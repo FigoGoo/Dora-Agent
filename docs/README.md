@@ -1,0 +1,35 @@
+# Dora-Agent 文档索引
+
+## 开发入口
+
+1. 产品体验设计师先产出《产品系统设计》，并确认 `product_status: Done`。
+2. 产品体验设计师使用 `docs/templates/项目开发计划模板.md` 安排开发计划、功能点、owner 和里程碑。
+3. 工程 subagent 阅读 `docs/standards/产品设计交接与开发约束规范.md`，输出需求映射矩阵。
+4. 主控 Codex 按 `AGENTS.md` 调度 subagent，并按功能点推进开发和 GitHub 提交。
+
+## 规范
+
+- 开发流程：`docs/standards/开发流程规范.md`
+- 产品交接：`docs/standards/产品设计交接与开发约束规范.md`
+- GitHub 协作：`docs/standards/GitHub仓库协作规范.md`
+- 本地开发配置：`docs/standards/本地开发与配置规范.md`
+- 安全：`docs/standards/安全规范.md`
+- 后端技术栈：`docs/standards/后端技术栈与操作规范.md`
+- CloudWeGo：`docs/standards/CloudWeGo开发操作规范.md`
+- SQL 脚本：`docs/standards/迭代SQL脚本规范.md`
+- 智能体配置化：`docs/standards/智能体配置化规范.md`
+
+## 模板
+
+- 产品：`docs/templates/PRD模板.md`
+- 项目计划：`docs/templates/项目开发计划模板.md`
+- 开发任务：`docs/templates/开发任务模板.md`
+- PR：`.github/PULL_REQUEST_TEMPLATE.md`
+- SQL 清单：`docs/templates/迭代SQL脚本清单模板.md`
+- SQL 脚本：`docs/templates/SQL脚本模板.sql`
+
+## 阶段说明
+
+当前阶段：本地开发，环境为 macOS + Docker。  
+线上目标：CentOS 8 单机。  
+上线后补充：CI/CD、发布回滚、可观测性、告警、SLO、测试环境矩阵和前端设计系统落地流程。

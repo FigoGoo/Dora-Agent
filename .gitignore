@@ -1,0 +1,25 @@
+# Local env and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+.idea/
+
+# Build outputs
+dist/
+build/
+tmp/
+coverage/
+
+# Go
+bin/
+*.test
+
+# Node
+node_modules/
