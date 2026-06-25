@@ -11,18 +11,18 @@ owner：Go Eino 智能体微服务架构工程师
 
 ## 表清单
 
-| 表名 | 用途 | 主要关联 |
+| 表名 | 用途 | 数据范围和清洗口径 |
 | --- | --- | --- |
-| agent_sessions | 会话 | user_id、tenant_id |
-| agent_runs | 运行 | session_id |
-| agent_messages | 消息 | session_id、run_id |
-| agent_events | 事件 | run_id |
-| agent_tool_calls | 工具调用 | run_id |
-| agent_tasks | 任务 | run_id |
-| agent_interrupts | 中断 | run_id |
-| agent_artifacts | 产物 | run_id |
-| agent_memories | 记忆 | user_id、tenant_id |
-| agent_runtime_configs | 配置 | tenant_id |
+| agent_sessions | 会话 | 按会话保留策略清理 |
+| agent_runs | 运行 | 按运行保留策略清理 |
+| agent_messages | 消息 | 按消息保留策略清理 |
+| agent_events | 事件 | 按事件保留策略清理 |
+| agent_tool_calls | 工具调用 | 按工具调用保留策略清理 |
+| agent_tasks | 任务 | 按任务保留策略清理 |
+| agent_interrupts | 中断 | 按中断保留策略清理 |
+| agent_artifacts | 产物 | 按产物保留策略清理 |
+| agent_memories | 记忆 | 按用户授权和隐私要求清理 |
+| agent_runtime_configs | 配置 | 按配置版本和审计要求保留 |
 
 ## 表字段
 
@@ -49,7 +49,7 @@ owner：Go Eino 智能体微服务架构工程师
 ## CRUD
 
 - Create：
-- Read：
+- Read：列表查询必须分页，默认 10 条每页；避免 `for` 循环逐条查询关联数据。
 - Update：
 - Delete / Archive：
 - 幂等规则：

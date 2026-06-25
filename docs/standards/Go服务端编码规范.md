@@ -2,6 +2,7 @@
 
 状态：active  
 owner：主控 Codex 汇总维护  
+更新时间：2026-06-25
 适用范围：Go 智能体微服务和业务微服务  
 
 ## gofmt
@@ -21,6 +22,19 @@ owner：主控 Codex 汇总维护
 - 日志接入火山引擎日志服务。
 - 测试使用 Go testing + testify。
 - 具体操作要求见 `docs/standards/后端技术栈与操作规范.md`。
+
+## DTO 与对象边界
+
+- 入参、出参和业务展示对象优先使用 DTO 包装。
+- DTO 按领域和业务场景划分，例如列表项、详情、创建、更新、预览、确认分别建模。
+- 不复用 ORM 对象、domain 大对象或跨场景通用大对象作为 transport 或展示对象。
+- DTO 字段保持当前场景最小够用，避免把数据库内部结构透出到 RPC、HTTP 或前端。
+
+## database schema
+
+- 数据库 schema 创建一律不添加数据库级外键约束。
+- 不通过关联键表达表关联；跨表一致性通过业务流程、幂等键、唯一约束、必要索引、application/domain 校验和测试保证。
+- migration 中不得新增 `FOREIGN KEY`、`REFERENCES` 或等价外键约束。
 
 ## context
 
@@ -50,6 +64,8 @@ owner：主控 Codex 汇总维护
 - repository 只负责数据访问，不承载业务规则。
 - 智能体服务 repository 只访问 Agent 领域数据库。
 - 业务服务 repository 只访问业务数据库。
+- 列表查询必须分页，默认 10 条每页；需要更大 page_size 时必须由契约或 API 文档明确上限。
+- 尽量避免在 `for` 循环中逐条查询数据库或 RPC；优先批量查询、`IN` 查询、JOIN、预加载或批量 RPC。
 
 ## application
 

@@ -3,9 +3,16 @@
 ## 开发入口
 
 1. 产品体验设计师先产出《产品系统设计》，并确认 `product_status: Done`。
-2. 产品体验设计师使用 `docs/templates/项目开发计划模板.md` 安排开发计划、功能点、owner 和里程碑。
-3. 工程 subagent 阅读 `docs/standards/产品设计交接与开发约束规范.md`，输出需求映射矩阵。
-4. 主控 Codex 按 `AGENTS.md` 调度 subagent，并按功能点推进开发和 GitHub 提交。
+2. 产品体验设计师将产品系统设计沉淀为 PRD，PRD 入口见 `docs/product/prd/README.md`。
+3. 产品体验设计师使用 `docs/templates/项目开发计划模板.md` 安排开发计划、功能点、owner 和里程碑。
+4. 工程 subagent 阅读 `docs/standards/产品设计交接与开发约束规范.md`，输出需求映射矩阵。
+5. 主控 Codex 按 `AGENTS.md` 调度 subagent，并按功能点推进开发和 GitHub 提交。
+
+## 产品文档
+
+- 产品设计索引：`docs/product/AIGC智能体产品设计索引.md`
+- PRD 套件：`docs/product/prd/README.md`
+- 系统概要与功能大纲：`docs/product/prd/00-系统概要与功能大纲PRD.md`
 
 ## 规范
 
