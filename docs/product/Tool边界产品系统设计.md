@@ -1,10 +1,10 @@
 # Tool 边界产品系统设计
 
-状态：draft  
-owner：产品体验设计师  
-更新时间：2026-06-25  
-适用范围：平台开放 Tool、Skill 可用 Tool、业务 RPC Tool、Tool 风险等级和人工确认边界  
-product_status：Draft
+状态：active
+owner：产品体验设计师
+更新时间：2026-06-25
+适用范围：平台开放 Tool、Skill 可用 Tool、业务 RPC Tool、Tool 风险等级和人工确认边界
+product_status：Done
 
 ## 关联文档
 
@@ -182,11 +182,11 @@ Skill 绑定 Tool、Agent 通过 Skill 执行 Tool、Agent 按用户意图直接
 
 ## Done Gate
 
-- [ ] Tool 类型确认。
-- [ ] Tool 风险等级确认。
-- [ ] 平台开放 Tool 管理范围确认。
-- [ ] 任意 HTTP Tool 是否排除确认。
-- [ ] Tool 可用范围限制确认。
-- [ ] Tool 超时、重试、取消策略确认。
-- [ ] 验收标准可测试。
-- [ ] product_status 更新为 Done 后，才允许进入正式工程开发。
+- [x] Tool 类型确认。
+- [x] Tool 风险等级确认。
+- [x] 平台开放 Tool 管理范围确认。
+- [x] 任意 HTTP Tool 是否排除确认。
+- [x] Tool 可用范围限制确认。
+- [x] Tool 超时、重试、取消策略确认。
+- [x] 验收标准可测试。
+- [x] product_status 已更新为 Done，允许进入工程需求映射与契约先行阶段。

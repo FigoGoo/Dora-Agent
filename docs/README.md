@@ -14,6 +14,15 @@
 - PRD 套件：`docs/product/prd/README.md`
 - 系统概要与功能大纲：`docs/product/prd/00-系统概要与功能大纲PRD.md`
 
+## 设计文档
+
+- UI/UE 设计索引：`docs/design/README.md`
+- UI/UE 设计总纲：`docs/design/00-UIUE设计总纲.md`
+- 信息架构与导航：`docs/design/01-站点信息架构与导航.md`
+- 统一 Agent 工作台：`docs/design/02-统一Agent创作工作台体验设计.md`
+- 首页体验设计：`docs/design/03-首页体验设计.md`
+- 视觉风格与 Token：`docs/design/08-视觉风格与设计Token草案.md`
+
 ## 规范
 
 - 开发流程：`docs/standards/开发流程规范.md`
@@ -37,6 +46,6 @@
 
 ## 阶段说明
 
-当前阶段：本地开发，环境为 macOS + Docker。  
-线上目标：CentOS 8 单机。  
+当前阶段：本地开发，环境为 macOS + Docker。
+线上目标：CentOS 8 单机。
 上线后补充：CI/CD、发布回滚、可观测性、告警、SLO、测试环境矩阵和前端设计系统落地流程。

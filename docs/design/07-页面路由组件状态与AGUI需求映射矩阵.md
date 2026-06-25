@@ -4,9 +4,10 @@
 owner：产品体验设计师
 更新时间：2026-06-25
 适用范围：Dora-Agent 第一版页面设计到前端组件、页面状态、AG-UI 消费点、API/RPC 依赖的需求映射
-相关代码路径：`web/**`、`frontend/**`
+相关代码路径：用户端 `frontend/**`；管理端 `admin_frontend/**`
 相关 PRD：[PRD 文档索引](../product/prd/README.md)、[00-系统概要与功能大纲 PRD](../product/prd/00-系统概要与功能大纲PRD.md)、[01-账户身份企业与空间 PRD](../product/prd/01-账户身份企业与空间PRD.md)、[02-平台后台与运营管理 PRD](../product/prd/02-平台后台与运营管理PRD.md)、[03-模型供应商模型选择与单价 PRD](../product/prd/03-模型供应商模型选择与单价PRD.md)、[04-Tool 边界与平台开放能力 PRD](../product/prd/04-Tool边界与平台开放能力PRD.md)、[05-Skill Builder 与审核 PRD](../product/prd/05-SkillBuilder与审核PRD.md)、[06-统一 Agent 创作工作台 PRD](../product/prd/06-统一Agent创作工作台PRD.md)、[07-积分账户兑换码与扣费 PRD](../product/prd/07-积分账户兑换码与扣费PRD.md)、[08-资产素材与创作过程 PRD](../product/prd/08-资产素材与创作过程PRD.md)、[09-AG-UI 与 A2UI 交互 PRD](../product/prd/09-AG-UI与A2UI交互PRD.md)、[10-内容安全治理 PRD](../product/prd/10-内容安全治理PRD.md)、[11-站内信与通知 PRD](../product/prd/11-站内信与通知PRD.md)、[12-作品中心与精选作品 PRD](../product/prd/12-作品中心与精选作品PRD.md)
-相关契约：[AG-UI 事件规范](../standards/AG-UI事件规范.md)；正式 API、RPC、AG-UI 契约待后续补充
+相关产品补充：[项目与资产归属产品系统设计](../product/项目与资产归属产品系统设计.md)
+相关契约：[AG-UI 事件规范](../standards/AG-UI事件规范.md)、[统一 Agent 工作台 AG-UI 事件协议草案](../contracts/ag-ui/统一Agent工作台AGUI事件协议草案.md)、[Agent 工作台 API 契约草案](../contracts/api/Agent工作台API契约草案.md)、[C 端与后台业务 API 契约草案](../contracts/api/C端与后台业务API契约草案.md)
 
 ## 使用说明
 
@@ -15,8 +16,12 @@ owner：产品体验设计师
 注意：
 
 - 本文件不定义最终字段，字段以 API、AG-UI 和 RPC 契约为准。
-- AG-UI 当前有 `docs/standards/AG-UI事件规范.md` 的基础事件，也有 `09-AG-UI与A2UI交互PRD.md` 的扩展事件建议。正式事件命名需要由 AG-UI 契约统一。
+- AG-UI 正式字段使用 `type`；第一版兼容读取 `event_type`，正式事件命名以契约草案为准。
 - 非 Agent 实时页面默认不消费 AG-UI，主要依赖 API；涉及业务事实写入的动作需要 RPC 由业务微服务承接。
+- 未登录访客可读取与用户无关的公开内容；触发需要登录的动作时由前端 LoginModal 承接。
+- 用户端桌面统一采用左右结构：左侧 `AppSideNav` / `PublicSideNav`，右侧 `ContextHeader` + `PageContent`。
+- 用户端工程目录固定为 `frontend/`，管理端工程目录固定为 `admin_frontend/`。
+- 项目 `archived` 后只读：可看历史、资产、黑板和作品；不可新建 run、继续生成、上传到该项目、确认扣费或保存新资产。
 
 ## 页面需求映射矩阵
 
@@ -24,15 +29,16 @@ owner：产品体验设计师
 | --- | --- | --- | --- | --- | --- | --- |
 | 账户登录、个人空间 | `/login`、`/register` | AuthForm、RegisterForm、IdentitySwitch | loading、error、success | 无 | 登录、注册、当前身份 API | 账号字段、登录方式 |
 | 企业登录、身份切换 | `/login`、`/app/account` | IdentityList、SpaceBadge、SwitchConfirm | loading、switching、permission_denied、success | 无 | 身份切换 API、企业身份 RPC | 切换后的缓存刷新策略 |
-| 首页快速创作 | `/app` | CreationLanding、PromptComposer、SkillCard | loading、empty、error、success | 无；进入工作台后消费 | 最近会话、热门 Skill、积分摘要 API | 首页是否允许未登录试用 |
-| 统一 Agent 工作台 | `/app/workspace` | AgentWorkspace、ChatMessage、ThinkingTypewriter、Composer、WorkspacePanel | loading、empty、streaming、interrupt、resume、error、success | `message.started`、`message.delta`、`message.completed`、`tool.call`、`tool.result`、`interrupt.required`、`resume.accepted`、`agent.completed`、`agent.failed`；PRD 建议扩展事件见下方 | Agent run API、确认/取消/重试 API、AG-UI SSE | 标准事件与 PRD 扩展事件命名统一 |
+| 首页公开浏览和快速创作 | `/`、`/app` | AppSideNav / PublicSideNav、ContextHeader、CreationLanding、PromptComposer、SkillCard、ProjectCard、FeaturedWorkStrip、LoginModal | loading、empty、login_required、error、success | 无；进入工作台后消费 | Public API：首页公开作品、公开 Skill 摘要；登录后 API：最近项目、积分摘要；新建创作默认创建项目 | 未登录 Prompt 是否允许先输入再登录 |
+| 项目容器与资产归属 | `/app/projects`、`/app/projects/:projectId` | AppSideNav、ContextHeader、ProjectGrid、ProjectCard、ProjectHeader、ProjectTabs、SessionList、AssetGrid、BlackboardPreview、WorkStrip | loading、empty、filtered_empty、archived、permission_denied、error、success | 非实时页面不消费；从项目进入工作台后消费 | 项目列表/详情 API、项目权限 RPC、项目资产/会话/作品 API | 项目标题、封面 |
+| 统一 Agent 工作台 | `/app/workspace?projectId=...` | ProjectToolbar、StoryboardPanel、PreviewStage、ChatPanel、ChatMessage、ThinkingTypewriter、MediaAssetsCard、Composer | loading、empty、streaming、interrupt、resume、archived_readonly、error、success | `agent.run.*`、`agent.message.*`、`agent.thinking.*`、`safety.prompt.*`、`project.archived.blocked`、`tool.call.*`、`generation.*`、`asset.save.*`、`workspace.*` | Agent run API、项目上下文、确认/取消/重试 API、AG-UI SSE | 补偿窗口和高频事件节流 |
 | 模型选择 | `/app/workspace` | ModelPicker、ComposerCapsule、ModelTag | editing、locked、unavailable、error | PRD 建议：`chat.controls.requested`、`chat.controls.locked`、`platform.tags.updated` | 可用模型 API、默认模型 API | 模型列表字段、显示名重复处理 |
-| 内容安全阻断 | `/app/workspace`、`/app/works/:id/edit` | SafetyNotice、ErrorNotice、PromptEditor | loading、blocked、error、success | PRD 建议：`safety.prompt.evaluated`、`safety.prompt.blocked` | 安全评估能力、作品分享评估 API | 用户可见提示口径 |
+| 内容安全阻断 | `/app/workspace`、`/app/works/:id/edit` | SafetyNotice、ErrorNotice、PromptEditor | loading、blocked、error、success | `safety.prompt.evaluating`、`safety.prompt.evaluated`、`safety.prompt.blocked` | 安全评估能力、作品分享评估 API、`safety_evidence` | 安全证据 TTL |
 | 积分预估和确认 | `/app/workspace`、`/app/credits` | CreditEstimate、ConfirmPanel、CreditOverview | estimating、insufficient、interrupt、success、error | `interrupt.required`；PRD 建议：`credits.estimated`、`credits.frozen`、`credits.charged`、`credits.released`、`confirmation.required` | 积分预估、冻结、扣减、释放 RPC/API | 0 积分确认文案 |
 | Tool 调用和生成进度 | `/app/workspace` | ToolStatus、GenerationProgress、RiskBadge | loading、generating、partial_completed、cancelled、timeout、error、success | `tool.call`、`tool.result`；PRD 建议：`tool.call.started`、`tool.call.progress`、`tool.call.completed`、`tool.call.failed`、`generation.progress` | Tool 执行、取消、重试 API/RPC | 可重试 Tool 范围 |
-| 资产和黑板 | `/app/workspace`、`/app/assets` | WorkspacePanel、AssetCard、BlackboardElement、StoryboardCard | loading、empty、saving、save_failed、resume、success | PRD 建议：`workspace.assets.updated`、`workspace.blackboard.updated`、`asset.save.started`、`asset.save.completed`、`asset.save.failed`、`process.snapshot.saved` | 资产 API、Agent 过程快照、业务资产 RPC | 资产元素类型配置来源 |
-| 会话历史和恢复 | `/app/sessions`、`/app/workspace/sessions/:sessionId` | SessionCard、SessionDrawer、RestoreBanner | loading、empty、filtered_empty、reconnecting、resume、error | `resume.accepted`；缺失事件补偿和快照恢复 | 会话列表 API、事件补偿 API、快照 API | 补偿窗口和快照结构 |
-| 资产库 | `/app/assets` | Upload、AssetCard、AssetDrawer、AssetPicker | loading、empty、uploading、blocked、error、success | 无；工作台引用时消费相关事件 | 上传、预览、下载、引用 API/RPC | 文件大小和 MIME 错误码 |
+| 资产和黑板 | `/app/workspace`、`/app/projects/:projectId`、`/app/assets` | StoryboardPanel、PreviewStage、MediaAssetsCard、AssetCard、BlackboardElement、StoryboardCard、ProjectFilter | loading、empty、saving、save_failed、resume、success | PRD 建议：`workspace.assets.updated`、`workspace.blackboard.updated`、`asset.save.started`、`asset.save.completed`、`asset.save.failed`、`process.snapshot.saved`；事件建议包含 `project_id` | 项目资产 API、资产 API、Agent 过程快照、业务资产 RPC | 资产元素类型配置来源 |
+| 会话历史和恢复 | `/app/projects/:projectId/sessions`、`/app/workspace/sessions/:sessionId` | SessionCard、SessionDrawer、RestoreBanner、ProjectContextBar | loading、empty、filtered_empty、reconnecting、resume、error | `resume.accepted`；缺失事件补偿和快照恢复 | 项目会话列表 API、事件补偿 API、快照 API | 补偿窗口和快照结构 |
+| 资产库 | `/app/assets` | Upload、AssetCard、AssetDrawer、AssetPicker、ProjectFilter | loading、empty、uploading、blocked、error、success | 无；工作台引用时消费相关事件 | 上传、预览、下载、引用、项目筛选 API/RPC | 文件大小和 MIME 错误码 |
 | 个人 Skill 管理 | `/app/skills`、`/app/skills/:id/edit` | SkillCard、SkillBuilder、ToolPicker、TestCaseList | loading、empty、draft、testing、pending_review、rejected、published、deprecated、error | 无；工作台执行 Skill 时通过 Tag 展示 | Skill CRUD、测试、提交审核 API/RPC | Skill 字段和版本规则 |
 | 企业 Skill | `/app/enterprise/skills` | SkillTabs、SkillCard、PermissionState | loading、empty、permission_denied、draft、pending_review、rejected、published | 无；工作台执行企业 Skill 时通过 Tag 展示 | 企业 Skill API/RPC | 企业拥有者权限字段 |
 | 通知中心 | `/app/notifications` | NotificationList、NotificationDetail、UnreadBadge | loading、empty、unread、read、error、success | 无 | 通知列表、已读、跳转 API | 通知类型枚举 |
@@ -40,7 +46,7 @@ owner：产品体验设计师
 | 企业成员管理 | `/app/enterprise/members` | MemberTable、InviteDialog、RemoveConfirm | loading、empty、invite_pending、confirming、permission_denied、error、success | 无 | 企业邀请、移除成员 API/RPC | 邀请链接有效期字段 |
 | 企业拥有者转让 | `/app/enterprise/owner-transfer` | MemberSelect、ImpactConfirm | loading、selecting_member、confirming、error、success | 无 | 拥有者转让 RPC/API | 转让后登录态刷新 |
 | 个人作品中心 | `/app/works`、`/app/works/:id/edit` | GalleryGrid、WorkCard、WorkForm、ShareModal | loading、empty、private、shared、taken_down、blocked、error、success | 无 | 作品 CRUD、公开快照、分享、取消分享 API/RPC | 分类和标签来源 |
-| 精选作品中心 | `/explore`、`/explore/:publicWorkId` | PublicShell、WorkCard、PublicDetail、LikeButton、ShareButton | loading、empty、filtered_empty、login_required、private、taken_down、error、success | 无 | 公开作品、点赞、分享链接 API | 公开媒体访问方式 |
+| 精选作品中心 | `/explore`、`/explore/:publicWorkId` | PublicSideNav、PublicShell、WorkCard、PublicDetail、LikeButton、ShareButton、LoginModal | loading、empty、filtered_empty、login_required、private、taken_down、error、success | 无 | 公开作品、TOS 公共 URL、点赞、分享链接 API；未登录点赞返回登录弹窗 | CDN 缓存失效 |
 | 平台后台用户管理 | `/admin/users` | UserTable、UserDetailDrawer、StatusConfirm | loading、empty、filtered_empty、confirming、permission_denied、error、success | 无 | 用户查询、启停、审计 API/RPC | 脱敏展示字段 |
 | 平台后台 Skill 审核 | `/admin/skills/reviews` | ReviewQueue、ReviewDetail、ReviewActionPanel | loading、empty、pending_review、approved、rejected、error、success | 无 | 审核结果、站内信、审计 API/RPC | 审核意见为空展示 |
 | 平台后台模型和 Tool | `/admin/models`、`/admin/models/providers`、`/admin/tools` | ModelTable、ProviderTable、ToolTable、RiskBadge、WhitelistEditor | loading、empty、testing、connected、failed、enabled、disabled、confirming、error | 无 | 模型供应商、模型、Tool 管理 API/RPC | Tool 白名单维度 |
@@ -60,7 +66,7 @@ owner：产品体验设计师
 | `tool.status` | `tool.call`、`tool.result` | `tool.call.started`、`tool.call.progress`、`tool.call.completed`、`tool.call.failed` | running、succeeded、failed、timeout、cancelled | 失败展示可理解原因，不展示敏感参数。 |
 | `generation.progress` | 可由 `tool.call` / `tool.result` 降级展示 | `generation.progress`、`generation.artifact.completed` | queued、running、partial_completed、completed、cancelled、failed | 取消后展示已完成与未完成释放状态。 |
 | `workspace.panel` | `resume.accepted` 可触发恢复后刷新 | `workspace.assets.updated`、`workspace.blackboard.updated`、`asset.save.started`、`asset.save.completed`、`asset.save.failed`、`process.snapshot.saved` | empty、assets、blackboard、updating、error | 按资产元素类型渲染，不按具体场景硬编码字段。 |
-| `error.notice` | `agent.failed`、`tool.result` | `safety.prompt.blocked`、`tool.call.failed`、`asset.save.failed`、`agent.run.failed` | user_error、permission_denied、tool_error、model_error、system_error、blocked | 用户可理解，不暴露供应商原始响应和内部策略。 |
+| `error.notice` | `agent.failed`、`tool.result` | `safety.prompt.blocked`、`project.archived.blocked`、`tool.call.failed`、`asset.save.failed`、`agent.run.failed` | user_error、permission_denied、tool_error、model_error、system_error、blocked、archived_readonly | 用户可理解，不暴露供应商原始响应和内部策略。 |
 
 ## 状态覆盖矩阵
 
@@ -69,11 +75,13 @@ owner：产品体验设计师
 | loading | 所有页面 | 页面、列表、详情、表单提交 | Skeleton、禁用提交、保留布局 |
 | empty | 列表和库 | 无数据 | 开始创作、上传、创建、清除筛选 |
 | error | 所有页面 | API、RPC、AG-UI、网络错误 | 重试、返回、展示 trace_id 摘要 |
+| login_required | 首页公开内容、精选作品、私有入口 | 未登录触发创作、点赞、个人数据入口或 API 返回 `UNAUTHENTICATED` | LoginModal、保留当前意图、登录后继续 |
 | success | 表单、保存、兑换、分享 | API/RPC 成功 | Toast、结果区、刷新列表 |
 | streaming | Agent 工作台 | `message.delta` 或 PRD 扩展消息事件 | 停止、等待完成、断线恢复 |
 | interrupt | Agent 工作台 | `interrupt.required` 或确认事件 | 确认、取消、修改后继续 |
 | resume | Agent 工作台 | `resume.accepted`、Last-Event-ID 或快照恢复 | 补齐事件、刷新快照、保持内容 |
 | blocked | 工作台、作品分享、上传文本 | 内容安全评估不通过 | 修改文本后重新评估 |
+| archived_readonly | 项目详情、工作台、项目资产和会话历史 | 项目状态为 `archived` 或收到 `PROJECT_ARCHIVED` / `project.archived.blocked` | 查看历史；如有恢复能力则先恢复项目，否则新建项目 |
 | permission_denied | 企业、后台、私有详情 | 权限不足或身份不匹配 | 返回、切换身份、重新登录 |
 | insufficient | 工作台、积分中心 | 积分不足 | 兑换、联系企业拥有者、取消生成 |
 
@@ -81,7 +89,10 @@ owner：产品体验设计师
 
 | 设计条目 | Go Eino 智能体微服务依赖 | 业务微服务依赖 | 前端依赖 | 测试依赖 |
 | --- | --- | --- | --- | --- |
-| Agent 工作台 | Agent run、AG-UI 事件、Tool 状态、Interrupt/Resume | 积分预估、资产保存、模型和 Tool 配置查询 | 工作台组件、SSE 消费、状态管理 | 事件顺序、断线重连、确认流程 |
+| 用户端左右结构 | 无 Agent Runtime 依赖 | 无业务写入依赖 | AppSideNav、PublicSideNav、ContextHeader、响应式折叠和路由高亮 | 桌面/小屏布局、登录前后骨架一致性 |
+| 项目与资产归属 | Agent session/run 保存 `project_id` 引用，不保存项目事实 | 项目、项目资产、项目作品和权限校验 | 项目列表、项目详情、工作台项目上下文 | 项目权限、资产来源、跨空间拒绝 |
+| Agent 工作台 | Agent run、AG-UI 事件、Tool 状态、Interrupt/Resume、项目上下文 | 积分预估、资产保存、项目绑定、模型和 Tool 配置查询 | 工作台组件、SSE 消费、状态管理 | 事件顺序、断线重连、确认流程 |
+| 访客公开访问 | 无 Agent Runtime 依赖；未登录不创建 session/run | 公开快照、公开 Skill 摘要、未登录动作返回认证错误 | PublicShell、LoginModal、公开内容状态 | 匿名访问、登录弹窗、隐私字段不返回 |
 | 企业空间 | 当前空间上下文传入 Agent | 企业身份、成员、积分、Skill 权限 | 企业页面和权限态 | 企业成员权限和资产不可见性 |
 | 作品中心 | 无直接编排依赖 | 作品、公开快照、点赞、分享、下架 | 作品管理和公开页 | 免登录查看、隐私边界 |
 | 平台后台 | Tool / Skill / 模型能力边界反馈 | 后台配置、用户管理、积分、审计 | 后台页面和表格表单 | 审计、脱敏、权限 |
@@ -89,15 +100,21 @@ owner：产品体验设计师
 
 ## 冲突与待确认
 
-- AG-UI 标准事件与 PRD 09 扩展事件命名需要在正式 AG-UI 契约中统一。
-- `docs/contracts/` 目录当前不存在，API/RPC 依赖只能标记为待契约确认。
-- 当前 PRD 套件仍为 Draft，对应页面只能作为设计草案和需求映射，不进入正式开发。
+- AG-UI 标准事件与 PRD 09 扩展事件命名已在契约草案中统一为 `type` 和分组事件命名。
+- `docs/contracts/` 已创建，API/RPC/AG-UI 依赖以契约草案为准。
+- 当前 PRD 套件已确认 Done，对应页面可进入需求映射矩阵、契约设计和正式开发。
 - 页面路由为草案，最终由前端工程师结合应用框架和路由规范确认。
+- 左侧导航折叠断点、图标集合和具体导航文案需要前端设计系统确认。
+- 项目标题、项目封面仍需产品确认；归档项目已确认只读且不允许继续创作。
+- 首页公开作品和公开 Skill 摘要的排序来源需要运营或 API 契约确认。
 - 任何页面字段、权限字段、状态枚举和 payload 都必须以后续契约为准。
 
 ## 验收标准
 
 - [ ] 页面、路由、组件、状态和 AG-UI 消费点已形成矩阵。
+- [ ] 用户端左右结构已纳入页面组件和前端依赖矩阵。
+- [ ] 未登录访客公开访问和 LoginModal 登录承接已纳入矩阵。
+- [ ] 项目容器、工作台项目上下文、资产项目归属已纳入矩阵。
 - [ ] 覆盖 loading、empty、error、success、streaming、interrupt、resume。
 - [ ] 明确非 Agent 实时页面不消费 AG-UI，主要依赖 API/RPC。
 - [ ] 明确 AG-UI 标准事件与 PRD 扩展事件需要后续契约统一。

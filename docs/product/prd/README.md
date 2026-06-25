@@ -1,16 +1,16 @@
 # AIGC 智能体 PRD 文档索引
 
-状态：draft  
-owner：产品体验设计师  
-更新时间：2026-06-25  
-适用范围：AIGC 智能体 SaaS 第一版 PRD 文档入口  
-product_status：Draft
+状态：active
+owner：产品体验设计师
+更新时间：2026-06-25
+适用范围：AIGC 智能体 SaaS 第一版 PRD 文档入口
+product_status：Done
 
 ## 背景
 
 本目录用于承接已经确认过的产品系统设计讨论，并将其转化为后续页面设计、契约设计、后端开发、Agent 开发和测试验收可直接引用的 PRD。
 
-当前所有 PRD 仍为 `Draft`，只能用于继续评审和完善。只有对应 PRD 的 `product_status` 更新为 `Done` 后，工程 subagent 才能进入正式开发。
+当前 PRD 套件已由用户确认进入 `product_status：Done`，工程 subagent 可以按开发流程先输出需求映射矩阵，再进入契约设计和代码开发。
 
 ## PRD 列表
 

@@ -1,0 +1,1211 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dora-Agent 暗色电影级首页原型</title>
+    <style>
+      :root {
+        --bg: #0a0a0a;
+        --bg-soft: #000000;
+        --surface-subtle: rgba(255, 255, 255, 0.05);
+        --surface: rgba(255, 255, 255, 0.1);
+        --surface-soft: rgba(255, 255, 255, 0.15);
+        --overlay-soft: rgba(0, 0, 0, 0.3);
+        --line: rgba(255, 255, 255, 0.1);
+        --line-minimal: rgba(255, 255, 255, 0.05);
+        --line-strong: rgba(255, 255, 255, 0.4);
+        --text: #ffffff;
+        --muted: rgba(255, 255, 255, 0.5);
+        --faint: rgba(255, 255, 255, 0.3);
+        --accent: #9bc957;
+        --accent-soft: rgba(155, 201, 87, 0.7);
+        --green: rgba(111, 225, 93, 0.8);
+        --teal: #32b9b9;
+        --blue: #6bbcff;
+        --gold: #f5d18a;
+        --sidebar: 90px;
+        --font-ui:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+        --font-cn:
+          PingFang, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC",
+          "Microsoft YaHei", sans-serif;
+        --font-display:
+          PingFang, "PingFang SC", Inter, ui-sans-serif, system-ui, sans-serif;
+        --selected-gradient: linear-gradient(90deg, rgba(129, 255, 112, 0.08) 0%, rgba(85, 156, 255, 0.08) 100%);
+        --skill-glass-bg:
+          radial-gradient(circle at 22% 56%, rgba(250, 188, 18, 0.04), transparent 36%),
+          radial-gradient(circle at 38% 68%, rgba(8, 185, 98, 0.09), transparent 34%),
+          radial-gradient(circle at 76% 66%, rgba(77, 136, 231, 0.13), transparent 32%),
+          radial-gradient(circle at 35% 18%, rgba(249, 69, 67, 0.12), transparent 30%),
+          linear-gradient(90deg, rgba(85, 72, 72, 0.2), rgba(49, 134, 255, 0.02)),
+          rgba(255, 255, 255, 0.018);
+        --hot-gradient: linear-gradient(88.96deg, #ff7474 6.07%, #ddbf3c 49.12%, #32b9b9 88.29%);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        overflow-x: hidden;
+        color: var(--text);
+        font-family: var(--font-ui);
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 1.5;
+        letter-spacing: 0;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: geometricPrecision;
+        background:
+          radial-gradient(circle at 24% 6%, rgba(128, 76, 48, 0.28), transparent 30%),
+          radial-gradient(circle at 82% 5%, rgba(38, 114, 138, 0.32), transparent 32%),
+          radial-gradient(circle at 54% 28%, rgba(67, 24, 28, 0.18), transparent 30%),
+          linear-gradient(180deg, #101010 0%, #050505 45%, #000 100%);
+      }
+
+      body::before {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        content: "";
+        background:
+          linear-gradient(90deg, rgba(0, 0, 0, 0.42), transparent 18%, transparent 82%, rgba(0, 0, 0, 0.72)),
+          linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.58) 52%, rgba(0, 0, 0, 0.9) 100%);
+      }
+
+      button,
+      a {
+        color: inherit;
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+      }
+
+      .app {
+        position: relative;
+        min-height: 100vh;
+      }
+
+      .topbar {
+        position: fixed;
+        z-index: 40;
+        top: 0;
+        right: 16px;
+        left: var(--sidebar);
+        display: flex;
+        justify-content: flex-end;
+        gap: 14px;
+        height: 70px;
+        padding: 18px 0;
+        pointer-events: none;
+      }
+
+      .topbar > * {
+        pointer-events: auto;
+      }
+
+      .promo {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        padding: 0 18px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 9999px;
+        background: linear-gradient(90deg, rgba(62, 104, 52, 0.8), rgba(50, 103, 164, 0.8));
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+        -webkit-backdrop-filter: blur(10px);
+        backdrop-filter: blur(10px);
+        color: #ffe9bd;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1;
+        white-space: nowrap;
+      }
+
+      .account {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        height: 30px;
+        padding: 0 0 0 12px;
+        border: 1px solid var(--line-minimal);
+        border-radius: 9999px;
+        background: rgba(255, 255, 255, 0.05);
+        box-shadow: none;
+        -webkit-backdrop-filter: blur(20px);
+        backdrop-filter: blur(20px);
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1;
+      }
+
+      .avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background:
+          radial-gradient(circle at 35% 30%, #d6fff7 0 12%, transparent 13%),
+          linear-gradient(135deg, #6b6f77, #1c1f23);
+      }
+
+      .sidebar {
+        position: fixed;
+        z-index: 50;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: var(--sidebar);
+        padding: 24px 0 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 24px;
+        background: linear-gradient(90deg, rgba(0, 0, 0, 0.52), rgba(0, 0, 0, 0));
+      }
+
+      .brand {
+        width: 66px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .brand-mark {
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        background:
+          linear-gradient(135deg, #ff6f61 0 28%, transparent 29%),
+          linear-gradient(45deg, #3edfff 0 38%, transparent 39%),
+          linear-gradient(180deg, #c8df6a, #5ed46a);
+        clip-path: polygon(0 0, 100% 50%, 0 100%);
+      }
+
+      .nav {
+        display: grid;
+        gap: 18px;
+        width: 100%;
+      }
+
+      .nav a,
+      .social a,
+      .gift {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        color: var(--muted);
+        text-decoration: none;
+        transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s;
+      }
+
+      .nav a {
+        flex-direction: column;
+        gap: 6px;
+        min-height: 48px;
+        font-family: var(--font-cn);
+        font-size: 11px;
+        font-weight: 500;
+        line-height: 14px;
+      }
+
+      .nav a:hover,
+      .nav a.active {
+        color: #fff;
+      }
+
+      .nav .icon {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border-radius: 9999px;
+        font-size: 18px;
+      }
+
+      .nav a.active .icon {
+        border: 1px solid rgba(255, 255, 255, 0.68);
+      }
+
+      .sidebar-spacer {
+        flex: 1;
+      }
+
+      .social {
+        display: grid;
+        gap: 13px;
+        width: 100%;
+      }
+
+      .gift {
+        width: 28px;
+        height: 28px;
+        margin: 0 auto;
+        border-radius: 9999px;
+        background: linear-gradient(90deg, #d2ffb3, #fff);
+        color: #000;
+      }
+
+      main {
+        position: relative;
+        z-index: 1;
+        margin-left: var(--sidebar);
+        padding: 72px 20px 80px;
+      }
+
+      .hero {
+        max-width: 1810px;
+        margin: 0 auto;
+        text-align: center;
+      }
+
+      .hero h1 {
+        margin: 8px 0 14px;
+        color: rgba(255, 255, 255, 0.86);
+        font-family: var(--font-display);
+        font-size: 40px;
+        font-weight: 200;
+        line-height: 1.25;
+        letter-spacing: 0;
+      }
+
+      .hero p {
+        margin: 0 0 38px;
+        color: rgba(255, 255, 255, 0.42);
+        font-family: var(--font-display);
+        font-size: 16px;
+        font-weight: 300;
+        line-height: 1.4;
+      }
+
+      .prompt-card {
+        position: relative;
+        width: min(1344px, calc(100vw - var(--sidebar) - 220px));
+        min-height: 140px;
+        margin: 0 auto;
+        padding: 22px;
+        border: 0.5px solid var(--line-strong);
+        border-radius: 20px;
+        background: rgba(0, 0, 0, 0.3);
+        box-shadow: none;
+        -webkit-backdrop-filter: blur(21.6px);
+        backdrop-filter: blur(21.6px);
+        transition:
+          border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+          background 0.3s,
+          box-shadow 0.3s;
+      }
+
+      .prompt-card:hover,
+      .prompt-card:focus-within {
+        border-color: var(--accent-soft);
+        background: rgba(0, 0, 0, 0.36);
+      }
+
+      .prompt-input {
+        display: flex;
+        align-items: flex-start;
+        min-height: 55px;
+        color: rgba(255, 255, 255, 0.48);
+        font-family: var(--font-cn);
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 20px;
+        text-align: left;
+      }
+
+      .prompt-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-top: 18px;
+      }
+
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .pill,
+      .send {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 25px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 9999px;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 500;
+        line-height: 1;
+        transition:
+          color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+          background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+          border-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+          opacity 0.2s;
+      }
+
+      .pill {
+        gap: 5px;
+        padding: 0 15px 0 10px;
+      }
+
+      .pill:hover {
+        color: #fff;
+        border-color: rgba(255, 255, 255, 0.4);
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .new {
+        display: inline-flex;
+        align-items: center;
+        height: 14px;
+        padding: 0 5px;
+        border-radius: 9999px;
+        background: rgba(111, 225, 93, 0.12);
+        color: var(--green);
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .send {
+        width: 30px;
+        min-width: 30px;
+        height: 30px;
+        border: 0;
+        background: linear-gradient(135deg, rgba(210, 255, 179, 0.9), rgba(255, 255, 255, 0.75));
+        color: #111;
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      .skills {
+        position: relative;
+        z-index: 8;
+        width: min(980px, calc(100vw - var(--sidebar) - 220px));
+        margin: 26px auto 86px;
+        overflow: visible;
+      }
+
+      .section-label {
+        margin: 0 0 14px;
+        color: var(--faint);
+        font-family: var(--font-ui);
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 18px;
+        text-align: center;
+      }
+
+      .skill-grid {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 12px;
+        overflow: visible;
+      }
+
+      .skill-item {
+        position: relative;
+        width: 178px;
+        height: 54px;
+        overflow: visible;
+      }
+
+      .skill-top,
+      .skill-more {
+        position: absolute;
+        inset: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 11px;
+        height: 54px;
+        width: 100%;
+        padding: 0 20px 0 23px;
+        overflow: visible;
+        border: 0.5px solid var(--line-minimal);
+        border-radius: 14px;
+        background: var(--skill-glass-bg);
+        box-shadow: none;
+        -webkit-backdrop-filter: blur(12px);
+        backdrop-filter: blur(12px);
+        color: #fff;
+        cursor: pointer;
+        font-family: var(--font-cn);
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 17px;
+        text-align: left;
+        transition:
+          transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+          background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+          border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+          box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .skill-top::before,
+      .skill-more::before {
+        flex: 0 0 auto;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        content: "";
+        background: var(--thumb, linear-gradient(135deg, #455, #111));
+        background-size: cover;
+      }
+
+      .skill-top::after,
+      .skill-more::after {
+        display: none;
+      }
+
+      .skill-title {
+        position: relative;
+        z-index: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .skill-item:hover,
+      .skill-item.is-active,
+      .skill-item:focus-within {
+        z-index: 30;
+      }
+
+      .skill-item:hover .skill-top,
+      .skill-item.is-active .skill-top,
+      .skill-item:focus-within .skill-top {
+        border-color: var(--line-minimal);
+        transform: none;
+        box-shadow: none;
+      }
+
+      .skill-hover {
+        position: absolute;
+        inset: -1px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        padding: 2px 0;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 14px;
+        background:
+          radial-gradient(circle at 18% 42%, rgba(255, 178, 111, 0.075), transparent 32%),
+          radial-gradient(circle at 76% 34%, rgba(148, 184, 218, 0.07), transparent 34%),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+          rgba(5, 5, 5, 0.3);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.11),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.28);
+        color: #fff;
+        opacity: 0;
+        pointer-events: auto;
+        -webkit-backdrop-filter: blur(16px);
+        backdrop-filter: blur(16px);
+        transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .try-action {
+        display: inline-flex;
+        height: 25px;
+        min-width: 78px;
+        align-items: center;
+        justify-content: center;
+        padding: 0 18px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 9999px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035)),
+          rgba(255, 255, 255, 0.045);
+        color: rgba(255, 255, 255, 0.92);
+        cursor: pointer;
+        font-family: var(--font-cn);
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 12px;
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+      }
+
+      .try-action:hover,
+      .try-action:focus-visible {
+        border-color: rgba(255, 255, 255, 0.28);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.055)),
+          rgba(255, 255, 255, 0.07);
+      }
+
+      .skill-hover-desc {
+        max-width: calc(100% - 34px);
+        overflow: hidden;
+        color: rgba(255, 255, 255, 0.88);
+        font-family: var(--font-cn);
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 14px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .skill-item:hover .skill-title,
+      .skill-item.is-active .skill-title,
+      .skill-item:focus-within .skill-title,
+      .skill-item:hover .skill-top::before,
+      .skill-item.is-active .skill-top::before,
+      .skill-item:focus-within .skill-top::before {
+        opacity: 0;
+      }
+
+      .skill-item:hover .skill-hover,
+      .skill-item.is-active .skill-hover,
+      .skill-item:focus-within .skill-hover {
+        opacity: 1;
+      }
+
+      .skill-more {
+        justify-content: center;
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .skill-more::before {
+        display: none;
+      }
+
+      .hot {
+        position: absolute;
+        top: -10px;
+        right: 12px;
+        padding: 2px 6px;
+        border-radius: 9999px;
+        background: linear-gradient(180deg, rgba(42, 38, 40, 0.88), rgba(37, 33, 35, 0.88));
+        color: var(--green);
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .skill-preview {
+        position: absolute;
+        z-index: 1000;
+        top: 64px;
+        left: 50%;
+        width: 340px;
+        height: 255px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 18px;
+        background: #1d2220;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.45);
+        opacity: 0;
+        pointer-events: none;
+        transform: translateX(-50%) translateY(18px) scale(0.96);
+        transition:
+          opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+          transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .skill-item:hover .skill-preview,
+      .skill-item.is-active .skill-preview {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0) scale(1);
+      }
+
+      .preview-image {
+        position: absolute;
+        inset: 0;
+        display: block;
+        background-image:
+          linear-gradient(90deg, rgba(2, 4, 5, 0.18), rgba(2, 4, 5, 0.02) 45%, rgba(0, 0, 0, 0.18)),
+          var(--preview-photo),
+          var(--preview, linear-gradient(135deg, #234, #111));
+        background-position: center, var(--preview-position, center), center;
+        background-size: cover, cover, cover;
+        filter: brightness(0.72) saturate(0.92);
+        transform: none;
+        transition: none;
+      }
+
+      .skill-item:hover .preview-image,
+      .skill-item.is-active .preview-image {
+        filter: brightness(0.72) saturate(0.92);
+        transform: none;
+      }
+
+      .preview-image::before {
+        display: none;
+      }
+
+      .preview-image::after {
+        display: none;
+      }
+
+      .skill-preview::after {
+        position: absolute;
+        inset: 0;
+        content: "";
+        background:
+          linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.34) 40%, rgba(0, 0, 0, 0.92));
+      }
+
+      .preview-copy {
+        position: absolute;
+        z-index: 1;
+        right: 22px;
+        bottom: 20px;
+        left: 22px;
+        text-align: left;
+      }
+
+      .model-badge {
+        position: absolute;
+        z-index: 1;
+        top: 10px;
+        right: 10px;
+        max-width: 150px;
+        height: 22px;
+        padding: 0 12px;
+        border-radius: 9999px;
+        background: rgba(0, 0, 0, 0.3);
+        -webkit-backdrop-filter: blur(15px);
+        backdrop-filter: blur(15px);
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 22px;
+      }
+
+      .preview-copy h3 {
+        margin: 0 0 8px;
+        font-family: var(--font-cn);
+        font-size: 18px;
+        font-weight: 600;
+        line-height: 24px;
+      }
+
+      .preview-copy p {
+        max-width: 360px;
+        margin: 0 0 10px;
+        color: rgba(255, 255, 255, 0.66);
+        font-family: var(--font-cn);
+        font-size: 13px;
+        font-weight: 400;
+        line-height: 20px;
+      }
+
+      .tag {
+        display: inline-flex;
+        height: 24px;
+        align-items: center;
+        margin-right: 6px;
+        padding: 0 10px;
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.75);
+        font-size: 11px;
+        font-weight: 400;
+        line-height: 1;
+      }
+
+      .strip {
+        max-width: 1810px;
+        margin: 0 auto 46px;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 18px;
+      }
+
+      .section-head h2 {
+        margin: 0;
+        font-family: var(--font-cn);
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 30px;
+      }
+
+      .section-head a {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 400;
+        line-height: 18px;
+        text-decoration: none;
+      }
+
+      .project-row {
+        display: grid;
+        grid-template-columns: 300px repeat(5, minmax(240px, 1fr));
+        gap: 16px;
+        overflow-x: auto;
+        padding-bottom: 8px;
+      }
+
+      .project {
+        min-width: 280px;
+      }
+
+      .project .cover,
+      .new-project {
+        height: 170px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        box-shadow: none;
+        -webkit-backdrop-filter: blur(12px);
+        backdrop-filter: blur(12px);
+      }
+
+      .new-project {
+        display: grid;
+        place-items: center;
+        border: 1px dashed rgba(255, 255, 255, 0.35);
+        color: var(--muted);
+      }
+
+      .plus {
+        display: grid;
+        width: 40px;
+        height: 40px;
+        margin: 0 auto 12px;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.36);
+        border-radius: 9999px;
+        font-size: 26px;
+      }
+
+      .project h3 {
+        margin: 14px 0 6px;
+        font-family: var(--font-cn);
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 20px;
+      }
+
+      .project p {
+        margin: 0;
+        color: var(--faint);
+        font-size: 13px;
+        font-weight: 400;
+        line-height: 18px;
+      }
+
+      .cover {
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.16)),
+          var(--cover);
+        background-size: cover;
+      }
+
+      .tv-head {
+        display: flex;
+        align-items: center;
+        gap: 32px;
+        margin-bottom: 18px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+      }
+
+      .tab {
+        min-width: 86px;
+        height: 31px;
+        border-radius: 9999px;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 1;
+        transition: color 0.2s, background 0.2s;
+      }
+
+      .tab.active {
+        border: 0;
+        background: rgba(255, 255, 255, 0.12);
+        box-shadow: none;
+        color: #fff;
+      }
+
+      .tv-grid {
+        display: grid;
+        grid-template-columns: 2fr repeat(3, 1fr);
+        gap: 14px;
+      }
+
+      .tv-card {
+        position: relative;
+        min-height: 198px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.05);
+        box-shadow: none;
+      }
+
+      .tv-card.big {
+        grid-row: span 1;
+      }
+
+      .tv-card::before {
+        position: absolute;
+        inset: 0;
+        content: "";
+        background: var(--cover);
+        background-size: cover;
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .tv-card::after {
+        position: absolute;
+        inset: 0;
+        content: "";
+        background:
+          linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0));
+      }
+
+      .tv-card:hover::before {
+        transform: scale(1.04);
+      }
+
+      .tv-copy {
+        position: absolute;
+        z-index: 1;
+        right: 16px;
+        bottom: 14px;
+        left: 16px;
+      }
+
+      .tv-copy span {
+        display: inline-flex;
+        margin-bottom: 8px;
+        padding: 4px 9px;
+        border-radius: 9999px;
+        background: rgba(0, 0, 0, 0.5);
+        color: rgba(255, 255, 255, 0.76);
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 1;
+      }
+
+      .tv-copy h3 {
+        margin: 0;
+        font-family: var(--font-cn);
+        font-size: 16px;
+        font-weight: 600;
+        line-height: 22px;
+      }
+
+      @media (max-width: 1100px) {
+        :root {
+          --sidebar: 72px;
+        }
+
+        .topbar {
+          left: 72px;
+        }
+
+        .promo {
+          display: none;
+        }
+
+        .prompt-card,
+        .skills {
+          width: calc(100vw - var(--sidebar) - 48px);
+        }
+
+        .tv-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      @media (max-width: 760px) {
+        :root {
+          --sidebar: 0px;
+        }
+
+        .sidebar {
+          display: none;
+        }
+
+        .topbar {
+          left: 16px;
+        }
+
+        main {
+          margin-left: 0;
+          padding-top: 96px;
+        }
+
+        .hero h1 {
+          font-size: 32px;
+        }
+
+        .prompt-actions {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .tv-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand" aria-label="Dora-Agent">
+          <span class="brand-mark"></span>
+        </div>
+        <nav class="nav" aria-label="主导航">
+          <a class="active" href="#"><span class="icon">⌂</span><span>首页</span></a>
+          <a href="#"><span class="icon">▱</span><span>项目</span></a>
+          <a href="#"><span class="icon">✦</span><span>快速生成</span></a>
+          <a href="#"><span class="icon">▰</span><span>资产库</span></a>
+          <a href="#"><span class="icon">♙</span><span>Skill</span></a>
+          <a href="#"><span class="icon">◌</span><span>精选作品</span></a>
+          <a href="#"><span class="icon">▯</span><span>教程</span></a>
+        </nav>
+        <div class="sidebar-spacer"></div>
+        <div class="social" aria-label="快捷入口">
+          <button class="gift" type="button">🎁</button>
+          <a href="#">●</a>
+          <a href="#">𝕏</a>
+          <a href="#">▶</a>
+        </div>
+      </aside>
+
+      <header class="topbar">
+        <button class="promo" type="button">🎬 大师 Skill 创作影像大奖</button>
+        <button class="account" type="button">🪙 12,860 <strong>Free</strong><span class="avatar"></span></button>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="hero-title">
+          <h1 id="hero-title">Dora-Agent 1.0 - 你的专属 AI 创作 Agent</h1>
+          <p>把品味和习惯写进 Skill，让精力回归创意</p>
+
+          <div class="prompt-card" role="group" aria-label="创作输入">
+            <div class="prompt-input">由一个想法或故事开始...</div>
+            <div class="prompt-actions">
+              <div class="pill-row">
+                <button class="pill" type="button">＋</button>
+                <button class="pill" type="button">⌘ 模型 <span class="new">新</span></button>
+                <button class="pill" type="button">▣ Skill</button>
+                <button class="pill" type="button">▤ 我的资产库</button>
+              </div>
+              <button class="send" type="button" aria-label="发送" disabled>↑</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="skills" aria-labelledby="skills-title">
+          <div id="skills-title" class="section-label">热门 Skills</div>
+          <div class="skill-grid">
+            <div
+              class="skill-item"
+              style="--thumb: linear-gradient(135deg, #385b3f, #1c2838); --preview-photo: url('https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?auto=format&fit=crop&w=1200&q=80'); --preview-position: center 44%; --preview: radial-gradient(circle at 28% 20%, #9fd45d, transparent 18%), linear-gradient(135deg, #113526, #17202b 52%, #060606);"
+            >
+              <div class="skill-top">
+                <span class="hot">热门</span>
+                <span class="skill-title">穿越世界杯</span>
+                <span class="skill-hover">
+                  <button class="try-action" type="button">试一试</button>
+                  <span class="skill-hover-desc">你在观看世界杯比赛时，突然被拉入电视画面...</span>
+                </span>
+              </div>
+              <div class="skill-preview" aria-hidden="true">
+                <span class="model-badge">Seedance 2.0</span>
+                <span class="preview-image"></span>
+                <span class="preview-copy">
+                  <h3>穿越世界杯</h3>
+                  <p>由一个灵感进入赛场，完成电影级运动短片。</p>
+                  <span class="tag">新手必用</span><span class="tag">影视</span>
+                </span>
+              </div>
+            </div>
+            <div
+              class="skill-item"
+              style="--thumb: linear-gradient(135deg, #2a3a46, #050505); --preview-photo: url('https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=1200&q=80'); --preview-position: center 34%; --preview: linear-gradient(120deg, #b8eaff 0%, #405b62 40%, #080808 100%);"
+            >
+              <div class="skill-top">
+                <span class="hot">热门</span>
+                <span class="skill-title">剧情短片</span>
+                <span class="skill-hover">
+                  <button class="try-action" type="button">试一试</button>
+                  <span class="skill-hover-desc">核心亮点：角色语音锚定，保持语调一致...</span>
+                </span>
+              </div>
+              <div class="skill-preview" aria-hidden="true">
+                <span class="model-badge">Seedance 2.0</span>
+                <span class="preview-image"></span>
+                <span class="preview-copy">
+                  <h3>剧情短片(音色参考)</h3>
+                  <p>角色音色、分镜、画面和视频生成的完整创作链路。</p>
+                  <span class="tag">新手必用</span><span class="tag">剧情短片</span>
+                </span>
+              </div>
+            </div>
+            <div
+              class="skill-item"
+              style="--thumb: linear-gradient(135deg, #673732, #111827); --preview-photo: url('https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&w=1200&q=80'); --preview-position: center 38%; --preview: radial-gradient(circle at 50% 22%, #d98c61, transparent 22%), linear-gradient(135deg, #3c201d, #080808);"
+            >
+              <div class="skill-top">
+                <span class="skill-title">AI 短剧一站式生成</span>
+                <span class="skill-hover">
+                  <button class="try-action" type="button">试一试</button>
+                  <span class="skill-hover-desc">剧本、角色、分镜、视频生成一站式完成...</span>
+                </span>
+              </div>
+              <div class="skill-preview" aria-hidden="true">
+                <span class="model-badge">Graph</span>
+                <span class="preview-image"></span>
+                <span class="preview-copy">
+                  <h3>AI 短剧一站式生成</h3>
+                  <p>剧本分析、角色设定、分镜设计、视频生成和合成。</p>
+                  <span class="tag">短剧</span><span class="tag">工作流</span>
+                </span>
+              </div>
+            </div>
+            <div
+              class="skill-item"
+              style="--thumb: linear-gradient(135deg, #7c4b24, #191919); --preview-photo: url('https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=1200&q=80'); --preview-position: center 50%; --preview: linear-gradient(135deg, #1d1d1d, #5d3825 45%, #0c0c0c);"
+            >
+              <div class="skill-top">
+                <span class="skill-title">商品宣传短片</span>
+                <span class="skill-hover">
+                  <button class="try-action" type="button">试一试</button>
+                  <span class="skill-hover-desc">上传商品图和卖点，生成电商广告短片...</span>
+                </span>
+              </div>
+              <div class="skill-preview" aria-hidden="true">
+                <span class="model-badge">Ads</span>
+                <span class="preview-image"></span>
+                <span class="preview-copy">
+                  <h3>商品宣传短片</h3>
+                  <p>用商品图和卖点生成电商广告视频。</p>
+                  <span class="tag">电商</span><span class="tag">广告</span>
+                </span>
+              </div>
+            </div>
+            <div class="skill-item">
+              <a class="skill-more" href="#">
+                <span class="skill-title">更多 Skill →</span>
+              </a>
+            </div>
+          </div>
+        </section>
+
+        <section class="strip" aria-labelledby="projects-title">
+          <div class="section-head">
+            <h2 id="projects-title">最近项目</h2>
+            <a href="#">查看全部 ›</a>
+          </div>
+          <div class="project-row">
+            <article class="project">
+              <div class="new-project"><div><span class="plus">＋</span>创建新项目</div></div>
+              <h3>新建项目</h3>
+              <p>开启您的创作之旅</p>
+            </article>
+            <article class="project">
+              <div class="cover" style="--cover: linear-gradient(135deg, #392016, #b36c41 45%, #070707);"></div>
+              <h3>短剧制作</h3>
+              <p>最后编辑于 2026年6月23日 00:58</p>
+            </article>
+            <article class="project">
+              <div class="cover" style="--cover: linear-gradient(135deg, #1d2424, #2b3631 50%, #111);"></div>
+              <h3>AI 模型身份查询</h3>
+              <p>最后编辑于 2026年6月23日 00:42</p>
+            </article>
+            <article class="project">
+              <div class="cover" style="--cover: linear-gradient(90deg, #111, #0e3b40 42%, #54f0ff 47%, #080808 64%);"></div>
+              <h3>音乐创作项目</h3>
+              <p>最后编辑于 2026年6月15日 18:26</p>
+            </article>
+            <article class="project">
+              <div class="cover" style="--cover: linear-gradient(135deg, #222, #303a3b, #0a0a0a);"></div>
+              <h3>歌曲制作</h3>
+              <p>最后编辑于 2026年6月15日 18:15</p>
+            </article>
+            <article class="project">
+              <div class="cover" style="--cover: linear-gradient(135deg, #1c1c1c, #111 50%, #050505);"></div>
+              <h3>功能介绍</h3>
+              <p>最后编辑于 2026年6月14日 05:45</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="strip" aria-labelledby="tv-title">
+          <div class="tv-head">
+            <h2 id="tv-title">精选作品</h2>
+            <div class="tabs" role="tablist" aria-label="精选作品分类">
+              <button class="tab active" type="button">全部</button>
+              <button class="tab" type="button">影视</button>
+              <button class="tab" type="button">短剧</button>
+              <button class="tab" type="button">漫剧</button>
+              <button class="tab" type="button">MV</button>
+              <button class="tab" type="button">TVC</button>
+            </div>
+          </div>
+          <div class="tv-grid">
+            <article class="tv-card big" style="--cover: linear-gradient(120deg, #e8d1a2, #95b278 42%, #101820);">
+              <div class="tv-copy"><span>影视</span><h3>让你的下一个灵感上场</h3></div>
+            </article>
+            <article class="tv-card" style="--cover: linear-gradient(135deg, #a96d43, #141414 70%);">
+              <div class="tv-copy"><span>短剧</span><h3>城市记忆</h3></div>
+            </article>
+            <article class="tv-card" style="--cover: linear-gradient(135deg, #203347, #0a0a0a 72%);">
+              <div class="tv-copy"><span>广告</span><h3>Wheels x Ball</h3></div>
+            </article>
+            <article class="tv-card" style="--cover: linear-gradient(135deg, #102b23, #020202 68%);">
+              <div class="tv-copy"><span>漫剧</span><h3>Dad.exe</h3></div>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script>
+      const skillItems = Array.from(document.querySelectorAll(".skill-item"));
+      const activateSkill = (target) => {
+        skillItems.forEach((item) => item.classList.toggle("is-active", item === target));
+      };
+
+      skillItems.forEach((item) => {
+        item.addEventListener("pointerenter", () => activateSkill(item));
+        item.addEventListener("focusin", () => activateSkill(item));
+        item.addEventListener("click", () => activateSkill(item));
+      });
+
+      document.querySelector(".skills")?.addEventListener("pointerleave", () => {
+        skillItems.forEach((item) => item.classList.remove("is-active"));
+      });
+    </script>
+  </body>
+</html>

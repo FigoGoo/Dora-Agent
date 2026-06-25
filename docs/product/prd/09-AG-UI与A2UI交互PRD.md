@@ -1,10 +1,10 @@
 # AG-UI 与 A2UI 交互 PRD
 
-状态：draft  
-owner：产品体验设计师  
-更新时间：2026-06-25  
-适用范围：统一 Agent 到前端的实时事件、组件、payload、顺序、断线重连和前端消费规则  
-product_status：Draft
+状态：active
+owner：产品体验设计师
+更新时间：2026-06-25
+适用范围：统一 Agent 到前端的实时事件、组件、payload、顺序、断线重连和前端消费规则
+product_status：Done
 
 ## 关联文档
 
@@ -96,7 +96,8 @@ flowchart TD
 | `agent.skill.selected` / `agent.skill.missing` | Skill 选择或缺失 | `platform.tags` / `message.stream` |
 | `platform.tags.updated` | 平台能力标签变化 | `platform.tags` |
 | `chat.controls.requested` / `chat.controls.locked` | 输入控件展示或锁定 | `chat.input.controls` |
-| `safety.prompt.evaluated` / `safety.prompt.blocked` | 安全评估 | `error.notice` |
+| `safety.prompt.evaluating` / `safety.prompt.evaluated` / `safety.prompt.blocked` | 安全评估 | `error.notice` |
+| `project.archived.blocked` | 项目归档阻断继续创作 | `error.notice` / `workspace.panel` |
 | `credits.estimated` / `credits.frozen` / `credits.charged` / `credits.released` | 积分状态 | `credit.estimate` |
 | `confirmation.required` / `confirmation.accepted` / `confirmation.rejected` | 人工确认 | `confirmation.panel` |
 | `tool.call.started` / `tool.call.progress` / `tool.call.completed` / `tool.call.failed` | Tool 调用 | `tool.status` |
@@ -113,7 +114,7 @@ flowchart TD
 | 字段 | 说明 |
 | --- | --- |
 | `event_id` | 全局唯一，用于幂等 |
-| `event_type` | 事件类型 |
+| `type` | 事件类型，正式字段名；第一版可兼容读取 `event_type` |
 | `sequence` | 同一 run 内单调递增 |
 | `timestamp` | 事件时间 |
 | `session_id` | 会话标识 |
@@ -210,10 +211,9 @@ sequenceDiagram
 
 ## Done Gate
 
-- [ ] 组件范围确认。
-- [ ] 事件清单确认。
-- [ ] payload 公共字段确认。
-- [ ] 断线重连规则确认。
-- [ ] 与正式 AG-UI 契约入口确认。
-- [ ] product_status 更新为 Done 后，才允许进入正式工程开发。
-
+- [x] 组件范围确认。
+- [x] 事件清单确认。
+- [x] payload 公共字段确认。
+- [x] 断线重连规则确认。
+- [x] 与正式 AG-UI 契约入口确认。
+- [x] product_status 已更新为 Done，允许进入工程需求映射与契约先行阶段。

@@ -1,10 +1,10 @@
 # Tool 边界与平台开放能力 PRD
 
-状态：draft  
-owner：产品体验设计师  
-更新时间：2026-06-25  
-适用范围：平台开放 Tool、Skill 可绑定 Tool、Agent 直接调用 Tool、风险等级、可用范围、超时重试取消  
-product_status：Draft
+状态：active
+owner：产品体验设计师
+更新时间：2026-06-25
+适用范围：平台开放 Tool、Skill 可绑定 Tool、Agent 直接调用 Tool、风险等级、可用范围、超时重试取消
+product_status：Done
 
 ## 关联文档
 
@@ -171,10 +171,10 @@ flowchart TD
 
 ## Done Gate
 
-- [ ] Tool 类型确认。
-- [ ] 风险等级和执行策略确认。
-- [ ] 白名单和可用范围确认。
-- [ ] Agent 直接调用 Tool 边界确认。
-- [ ] 验收标准可测试。
-- [ ] product_status 更新为 Done 后，才允许进入正式工程开发。
+- [x] Tool 类型确认。
+- [x] 风险等级和执行策略确认。
+- [x] 白名单和可用范围确认。
+- [x] Agent 直接调用 Tool 边界确认。
+- [x] 验收标准可测试。
+- [x] product_status 已更新为 Done，允许进入工程需求映射与契约先行阶段。
 
