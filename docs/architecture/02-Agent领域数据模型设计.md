@@ -1,8 +1,8 @@
 # Agent 领域数据模型设计
 
-状态：draft
-owner：Go Eino 智能体微服务架构工程师
-更新时间：2026-06-25
+状态：archived
+owner：Agent 服务责任域
+更新时间：2026-06-28
 适用范围：智能体微服务 Agent Runtime PostgreSQL 数据模型草案
 相关代码路径：`/services/agent/**`、`/db/migrations/iterations/**`
 相关契约：`docs/standards/Agent领域数据建模规范.md`、`docs/architecture/00-智能体微服务总体架构设计.md`、`docs/architecture/01-Eino能力选型与TurnLoop设计.md`

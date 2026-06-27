@@ -1,5 +1,5 @@
 {
-  "case_id": "business_api_m5_notification_navigation_success",
+  "case_id": "business_api_notification_navigation_success",
   "method": "GET",
   "path": "/api/notifications/ntf_skill_review_001/navigation",
   "request_headers": {
@@ -16,7 +16,7 @@
       "target_resource_id": "sk_seed_storyboard",
       "target_type": "skill_version"
     },
-    "trace_id": "trace_api_m5_notification_navigation_001"
+    "trace_id": "trace_api_notification_navigation_001"
   },
   "assertions": [
     "navigation performs permission recheck before returning allowed=true",

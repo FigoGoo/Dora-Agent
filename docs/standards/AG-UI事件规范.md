@@ -1,25 +1,37 @@
 # AG-UI 事件规范
 
 状态：active  
-owner：主控 Codex 汇总维护  
+owner：文档与契约责任域
+更新时间：2026-06-28
 适用范围：智能体微服务到前端的实时事件协议  
 
 ## 事件类型
 
-建议基础事件：
+字段级事件类型和 payload schema 以 `api/agui/agent-workbench-events.schema.json` 为准。当前 canonical 事件族：
 
-- `agent.started`
-- `message.started`
-- `message.delta`
-- `message.completed`
-- `tool.call`
-- `tool.result`
-- `graph.node.started`
-- `graph.node.completed`
-- `interrupt.required`
+- `agent.run.started`
+- `agent.run.completed`
+- `agent.run.failed`
+- `agent.run.cancelled`
+- `agent.thinking.started`
+- `agent.thinking.delta`
+- `agent.thinking.completed`
+- `agent.message.delta`
+- `agent.message.completed`
+- `tool.call.started`
+- `tool.call.progress`
+- `tool.call.completed`
+- `tool.call.failed`
+- `generation.progress`
+- `generation.artifact.completed`
+- `confirmation.required`
+- `confirmation.accepted`
+- `confirmation.rejected`
 - `resume.accepted`
-- `agent.completed`
-- `agent.failed`
+- `workspace.assets.updated`
+- `workspace.blackboard.updated`
+- `process.snapshot.saved`
+- `project.archived.blocked`
 
 新增事件必须先文档化。
 
@@ -30,7 +42,7 @@ owner：主控 Codex 汇总维护
 ```json
 {
   "event_id": "evt_xxx",
-  "type": "message.delta",
+  "type": "agent.message.delta",
   "session_id": "sess_xxx",
   "run_id": "run_xxx",
   "sequence": 12,
@@ -61,7 +73,7 @@ payload 内容按事件类型定义，避免泄露 Eino 内部实现细节。
 ## 顺序
 
 - 同一 run 内 sequence 单调递增。
-- 前端按 sequence 合并 message.delta 和状态事件。
+- 前端按 sequence 合并 `agent.message.delta` 和状态事件。
 
 ## 幂等
 
@@ -75,7 +87,7 @@ payload 内容按事件类型定义，避免泄露 Eino 内部实现细节。
 
 ## 错误事件
 
-- `agent.failed` 表示运行失败。
+- `agent.run.failed` 表示运行失败。
 - Tool、RPC、模型或权限错误应在 payload 中说明 error_code、message、recoverable、trace_id。
 
 ## 未知事件兼容
@@ -85,8 +97,8 @@ payload 内容按事件类型定义，避免泄露 Eino 内部实现细节。
 
 ## 前端展示规则
 
-- `message.delta` 增量渲染，`message.completed` 固化消息。
-- `tool.call` 展示调用中，`tool.result` 展示成功或失败。
-- `interrupt.required` 展示人工确认操作。
-- `agent.completed` 展示完成状态。
-- `agent.failed` 展示可理解错误和重试入口。
+- `agent.message.delta` 增量渲染，`agent.message.completed` 固化消息。
+- `tool.call.started` 展示调用中，`tool.call.completed` 或 `tool.call.failed` 展示结果。
+- `confirmation.required` 展示人工确认操作；Agent 内部 `interrupt` 只作为状态记录和 API 语义，不作为 canonical AG-UI 事件。
+- `agent.run.completed` 展示完成状态。
+- `agent.run.failed` 展示可理解错误和重试入口。

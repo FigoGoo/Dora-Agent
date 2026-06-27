@@ -1,10 +1,10 @@
 {
-  "case_id": "business_api_m5_work_share_confirm_success",
+  "case_id": "business_api_work_share_confirm_success",
   "method": "POST",
   "path": "/api/works/wrk_seed_public/share/confirm",
   "request_headers": {
     "Authorization": "Bearer user_session_token",
-    "Idempotency-Key": "idem_m5_share_confirm_001"
+    "Idempotency-Key": "idem_share_confirm_001"
   },
   "request_body": {
     "preview_token": "preview.share.work.seed"
@@ -20,7 +20,7 @@
       "share_status": "shared",
       "share_url": "http://localhost:3000/share/seed-storyboard"
     },
-    "trace_id": "trace_api_m5_share_confirm_001"
+    "trace_id": "trace_api_share_confirm_001"
   },
   "assertions": [
     "confirm requires Idempotency-Key",

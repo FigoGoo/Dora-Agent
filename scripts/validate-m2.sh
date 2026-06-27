@@ -32,7 +32,7 @@ business_router = Path("services/business/internal/transport/http/handlers_m2.go
 agent_router = Path("services/agent/internal/api/http/workbench_handlers.go").read_text()
 business_rpc = Path("services/business/internal/transport/rpc/handlers.go").read_text()
 agent_app = Path("services/agent/internal/application/workbench/app.go").read_text()
-business_migration = Path("db/migrations/iterations/2026-06-27-business-core/business/0013_m2_identity_project_alignment.up.sql").read_text()
+business_migration = Path("db/migrations/iterations/2026-06-27-business-core/business/0013_identity_project_alignment.up.sql").read_text()
 
 for route in [
     "/api/auth/register",

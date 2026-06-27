@@ -1,8 +1,8 @@
 # 03-Agent领域模型状态机与数据库设计
 
-状态：production-design-ready
-owner：Go Eino 智能体微服务架构工程师
-更新时间：2026-06-27
+状态：archived
+owner：Agent 服务责任域
+更新时间：2026-06-28
 适用范围：Agent Runtime model、数据库表、Repository、CRUD、状态机、索引和数据保留
 相关代码路径：`services/agent/internal/domain/**`、`services/agent/internal/infra/repository/**`、`db/migrations/iterations/**`
 相关契约：`docs/architecture/02-Agent领域数据模型设计.md`、`db/migrations/iterations/20260627_agent_runtime/agent/001_create_agent_runtime.up.sql`

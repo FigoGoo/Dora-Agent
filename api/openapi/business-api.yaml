@@ -1112,6 +1112,14 @@ paths:
         in: query
         schema:
           type: string
+      - name: tag
+        in: query
+        schema:
+          type: string
+      - name: resource_type
+        in: query
+        schema:
+          type: string
   /api/public/works/{public_work_id}:
     get:
       tags:

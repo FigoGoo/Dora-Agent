@@ -1,5 +1,5 @@
 {
-  "case_id": "business_api_m5_public_work_version_compat_success",
+  "case_id": "business_api_public_work_version_compat_success",
   "method": "GET",
   "path": "/api/public/works/pubw_seed_storyboard",
   "request_headers": {
@@ -17,7 +17,7 @@
       "like_count": 1,
       "assets": []
     },
-    "trace_id": "trace_api_m5_public_compat_001"
+    "trace_id": "trace_api_public_compat_001"
   },
   "assertions": [
     "older clients can ignore category, tags and public_media_refs",

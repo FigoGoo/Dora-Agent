@@ -1,9 +1,27 @@
 # Agent 工作台 API 契约草案
 
 状态：draft
-owner：主控 Codex 汇总维护；Go Eino 智能体微服务架构工程师和前端开发工程师确认
-更新时间：2026-06-25
+owner：文档与契约责任域；Agent 服务责任域和前端责任域确认
+更新时间：2026-06-28
 适用范围：前端 -> 智能体微服务，统一 Agent 工作台
+
+## 成熟度复核
+
+当前成熟度：draft，不升 `active`。  
+使用方式：可作为 Agent 工作台 API 路由方向和错误语义输入；字段级 route、request/response 和 schema 以 `api/openapi/agent-workbench.yaml` 为准，索引见 `docs/contracts/字段级契约索引.md`。
+
+已补齐项：SSE 鉴权、`Last-Event-ID`、event replay 分页、snapshot fallback 和同 session run 并发策略已在本文冻结。
+
+未冻结项：自动化 API contract 执行证据和服务级验收报告尚未固化，因此本文仍保持 `draft`。
+
+## 字段级事实源
+
+- OpenAPI：`api/openapi/agent-workbench.yaml`
+- Agent API 实现：`services/agent/internal/api/http/**`
+- AG-UI schema：`api/agui/agent-workbench-events.schema.json`
+- AG-UI fixture：`tests/agent/agui/fixtures/**`
+
+新增或变更字段时，先更新 OpenAPI、AG-UI schema 或 fixture，再同步本文档的错误语义、补偿规则和成熟度状态。
 
 ## API 清单
 
@@ -11,11 +29,14 @@ owner：主控 Codex 汇总维护；Go Eino 智能体微服务架构工程师和
 | --- | --- | --- | --- | --- |
 | POST | `/api/agent/sessions` | 在项目下创建会话 | 登录态 | planned |
 | GET | `/api/agent/sessions/:session_id` | 查询会话快照 | 登录态 + 项目权限 | planned |
+| GET | `/api/agent/sessions/:session_id/messages` | 分页查询会话消息 | 登录态 + 项目权限 | planned |
 | POST | `/api/agent/runs` | 发送用户输入并创建 run | 登录态 + 项目权限 | planned |
-| GET | `/api/agent/runs/:run_id/events` | SSE 实时事件 | 登录态 + 项目权限 | planned |
-| GET | `/api/agent/runs/:run_id/event-replay` | 按 sequence 补偿事件 | 登录态 + 项目权限 | planned |
-| POST | `/api/agent/interrupts/:interrupt_id/confirm` | 确认人工中断 | 登录态 + 项目权限 | planned |
-| POST | `/api/agent/interrupts/:interrupt_id/reject` | 拒绝人工中断 | 登录态 + 项目权限 | planned |
+| GET | `/api/agent/runs/:run_id` | 查询 run 状态 | 登录态 + 项目权限 | planned |
+| GET | `/api/agent/runs/:run_id/stream` | SSE 实时事件 | 登录态 + 项目权限 | planned |
+| GET | `/api/agent/runs/:run_id/events` | 按 sequence 补偿事件 | 登录态 + 项目权限 | planned |
+| POST | `/api/agent/runs/:run_id/messages` | 追加用户输入 | 登录态 + 项目权限 | planned |
+| POST | `/api/agent/runs/:run_id/interrupts/:interrupt_id/accept` | 确认人工中断 | 登录态 + 项目权限 | planned |
+| POST | `/api/agent/runs/:run_id/interrupts/:interrupt_id/reject` | 拒绝人工中断 | 登录态 + 项目权限 | planned |
 | POST | `/api/agent/runs/:run_id/cancel` | 取消 run | 登录态 + 项目权限 | planned |
 | GET | `/api/agent/runs/:run_id/snapshot` | 查询 run 快照 | 登录态 + 项目权限 | planned |
 
@@ -26,7 +47,7 @@ owner：主控 Codex 汇总维护；Go Eino 智能体微服务架构工程师和
 | Authorization | header | string | 是 | 登录 token |
 | X-Trace-Id | header | string | 是 | 链路追踪 |
 | Idempotency-Key | header | string | 写操作必填 | 幂等键 |
-| Last-Event-ID | header | string | SSE 重连可选 | 最近消费事件 |
+| Last-Event-ID | header | string | SSE 重连可选 | 最近成功消费的 AG-UI `event_id`，仅用于 `/stream` |
 
 ## 创建会话
 
@@ -60,9 +81,10 @@ owner：主控 Codex 汇总维护；Go Eino 智能体微服务架构工程师和
 | --- | --- | --- | --- | --- |
 | session_id | body | string | 是 | Agent 会话 ID |
 | project_id | body | string | 是 | 业务项目 ID |
-| user_message | body | object | 是 | 用户输入，结构待细化 |
+| user_input | body | object | 是 | 用户输入 DTO，字段级以 OpenAPI `UserInputDTO` 为准 |
 | model_selection | body | object | 否 | 用户选择模型 |
-| referenced_asset_ids | body | array | 否 | 引用业务资产 |
+| referenced_assets | body | array | 否 | 引用业务资产 DTO |
+| control_inputs | body | array | 否 | 前端控件输入 DTO |
 
 响应：
 
@@ -71,7 +93,43 @@ owner：主控 Codex 汇总维护；Go Eino 智能体微服务架构工程师和
 | run_id | string | 是 | Agent run ID |
 | session_id | string | 是 | 会话 ID |
 | stream_url | string | 是 | SSE URL |
+| snapshot_version | string | 是 | 创建 run 时的快照版本 |
 | status | string | 是 | `pending` / `running` |
+
+## Run 并发策略
+
+- 同一 `session_id` 同一时间只允许一个 active run。
+- active run 包括 `pending`、`running`、`waiting_confirmation`、`waiting_input`、`resuming` 和 `cancelling`。
+- 当 session 已有 active run 时，`POST /api/agent/runs` 必须返回 `409 RUN_STATE_CONFLICT`，不得隐式取消旧 run 或创建并行 run。
+- `completed`、`failed`、`cancelled` 或 `expired` 后可以创建新 run；新 run 必须继承同一 `project_id` 并重新做项目权限校验。
+- `POST /api/agent/runs/:run_id/messages` 只能用于当前 active run 的追加输入或恢复，不创建新 run。
+- `cancel`、`accept`、`reject` 必须携带 `Idempotency-Key`；同 key 同 hash 返回同一结果，同 key 不同 hash 返回 `IDEMPOTENCY_CONFLICT`。
+
+## SSE 和事件补偿
+
+### 打开 SSE
+
+- API：`GET /api/agent/runs/:run_id/stream`
+- 鉴权：使用 Agent API Bearer 登录态，不单独定义长期 stream token。
+- 重连：前端可携带 `Last-Event-ID` header，值为最近成功消费的 AG-UI `event_id`。
+- 服务端必须校验 run、session、project 权限；权限失效返回 `PERMISSION_DENIED` 或 `PROJECT_ARCHIVED`，不继续推送事件。
+- SSE 只推送 AG-UI schema 中定义的事件；未知事件只允许通过兼容策略被前端忽略，不允许作为业务逻辑依赖。
+
+### 事件补偿
+
+- API：`GET /api/agent/runs/:run_id/events?after_sequence={sequence}&page_size={size}`
+- 默认分页：`page_size=10`。
+- 最大分页：`page_size=100`。
+- 返回：`events`、`next_after_sequence`、`snapshot_required`。
+- 正常补偿返回 `sequence > after_sequence` 的连续事件；前端按 `event_id` 去重、按 `sequence` 合并。
+- 如果 `after_sequence` 超出事件保留窗口、事件缺口不可补、`Last-Event-ID` 无法映射到当前 run，返回 `snapshot_required=true`。
+
+### Snapshot fallback
+
+- API：`GET /api/agent/runs/:run_id/snapshot`
+- snapshot 至少包含 session、run、messages、assets、blackboard、tasks、`last_event_sequence` 和只读原因。
+- 前端收到 `snapshot_required=true` 后必须先查询 snapshot，用 snapshot 覆盖本地工作台状态，再从 `last_event_sequence` 继续补偿或重开 SSE。
+- snapshot 只能包含 Agent Runtime 数据和业务引用，不得包含业务事实副本、私有 TOS 签名、系统 Prompt、供应商原始响应或推理链路。
 
 ## 项目归档阻断
 
@@ -116,8 +174,7 @@ owner：主控 Codex 汇总维护；Go Eino 智能体微服务架构工程师和
 - resume：优先事件补偿，失败后 snapshot 恢复。
 - error：保留已有消息和资产引用，展示错误卡。
 
-## 待确认
+## 后续证据
 
-- 用户输入 DTO 是否支持文本、上传文件、素材引用、控件输入分开建模。
-- SSE URL 是否独立鉴权 token。
-- run 并发策略：同一 session 是否允许多个 active run。
+- 需要补充 API contract 覆盖：`/stream` 鉴权、`Last-Event-ID` 重连、`/events` 分页、`snapshot_required=true`、`/snapshot` 恢复。
+- 需要在服务级测试报告中记录同 session active run 冲突、accept/reject/cancel 幂等和项目归档阻断执行证据。

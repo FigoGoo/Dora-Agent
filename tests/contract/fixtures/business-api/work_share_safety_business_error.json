@@ -1,5 +1,5 @@
 {
-  "case_id": "business_api_m5_work_share_business_error_safety_digest_mismatch",
+  "case_id": "business_api_work_share_business_error_safety_digest_mismatch",
   "method": "POST",
   "path": "/api/works/wrk_seed_public/share/preview",
   "request_headers": {
@@ -19,7 +19,7 @@
       "evidence_version": "2026-06-28",
       "evaluated_at": "2026-06-27T00:00:00Z",
       "expires_at": "2026-06-27T00:10:00Z",
-      "trace_id": "trace_api_m5_share_safety_001"
+      "trace_id": "trace_api_share_safety_001"
     }
   },
   "response_status": 409,
@@ -32,7 +32,7 @@
       "message": "work share safety evidence digest does not match public text",
       "retryable": false
     },
-    "trace_id": "trace_api_m5_share_safety_001"
+    "trace_id": "trace_api_share_safety_001"
   },
   "assertions": [
     "work_share evidence digest binds public title, description and tags",

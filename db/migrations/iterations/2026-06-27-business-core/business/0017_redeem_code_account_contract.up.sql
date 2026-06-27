@@ -1,6 +1,6 @@
 -- Dora business service migration 0017
 -- Owner: 业务微服务后端工程师
--- Scope: M4 redeem code account_type and bind target contract alignment.
+-- Scope: Redeem code account_type and bind target contract alignment.
 -- Lock risk: additive columns and indexes; no database-level foreign keys.
 
 ALTER TABLE redeem_code_batches

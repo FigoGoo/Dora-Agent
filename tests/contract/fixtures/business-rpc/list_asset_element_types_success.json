@@ -36,7 +36,7 @@
     ]
   },
   "assertions": [
-    "Agent consumes the 14 canonical M4 asset element types through RPC rather than hardcoding them",
+    "Agent consumes the canonical asset element types through RPC rather than hardcoding them",
     "schema_hint_json and render_hint_json are present for every type"
   ]
 }

@@ -1,8 +1,8 @@
 # 02-通用上下文 DTO 错误码幂等审计与日志设计
 
-状态：production-design-ready  
-owner：业务微服务后端工程师  
-更新时间：2026-06-27  
+状态：archived
+owner：业务服务责任域
+更新时间：2026-06-28
 适用范围：业务服务所有 RPC、DTO、错误、幂等、审计、日志和测试  
 相关代码路径：`api/thrift/common/**`、`api/thrift/business/**`、`services/business/internal/domain/common/**`、`services/business/internal/pkg/errors/**`、`services/business/internal/infra/idempotency/**`
 

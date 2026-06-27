@@ -1,8 +1,8 @@
 # 05-TurnLoop中断恢复取消与长任务设计
 
-状态：production-design-ready
-owner：Go Eino 智能体微服务架构工程师
-更新时间：2026-06-27
+状态：archived
+owner：Agent 服务责任域
+更新时间：2026-06-28
 适用范围：多轮执行、追加输入、Interrupt/Resume、Preempt/Cancel、长任务、失败恢复
 相关代码路径：`services/agent/internal/runtime/turnloop/**`、`services/agent/internal/application/run/**`
 相关契约：`docs/standards/TurnLoop执行规范.md`、`docs/architecture/01-Eino能力选型与TurnLoop设计.md`

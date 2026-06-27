@@ -1,8 +1,8 @@
 # 07-Tool能力策略白名单风险与执行校验设计
 
-状态：production-design-ready  
-owner：业务微服务后端工程师  
-更新时间：2026-06-27  
+状态：archived
+owner：业务服务责任域
+更新时间：2026-06-28
 适用范围：平台 Tool 定义、Tool 策略、白名单、风险等级、超时重试取消策略、Agent 执行前校验  
 相关代码路径：`services/business/internal/application/toolpolicy/**`、`services/business/internal/domain/toolpolicy/**`
 

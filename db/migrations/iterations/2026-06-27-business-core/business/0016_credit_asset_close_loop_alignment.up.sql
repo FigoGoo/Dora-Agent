@@ -1,6 +1,6 @@
 -- Dora business service migration 0016
 -- Owner: 业务微服务后端工程师
--- Scope: M4 credit freeze batch allocation, asset object keys and generated asset slots.
+-- Scope: Credit freeze batch allocation, asset object keys and generated asset slots.
 -- Lock risk: additive local baseline alignment; no database-level foreign keys.
 
 ALTER TABLE credit_estimates

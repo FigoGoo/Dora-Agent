@@ -1,8 +1,8 @@
 # 08-Skill目录版本审核发布回滚与通知设计
 
-状态：production-design-ready  
-owner：业务微服务后端工程师  
-更新时间：2026-06-27  
+状态：archived
+owner：业务服务责任域
+更新时间：2026-06-28
 适用范围：系统 Skill、企业 Skill、个人 Skill、版本、输出元素结构、测试样例、审核、发布、废弃、回滚和通知  
 相关代码路径：`services/business/internal/application/skillcatalog/**`、`services/business/internal/domain/skillcatalog/**`
 
@@ -198,10 +198,10 @@ owner：业务微服务后端工程师
 | GET | `/api/skills` | user | `ListSkillsRequest` | `PageResult<SkillCardDTO>` | `loading`、`empty` |
 | POST | `/api/skills` | user | `CreateSkillDraftRequest` + `Idempotency-Key` | `SkillDetailDTO` | `draft`、`success` |
 | GET | `/api/skills/:skill_id` | user | path | `SkillDetailDTO` | `loading`、`permission_denied` |
-| PATCH | `/api/skills/:skill_id` | owner | `UpdateSkillDraftRequest` + `Idempotency-Key` | `SkillDetailDTO` | `editing`、`success` |
-| POST | `/api/skills/:skill_id/test` | owner | `RunSkillTestRequest` + `Idempotency-Key` | `SkillTestResultDTO` | `testing`、`success`、`error` |
-| POST | `/api/skills/:skill_id/submit-review` | owner | `SubmitSkillReviewRequest` + `Idempotency-Key` | `SkillDetailDTO` | `pending_review` |
-| POST | `/api/skills/:skill_id/rollback` | owner | `RollbackSkillRequest` + `Idempotency-Key` | `SkillDetailDTO` | `confirming`、`success` |
+| PATCH | `/api/skills/:skill_id` | 责任域 | `UpdateSkillDraftRequest` + `Idempotency-Key` | `SkillDetailDTO` | `editing`、`success` |
+| POST | `/api/skills/:skill_id/test` | 责任域 | `RunSkillTestRequest` + `Idempotency-Key` | `SkillTestResultDTO` | `testing`、`success`、`error` |
+| POST | `/api/skills/:skill_id/submit-review` | 责任域 | `SubmitSkillReviewRequest` + `Idempotency-Key` | `SkillDetailDTO` | `pending_review` |
+| POST | `/api/skills/:skill_id/rollback` | 责任域 | `RollbackSkillRequest` + `Idempotency-Key` | `SkillDetailDTO` | `confirming`、`success` |
 | GET | `/api/admin/skills/system` | admin | `ListSkillsRequest` | `PageResult<SkillCardDTO>` | `loading`、`empty` |
 | POST | `/api/admin/skills/system` | admin | `CreateSkillDraftRequest` + `Idempotency-Key` | `SkillDetailDTO` | `draft` |
 | GET | `/api/admin/skills/system/:skill_id` | admin | path | `SkillDetailDTO` | `loading`、`permission_denied` |

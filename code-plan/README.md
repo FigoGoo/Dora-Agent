@@ -1,19 +1,25 @@
-# code-plan 正式开发设计总入口
+# 第一阶段服务端开发设计归档入口
 
-状态：production-design-ready  
-owner：主控 Codex 汇总维护  
-更新时间：2026-06-27  
+状态：archived  
+owner：文档与契约责任域
+更新时间：2026-06-28  
 适用范围：`services/agent/**`、`services/business/**`、`api/thrift/**`、`api/openapi/**`、`api/agui/**`、`db/migrations/iterations/**`、`tests/agent/**`、`tests/business/**`、`tests/contract/**`、`tests/e2e/**`  
 相关代码路径：`services/agent/**`、`services/business/**`、`api/**`、`db/migrations/iterations/**`、`tests/**`  
 相关设计契约：`docs/product/**`、`docs/product/prd/**`、`docs/design/**`、`docs/architecture/**`、`docs/standards/**`、`code-plan/agent/**`、`code-plan/business/**`、`code-plan/tests/**`
 
+## 归档说明
+
+第一阶段服务端开发已经完成。本目录保留第一阶段服务端设计、契约映射、测试设计和历史验收口径，仅用于追溯，不再作为后续迭代的当前事实源。
+
+后续功能迭代、前端开发、发布上线或契约变更，必须先从 `docs/current/README.md` 进入，并更新 `docs/technical/**`、`docs/contracts/**`、`docs/standards/**`、`docs/product/**` 或 `docs/test/**` 中的 active 文档。
+
 ## 目标
 
-本目录是 Dora-Agent 本次正式开发的工程事实源。目标是在不依赖现有临时代码、临时 schema、临时 fixture、临时 OpenAPI 或临时 RPC 文件的前提下，把 `docs/product/**` 和 `docs/design/**` 中已经 Done 的产品设计转成可直接开发、可测试、可验收的 Agent 微服务、业务微服务、跨服务契约、数据库、配置和测试设计。
+本目录记录 Dora-Agent 第一阶段服务端开发的工程设计基线。它把 `docs/product/**` 和 `docs/design/**` 中已经 Done 的产品设计转成 Agent 微服务、业务微服务、跨服务契约、数据库、配置和测试设计。
 
-本次开发不涉及前端开发，不补部署上线文档。
+当前不再在本目录新增阶段计划、任务拆分或迭代要求。
 
-## 当前范围
+## 历史范围
 
 | 范围 | 本次是否覆盖 | 说明 |
 | --- | --- | --- |
@@ -29,59 +35,34 @@ owner：主控 Codex 汇总维护
 
 ## 事实源读取顺序
 
+本节仅用于追溯第一阶段服务端开发期间的历史读取顺序。新任务不要按本顺序读取，必须改读 `docs/current/README.md`。
+
 1. `docs/product/AIGC智能体产品设计索引.md` 和 `docs/product/prd/**`。
 2. `docs/product/工程交付输入清单产品系统设计.md`。
 3. `docs/product/**` 中各产品系统设计。
-4. `docs/design/**` 中页面、A2UI、AG-UI 和设计 token 文档，只作为 Agent/业务契约输入；本次不进入前端开发。
+4. `docs/design/**` 中页面、A2UI、AG-UI 和设计 token 文档。
 5. `docs/architecture/**`。
 6. `docs/standards/**`。
 7. `code-plan/agent/**`。
 8. `code-plan/business/**`。
 9. `code-plan/tests/**`。
 
-现有代码、临时 schema、临时 fixture、临时 seed、临时 OpenAPI 或临时 RPC 文件如与 `code-plan` 不一致，以 `code-plan` 为准，在对应功能切片内先同步契约和测试，再写实现。
-
 ## 交付入口
 
-| 入口 | owner | 用途 |
+| 入口 | 责任域 | 用途 |
 | --- | --- | --- |
-| [agent/README.md](./agent/README.md) | Go Eino 智能体微服务架构工程师 | Agent 微服务架构、Eino Runtime、Agent API、AG-UI、RPC client、Agent DB、运行时测试。 |
-| [business/README.md](./business/README.md) | 业务微服务后端工程师 | 业务领域、Kitex RPC、HTTP API、业务 DB、事务、权限、审计和业务测试。 |
-| [tests/README.md](./tests/README.md) | 浏览器、RPC 与数据库测试工程师 | 非前端范围内的服务级、契约级、AG-UI、RPC、Agent DB、业务 DB 和跨服务验收。 |
+| [agent/README.md](./agent/README.md) | Agent 服务责任域 | Agent 微服务架构、Eino Runtime、Agent API、AG-UI、RPC client、Agent DB、运行时测试。 |
+| [business/README.md](./business/README.md) | 业务服务责任域 | 业务领域、Kitex RPC、HTTP API、业务 DB、事务、权限、审计和业务测试。 |
+| [tests/README.md](./tests/README.md) | 测试与验收责任域 | 非前端范围内的服务级、契约级、AG-UI、RPC、Agent DB、业务 DB 和跨服务验收。 |
 
-## 开发顺序
+## 归档使用规则
 
-| 阶段 | 输入 | 主要产出 | Done 条件 |
-| --- | --- | --- | --- |
-| M0 契约冻结 | Agent 04/06/07、业务 02/15、测试 00 | Thrift、OpenAPI、AG-UI schema、错误码、分页、幂等、fixture 设计冻结 | 契约字段、错误码、幂等键和 fixture 场景在 Agent、业务、测试三侧一致。 |
-| M1 基础设施 | Agent 01/03/11、业务 01/02/14 | 服务骨架、配置、日志、Agent DB、业务 DB、migration、seed | 配置键、日志 trace、SQL up/down、无外键约束、Agent 状态机、业务幂等 tenant 维度、审计模型和基础测试路径与 code-plan 语义一致。 |
-| M2 身份项目能力 | 业务 03/04/05、Agent 04/05、Agent 07 中 `AccountSpaceService.ResolveCurrentSpaceContext` 与 `ProjectService.CheckProjectAccess` 子集 | 登录空间、企业、管理员、项目、权限、Agent session/run 基础 | session/run 创建前能解析空间、校验项目、区分权限错误和归档状态；Agent 07 中 Skill、Tool、模型、积分和资产 RPC 不计入 M2，分别归入 M3/M4。 |
-| M3 配置能力 | 业务 06/07/08、Agent 02/08/12/13、Agent 04 token 鉴权、Agent 07 中 `AccountSpaceService.ResolveAuthContextFromToken` 与 Skill / Tool / Model / PlatformDictionary RPC 子集 | 模型、Tool、Skill、Skill 测试、安全证据、模型 Tool 适配 | Agent 通过业务 RPC 解析 Authorization token，只路由 Published Skill，只执行允许 Tool，安全评估先于预估和生成。 |
-| M4 积分资产闭环 | 业务 09/10/11、Agent 09/10/13、Agent 07 中 Credit / Asset / AssetCreditCommit / 资产写入权限 RPC 子集 | 预估、确认、冻结、生成、TOS 对象槽、保存、扣费、释放 | 资产保存成功才扣费；失败、取消、归档能释放冻结；DB 事实边界正确。 |
-| M5 公开触达和通知 | 业务 12/13、Agent 06/10 | 作品公开快照、点赞、下架、站内信、AG-UI 展示事件 | 公开内容不泄露隐私，通知和公开状态由业务服务维护。 |
-| M6 服务级验收 | 测试 00、Agent 14、业务 15 | RPC contract、HTTP contract、AG-UI replay、DB 验证、跨服务主链路报告 | 非前端、非部署范围内的阻断缺陷清零，未执行项有原因和风险说明。 |
+- 新任务默认不读取本目录。
+- 需要追溯第一阶段服务端设计时，可按 `agent/README.md`、`business/README.md`、`tests/README.md` 定位历史设计。
+- 如果历史设计仍然有效，应迁移或摘录到 `docs/technical/**`、`docs/contracts/**`、`docs/standards/**` 或 `docs/test/**` 的 active 文档。
+- 如果历史设计已经失效，应标记替代文档或移入 `docs/archive/**`。
 
-### Agent 07 里程碑拆分
-
-`code-plan/agent/07-RPC客户端业务能力调用与DTO映射设计.md` 是 Agent 调用业务服务的完整 RPC client 事实源，不代表整篇 Agent 07 都在 M2 完成。后续开发和验收按以下分期判定：
-
-| 全局阶段 | Agent 07 范围 | 验收口径 |
-| --- | --- | --- |
-| M2 身份项目能力 | `AccountSpaceService.ResolveCurrentSpaceContext`、`ProjectService.CheckProjectAccess` 的 `view` 与 `continue_creation` 用法 | session/run 创建、追加输入、interrupt accept/reject、cancel 和 snapshot 前完成空间解析与项目权限校验；同时检查 RPC error 与正常响应中的 `allowed`、`creative_allowed`。 |
-| M3 配置能力 | `AccountSpaceService.ResolveAuthContextFromToken`；`SkillCatalogService.ListRoutableSkills`、`GetPublishedSkillSpec`、`GetReviewCandidateSkillSpec`、`SaveSkillTestResult`；`ToolCapabilityService.CheckToolExecutionPolicy`；`ModelConfigService.ListAvailableGenerationModels`、`ResolveDefaultModel`、`ResolveGenerationModelSnapshot`；`PlatformDictionaryService.ListAssetElementTypes` | Agent API token 鉴权、Skill 路由、Skill 测试、Tool 策略、模型选择、模型快照和元素类型字典完成后才可标记通过。 |
-| M4 积分资产闭环 | `CreditService.EstimateGenerationCredits`、`EstimateToolCredits`、`FreezeCredits`、`ChargeToolUsageCredits`、`ReleaseFrozenCredits`；`AssetService.BatchCheckAssetAccess`、`PrepareGeneratedAssetObjects`；`AssetCreditCommitService.CommitGeneratedAssetAndCharge`；`ProjectService.CheckProjectAccess` 的 `attach_asset`、`commit_asset`、`create_work` 用法 | 预估、确认、冻结、扣费、释放、资产访问校验、上传槽、资产保存和创作结果提交完成后才可标记通过。 |
-
-### M3 / M4 / M6 阻断任务承接
-
-以下任务来自 M2 后续复核，不再允许以“已延期”作为完成说明；必须在对应阶段的实现、fixture、验证脚本和报告中闭环。
-
-| 阶段 | 阻断任务 | Done 口径 |
-| --- | --- | --- |
-| M3 配置能力 | Agent 07 中 `ResolveAuthContextFromToken`、Skill / Tool / Model / PlatformDictionary RPC client 与业务 Kitex server；Agent 01 的 `runtime/eino`、`runtime/tool`、`runtime/skill`、`runtime/memory`、`events` 分层；Agent 04 的 token 鉴权、真实 SSE、输入引用校验、view 权限校验和错误码；Agent 05 的 `StartTurn` / `ResumeTurn` / `CancelRun` 基础 TurnLoop；Agent 03 中支撑 M3 的 session/run/event/snapshot/artifact repository；Agent 11 中 provider 配置、trace 和配置测试；业务 01/02 中支撑 M3 RPC 的分层、BusinessError 和公共字段基线。 | M3 相关 RPC 不再返回 `NOT_IMPLEMENTED`；Agent gateway 有对应 client 字段和 mapper；Agent API 不信任 `X-Actor-User-Id` / `X-Space-Id` 作为身份事实；业务 06/07/08 与 `PlatformDictionaryService.ListAssetElementTypes` 只读字典子集有真实应用服务、contract fixture 和测试；M3 报告不得把未执行项写为通过。 |
-| M4 积分资产闭环 | Agent 07 中 Credit / Asset / AssetCreditCommit RPC client 与业务 Kitex server；`ProjectService.CheckProjectAccess` 的 `attach_asset`、`commit_asset`、`create_work` 用法；Agent 05/09 中安全通过后预估、确认、冻结、生成、上传槽、保存、扣费、释放和失败补偿；业务 09/10/11 的积分、资产、元素、保存扣费事务；项目资产绑定和资产权限校验。 | M4 相关 RPC 不再返回 `NOT_IMPLEMENTED`；保存成功前不扣费，失败/取消/归档能释放冻结；资产 object key 由业务签发，Agent 只保存业务返回引用；业务 DB 和 Agent DB 边界测试通过。 |
-| M6 服务级验收 | M2 遗留的业务 03/04/05 RPC / Application 完整性、业务 04 后台 RPC、业务 05 项目 RPC 和资产绑定、业务 14 真实测试矩阵、Agent/业务架构依赖方向测试、全量 route parity、全量 contract fixture 和 `NOT_IMPLEMENTED` 扫描。 | 非前端、非部署范围内的 Agent、业务、RPC、OpenAPI、AG-UI、DB、fixture 和服务级主链路阻断项清零；测试报告只记录真实执行结果，未执行项写明原因、影响和 owner。 |
-
-## 全局 Done Gate
+## 历史交付口径
 
 - [x] 产品文档 `product_status: Done`，正式开发计划不依赖 `docs/project/**`。
 - [x] 本次范围明确排除前端开发和部署上线文档。
@@ -99,7 +80,7 @@ owner：主控 Codex 汇总维护
 
 以下问题会阻断对应功能切片进入联调或验收：
 
-- RPC / OpenAPI / AG-UI schema 与 `code-plan` 字段不一致。
+- RPC / OpenAPI / AG-UI schema 与当前契约字段不一致。
 - fixture 缺少正常、权限、业务错误、幂等冲突、超时或版本兼容场景。
 - Agent 侧复制业务主数据，或业务侧保存 Agent session/run/message/event。
 - 写操作缺少 `idempotency_key`、request hash 或审计字段。

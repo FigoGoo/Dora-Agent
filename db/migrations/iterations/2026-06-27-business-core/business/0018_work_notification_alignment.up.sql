@@ -1,6 +1,6 @@
 -- Dora business service migration 0018
 -- Owner: 业务微服务后端工程师
--- Scope: M5 work public snapshot, likes and notifications code-plan alignment.
+-- Scope: Work public snapshot, likes and notifications alignment.
 -- Lock risk: local-development additive columns and indexes; no database-level foreign keys.
 
 ALTER TABLE works ADD COLUMN IF NOT EXISTS category varchar(64);

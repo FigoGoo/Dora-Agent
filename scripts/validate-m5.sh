@@ -200,7 +200,7 @@ for stale_preview in [
     if stale_preview in handlers:
         fail("M5 preview route must not require Idempotency-Key or request_hash")
 
-migration = Path("db/migrations/iterations/2026-06-27-business-core/business/0018_m5_work_notification_alignment.up.sql")
+migration = Path("db/migrations/iterations/2026-06-27-business-core/business/0018_work_notification_alignment.up.sql")
 if not migration.exists():
     fail("missing M5 work/notification alignment migration")
 migration_text = migration.read_text()
@@ -230,22 +230,22 @@ for path in Path("tests/contract/fixtures/business-api").glob("*.json"):
     fixture_cases.add(case_id)
     fixture_by_id[case_id] = data
 required_fixture_cases = {
-    "business_api_m5_work_share_preview_success",
-    "business_api_m5_work_share_confirm_success",
-    "business_api_m5_work_share_business_error_safety_digest_mismatch",
-    "business_api_m5_work_share_idempotency_conflict",
-    "business_api_m5_admin_public_work_takedown_preview_success",
-    "business_api_m5_admin_public_work_takedown_confirm_success",
-    "business_api_m5_notification_read_success",
-    "business_api_m5_notification_navigation_success",
-    "business_api_m5_public_work_timeout_error",
-    "business_api_m5_public_work_version_compat_success",
+    "business_api_work_share_preview_success",
+    "business_api_work_share_confirm_success",
+    "business_api_work_share_business_error_safety_digest_mismatch",
+    "business_api_work_share_idempotency_conflict",
+    "business_api_admin_public_work_takedown_preview_success",
+    "business_api_admin_public_work_takedown_confirm_success",
+    "business_api_notification_read_success",
+    "business_api_notification_navigation_success",
+    "business_api_public_work_timeout_error",
+    "business_api_public_work_version_compat_success",
 }
 missing = required_fixture_cases - fixture_cases
 if missing:
     fail(f"missing M5 business-api fixtures {sorted(missing)}")
 
-preview_fixture = fixture_by_id["business_api_m5_work_share_preview_success"]
+preview_fixture = fixture_by_id["business_api_work_share_preview_success"]
 if "Idempotency-Key" in preview_fixture.get("request_headers", {}):
     fail("work share preview fixture must not require Idempotency-Key")
 preview_body = preview_fixture.get("request_body", {})
@@ -255,25 +255,25 @@ for field in ["public_title", "public_description", "tags", "safety_evidence"]:
 if {"title", "description", "safety_evidence_id", "request_hash"} & set(preview_body):
     fail("work share preview fixture still uses stale request fields")
 
-confirm_fixture = fixture_by_id["business_api_m5_work_share_confirm_success"]
+confirm_fixture = fixture_by_id["business_api_work_share_confirm_success"]
 if set(confirm_fixture.get("request_body", {})) != {"preview_token"}:
     fail("work share confirm fixture body must contain only preview_token")
 if "Idempotency-Key" not in confirm_fixture.get("request_headers", {}):
     fail("work share confirm fixture missing Idempotency-Key")
 
-takedown_preview = fixture_by_id["business_api_m5_admin_public_work_takedown_preview_success"]
+takedown_preview = fixture_by_id["business_api_admin_public_work_takedown_preview_success"]
 if "Idempotency-Key" in takedown_preview.get("request_headers", {}):
     fail("take-down preview fixture must not require Idempotency-Key")
 if "request_hash" in takedown_preview.get("request_body", {}):
     fail("take-down preview fixture must not carry request_hash")
 
-takedown_confirm = fixture_by_id["business_api_m5_admin_public_work_takedown_confirm_success"]
+takedown_confirm = fixture_by_id["business_api_admin_public_work_takedown_confirm_success"]
 if "request_hash" in takedown_confirm.get("request_body", {}):
     fail("take-down confirm fixture must not carry request_hash")
 if "Idempotency-Key" not in takedown_confirm.get("request_headers", {}):
     fail("take-down confirm fixture missing Idempotency-Key")
 
-notification_fixture = fixture_by_id["business_api_m5_notification_read_success"]["response_body"]["data"]
+notification_fixture = fixture_by_id["business_api_notification_read_success"]["response_body"]["data"]
 if "status" in notification_fixture:
     fail("notification fixture still exposes stale status")
 for field in ["title", "related_resource_type", "related_resource_id", "navigation_hint", "read_at", "created_at"]:
@@ -291,7 +291,7 @@ if {"page_size", "has_more", "next_page_token"} & set(notification_page):
 for field in ["items", "limit", "offset", "total"]:
     if field not in notification_page:
         fail(f"notification page fixture missing {field}")
-notification_nav = fixture_by_id["business_api_m5_notification_navigation_success"]["response_body"]["data"]
+notification_nav = fixture_by_id["business_api_notification_navigation_success"]["response_body"]["data"]
 if "target_id" in notification_nav:
     fail("notification navigation fixture still exposes stale target_id")
 for field in ["notification_id", "allowed", "target_route", "target_resource_id"]:

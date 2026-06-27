@@ -1,10 +1,10 @@
 {
-  "case_id": "business_api_m5_work_share_idempotency_conflict",
+  "case_id": "business_api_work_share_idempotency_conflict",
   "method": "POST",
   "path": "/api/works/wrk_seed_public/share/confirm",
   "request_headers": {
     "Authorization": "Bearer user_session_token",
-    "Idempotency-Key": "idem_m5_share_confirm_001"
+    "Idempotency-Key": "idem_share_confirm_001"
   },
   "request_body": {
     "preview_token": "preview.share.work.seed.different"
@@ -19,7 +19,7 @@
       "message": "work share idempotency key conflicts",
       "retryable": false
     },
-    "trace_id": "trace_api_m5_share_idem_001"
+    "trace_id": "trace_api_share_idem_001"
   },
   "assertions": [
     "same idempotency key with different preview_token is rejected",

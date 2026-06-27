@@ -1,11 +1,11 @@
 # Agent 服务端能力测试用例
 
 状态：active  
-owner：浏览器、RPC 与数据库测试工程师  
+owner：测试与验收责任域
 更新时间：2026-06-28  
 适用范围：智能体微服务 Agent API、TurnLoop、AG-UI 事件生产、SSE 补偿、Agent DB、RPC client、Skill 测试、模型 Tool 和跨服务主链路  
 相关代码路径：`tests/agent/**`、`tests/contract/**`、`tests/e2e/service/**`、`api/openapi/agent-workbench.yaml`、`api/agui/**`、`services/agent/**`、`db/migrations/iterations/**/agent/**`  
-相关契约：`docs/contracts/api/Agent工作台API契约草案.md`、`docs/contracts/ag-ui/统一Agent工作台AGUI事件协议草案.md`、`docs/contracts/data/Agent领域数据模型草案.md`、`code-plan/agent/**`、`docs/standards/AG-UI事件规范.md`、`docs/standards/TurnLoop执行规范.md`、`docs/standards/Agent领域数据建模规范.md`
+相关契约：`docs/current/README.md`、`docs/contracts/api/Agent工作台API契约草案.md`、`docs/contracts/ag-ui/统一Agent工作台AGUI事件协议草案.md`、`docs/contracts/data/Agent领域数据模型草案.md`、`docs/standards/AG-UI事件规范.md`、`docs/standards/TurnLoop执行规范.md`、`docs/standards/Agent领域数据建模规范.md`
 
 ## 测试边界
 
@@ -24,13 +24,13 @@ owner：浏览器、RPC 与数据库测试工程师
 | AG-API-005 | 同 session 并发 run 拒绝 | `POST /api/agent/runs` | session 已有 running/waiting_confirmation run | 返回 `RUN_STATE_CONFLICT`；不创建第二个 active run | API contract、Agent DB |
 | AG-API-006 | 引用资产权限拒绝 | `POST /api/agent/runs` | `referenced_asset_ids` 含跨空间资产 | 调用 `BatchCheckAssetAccess`，有 denied 时返回 403 或逐项拒绝摘要；不启动 TurnLoop | API contract、RPC mock |
 | AG-API-007 | 创建 run 归档项目拒绝 | `POST /api/agent/runs` | project archived | 返回 HTTP 409 `PROJECT_ARCHIVED`；不创建 run、不冻结积分、不启动 SSE | API contract、Agent DB、RPC mock |
-| AG-API-008 | SSE 实时事件鉴权 | `GET /api/agent/runs/:run_id/events` | run 属于当前用户 | token、项目 view 权限通过后建立 SSE；无权限返回 401/403；heartbeat 按配置输出 | API/SSE test |
-| AG-API-009 | SSE Last-Event-ID 重连 | `GET /api/agent/runs/:run_id/events` | event store 有 sequence 1..N | 带 `Last-Event-ID` 时从下一事件续传；重复 event_id 不重复推送语义 | SSE replay test、Agent DB |
-| AG-API-010 | event replay 查询 | `GET /api/agent/runs/:run_id/event-replay` | after_sequence 指定 | 返回连续事件，默认分页 10；缺口或超窗口时提示 snapshot fallback | API contract、Agent DB |
-| AG-API-011 | 确认中断 accept | `POST /api/agent/interrupts/:interrupt_id/confirm` | run waiting_confirmation，interrupt required | 校验权限、项目仍 active、幂等键；interrupt -> accepted，run -> resuming/running；输出 `confirmation.accepted` 或 `resume.accepted`；不重复冻结 | API contract、Agent DB、AG-UI fixture |
+| AG-API-008 | SSE 实时事件鉴权 | `GET /api/agent/runs/:run_id/stream` | run 属于当前用户 | token、项目 view 权限通过后建立 SSE；无权限返回 401/403；heartbeat 按配置输出 | API/SSE test |
+| AG-API-009 | SSE Last-Event-ID 重连 | `GET /api/agent/runs/:run_id/stream` | event store 有 sequence 1..N | 带 `Last-Event-ID` 时从下一事件续传；重复 event_id 不重复推送语义 | SSE replay test、Agent DB |
+| AG-API-010 | event replay 查询 | `GET /api/agent/runs/:run_id/events` | after_sequence 指定 | 返回连续事件，默认分页 10，最大 100；缺口或超窗口时提示 snapshot fallback | API contract、Agent DB |
+| AG-API-011 | 确认中断 accept | `POST /api/agent/runs/:run_id/interrupts/:interrupt_id/accept` | run waiting_confirmation，interrupt required | 校验权限、项目仍 active、幂等键；interrupt -> accepted，run -> resuming/running；输出 `confirmation.accepted` 或 `resume.accepted`；不重复冻结 | API contract、Agent DB、AG-UI fixture |
 | AG-API-012 | 确认重复提交 | confirm API | 同一幂等键重复 | 返回同一确认结果；不重复调用 `FreezeCredits` | API contract、RPC call count |
 | AG-API-013 | 确认过期 | confirm API | interrupt expired | 返回 `INTERRUPT_EXPIRED` 或 `RUN_STATE_CONFLICT`；run 进入 failed/cancelled 规则一致 | API contract、Agent DB |
-| AG-API-014 | 拒绝中断 | `POST /api/agent/interrupts/:interrupt_id/reject` | confirmation required | interrupt -> rejected，run -> cancelled；输出 `confirmation.rejected`、`agent.run.cancelled`；如有冻结则释放 | API contract、Agent DB、AG-UI |
+| AG-API-014 | 拒绝中断 | `POST /api/agent/runs/:run_id/interrupts/:interrupt_id/reject` | confirmation required | interrupt -> rejected，run -> cancelled；输出 `confirmation.rejected`、`agent.run.cancelled`；如有冻结则释放 | API contract、Agent DB、AG-UI |
 | AG-API-015 | 取消 run | `POST /api/agent/runs/:run_id/cancel` | running task | 停止新 Tool，正在运行 task 进入 cancel_requested/cancelled；已完成资产按规则保留，未完成释放冻结；run terminal | API contract、Agent DB、RPC mock |
 | AG-API-016 | snapshot 查询 | `GET /api/agent/runs/:run_id/snapshot` | completed/running/failed/archived 项目 | 返回消息、任务、资产引用、黑板和 last_event_sequence；archived 项目 readonly_reason；不返回长期 TOS URL | API contract、Agent DB、脱敏 |
 | AG-API-017 | API route parity | OpenAPI vs handler | `api/openapi/agent-workbench.yaml` | 所有设计路由存在 handler、鉴权、错误映射、幂等头要求；缺路由阻断联调 | route parity test |
@@ -81,7 +81,7 @@ owner：浏览器、RPC 与数据库测试工程师
 | AG-AGUI-011 | 保存失败序列 | asset save failed fixture | `asset.save.failed` -> `credits.released` -> `agent.run.failed`；错误含 retryable/support_trace_id | replay fixture |
 | AG-AGUI-012 | 项目归档序列 | project archived fixture | `project.archived.blocked`、`credits.released`、`agent.run.cancelled`、`process.snapshot.saved` 顺序符合契约 | replay fixture |
 | AG-AGUI-013 | Last-Event-ID 补偿 | SSE + replay API | 根据 event_id 找到 sequence 后续传；找不到则按 snapshot fallback | SSE test |
-| AG-AGUI-014 | after_sequence 补偿 | event-replay API | `after_sequence=N` 返回 N+1 起连续事件，分页默认 10 | API contract |
+| AG-AGUI-014 | after_sequence 补偿 | `/runs/:run_id/events` API | `after_sequence=N` 返回 N+1 起连续事件，分页默认 10，最大 100 | API contract |
 | AG-AGUI-015 | snapshot fallback | event 缺口超窗口 | 返回 `snapshot_id/snapshot_version/last_event_sequence` 和不可补偿标识；snapshot 可恢复 | API/Agent DB |
 | AG-AGUI-016 | 逐事件 payload 必填 | 所有事件类型 fixture | `agent.run.*`、thinking、message、skill、controls、safety、credits、confirmation、tool、generation、asset、workspace、snapshot、project archived、failed payload 必填字段齐全 | schema test |
 
@@ -113,7 +113,7 @@ owner：浏览器、RPC 与数据库测试工程师
 | AG-RPC-002 | Auth/RequestMeta mapper | rpc mapper unit | `source=agent_service`、trace_id、idempotency_key、space/user 正确映射；不把 X-Client-Request-ID 写入 RequestMeta | unit |
 | AG-RPC-003 | 错误映射 | error mapper | 业务错误映射到 Agent domain error 和 AG-UI user_message；系统错保留 support_trace_id | unit/contract |
 | AG-RPC-004 | 超时映射 | rpc mock timeout | 业务 timeout 返回可重试标记，TurnLoop 按策略处理，不无限等待 | RPC mock |
-| AG-RPC-005 | `NOT_IMPLEMENTED` 扫描 | 全量 Agent-facing RPC | M3/M4/M6 相关 RPC client/server fixture 不返回 `NOT_IMPLEMENTED` | RPC smoke |
+| AG-RPC-005 | `NOT_IMPLEMENTED` 扫描 | 全量 Agent-facing RPC | 当前服务范围内的 RPC client/server fixture 不返回 `NOT_IMPLEMENTED` | RPC smoke |
 | AG-RPC-006 | Skill DTO 映射 | `ListRoutableSkills/GetPublishedSkillSpec` | memory_policy、confirmation_policy、output_element_schema、tool_bindings 原样映射；不丢字段 | RPC contract |
 | AG-RPC-007 | Tool policy DTO 映射 | `CheckToolExecutionPolicy` | risk_level、requires_confirmation、charge_mode、timeout_ms、retry/cancel policy 正确进入 TurnLoop | RPC contract |
 | AG-RPC-008 | Model snapshot DTO 映射 | `ResolveGenerationModelSnapshot` | provider_ref 非敏感，pricing_snapshot_id 必须匹配；不读取 API Key | RPC contract、脱敏 |
@@ -178,7 +178,7 @@ owner：浏览器、RPC 与数据库测试工程师
 | AG-OBS-004 | provider config missing | 外部模型未配置 | 返回明确配置错误，不使用隔离测试 adapter 冒充生产真实调用；测试报告标注 | adapter test |
 | AG-OBS-005 | AG-UI schema/fixture 门禁 | schema + fixture | 新增事件必须同步 schema、最小 fixture、publisher 单测；缺一阻断 | fixture lint |
 | AG-OBS-006 | Agent DB migration 门禁 | migration + model | 新字段先 migration/model/repository，再使用；up/down 可执行 | migration test |
-| AG-OBS-007 | RPC fixture 完整性 | business RPC fixtures | M3/M4/M6 所需 fixture 覆盖正常、权限、业务错误、幂等冲突、超时 | fixture lint |
+| AG-OBS-007 | RPC fixture 完整性 | business RPC fixtures | 当前服务范围所需 fixture 覆盖正常、权限、业务错误、幂等冲突、超时 | fixture lint |
 | AG-OBS-008 | 报告真实性 | 测试报告 | 未执行项不得写通过；mock-only、配置缺失、外部依赖未接入必须标明 | report audit |
 
 ### 服务级 Agent 主链路
@@ -199,9 +199,8 @@ owner：浏览器、RPC 与数据库测试工程师
 
 ## 风险和待确认
 
-- SSE URL 是否使用独立鉴权 token、同 session 是否允许多个 active run，需以 Agent API 最终契约确认。
 - 真实模型供应商和 TOS 未配置时，必须使用 mock/隔离 adapter 覆盖服务端逻辑，并在报告中说明未覆盖真实外部调用。
-- AG-UI canonical type 与标准 alias 的兼容周期需前后端契约最终确认；本测试以 canonical `type` 为准。
+- SSE 鉴权、Last-Event-ID、event replay、snapshot fallback 和同 session active run 策略已由 Agent API 与 AG-UI 契约冻结；实现报告需补充执行证据。
 
 ## 验收标准
 

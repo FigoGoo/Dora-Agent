@@ -1,6 +1,6 @@
 -- Dora business service migration 0013
 -- Owner: 业务微服务后端工程师
--- Scope: M2 identity, admin and project semantic alignment.
+-- Scope: Identity, admin and project semantic alignment.
 -- Lock risk: local development baseline; additive columns and indexes only.
 
 ALTER TABLE business_users

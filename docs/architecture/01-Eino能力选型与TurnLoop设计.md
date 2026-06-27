@@ -1,8 +1,8 @@
 # Eino 能力选型与 TurnLoop 设计
 
-状态：draft
-owner：Go Eino 智能体微服务架构工程师
-更新时间：2026-06-25
+状态：archived
+owner：Agent 服务责任域
+更新时间：2026-06-28
 适用范围：统一 Agent、Eino 编排、Tool Runtime、Skill Runtime、Interrupt/Resume、长任务 TurnLoop
 相关代码路径：`/services/agent/**`
 相关契约：`docs/architecture/00-智能体微服务总体架构设计.md`、`docs/standards/TurnLoop执行规范.md`、`docs/standards/Eino智能体微服务编码规范.md`

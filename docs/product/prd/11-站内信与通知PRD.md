@@ -1,7 +1,7 @@
 # 站内信与通知 PRD
 
 状态：active
-owner：产品体验设计师
+owner：产品与需求责任域
 更新时间：2026-06-25
 适用范围：普通用户端站内信、Skill 审核结果通知、系统通知和已读未读状态
 product_status：Done

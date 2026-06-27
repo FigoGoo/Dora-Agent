@@ -1,8 +1,8 @@
 # 06-AG-UI事件生产SSE补偿与Payload设计
 
-状态：production-design-ready
-owner：Go Eino 智能体微服务架构工程师
-更新时间：2026-06-27
+状态：archived
+owner：Agent 服务责任域
+更新时间：2026-06-28
 适用范围：内部事件、AG-UI 事件、SSE、event store、事件补偿、snapshot、前端消费边界
 相关代码路径：`services/agent/internal/events/**`
 相关设计契约：`docs/standards/AG-UI事件规范.md`

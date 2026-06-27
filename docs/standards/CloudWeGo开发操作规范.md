@@ -1,7 +1,7 @@
 # CloudWeGo 开发操作规范
 
 状态：active  
-owner：主控 Codex 汇总维护  
+owner：文档与契约责任域
 适用范围：Kitex、Thrift、etcd 服务发现相关开发  
 更新时间：2026-06-25
 
@@ -72,14 +72,14 @@ kitex -module <go_module> -service <service_name> <path/to/service.thrift>
 
 ## Kitex Server
 
-- 业务微服务后端工程师负责 Kitex server。
+- 业务服务责任域负责 Kitex server。
 - server 注册到 etcd。
 - server handler 只做 RPC transport 转换，业务规则进入 application/domain。
 - 错误码稳定，避免直接暴露内部错误。
 
 ## Kitex Client
 
-- Go Eino 智能体微服务架构工程师负责 Kitex client。
+- Agent 服务责任域负责 Kitex client。
 - client 通过 etcd resolver 发现业务服务。
 - client 调用必须设置 context timeout。
 - client 错误必须映射为 Agent 可理解错误，不吞掉业务错误。
@@ -97,6 +97,6 @@ kitex -module <go_module> -service <service_name> <path/to/service.thrift>
 - [ ] 是否有 Thrift IDL。
 - [ ] 是否按官方流程生成代码。
 - [ ] 是否没有手改生成代码。
-- [ ] Kitex server/client owner 是否明确。
+- [ ] Kitex server/client 责任域是否明确。
 - [ ] 是否通过 etcd 注册发现。
 - [ ] 是否有 contract test。

@@ -1,5 +1,5 @@
 {
-  "case_id": "business_api_m5_admin_public_work_takedown_preview_success",
+  "case_id": "business_api_admin_public_work_takedown_preview_success",
   "method": "POST",
   "path": "/api/admin/works/public/pubw_seed_storyboard/take-down/preview",
   "request_headers": {
@@ -25,7 +25,7 @@
       "expires_at": "2026-06-27T00:10:00Z",
       "notify_author": true
     },
-    "trace_id": "trace_api_m5_takedown_preview_001"
+    "trace_id": "trace_api_takedown_preview_001"
   },
   "assertions": [
     "admin preview token binds public_work_id, reason and admin id",

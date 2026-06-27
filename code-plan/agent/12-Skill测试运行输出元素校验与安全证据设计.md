@@ -1,8 +1,8 @@
 # 12-Skill测试运行输出元素校验与安全证据设计
 
-状态：production-design-ready
-owner：Go Eino 智能体微服务架构工程师
-更新时间：2026-06-27
+状态：archived
+owner：Agent 服务责任域
+更新时间：2026-06-28
 适用范围：Skill 发布前测试运行、测试样例、输出元素校验、测试隔离、安全证据和测试结果回传
 相关代码路径：`services/agent/internal/runtime/skilltest/**`、`services/agent/internal/runtime/skill/**`、`services/agent/internal/runtime/safety/**`
 相关设计契约：`docs/product/prd/05-SkillBuilder与审核PRD.md`、`docs/product/prd/10-内容安全治理PRD.md`、`code-plan/agent/07-RPC客户端业务能力调用与DTO映射设计.md`、`code-plan/business/08-Skill目录版本审核发布回滚与通知设计.md`

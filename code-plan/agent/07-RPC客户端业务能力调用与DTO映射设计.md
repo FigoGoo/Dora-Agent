@@ -1,8 +1,8 @@
 # 07-RPC客户端业务能力调用与DTO映射设计
 
-状态：production-design-ready
-owner：Go Eino 智能体微服务架构工程师
-更新时间：2026-06-27
+状态：archived
+owner：Agent 服务责任域
+更新时间：2026-06-28
 适用范围：智能体微服务调用业务微服务的 RPC client、DTO 映射、错误码、超时、重试、幂等、权限上下文
 相关代码路径：`services/agent/internal/infra/rpc/**`、`api/thrift/**`
 相关设计契约：`docs/standards/RPC契约规范.md`、`code-plan/business/15-生产级闭眼开发门禁与Agent对齐验收设计.md`
@@ -29,25 +29,11 @@ owner：Go Eino 智能体微服务架构工程师
 - ContentSafetyConfigService
 - Audit 或 trace 相关能力
 
-## 里程碑实现拆分
+## 实现状态说明
 
-Agent 07 是完整 RPC client 设计事实源，不代表所有 RPC 都在 M2 实现。按根 `code-plan/README.md` 的全局里程碑拆分如下：
+第一阶段服务端开发已经完成。本文件保留 Agent 侧 RPC client 和业务服务 RPC 能力的历史设计基线，用于追溯方法语义、DTO、错误码、幂等和测试夹具要求。
 
-| 全局阶段 | Agent 07 实现范围 | 说明 |
-| --- | --- | --- |
-| M2 身份项目能力 | `AccountSpaceService.ResolveCurrentSpaceContext`、`ProjectService.CheckProjectAccess` 的 `view` 与 `continue_creation` 用法 | 用于 session/run 创建、追加输入、interrupt accept/reject、cancel 前权限确认和 snapshot 只读判断；Agent 必须同时检查 RPC error 与正常响应中的 `allowed`、`creative_allowed`。 |
-| M3 配置能力 | `AccountSpaceService.ResolveAuthContextFromToken`；`SkillCatalogService.ListRoutableSkills`、`GetPublishedSkillSpec`、`GetReviewCandidateSkillSpec`、`SaveSkillTestResult`；`ToolCapabilityService.CheckToolExecutionPolicy`；`ModelConfigService.ListAvailableGenerationModels`、`ResolveDefaultModel`、`ResolveGenerationModelSnapshot`；`PlatformDictionaryService.ListAssetElementTypes` | 用于 Agent API token 鉴权、Published Skill 路由、Skill 测试、Tool 策略、模型选择、模型运行快照和元素类型字典；M2 不把这些 RPC 标记为完成。 |
-| M4 积分资产闭环 | `CreditService.EstimateGenerationCredits`、`EstimateToolCredits`、`FreezeCredits`、`ChargeToolUsageCredits`、`ReleaseFrozenCredits`；`AssetService.BatchCheckAssetAccess`、`PrepareGeneratedAssetObjects`；`AssetCreditCommitService.CommitGeneratedAssetAndCharge`；`ProjectService.CheckProjectAccess` 的 `attach_asset`、`commit_asset`、`create_work` 用法 | 用于预估、确认、冻结、独立 Tool 扣费、释放、资产访问校验、上传槽、资产保存和创作结果提交；M2 不把这些 RPC 标记为完成。 |
-
-## RPC client / server 实现任务清单
-
-本清单是 Agent 07 的代码实现承接，不是延期说明。进入对应阶段后，缺任一项均阻断联调和验收。
-
-| 阶段 | Agent client 必须实现 | 业务 server 必须实现 | contract fixture 必须覆盖 |
-| --- | --- | --- | --- |
-| M3 配置能力 | `BusinessGateway` 增加 AccountSpace token 解析、Skill、Tool、Model、PlatformDictionary client 字段；补齐 auth/request meta mapper、分页 mapper、错误映射、超时和重试策略；TurnLoop 调用处不得直接构造业务 DTO 或字符串匹配错误。 | 业务 03 token 解析子集、业务 06/07/08 和元素类型只读字典子集移除 M3 方法的 `NOT_IMPLEMENTED`，返回稳定 DTO 与业务错误。 | Authorization token 成功/失败/跨空间；Published / Draft / Deprecated Skill、测试候选和测试结果幂等；Tool disabled / high risk / requires confirmation / timeout；默认模型、停用模型、价格快照缺失、供应商配置缺失；元素类型 schema version 兼容。 |
-| M4 积分资产闭环 | `BusinessGateway` 增加 Credit、Asset、AssetCreditCommit client 字段；所有写 RPC 传 `request_meta.idempotency_key`；TurnLoop 使用 `estimate_item_id` 防重复扣费；资产保存只接受业务签发 object key 和业务返回 asset ref。 | 业务 09/10/11 移除 M4 方法的 `NOT_IMPLEMENTED`；`CheckProjectAccess` 支持 `attach_asset`、`commit_asset`、`create_work`；保存资产与扣费在业务事务内原子完成。 | 余额足够/不足、安全证据失效、冻结幂等、冻结冲突、独立 Tool 扣费、实际数量超预估、释放幂等、批量资产访问拒绝、对象槽过期、object key 不匹配、保存失败释放、重复 `estimate_item_id`。 |
-| M6 服务级验收 | 全量 RPC client 与 mapper 做依赖方向测试；禁止 Agent 侧复制业务主数据；错误码映射覆盖 `UNAUTHENTICATED`、`PERMISSION_DENIED`、`CROSS_SPACE_DENIED`、`PROJECT_ARCHIVED`、`IDEMPOTENCY_CONFLICT`、`STATE_CONFLICT`。 | 全量 Agent-facing RPC 通过 Kitex service 注册和 contract test；不属于当前产品范围的方法必须在 code-plan 中有明确非目标说明，不能静默 `NOT_IMPLEMENTED`。 | 每个 RPC 方法至少有正常、权限、业务错误、幂等冲突或版本兼容场景；超时场景由 mock server 或 contract fixture 明确覆盖。 |
+后续新增或变更 RPC 能力时，不再往本文档追加阶段任务；应先更新 `docs/contracts/rpc/**`、`docs/technical/**` 和对应测试用例，再修改 Agent 服务或业务服务实现。
 
 ## 方法级设计必须覆盖
 

@@ -1,7 +1,7 @@
 # 统一 Agent 创作工作台 PRD
 
 状态：active
-owner：产品体验设计师
+owner：产品与需求责任域
 更新时间：2026-06-25
 适用范围：统一 Agent、创作工作台、意图识别、Skill 路由、对话、生成、确认、资产和黑板
 product_status：Done

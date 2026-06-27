@@ -1,8 +1,8 @@
 # 02-Eino模块选型与统一Agent运行时设计
 
-状态：production-design-ready
-owner：Go Eino 智能体微服务架构工程师
-更新时间：2026-06-27
+状态：archived
+owner：Agent 服务责任域
+更新时间：2026-06-28
 适用范围：Eino Agent、Graph、Workflow、Tool、Skill、Retriever、Memory、Callback、Interrupt/Resume、TurnLoop
 相关代码路径：`services/agent/internal/runtime/**`
 相关契约：`docs/architecture/01-Eino能力选型与TurnLoop设计.md`、`docs/standards/Eino智能体微服务编码规范.md`
@@ -134,7 +134,7 @@ sequenceDiagram
 
 | 能力 | 生产级结论 | 原因 |
 | --- | --- | --- |
-| Multi-Agent | 不使用 | 产品要求一个统一 Agent，角色 owner 只是职责边界。 |
+| Multi-Agent | 不使用 | 产品要求一个统一 Agent，责任域只是职责边界。 |
 | 用户自定义 Tool | 不使用 | 生产级实现只允许平台开放 Tool。 |
 | 未授权长期用户 Memory | 不使用 | Memory 只能写脱敏摘要；`user_preference`、`space_preference` 必须同时满足 Skill `memory_policy` 和 Agent 侧授权状态。 |
 | 任意 HTTP Tool | 不使用 | 不满足平台 Tool 白名单和风险管控。 |

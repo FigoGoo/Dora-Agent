@@ -1,8 +1,8 @@
 # AG-UI 与 A2UI 交互契约产品系统设计
 
-状态：active
-owner：产品体验设计师
-更新时间：2026-06-25
+状态：archived
+owner：产品与需求责任域
+更新时间：2026-06-28
 适用范围：统一 Agent 到前端的组件样式、组件作用、事件类型、事件顺序、payload 和交互契约
 product_status：Done
 

@@ -1,6 +1,6 @@
 -- Dora business service migration 0018 rollback
 -- Owner: 业务微服务后端工程师
--- Scope: remove M5 additive alignment columns and indexes.
+-- Scope: Remove additive work and notification alignment columns and indexes.
 
 DROP INDEX IF EXISTS uq_notification_failures_idempotency_key;
 ALTER TABLE notification_create_failures DROP COLUMN IF EXISTS error_code;

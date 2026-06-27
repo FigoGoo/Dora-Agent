@@ -1,20 +1,20 @@
-# Eino 智能体微服务生产级系统设计开发文档
+# 第一阶段 Agent 服务设计归档目录
 
-状态：production-design-ready
-owner：Go Eino 智能体微服务架构工程师
-更新时间：2026-06-27
+状态：archived
+owner：Agent 服务责任域
+更新时间：2026-06-28
 适用范围：`services/agent/**`、Agent API、Eino Runtime、AG-UI 事件生产、RPC client、Agent Runtime 数据库、Agent 侧测试
 相关代码路径：`services/agent/**`、`api/thrift/**`、`api/openapi/**`、`db/migrations/iterations/**`、`tests/agent/**`、`tests/contract/**`
 相关设计契约：`code-plan/README.md`、`code-plan/agent/**`、`code-plan/business/**`、`code-plan/tests/**`、`docs/product/**`、`docs/architecture/**`、`docs/standards/**`
-后续实现落点：`api/thrift/**`、`api/openapi/**`、`api/agui/**`、`db/migrations/iterations/**`、`tests/agent/**`、`tests/contract/**`
+历史实现落点：`api/thrift/**`、`api/openapi/**`、`api/agui/**`、`db/migrations/iterations/**`、`tests/agent/**`、`tests/contract/**`
 
-## 说明
+## 归档说明
 
-本目录是 Eino 智能体微服务的正式生产级系统设计开发文档，用于和业务开发、测试对齐范围、顺序和职责边界。当前文档体系已经包含架构、模型、函数出入参、RPC/AG-UI 边界、流程闭环、日志和测试设计。现有临时代码、临时 schema、fixture 或 migration 如与本目录不一致，以本目录设计为准，在对应功能切片内同步修正。
+本目录是第一阶段 Agent 服务开发的历史设计归档，用于追溯架构、模型、函数出入参、RPC/AG-UI 边界、流程闭环、日志和测试设计。后续新迭代不再以本目录作为当前事实源。
 
-本次开发不涉及前端开发和部署上线文档；Agent 侧只负责定义和生产 Agent API、AG-UI 事件、SSE 补偿和 schema/fixture，不实现前端 reducer、页面或浏览器 UI 自动化。
+如历史设计仍需复用，先迁移到 `docs/technical/**`、`docs/contracts/**`、`docs/standards/**` 或 `docs/test/**` 的 active 文档，再进入实现。
 
-每份详细设计包含：
+历史详细设计包含：
 
 - 架构设计。
 - Eino 模块选型。
@@ -28,7 +28,7 @@ owner：Go Eino 智能体微服务架构工程师
 - 日志、trace、指标和脱敏规则。
 - 测试设计与验收标准。
 
-## 开发顺序
+## 历史文档列表
 
 | 顺序 | 文档 | 目标 |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ owner：Go Eino 智能体微服务架构工程师
 - Agent 数据库建表不添加数据库级外键约束，不写外键或引用约束关键字。
 - 列表查询默认 `page_size=10`，需要定义上限并避免逐条循环查询。
 
-## 对齐方式
+## 历史对齐方式
 
 每份详细设计都必须显式包含 `【业务开发】需要提供的能力与参数` 章节。该章节至少写清：
 

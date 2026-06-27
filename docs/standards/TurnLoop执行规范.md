@@ -1,7 +1,7 @@
 # TurnLoop 执行规范
 
 状态：active  
-owner：主控 Codex 汇总维护  
+owner：文档与契约责任域
 适用范围：智能体微服务多轮执行循环  
 
 ## 执行轮次
@@ -18,8 +18,8 @@ owner：主控 Codex 汇总维护
 
 ## 工具调用
 
-- Tool 调用前记录 tool.call 事件。
-- Tool 返回后记录 tool.result 事件。
+- Tool 调用前记录 tool.call.started 事件。
+- Tool 返回后记录 tool.call.completed 或 tool.call.failed 事件。
 - 工具结果可触发继续推理或结束运行。
 
 ## 中断
@@ -55,4 +55,4 @@ owner：主控 Codex 汇总维护
 ## 失败恢复
 
 - 可恢复失败保存恢复点并提示用户操作。
-- 不可恢复失败输出 agent.failed，并保留 trace_id、run_id 和错误分类。
+- 不可恢复失败输出 agent.run.failed，并保留 trace_id、run_id 和错误分类。

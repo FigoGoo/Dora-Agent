@@ -1,10 +1,10 @@
 {
-  "case_id": "business_api_m5_notification_read_success",
+  "case_id": "business_api_notification_read_success",
   "method": "POST",
   "path": "/api/notifications/ntf_skill_review_001/read",
   "request_headers": {
     "Authorization": "Bearer user_session_token",
-    "Idempotency-Key": "idem_m5_notification_read_001"
+    "Idempotency-Key": "idem_notification_read_001"
   },
   "request_body": {
     "request_hash": "sha256:m5-notification-read-request"
@@ -28,7 +28,7 @@
       "read_at": "2026-06-27T00:05:00Z",
       "created_at": "2026-06-27T00:00:00Z"
     },
-    "trace_id": "trace_api_m5_notification_read_001"
+    "trace_id": "trace_api_notification_read_001"
   },
   "assertions": [
     "mark read is scoped to the current user",

@@ -1,7 +1,7 @@
 -- Dora business service migration 0015
 -- Owner: 业务微服务后端工程师
 -- Scope: Skill test result idempotency and request hash.
--- Lock risk: metadata-only columns and unique index for local M3 baseline.
+-- Lock risk: metadata-only columns and unique index for local baseline.
 
 ALTER TABLE skill_test_runs
   ADD COLUMN IF NOT EXISTS idempotency_key varchar(128),

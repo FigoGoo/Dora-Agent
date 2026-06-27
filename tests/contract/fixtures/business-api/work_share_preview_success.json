@@ -1,5 +1,5 @@
 {
-  "case_id": "business_api_m5_work_share_preview_success",
+  "case_id": "business_api_work_share_preview_success",
   "method": "POST",
   "path": "/api/works/wrk_seed_public/share/preview",
   "request_headers": {
@@ -19,7 +19,7 @@
       "evidence_version": "2026-06-28",
       "evaluated_at": "2026-06-27T00:00:00Z",
       "expires_at": "2026-06-27T00:10:00Z",
-      "trace_id": "trace_api_m5_share_preview_001"
+      "trace_id": "trace_api_share_preview_001"
     }
   },
   "response_status": 200,
@@ -43,7 +43,7 @@
       ],
       "expires_at": "2026-06-27T00:10:00Z"
     },
-    "trace_id": "trace_api_m5_share_preview_001"
+    "trace_id": "trace_api_share_preview_001"
   },
   "assertions": [
     "preview uses public_title/public_description/tags and full work_share safety evidence",

@@ -1,8 +1,8 @@
 # 14-SQL迁移本地配置测试矩阵与验收设计
 
-状态：production-design-ready  
-owner：业务微服务后端工程师、浏览器/RPC 与数据库测试工程师  
-更新时间：2026-06-27  
+状态：archived
+owner：业务服务责任域、测试与验收责任域 
+更新时间：2026-06-28
 适用范围：业务数据库 migration、本地配置、RPC contract test、HTTP API contract test、业务集成测试、Agent 依赖验收和交付 Done Gate  
 相关代码路径：`db/migrations/iterations/**/business/**`、`.env.example`、`tests/business/**`、`tests/contract/**`
 

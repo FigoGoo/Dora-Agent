@@ -1,7 +1,7 @@
 # Skill Builder 与审核 PRD
 
 状态：active
-owner：产品体验设计师
+owner：产品与需求责任域
 更新时间：2026-06-25
 适用范围：系统 Skill、企业 Skill、个人 Skill 的创建、测试、审核、发布、版本和回滚
 product_status：Done

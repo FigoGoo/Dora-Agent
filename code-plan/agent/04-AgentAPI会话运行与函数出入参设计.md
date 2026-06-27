@@ -1,8 +1,8 @@
 # 04-Agent API会话运行与函数出入参设计
 
-状态：production-design-ready
-owner：Go Eino 智能体微服务架构工程师
-更新时间：2026-06-27
+状态：archived
+owner：Agent 服务责任域
+更新时间：2026-06-28
 适用范围：Agent HTTP API、session、run、message、interrupt、cancel、snapshot、SSE 入口
 相关代码路径：`services/agent/internal/api/http/**`、`services/agent/internal/application/**`
 相关设计契约：`code-plan/agent/00-事实源需求映射与开发顺序.md`

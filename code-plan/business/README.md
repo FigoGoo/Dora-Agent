@@ -1,24 +1,24 @@
-# 业务服务系统设计开发文档目录
+# 第一阶段业务服务设计归档目录
 
-状态：production-design-ready  
-owner：业务微服务后端工程师  
-更新时间：2026-06-27  
+状态：archived
+owner：业务服务责任域
+更新时间：2026-06-28
 适用范围：`services/business/**`、`api/thrift/business/**`、业务数据库、Kitex RPC server、业务 API 适配层、业务服务测试  
 相关代码路径：`services/business/**`、`api/thrift/**`、`db/migrations/iterations/**/business/**`、`tests/business/**`、`tests/contract/**`  
 相关设计事实源：`code-plan/README.md`、`docs/product/**`、`docs/product/prd/**`、`docs/architecture/10-业务微服务领域与RPC能力设计.md`、`docs/architecture/11-业务数据模型与事务边界设计.md`、`code-plan/business/**`、`code-plan/agent/07-RPC客户端业务能力调用与DTO映射设计.md`、`code-plan/agent/09-积分确认冻结生成资产保存扣费释放闭环设计.md`、`code-plan/agent/14-生产级闭眼开发门禁与任务切片验收设计.md`、`code-plan/tests/**`、`docs/standards/**`
-后续实现落点：`api/thrift/business_agent_service.thrift`、`api/openapi/business-api.yaml`、`db/migrations/iterations/2026-06-27-business-core/business/**`、`tests/contract/fixtures/business-rpc/**`、`tests/contract/fixtures/business-api/**`
+历史实现落点：`api/thrift/business_agent_service.thrift`、`api/openapi/business-api.yaml`、`db/migrations/iterations/2026-06-27-business-core/business/**`、`tests/contract/fixtures/business-rpc/**`、`tests/contract/fixtures/business-api/**`
 
-## 目标
+## 归档说明
 
-本目录用于把 Dora-Agent 已确认的产品设计转成业务服务可开发的正式生产级系统设计文档。文档按开发顺序和功能点拆分，覆盖字段、领域模型、RPC、DTO、函数出入参、事务、权限、幂等、审计、日志、SQL 和测试，目标是开发者照着文档即可进入 Kitex、GORM、migration 和测试实现。现有临时代码、临时 Thrift、OpenAPI、migration、seed 或 fixture 如与本目录不一致，以本目录设计为准，在对应功能切片内同步修正。
+本目录是第一阶段业务服务开发的历史设计归档，记录产品设计如何被转成业务服务字段、领域模型、RPC、DTO、函数出入参、事务、权限、幂等、审计、日志、SQL 和测试设计。后续新迭代不再以本目录作为当前事实源。
 
-业务服务只负责业务事实、业务规则、事务一致性、权限、审计和业务数据库。业务服务不负责 Eino Agent 编排、AG-UI 事件生产、Agent 会话、run、消息、Tool 调用历史、黑板、记忆和 Agent Runtime 数据。
+如历史设计仍需复用，先迁移到 `docs/technical/**`、`docs/contracts/**`、`docs/standards/**` 或 `docs/test/**` 的 active 文档，再进入实现。
 
-本次开发不涉及前端开发和部署上线文档；业务侧仍需要提供用户端、公开端和管理端 HTTP API 的服务端 DTO 契约，作为后续接入依据，但不实现前端页面、组件或浏览器 UI 自动化。
+业务服务边界仍以 `AGENTS.md`、`docs/current/README.md` 和当前 active 契约为准。
 
-## 固定章节要求
+## 历史详细设计结构
 
-每份功能点文档必须包含：
+每份功能点文档历史上包含：
 
 - 产品和契约事实源。
 - 本功能点职责内做什么、不做什么。
@@ -35,7 +35,7 @@ owner：业务微服务后端工程师
 - 【Agent开发】需要提供或消费的能力与参数。
 - 测试设计和验收标准。
 
-接口设计不得单独脱离业务领域另建“对接清单”。用户端 `frontend/**`、管理端 `admin_frontend/**`、公开页和 Agent 需要的所有能力，都必须落回对应业务领域文档；同一业务事实只允许有一个领域 owner 和一套状态机。
+接口设计不得单独脱离业务领域另建“对接清单”。用户端 `frontend/**`、管理端 `admin_frontend/**`、公开页和 Agent 需要的所有能力，都必须落回对应业务领域文档；同一业务事实只允许有一个责任域 和一套状态机。
 
 ## 数据库表设计要求
 
@@ -49,7 +49,7 @@ owner：业务微服务后端工程师
 - 列表查询必须能从表结构看出分页排序索引，默认以 `created_at desc` 或领域定义的排序字段分页。
 - 敏感字段必须说明保存 hash、加密密文或脱敏摘要，不保存明文。
 
-## 开发顺序
+## 历史文档列表
 
 | 顺序 | 文档 | 目标 |
 | --- | --- | --- |

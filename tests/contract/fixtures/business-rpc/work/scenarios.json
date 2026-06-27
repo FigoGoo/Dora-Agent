@@ -43,7 +43,7 @@
       ],
       "response": {
         "work": {
-          "work_id": "wrk_m6_1001",
+          "work_id": "wrk_public_1001",
           "project_id": "prj_active_1001",
           "title": "Public Candidate Work",
           "description": "Created from generated assets",
@@ -74,7 +74,7 @@
           "trace_id": "trace_work_share_preview_success",
           "source": "business_http"
         },
-        "work_id": "wrk_m6_1001",
+        "work_id": "wrk_public_1001",
         "public_title": "Public Candidate Work",
         "public_description": "Share safe summary",
         "tags": [
@@ -85,7 +85,7 @@
           "scene": "work_share",
           "result": "passed",
           "target_type": "work_share_text",
-          "target_ref_id": "wrk_m6_1001",
+          "target_ref_id": "wrk_public_1001",
           "evaluated_object_digest": "sha256:work-share-text",
           "policy_version": "safety-policy-2026-06",
           "evidence_version": "1",
@@ -100,7 +100,7 @@
       ],
       "response": {
         "preview_token": "work_share_preview_token_1001",
-        "work_id": "wrk_m6_1001",
+        "work_id": "wrk_public_1001",
         "public_title": "Public Candidate Work",
         "public_description": "Share safe summary",
         "public_media_summary": [
@@ -132,7 +132,7 @@
           "source": "business_http",
           "idempotency_key": "idem_work_share_confirm_success"
         },
-        "work_id": "wrk_m6_1001",
+        "work_id": "wrk_public_1001",
         "preview_token": "work_share_preview_token_1001"
       },
       "assertions": [
@@ -140,11 +140,11 @@
         "public share URL does not expose private object keys"
       ],
       "response": {
-        "public_work_id": "pub_m6_1001",
+        "public_work_id": "pub_public_1001",
         "public_slug": "public-candidate-work",
-        "share_url": "https://www.dora.test/public/works/pub_m6_1001",
+        "share_url": "https://www.dora.test/public/works/pub_public_1001",
         "share_status": "shared",
-        "snapshot_id": "snap_m6_1001"
+        "snapshot_id": "snap_public_1001"
       }
     },
     {
@@ -163,7 +163,7 @@
           "trace_id": "trace_work_take_down_preview_success",
           "source": "business_admin_http"
         },
-        "public_work_id": "pub_m6_1001",
+        "public_work_id": "pub_public_1001",
         "reason": "policy violation",
         "notify_author": true
       },
@@ -173,8 +173,8 @@
       ],
       "response": {
         "preview_token": "take_down_preview_token_1001",
-        "public_work_id": "pub_m6_1001",
-        "work_id": "wrk_m6_1001",
+        "public_work_id": "pub_public_1001",
+        "work_id": "wrk_public_1001",
         "current_status": "active",
         "reason": "policy violation",
         "notify_author": true,
@@ -204,7 +204,7 @@
           "source": "business_admin_http",
           "idempotency_key": "idem_work_take_down_confirm_success"
         },
-        "public_work_id": "pub_m6_1001",
+        "public_work_id": "pub_public_1001",
         "preview_token": "take_down_preview_token_1001"
       },
       "assertions": [
@@ -213,8 +213,8 @@
       ],
       "response": {
         "public_work": {
-          "public_work_id": "pub_m6_1001",
-          "work_id": "wrk_m6_1001",
+          "public_work_id": "pub_public_1001",
+          "work_id": "wrk_public_1001",
           "public_title": "Public Candidate Work",
           "author_user_id": "usr_1001",
           "status": "taken_down",
@@ -248,10 +248,10 @@
       "response": {
         "items": [
           {
-            "public_work_id": "pub_m6_1001",
+            "public_work_id": "pub_public_1001",
             "public_slug": "public-candidate-work",
             "public_title": "Public Candidate Work",
-            "cover_media_url": "https://cdn.test/public/pub_m6_1001/cover.png",
+            "cover_media_url": "https://cdn.test/public/pub_public_1001/cover.png",
             "author_display_name": "Seed User",
             "like_count": 3,
             "published_at": "2026-06-28T12:00:00Z"
@@ -273,14 +273,14 @@
           "trace_id": "trace_work_public_detail_success",
           "source": "public_http"
         },
-        "public_work_id": "pub_m6_1001"
+        "public_work_id": "pub_public_1001"
       },
       "assertions": [
         "public detail omits prompt, blackboard, private object keys and credit cost",
         "only active public snapshot payload is returned"
       ],
       "response": {
-        "public_work_id": "pub_m6_1001",
+        "public_work_id": "pub_public_1001",
         "public_slug": "public-candidate-work",
         "public_title": "Public Candidate Work",
         "public_description": "Share safe summary",
@@ -288,7 +288,7 @@
         "media_refs": [
           {
             "resource_type": "image",
-            "public_url": "https://cdn.test/public/pub_m6_1001/image.png"
+            "public_url": "https://cdn.test/public/pub_public_1001/image.png"
           }
         ],
         "like_count": 3,

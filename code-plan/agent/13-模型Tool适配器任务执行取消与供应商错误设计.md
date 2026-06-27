@@ -1,8 +1,8 @@
 # 13-模型Tool适配器任务执行取消与供应商错误设计
 
-状态：production-design-ready
-owner：Go Eino 智能体微服务架构工程师
-更新时间：2026-06-27
+状态：archived
+owner：Agent 服务责任域
+更新时间：2026-06-28
 适用范围：图片、音乐、视频模型 Tool 适配器，任务提交、查询、取消、超时、部分完成和供应商错误分类
 相关代码路径：`services/agent/internal/runtime/tool/**`、`services/agent/internal/runtime/modeltool/**`
 相关契约：`docs/product/prd/03-模型供应商模型选择与单价PRD.md`、`docs/product/prd/04-Tool边界与平台开放能力PRD.md`、`docs/product/prd/07-积分账户兑换码与扣费PRD.md`

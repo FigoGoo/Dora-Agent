@@ -1,8 +1,8 @@
 # 10-资产上传 TOS 对象资产元素预览下载设计
 
-状态：production-design-ready  
-owner：业务微服务后端工程师  
-更新时间：2026-06-27  
+状态：archived
+owner：业务服务责任域
+更新时间：2026-06-28
 适用范围：上传素材、TOS object key、上传意图、资产事实、最终资产元素、资产权限、预览和下载授权  
 相关代码路径：`services/business/internal/application/asset/**`、`services/business/internal/domain/asset/**`、`services/business/internal/infra/tos/**`
 
