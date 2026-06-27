@@ -11,6 +11,7 @@ import (
 
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/notification"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/security"
@@ -29,12 +30,22 @@ const (
 )
 
 type App struct {
-	repo *businesscore.Repository
-	now  func() time.Time
+	repo         *businesscore.Repository
+	notification notificationService
+	now          func() time.Time
 }
 
 func New(repo *businesscore.Repository) *App {
 	return &App{repo: repo, now: func() time.Time { return time.Now().UTC() }}
+}
+
+type notificationService interface {
+	CreateNotification(ctx context.Context, in notification.CreateNotificationInput) (notification.NotificationDTO, error)
+	RecordCreateFailure(ctx context.Context, in notification.FailureInput) error
+}
+
+func (a *App) SetNotificationService(service notificationService) {
+	a.notification = service
 }
 
 type SkillSummaryDTO struct {
@@ -438,6 +449,7 @@ func (a *App) Publish(ctx context.Context, auth admin.AdminAuth, skillID, versio
 	if err := tx.Commit().Error; err != nil {
 		return SkillDetailDTO{}, err
 	}
+	a.notifySkillReview(ctx, skill, version.ID, "approved", "")
 	return skillDTO(skill), nil
 }
 
@@ -508,7 +520,39 @@ func (a *App) rejectReview(ctx context.Context, auth admin.AdminAuth, versionID,
 	if err := a.repo.DB().WithContext(ctx).Where("id = ?", version.SkillID).First(&skill).Error; err != nil {
 		return SkillDetailDTO{}, err
 	}
+	a.notifySkillReview(ctx, skill, version.ID, "rejected", comment)
 	return skillDTO(skill), nil
+}
+
+func (a *App) notifySkillReview(ctx context.Context, skill businesscore.Skill, versionID, result, comment string) {
+	if a.notification == nil || skill.OwnerUserID == nil || *skill.OwnerUserID == "" {
+		return
+	}
+	notificationType := "skill_review_approved"
+	title := "Skill approved"
+	summary := "Your Skill review has been approved."
+	if result == "rejected" {
+		notificationType = "skill_review_rejected"
+		title = "Skill rejected"
+		summary = "Your Skill review has been rejected."
+	}
+	if strings.TrimSpace(comment) != "" && result == "rejected" {
+		summary = "Your Skill review has been rejected. Please update and submit again."
+	}
+	idem := "skill_review:" + result + ":" + versionID
+	_, err := a.notification.CreateNotification(ctx, notification.CreateNotificationInput{
+		RecipientUserID: *skill.OwnerUserID, Type: notificationType, Title: title, Summary: summary,
+		RelatedResourceType: "skill", RelatedResourceID: skill.ID,
+		NavigationHint: map[string]any{"target_route": "/skills/" + skill.ID, "target_resource_id": skill.ID},
+		IdempotencyKey: idem, TraceID: "skill-review-" + versionID,
+	})
+	if err == nil {
+		return
+	}
+	_ = a.notification.RecordCreateFailure(ctx, notification.FailureInput{
+		RecipientUserID: *skill.OwnerUserID, Type: notificationType, RelatedResourceType: "skill", RelatedResourceID: skill.ID,
+		IdempotencyKey: idem, ErrorCode: errorCode(err), ErrorSummary: err.Error(), TraceID: "skill-review-" + versionID,
+	})
 }
 
 func (a *App) visibleSkill(ctx context.Context, auth accountspace.AuthContext, skillID string) (businesscore.Skill, error) {
@@ -750,6 +794,14 @@ func optionalString(value string) *string {
 	}
 	value = strings.TrimSpace(value)
 	return &value
+}
+
+func errorCode(err error) string {
+	var businessErr *bizerrors.BusinessError
+	if errors.As(err, &businessErr) {
+		return string(businessErr.Code)
+	}
+	return string(bizerrors.CodeInternal)
 }
 
 func value(ptr *string) string {

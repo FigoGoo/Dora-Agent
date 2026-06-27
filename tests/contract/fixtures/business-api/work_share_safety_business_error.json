@@ -1,0 +1,31 @@
+{
+  "case_id": "business_api_m5_work_share_business_error_safety_digest_mismatch",
+  "method": "POST",
+  "path": "/api/works/wrk_seed_public/share/confirm",
+  "request_headers": {
+    "Authorization": "Bearer user_session_token",
+    "Idempotency-Key": "idem_m5_share_digest_mismatch"
+  },
+  "request_body": {
+    "preview_token": "preview.share.work.seed",
+    "title": "Mutated title",
+    "safety_evidence_id": "safe_work_share_seed",
+    "request_hash": "sha256:m5-share-digest-mismatch"
+  },
+  "response_status": 409,
+  "response_body": {
+    "code": "SAFETY_EVIDENCE_INVALID",
+    "message": "safety evidence digest mismatch",
+    "data": null,
+    "error": {
+      "code": "SAFETY_EVIDENCE_INVALID",
+      "message": "safety evidence digest mismatch",
+      "retryable": false
+    },
+    "trace_id": "trace_api_m5_share_safety_001"
+  },
+  "assertions": [
+    "work_share evidence digest binds title, description and tags",
+    "digest mismatch does not publish a public snapshot"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "case_id": "business_api_m5_admin_public_work_takedown_confirm_success",
+  "method": "POST",
+  "path": "/api/admin/works/public/pubw_seed_storyboard/take-down/confirm",
+  "request_headers": {
+    "Authorization": "Bearer admin_session_token",
+    "X-Admin-Reason": "policy violation",
+    "Idempotency-Key": "idem_m5_takedown_confirm_001"
+  },
+  "request_body": {
+    "reason": "policy violation",
+    "preview_token": "preview.takedown.work.seed",
+    "notify_author": true,
+    "request_hash": "sha256:m5-takedown-confirm-request"
+  },
+  "response_status": 200,
+  "response_body": {
+    "code": "OK",
+    "message": "ok",
+    "data": {
+      "public_work_id": "pubw_seed_storyboard",
+      "status": "taken_down",
+      "audit_id": "audit_m5_takedown_001",
+      "notification_status": "created"
+    },
+    "trace_id": "trace_api_m5_takedown_confirm_001"
+  },
+  "assertions": [
+    "confirm writes moderation and audit records",
+    "notification failure would be compensated without rolling back takedown"
+  ]
+}

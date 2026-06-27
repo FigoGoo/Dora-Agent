@@ -1,0 +1,33 @@
+{
+  "case_id": "business_api_m5_admin_public_work_takedown_preview_success",
+  "method": "POST",
+  "path": "/api/admin/works/public/pubw_seed_storyboard/take-down/preview",
+  "request_headers": {
+    "Authorization": "Bearer admin_session_token",
+    "X-Admin-Reason": "policy violation",
+    "Idempotency-Key": "idem_m5_takedown_preview_001"
+  },
+  "request_body": {
+    "reason": "policy violation",
+    "notify_author": true,
+    "request_hash": "sha256:m5-takedown-preview-request"
+  },
+  "response_status": 200,
+  "response_body": {
+    "code": "OK",
+    "message": "ok",
+    "data": {
+      "public_work_id": "pubw_seed_storyboard",
+      "current_status": "active",
+      "reason": "policy violation",
+      "preview_token": "preview.takedown.work.seed",
+      "expires_at": "2026-06-27T00:10:00Z",
+      "notify_author": true
+    },
+    "trace_id": "trace_api_m5_takedown_preview_001"
+  },
+  "assertions": [
+    "admin preview token binds public_work_id, reason and admin id",
+    "preview does not mutate public snapshot status"
+  ]
+}

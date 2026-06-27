@@ -222,37 +222,50 @@ INSERT INTO asset_elements (
 ) ON CONFLICT (asset_id, element_key) DO NOTHING;
 
 INSERT INTO works (
-  id, work_no, project_id, owner_user_id, space_id, title, description, cover_asset_id, status, latest_snapshot_id
+  id, work_no, project_id, owner_user_id, space_id, title, description, cover_asset_id, status, latest_snapshot_id,
+  share_status, current_snapshot_id, category, tags
 ) VALUES (
-  'wrk_seed_public', 'W1001', 'prj_active_1001', 'usr_1001', 'sp_personal_1001', 'Seed public storyboard', 'A public seed work', 'ast_generated_1001', 'public', 'wps_seed_public'
+  'wrk_seed_public', 'W1001', 'prj_active_1001', 'usr_1001', 'sp_personal_1001', 'Seed public storyboard', 'A public seed work', 'ast_generated_1001', 'public', 'wps_seed_public',
+  'shared', 'wps_seed_public', 'storyboard', '["seed","storyboard"]'::jsonb
 ) ON CONFLICT (work_no) DO NOTHING;
 
 INSERT INTO work_assets (
-  id, work_id, asset_id, asset_role, sort_order
+  id, work_asset_id, work_id, asset_id, asset_role, role, sort_order, display_order
 ) VALUES (
-  'wka_seed_public_cover', 'wrk_seed_public', 'ast_generated_1001', 'cover', 0
+  'wka_seed_public_cover', 'wka_seed_public_cover', 'wrk_seed_public', 'ast_generated_1001', 'cover', 'cover', 0, 0
 ) ON CONFLICT (work_id, asset_id, asset_role) DO NOTHING;
 
 INSERT INTO work_public_snapshots (
-  id, snapshot_id, work_id, share_slug, title, description, cover_asset_id, snapshot_json, share_url, visibility, status, like_count, published_by_user_id, published_at
+  id, snapshot_id, work_id, share_slug, public_work_id, public_slug, title, description, cover_asset_id,
+  snapshot_json, snapshot_payload, public_media_refs, share_url, public_url, visibility, status, like_count,
+  category, resource_type, published_by_user_id, published_by, published_at
 ) VALUES (
-  'wps_seed_public_row', 'wps_seed_public', 'wrk_seed_public', 'seed-storyboard', 'Seed public storyboard', 'A public seed work', 'ast_generated_1001', '{"assets":[{"asset_id":"ast_generated_1001","element_type":"image_ref"}]}'::jsonb, 'http://localhost:3000/share/seed-storyboard', 'public', 'published', 1, 'usr_1001', '2026-06-27T12:00:00Z'
+  'wps_seed_public_row', 'wps_seed_public', 'wrk_seed_public', 'seed-storyboard', 'pubw_seed_storyboard', 'seed-storyboard', 'Seed public storyboard', 'A public seed work', 'ast_generated_1001',
+  '{"assets":[{"asset_id":"ast_generated_1001","element_type":"image_ref"}]}'::jsonb,
+  '{"public_work_id":"pubw_seed_storyboard","title":"Seed public storyboard","description":"A public seed work","tags":["seed","storyboard"],"share_url":"http://localhost:3000/share/seed-storyboard","public_media_refs":[{"public_media_id":"pm_seed_storyboard","resource_type":"image","variant":"preview","public_media_url":"http://localhost/tos/local/public/works/pubw_seed_storyboard/snapshots/wps_seed_public/media/pm_seed_storyboard/preview"}],"author_display_name":"Dora Creator"}'::jsonb,
+  '[{"public_media_id":"pm_seed_storyboard","resource_type":"image","variant":"preview","public_media_url":"http://localhost/tos/local/public/works/pubw_seed_storyboard/snapshots/wps_seed_public/media/pm_seed_storyboard/preview"}]'::jsonb,
+  'http://localhost:3000/share/seed-storyboard', 'http://localhost:3000/share/seed-storyboard', 'public', 'active', 1,
+  'storyboard', 'image', 'usr_1001', 'usr_1001', '2026-06-27T12:00:00Z'
 ) ON CONFLICT (snapshot_id) DO NOTHING;
 
 INSERT INTO work_likes (
-  id, snapshot_id, user_id, status
+  id, like_id, snapshot_id, public_work_id, work_id, user_id, status, liked_at
 ) VALUES (
-  'wlike_seed_1002', 'wps_seed_public', 'usr_1002', 'liked'
+  'wlike_seed_1002', 'wlike_seed_1002', 'wps_seed_public', 'pubw_seed_storyboard', 'wrk_seed_public', 'usr_1002', 'liked', '2026-06-27T12:05:00Z'
 ) ON CONFLICT (snapshot_id, user_id) DO NOTHING;
 
 INSERT INTO work_categories (
-  id, category_code, display_name, sort_order, status
+  id, category_code, category_key, display_name, sort_order, status
 ) VALUES (
-  'wcat_storyboard', 'storyboard', 'Storyboard', 10, 'active'
+  'wcat_storyboard', 'storyboard', 'storyboard', 'Storyboard', 10, 'active'
 ) ON CONFLICT (category_code) DO NOTHING;
 
 INSERT INTO notifications (
-  id, notification_no, recipient_user_id, recipient_space_id, recipient_enterprise_id, notification_type, title, body, jump_type, jump_target_id, jump_payload_json, source_type, source_id, status
+  id, notification_id, notification_no, recipient_user_id, recipient_space_id, recipient_enterprise_id,
+  notification_type, type, title, summary, body, jump_type, jump_target_id, jump_payload_json,
+  related_resource_type, related_resource_id, navigation_hint, source_type, source_id, status, idempotency_key, trace_id
 ) VALUES (
-  'ntf_skill_review_001', 'N1001', 'usr_1001', 'sp_personal_1001', null, 'skill.review.approved', 'Skill approved', 'Your storyboard skill has been approved.', 'skill_version', 'skv_seed_storyboard_100', '{"skill_id":"sk_seed_storyboard"}'::jsonb, 'skill_review', 'skv_seed_storyboard_100', 'unread'
+  'ntf_skill_review_001', 'ntf_skill_review_001', 'N1001', 'usr_1001', 'sp_personal_1001', null,
+  'skill.review.approved', 'skill_review_approved', 'Skill approved', 'Your storyboard skill has been approved.', 'Your storyboard skill has been approved.', 'skill_version', 'skv_seed_storyboard_100', '{"skill_id":"sk_seed_storyboard"}'::jsonb,
+  'skill_version', 'skv_seed_storyboard_100', '{"target_route":"/skills/sk_seed_storyboard","target_resource_id":"sk_seed_storyboard"}'::jsonb, 'skill_review', 'skv_seed_storyboard_100', 'unread', 'seed:ntf_skill_review_001', 'seed-notification'
 ) ON CONFLICT (notification_no) DO NOTHING;

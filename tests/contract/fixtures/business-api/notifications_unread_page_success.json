@@ -13,11 +13,18 @@
       "items": [
         {
           "notification_id": "ntf_skill_review_001",
-          "notification_type": "skill.review.approved",
-          "title": "Skill approved",
+          "type": "skill_review_approved",
+          "summary": "Skill approved",
+          "body": "Your skill has been approved.",
+          "navigation_hint": {
+            "target_type": "skill_version",
+            "target_id": "skv_seed_storyboard_100",
+            "path": "/skills/skv_seed_storyboard_100"
+          },
           "status": "unread",
-          "jump_type": "skill_version",
-          "jump_target_id": "skv_seed_storyboard_100"
+          "read_at": null,
+          "created_at": "2026-06-27T00:00:00Z",
+          "trace_id": "trace_seed_notification"
         }
       ],
       "page_size": 10,

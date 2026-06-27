@@ -17,9 +17,11 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetdict"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/credit"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/modelconfig"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/notification"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/skillcatalog"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/toolpolicy"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/work"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/config"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/idempotency"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/logger"
@@ -35,21 +37,23 @@ import (
 )
 
 type App struct {
-	Config     config.BusinessConfig
-	Logger     *slog.Logger
-	DB         *gorm.DB
-	Account    *accountspace.App
-	Admin      *admin.App
-	Project    *project.App
-	Model      *modelconfig.App
-	Tool       *toolpolicy.App
-	Skill      *skillcatalog.App
-	Dictionary *assetdict.App
-	Credit     *credit.App
-	Asset      *asset.App
-	Commit     *assetcommit.App
-	Kitex      server.Server
-	HTTPServer *http.Server
+	Config       config.BusinessConfig
+	Logger       *slog.Logger
+	DB           *gorm.DB
+	Account      *accountspace.App
+	Admin        *admin.App
+	Project      *project.App
+	Model        *modelconfig.App
+	Tool         *toolpolicy.App
+	Skill        *skillcatalog.App
+	Dictionary   *assetdict.App
+	Credit       *credit.App
+	Asset        *asset.App
+	Commit       *assetcommit.App
+	Work         *work.App
+	Notification *notification.App
+	Kitex        server.Server
+	HTTPServer   *http.Server
 }
 
 func New(cfg config.BusinessConfig) (*App, error) {
@@ -68,6 +72,8 @@ func New(cfg config.BusinessConfig) (*App, error) {
 	toolApp := toolpolicy.New(repo)
 	skillApp := skillcatalog.New(repo)
 	dictionaryApp := assetdict.New(repo)
+	notificationApp := notification.New(repo, guard)
+	skillApp.SetNotificationService(notificationApp)
 	creditApp := credit.New(repo, guard, auditWriter)
 	assetApp := asset.New(repo, guard, auditWriter, asset.TOSOptions{
 		Env: cfg.AppEnv, Bucket: cfg.TOS.Bucket, BaseURL: cfg.TOS.BaseURL,
@@ -77,6 +83,9 @@ func New(cfg config.BusinessConfig) (*App, error) {
 		return nil, fmt.Errorf("create tos object verifier: %w", err)
 	}
 	commitApp := assetcommit.New(repo, guard, auditWriter, commitVerifier)
+	workApp := work.New(repo, guard, auditWriter, work.Options{
+		PublicWebBaseURL: cfg.PublicWebBaseURL, TOSBaseURL: cfg.TOS.BaseURL, Env: cfg.AppEnv, Notification: notificationApp,
+	})
 	if _, err := adminApp.BootstrapInitialAdmin(contextBackground(), admin.BootstrapInput{
 		Account:             cfg.AdminBootstrapAccount,
 		PasswordHash:        cfg.AdminBootstrapPasswordHash,
@@ -110,6 +119,8 @@ func New(cfg config.BusinessConfig) (*App, error) {
 			Credit:       creditApp,
 			Asset:        assetApp,
 			Commit:       commitApp,
+			Work:         workApp,
+			Notification: notificationApp,
 		})
 		httpServer = &http.Server{
 			Addr:              cfg.HTTPAddr,
@@ -119,21 +130,23 @@ func New(cfg config.BusinessConfig) (*App, error) {
 	}
 
 	return &App{
-		Config:     cfg,
-		Logger:     log,
-		DB:         db,
-		Account:    accountApp,
-		Admin:      adminApp,
-		Project:    projectApp,
-		Model:      modelApp,
-		Tool:       toolApp,
-		Skill:      skillApp,
-		Dictionary: dictionaryApp,
-		Credit:     creditApp,
-		Asset:      assetApp,
-		Commit:     commitApp,
-		Kitex:      kitexServer,
-		HTTPServer: httpServer,
+		Config:       cfg,
+		Logger:       log,
+		DB:           db,
+		Account:      accountApp,
+		Admin:        adminApp,
+		Project:      projectApp,
+		Model:        modelApp,
+		Tool:         toolApp,
+		Skill:        skillApp,
+		Dictionary:   dictionaryApp,
+		Credit:       creditApp,
+		Asset:        assetApp,
+		Commit:       commitApp,
+		Work:         workApp,
+		Notification: notificationApp,
+		Kitex:        kitexServer,
+		HTTPServer:   httpServer,
 	}, nil
 }
 

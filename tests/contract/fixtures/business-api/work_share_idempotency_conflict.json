@@ -1,0 +1,31 @@
+{
+  "case_id": "business_api_m5_work_share_idempotency_conflict",
+  "method": "POST",
+  "path": "/api/works/wrk_seed_public/share/confirm",
+  "request_headers": {
+    "Authorization": "Bearer user_session_token",
+    "Idempotency-Key": "idem_m5_share_confirm_001"
+  },
+  "request_body": {
+    "preview_token": "preview.share.work.seed",
+    "title": "Different title",
+    "safety_evidence_id": "safe_work_share_seed",
+    "request_hash": "sha256:m5-share-confirm-conflict"
+  },
+  "response_status": 409,
+  "response_body": {
+    "code": "IDEMPOTENCY_CONFLICT",
+    "message": "work share idempotency key conflicts",
+    "data": null,
+    "error": {
+      "code": "IDEMPOTENCY_CONFLICT",
+      "message": "work share idempotency key conflicts",
+      "retryable": false
+    },
+    "trace_id": "trace_api_m5_share_idem_001"
+  },
+  "assertions": [
+    "same idempotency key with different semantic request is rejected",
+    "tenant/space/actor dimensions are part of request hash handling"
+  ]
+}

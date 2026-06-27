@@ -1002,14 +1002,14 @@ paths:
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         $ref: '#/components/requestBodies/UpdateWorkBody'
-  /api/works/{work_id}/share:
+  /api/works/{work_id}/share/preview:
     post:
       tags:
       - Work
-      operationId: shareWork
+      operationId: previewShareWork
       responses:
         '200':
-          $ref: '#/components/responses/ShareWorkOk'
+          $ref: '#/components/responses/PreviewShareWorkOk'
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -1024,7 +1024,30 @@ paths:
       - $ref: '#/components/parameters/WorkId'
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
-        $ref: '#/components/requestBodies/ShareWorkBody'
+        $ref: '#/components/requestBodies/PreviewShareWorkBody'
+  /api/works/{work_id}/share/confirm:
+    post:
+      tags:
+      - Work
+      operationId: confirmShareWork
+      responses:
+        '200':
+          $ref: '#/components/responses/ConfirmShareWorkOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/WorkId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/ConfirmShareWorkBody'
   /api/works/{work_id}/unshare:
     post:
       tags:
@@ -2197,14 +2220,14 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/PageSize'
-  /api/admin/works/public/{public_work_id}/take-down:
+  /api/admin/works/public/{public_work_id}/take-down/preview:
     post:
       tags:
       - Work
-      operationId: takeDownPublicWork
+      operationId: previewTakeDownPublicWork
       responses:
         '200':
-          $ref: '#/components/responses/TakeDownPublicWorkOk'
+          $ref: '#/components/responses/PreviewTakeDownPublicWorkOk'
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -2220,7 +2243,31 @@ paths:
       - $ref: '#/components/parameters/IdempotencyKey'
       - $ref: '#/components/parameters/AdminReason'
       requestBody:
-        $ref: '#/components/requestBodies/TakeDownPublicWorkBody'
+        $ref: '#/components/requestBodies/PreviewTakeDownPublicWorkBody'
+  /api/admin/works/public/{public_work_id}/take-down/confirm:
+    post:
+      tags:
+      - Work
+      operationId: confirmTakeDownPublicWork
+      responses:
+        '200':
+          $ref: '#/components/responses/ConfirmTakeDownPublicWorkOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/PublicWorkId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/AdminReason'
+      requestBody:
+        $ref: '#/components/requestBodies/ConfirmTakeDownPublicWorkBody'
 components:
   parameters:
     IdempotencyKey:
@@ -2460,12 +2507,18 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/UpdateWorkRequest'
-    ShareWorkBody:
+    PreviewShareWorkBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ShareWorkRequest'
+            $ref: '#/components/schemas/PreviewShareWorkRequest'
+    ConfirmShareWorkBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ConfirmShareWorkRequest'
     UnshareWorkBody:
       required: true
       content:
@@ -2640,12 +2693,18 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ExportRedeemCodesRequest'
-    TakeDownPublicWorkBody:
+    PreviewTakeDownPublicWorkBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/TakeDownPublicWorkRequest'
+            $ref: '#/components/schemas/PreviewTakeDownPublicWorkRequest'
+    ConfirmTakeDownPublicWorkBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ConfirmTakeDownPublicWorkRequest'
     LogoutBody:
       required: true
       content:
@@ -2983,12 +3042,18 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/UpdateWorkOkEnvelope'
-    ShareWorkOk:
-      description: shareWork successful response.
+    PreviewShareWorkOk:
+      description: previewShareWork successful response.
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ShareWorkOkEnvelope'
+            $ref: '#/components/schemas/PreviewShareWorkOkEnvelope'
+    ConfirmShareWorkOk:
+      description: confirmShareWork successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ConfirmShareWorkOkEnvelope'
     UnshareWorkOk:
       description: unshareWork successful response.
       content:
@@ -3307,12 +3372,18 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ListAdminPublicWorksOkEnvelope'
-    TakeDownPublicWorkOk:
-      description: takeDownPublicWork successful response.
+    PreviewTakeDownPublicWorkOk:
+      description: previewTakeDownPublicWork successful response.
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/TakeDownPublicWorkOkEnvelope'
+            $ref: '#/components/schemas/PreviewTakeDownPublicWorkOkEnvelope'
+    ConfirmTakeDownPublicWorkOk:
+      description: confirmTakeDownPublicWork successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ConfirmTakeDownPublicWorkOkEnvelope'
   schemas:
     ErrorEnvelope:
       type: object
@@ -4108,21 +4179,58 @@ components:
         updated_at:
           type: string
           format: date-time
+    ShareWorkPreviewDTO:
+      type: object
+      required:
+      - work_id
+      - preview_token
+      - expires_at
+      - safety_evidence_id
+      - safety_evidence_digest
+      additionalProperties: false
+      properties:
+        work_id:
+          type: string
+        preview_token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        safety_evidence_id:
+          type: string
+        safety_evidence_digest:
+          type: string
+        sanitized_title:
+          type: string
+        sanitized_description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        public_media_refs:
+          type: array
+          items:
+            type: string
     WorkShareResultDTO:
       type: object
       required:
       - work_id
+      - public_work_id
+      - snapshot_id
       - share_status
       - share_url
       additionalProperties: false
       properties:
         work_id:
           type: string
+        public_work_id:
+          type: string
+        snapshot_id:
+          type: string
         share_status:
           type: string
         share_url:
-          type: string
-        snapshot_id:
           type: string
     PublicHomeDTO:
       type: object
@@ -4159,11 +4267,17 @@ components:
           type: integer
         share_url:
           type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
     PublicWorkDetailDTO:
       type: object
       required:
       - public_work_id
-      - work_id
+      - snapshot_id
       - title
       - share_url
       - like_count
@@ -4171,7 +4285,7 @@ components:
       properties:
         public_work_id:
           type: string
-        work_id:
+        snapshot_id:
           type: string
         title:
           type: string
@@ -4185,6 +4299,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AssetSummaryDTO'
+        public_media_refs:
+          type: array
+          items:
+            type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
     PublicWorkReactionDTO:
       type: object
       required:
@@ -4203,25 +4327,49 @@ components:
       type: object
       required:
       - notification_id
-      - notification_type
-      - title
+      - type
+      - summary
+      - body
+      - navigation_hint
       - status
+      - created_at
       additionalProperties: false
       properties:
         notification_id:
           type: string
-        notification_type:
+        type:
           type: string
-        title:
+        summary:
           type: string
+        body:
+          type: string
+        navigation_hint:
+          $ref: '#/components/schemas/NotificationNavigationHintDTO'
         status:
           type: string
           enum:
           - unread
           - read
-        jump_type:
+        read_at:
           type: string
-        jump_target_id:
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        trace_id:
+          type: string
+    NotificationNavigationHintDTO:
+      type: object
+      required:
+      - target_type
+      - target_id
+      additionalProperties: false
+      properties:
+        target_type:
+          type: string
+        target_id:
+          type: string
+        path:
           type: string
     UnreadCountDTO:
       type: object
@@ -4601,6 +4749,29 @@ components:
           type: string
         status:
           type: string
+    TakeDownPublicWorkPreviewDTO:
+      type: object
+      required:
+      - public_work_id
+      - current_status
+      - preview_token
+      - expires_at
+      - notify_author
+      additionalProperties: false
+      properties:
+        public_work_id:
+          type: string
+        current_status:
+          type: string
+        reason:
+          type: string
+        preview_token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        notify_author:
+          type: boolean
     WorkTakeDownResultDTO:
       type: object
       required:
@@ -4614,6 +4785,8 @@ components:
         status:
           type: string
         audit_id:
+          type: string
+        notification_status:
           type: string
     EnterpriseMemberListDTO:
       type: object
@@ -5559,13 +5732,35 @@ components:
           format: date-time
         request_hash:
           type: string
-    ShareWorkRequest:
+    PreviewShareWorkRequest:
       type: object
       required:
       - safety_evidence_id
       - request_hash
       additionalProperties: false
       properties:
+        title:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        safety_evidence_id:
+          type: string
+        request_hash:
+          type: string
+    ConfirmShareWorkRequest:
+      type: object
+      required:
+      - preview_token
+      - safety_evidence_id
+      - request_hash
+      additionalProperties: false
+      properties:
+        preview_token:
+          type: string
         title:
           type: string
         description:
@@ -6006,7 +6201,7 @@ components:
           type: string
         request_hash:
           type: string
-    TakeDownPublicWorkRequest:
+    PreviewTakeDownPublicWorkRequest:
       type: object
       required:
       - reason
@@ -6015,8 +6210,26 @@ components:
       properties:
         reason:
           type: string
+        notify_author:
+          type: boolean
+          default: true
+        request_hash:
+          type: string
+    ConfirmTakeDownPublicWorkRequest:
+      type: object
+      required:
+      - reason
+      - preview_token
+      - request_hash
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
         preview_token:
           type: string
+        notify_author:
+          type: boolean
+          default: true
         request_hash:
           type: string
     LoginOkEnvelope:
@@ -6893,7 +7106,26 @@ components:
           $ref: '#/components/schemas/WorkDetailDTO'
         trace_id:
           type: string
-    ShareWorkOkEnvelope:
+    PreviewShareWorkOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ShareWorkPreviewDTO'
+        trace_id:
+          type: string
+    ConfirmShareWorkOkEnvelope:
       type: object
       required:
       - code
@@ -7919,7 +8151,26 @@ components:
           $ref: '#/components/schemas/PublicWorkListDTO'
         trace_id:
           type: string
-    TakeDownPublicWorkOkEnvelope:
+    PreviewTakeDownPublicWorkOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/TakeDownPublicWorkPreviewDTO'
+        trace_id:
+          type: string
+    ConfirmTakeDownPublicWorkOkEnvelope:
       type: object
       required:
       - code

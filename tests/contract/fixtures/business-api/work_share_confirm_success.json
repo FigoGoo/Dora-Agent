@@ -1,0 +1,34 @@
+{
+  "case_id": "business_api_m5_work_share_confirm_success",
+  "method": "POST",
+  "path": "/api/works/wrk_seed_public/share/confirm",
+  "request_headers": {
+    "Authorization": "Bearer user_session_token",
+    "Idempotency-Key": "idem_m5_share_confirm_001"
+  },
+  "request_body": {
+    "preview_token": "preview.share.work.seed",
+    "title": "Seed public storyboard",
+    "description": "A sanitized public description.",
+    "tags": ["demo", "storyboard"],
+    "safety_evidence_id": "safe_work_share_seed",
+    "request_hash": "sha256:m5-share-confirm-request"
+  },
+  "response_status": 200,
+  "response_body": {
+    "code": "OK",
+    "message": "ok",
+    "data": {
+      "work_id": "wrk_seed_public",
+      "public_work_id": "pubw_seed_storyboard",
+      "snapshot_id": "wps_seed_public",
+      "share_status": "shared",
+      "share_url": "http://localhost:3000/share/seed-storyboard"
+    },
+    "trace_id": "trace_api_m5_share_confirm_001"
+  },
+  "assertions": [
+    "confirm requires Idempotency-Key and request_hash",
+    "public snapshot is created from sanitized preview payload"
+  ]
+}

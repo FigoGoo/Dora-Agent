@@ -1,0 +1,21 @@
+{
+  "case_id": "business_api_m5_public_work_timeout_error",
+  "method": "GET",
+  "path": "/api/public/works?category=storyboard&page_size=10",
+  "response_status": 500,
+  "response_body": {
+    "code": "TIMEOUT",
+    "message": "public work query timed out",
+    "data": null,
+    "error": {
+      "code": "TIMEOUT",
+      "message": "public work query timed out",
+      "retryable": true
+    },
+    "trace_id": "trace_api_m5_public_timeout_001"
+  },
+  "assertions": [
+    "timeout errors are retryable",
+    "partial public payload is not returned after timeout"
+  ]
+}
