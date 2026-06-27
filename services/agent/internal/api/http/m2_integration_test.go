@@ -2,6 +2,8 @@ package http
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -125,10 +127,22 @@ func TestM2AgentInterruptRoutes(t *testing.T) {
 
 	acceptRunID, acceptInterruptID := createWaitingInterruptRun(t, router, repo, "accept")
 	accepted := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+acceptRunID+"/interrupts/"+acceptInterruptID+"/accept", "idem-accept", map[string]any{
-		"run_id": acceptRunID, "interrupt_id": acceptInterruptID, "action": "confirm", "confirmed_payload_digest": "sha256:payload",
+		"run_id": acceptRunID, "interrupt_id": acceptInterruptID, "action": "confirm", "confirmed_payload_digest": interruptPayloadDigest(t, repo, acceptRunID, acceptInterruptID),
 	})
 	if accepted["status"] != "completed" {
 		t.Fatalf("accept interrupt response = %#v", accepted)
+	}
+
+	mismatchRunID, mismatchInterruptID := createWaitingInterruptRun(t, router, repo, "digest-mismatch")
+	mismatch := agentRaw(t, router, http.MethodPost, "/api/agent/runs/"+mismatchRunID+"/interrupts/"+mismatchInterruptID+"/accept", "idem-accept-mismatch", map[string]any{
+		"run_id": mismatchRunID, "interrupt_id": mismatchInterruptID, "action": "confirm", "confirmed_payload_digest": "sha256:wrong",
+	})
+	if mismatch.Code != http.StatusBadRequest || mismatch.ErrorCode() != "INVALID_ARGUMENT" {
+		t.Fatalf("expected digest mismatch rejection, status=%d body=%#v", mismatch.Code, mismatch.Body)
+	}
+	stillRequired, err := repo.GetRequiredInterrupt(t.Context(), mismatchRunID)
+	if err != nil || stillRequired.ID != mismatchInterruptID {
+		t.Fatalf("digest mismatch resolved interrupt unexpectedly, interrupt=%#v err=%v", stillRequired, err)
 	}
 
 	rejectRunID, rejectInterruptID := createWaitingInterruptRun(t, router, repo, "reject")
@@ -188,7 +202,7 @@ func TestM2AgentDeniedAccessBodyBlocksResumeActions(t *testing.T) {
 		}
 	}
 	acceptResp := agentRaw(t, deniedRouter, http.MethodPost, "/api/agent/runs/"+interruptRunID+"/interrupts/"+interruptID+"/accept", "idem-denied-accept", map[string]any{
-		"run_id": interruptRunID, "interrupt_id": interruptID, "action": "confirm", "confirmed_payload_digest": "sha256:payload",
+		"run_id": interruptRunID, "interrupt_id": interruptID, "action": "confirm", "confirmed_payload_digest": interruptPayloadDigest(t, repo, interruptRunID, interruptID),
 	})
 	if acceptResp.Code != http.StatusForbidden || acceptResp.ErrorCode() != "PERMISSION_DENIED" {
 		t.Fatalf("expected PERMISSION_DENIED interrupt block, status=%d body=%#v", acceptResp.Code, acceptResp.Body)
@@ -392,4 +406,14 @@ func createWaitingInterruptRun(t *testing.T, router http.Handler, repo *reposito
 		t.Fatalf("get required interrupt: %v", err)
 	}
 	return runID, interrupt.ID
+}
+
+func interruptPayloadDigest(t *testing.T, repo *repository.Repository, runID, interruptID string) string {
+	t.Helper()
+	interrupt, err := repo.GetInterrupt(t.Context(), runID, interruptID)
+	if err != nil {
+		t.Fatalf("get interrupt for digest: %v", err)
+	}
+	sum := sha256.Sum256(interrupt.ConfirmationPayload)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }

@@ -5402,6 +5402,7 @@ components:
       - filename
       - content_type
       - size_bytes
+      - safety_evidence
       - request_hash
       additionalProperties: false
       properties:
@@ -5416,10 +5417,54 @@ components:
           type: string
         project_id:
           type: string
-        safety_evidence_id:
-          type: string
+        safety_evidence:
+          $ref: '#/components/schemas/SafetyEvidence'
         request_hash:
           type: string
+    SafetyEvidence:
+      type: object
+      required:
+      - safety_evidence_id
+      - scene
+      - target_type
+      - result
+      - evaluated_object_digest
+      - policy_version
+      - evidence_version
+      - evaluated_at
+      - trace_id
+      additionalProperties: false
+      properties:
+        safety_evidence_id:
+          type: string
+        scene:
+          type: string
+        target_type:
+          type: string
+        result:
+          type: string
+          enum:
+          - passed
+          - blocked
+          - failed
+        evaluated_object_digest:
+          type: string
+        policy_version:
+          type: string
+        evidence_version:
+          type: string
+        source_session_id:
+          type: string
+        source_run_id:
+          type: string
+        trace_id:
+          type: string
+        evaluated_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
     ConfirmUploadIntentRequest:
       type: object
       required:

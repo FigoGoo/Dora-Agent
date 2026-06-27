@@ -15,6 +15,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/auditlog"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/security"
+	"github.com/volcengine/ve-tos-golang-sdk/v2/tos"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -24,14 +25,100 @@ type AuthContext = accountspace.AuthContext
 type RequestMeta = accountspace.RequestMeta
 
 type App struct {
-	repo  *businesscore.Repository
-	guard *idempotency.IdempotencyGuard
-	audit auditlog.Writer
-	now   func() time.Time
+	repo     *businesscore.Repository
+	guard    *idempotency.IdempotencyGuard
+	audit    auditlog.Writer
+	verifier ObjectVerifier
+	now      func() time.Time
 }
 
-func New(repo *businesscore.Repository, guard *idempotency.IdempotencyGuard, audit auditlog.Writer) *App {
-	return &App{repo: repo, guard: guard, audit: audit, now: func() time.Time { return time.Now().UTC() }}
+func New(repo *businesscore.Repository, guard *idempotency.IdempotencyGuard, audit auditlog.Writer, verifiers ...ObjectVerifier) *App {
+	verifier := ObjectVerifier(MetadataObjectVerifier{})
+	if len(verifiers) > 0 && verifiers[0] != nil {
+		verifier = verifiers[0]
+	}
+	return &App{repo: repo, guard: guard, audit: audit, verifier: verifier, now: func() time.Time { return time.Now().UTC() }}
+}
+
+type ObjectExpectation struct {
+	Bucket      string
+	ObjectKey   string
+	ContentType string
+	SizeBytes   int64
+	Checksum    string
+}
+
+type VerifiedObject struct {
+	Bucket      string
+	ObjectKey   string
+	ContentType string
+	SizeBytes   int64
+	Checksum    string
+	Etag        string
+}
+
+type ObjectVerifier interface {
+	VerifyGeneratedObject(ctx context.Context, expected ObjectExpectation, actual StorageObjectRef) (VerifiedObject, error)
+}
+
+type MetadataObjectVerifier struct{}
+
+func (MetadataObjectVerifier) VerifyGeneratedObject(ctx context.Context, expected ObjectExpectation, actual StorageObjectRef) (VerifiedObject, error) {
+	if err := ctx.Err(); err != nil {
+		return VerifiedObject{}, err
+	}
+	if actual.Bucket != expected.Bucket || actual.ObjectKey != expected.ObjectKey ||
+		actual.ContentType != expected.ContentType || actual.SizeBytes != expected.SizeBytes ||
+		actual.Checksum != expected.Checksum {
+		return VerifiedObject{}, bizerrors.New(bizerrors.CodeAssetSaveFailed, "uploaded object metadata does not match generated slot")
+	}
+	if strings.TrimSpace(actual.Etag) == "" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(actual.Etag)), "local-") {
+		return VerifiedObject{}, bizerrors.New(bizerrors.CodeAssetSaveFailed, "uploaded object is not verifiable")
+	}
+	return VerifiedObject{
+		Bucket: actual.Bucket, ObjectKey: actual.ObjectKey, ContentType: actual.ContentType,
+		SizeBytes: actual.SizeBytes, Checksum: actual.Checksum, Etag: normalizeETag(actual.Etag),
+	}, nil
+}
+
+type TOSHeadObjectVerifier struct {
+	client *tos.ClientV2
+}
+
+func NewTOSHeadObjectVerifier(endpoint, region, accessKeyID, secretAccessKey string) (ObjectVerifier, error) {
+	if strings.TrimSpace(endpoint) == "" || strings.TrimSpace(region) == "" || strings.TrimSpace(accessKeyID) == "" || strings.TrimSpace(secretAccessKey) == "" {
+		return nil, nil
+	}
+	client, err := tos.NewClientV2(endpoint, tos.WithRegion(region), tos.WithCredentials(tos.NewStaticCredentials(accessKeyID, secretAccessKey)))
+	if err != nil {
+		return nil, err
+	}
+	return TOSHeadObjectVerifier{client: client}, nil
+}
+
+func (v TOSHeadObjectVerifier) VerifyGeneratedObject(ctx context.Context, expected ObjectExpectation, actual StorageObjectRef) (VerifiedObject, error) {
+	if v.client == nil {
+		return MetadataObjectVerifier{}.VerifyGeneratedObject(ctx, expected, actual)
+	}
+	head, err := v.client.HeadObjectV2(ctx, &tos.HeadObjectV2Input{Bucket: expected.Bucket, Key: expected.ObjectKey})
+	if err != nil {
+		return VerifiedObject{}, bizerrors.New(bizerrors.CodeAssetSaveFailed, "tos head object failed")
+	}
+	if head.ContentLength != expected.SizeBytes || head.ContentType != expected.ContentType {
+		return VerifiedObject{}, bizerrors.New(bizerrors.CodeAssetSaveFailed, "tos object metadata does not match generated slot")
+	}
+	if actual.Bucket != expected.Bucket || actual.ObjectKey != expected.ObjectKey ||
+		actual.ContentType != expected.ContentType || actual.SizeBytes != expected.SizeBytes ||
+		actual.Checksum != expected.Checksum {
+		return VerifiedObject{}, bizerrors.New(bizerrors.CodeAssetSaveFailed, "uploaded object metadata does not match generated slot")
+	}
+	if actual.Etag != "" && normalizeETag(head.ETag) != normalizeETag(actual.Etag) {
+		return VerifiedObject{}, bizerrors.New(bizerrors.CodeAssetSaveFailed, "tos object etag does not match upload result")
+	}
+	return VerifiedObject{
+		Bucket: expected.Bucket, ObjectKey: expected.ObjectKey, ContentType: head.ContentType,
+		SizeBytes: head.ContentLength, Checksum: actual.Checksum, Etag: normalizeETag(defaultString(actual.Etag, head.ETag)),
+	}, nil
 }
 
 type StorageObjectRef struct {
@@ -112,7 +199,7 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 	if in.Meta.IdempotencyKey == "" || in.ProjectID == "" || in.SessionID == "" || in.RunID == "" || in.FreezeID == "" || len(in.Artifacts) == 0 {
 		return CommitDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "asset commit request is incomplete")
 	}
-	if err := validateSafetyEvidence(in.SafetyEvidence, a.now()); err != nil {
+	if err := validateSafetyEvidence(in.SafetyEvidence, in.SessionID, in.RunID, in.Meta.TraceID, a.now()); err != nil {
 		return CommitDTO{}, err
 	}
 	hash := requestHash(in.Meta, in.Auth, map[string]any{"project_id": in.ProjectID, "run_id": in.RunID, "freeze_id": in.FreezeID, "artifacts": in.Artifacts, "elements": in.FinalElements})
@@ -148,12 +235,25 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 		if in.EstimateID != "" && freeze.EstimateID != in.EstimateID {
 			return bizerrors.New(bizerrors.CodeStateConflict, "asset commit estimate does not match freeze")
 		}
+		var estimate businesscore.CreditEstimate
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("estimate_id = ?", freeze.EstimateID).First(&estimate).Error; err != nil {
+			return bizerrors.New(bizerrors.CodeResourceNotFound, "credit estimate not found")
+		}
+		if estimate.AccountID != freeze.AccountID || estimate.ProjectID != in.ProjectID {
+			return bizerrors.New(bizerrors.CodeStateConflict, "asset commit estimate does not match freeze")
+		}
+		if err := validateSafetyEvidence(in.SafetyEvidence, in.SessionID, in.RunID, in.Meta.TraceID, a.now()); err != nil {
+			return err
+		}
+		if estimate.SafetyEvidenceHash == nil || *estimate.SafetyEvidenceHash != safetyDigest(in.SafetyEvidence) {
+			return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence does not match credit estimate")
+		}
 		commitID := security.RandomID("acm_")
 		assetRefs := make([]CommittedAssetRefDTO, 0, len(in.Artifacts))
 		lineItems := make([]ChargedLineItemDTO, 0, len(in.Artifacts))
 		var charged int64
 		for _, artifact := range in.Artifacts {
-			assetRef, line, err := a.commitArtifact(tx, in, commitID, artifact, now)
+			assetRef, line, err := a.commitArtifact(ctx, tx, in, freeze, commitID, artifact, now)
 			if err != nil {
 				return err
 			}
@@ -217,7 +317,7 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 	return dto, nil
 }
 
-func (a *App) commitArtifact(tx *gorm.DB, in CommitInput, commitID string, artifact CommitArtifactInput, now time.Time) (CommittedAssetRefDTO, ChargedLineItemDTO, error) {
+func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, freeze businesscore.CreditFreeze, commitID string, artifact CommitArtifactInput, now time.Time) (CommittedAssetRefDTO, ChargedLineItemDTO, error) {
 	if artifact.ArtifactID == "" || artifact.ResourceType == "" || artifact.ElementType == "" || artifact.StorageObjectRef.ObjectKey == "" {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "commit artifact is incomplete")
 	}
@@ -231,12 +331,21 @@ func (a *App) commitArtifact(tx *gorm.DB, in CommitInput, commitID string, artif
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("estimate_item_id = ?", artifact.EstimateItemID).First(&estimateItem).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "estimate item not found")
 	}
+	if estimateItem.EstimateID != freeze.EstimateID {
+		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "estimate item does not belong to current freeze")
+	}
+	if estimateItem.ItemType != "model_generation" && estimateItem.ItemType != "asset_generation" {
+		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "estimate item is not chargeable by asset commit")
+	}
+	if estimateItem.ResourceType != nil && *estimateItem.ResourceType != "" && *estimateItem.ResourceType != artifact.ResourceType {
+		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "estimate item resource type does not match artifact")
+	}
 	var slot businesscore.GeneratedAssetObjectSlot
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("run_id = ? AND artifact_id = ?", in.RunID, artifact.ArtifactID).First(&slot).Error
 	if err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "generated object slot not found")
 	}
-	if slot.ExpiresAt.Before(now) || (slot.Status != "created" && slot.Status != "uploaded" && slot.Status != "committed") {
+	if slot.ExpiresAt.Before(now) || (slot.Status != "created" && slot.Status != "uploaded") {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "generated object slot is not committable")
 	}
 	if slot.ObjectKey != artifact.StorageObjectRef.ObjectKey || slot.Bucket != artifact.StorageObjectRef.Bucket || slot.ContentType != artifact.StorageObjectRef.ContentType || slot.SizeBytes != artifact.StorageObjectRef.SizeBytes {
@@ -244,6 +353,22 @@ func (a *App) commitArtifact(tx *gorm.DB, in CommitInput, commitID string, artif
 	}
 	if slot.Checksum != nil && *slot.Checksum != "" && artifact.StorageObjectRef.Checksum != "" && *slot.Checksum != artifact.StorageObjectRef.Checksum {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "storage checksum does not match generated slot")
+	}
+	verified, err := a.verifier.VerifyGeneratedObject(ctx, ObjectExpectation{
+		Bucket: slot.Bucket, ObjectKey: slot.ObjectKey, ContentType: slot.ContentType,
+		SizeBytes: slot.SizeBytes, Checksum: value(slot.Checksum),
+	}, artifact.StorageObjectRef)
+	if err != nil {
+		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
+	}
+	if verified.Etag == "" {
+		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeAssetSaveFailed, "uploaded object is missing etag")
+	}
+	slot.Status = "uploaded"
+	slot.Etag = optionalString(verified.Etag)
+	slot.UpdatedAt = now
+	if err := tx.Save(&slot).Error; err != nil {
+		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
 	}
 	assetID := security.RandomID("ast_")
 	title := artifact.ArtifactSummary["display_name"]
@@ -257,10 +382,10 @@ func (a *App) commitArtifact(tx *gorm.DB, in CommitInput, commitID string, artif
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
 	}
 	object := businesscore.AssetStorageObject{
-		ID: security.RandomID("aso_"), AssetID: assetID, Bucket: artifact.StorageObjectRef.Bucket, ObjectKey: &artifact.StorageObjectRef.ObjectKey,
-		ObjectKeyHash: digest(artifact.StorageObjectRef.ObjectKey), ObjectURI: "tos://" + artifact.StorageObjectRef.Bucket + "/" + artifact.StorageObjectRef.ObjectKey,
-		MIMEType: &artifact.StorageObjectRef.ContentType, SizeBytes: &artifact.StorageObjectRef.SizeBytes, Checksum: &artifact.StorageObjectRef.Checksum,
-		Etag: optionalString(artifact.StorageObjectRef.Etag), StorageStatus: "available", PreviewURI: optionalString("/api/assets/" + assetID + "/access?access_type=preview"),
+		ID: security.RandomID("aso_"), AssetID: assetID, Bucket: verified.Bucket, ObjectKey: &verified.ObjectKey,
+		ObjectKeyHash: digest(verified.ObjectKey), ObjectURI: "tos://" + verified.Bucket + "/" + verified.ObjectKey,
+		MIMEType: &verified.ContentType, SizeBytes: &verified.SizeBytes, Checksum: &verified.Checksum,
+		Etag: optionalString(verified.Etag), StorageStatus: "available", PreviewURI: optionalString("/api/assets/" + assetID + "/access?access_type=preview"),
 		DownloadPolicy: mustJSON(map[string]any{"access": "business_signed"}), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := tx.Create(&object).Error; err != nil {
@@ -298,7 +423,7 @@ func (a *App) commitArtifact(tx *gorm.DB, in CommitInput, commitID string, artif
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
 	}
 	slot.Status = "committed"
-	slot.Etag = optionalString(artifact.StorageObjectRef.Etag)
+	slot.Etag = optionalString(verified.Etag)
 	slot.UpdatedAt = now
 	if err := tx.Save(&slot).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -417,13 +542,33 @@ func ensureEstimateItemUnsettled(tx *gorm.DB, estimateItemID string) error {
 	return nil
 }
 
-func validateSafetyEvidence(evidence *businessagent.SafetyEvidenceDTO, now time.Time) error {
+func validateSafetyEvidence(evidence *businessagent.SafetyEvidenceDTO, sessionID, runID, traceID string, now time.Time) error {
 	if evidence == nil || evidence.Result_ != "passed" || evidence.Scene != "generation" || evidence.TargetType != "prompt" {
 		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence is invalid")
 	}
+	if strings.TrimSpace(evidence.SafetyEvidenceId) == "" || !strings.HasPrefix(evidence.EvaluatedObjectDigest, "sha256:") ||
+		strings.TrimSpace(evidence.PolicyVersion) == "" || strings.TrimSpace(evidence.EvidenceVersion) == "" ||
+		strings.TrimSpace(evidence.EvaluatedAt) == "" || strings.TrimSpace(evidence.TraceId) == "" {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence fields are incomplete")
+	}
+	if traceID != "" && evidence.TraceId != traceID {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence trace_id does not match request")
+	}
+	if evidence.SourceSessionId != nil && *evidence.SourceSessionId != "" && *evidence.SourceSessionId != sessionID {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence source_session_id does not match")
+	}
+	if evidence.SourceRunId != nil && *evidence.SourceRunId != "" && *evidence.SourceRunId != runID {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence source_run_id does not match")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, evidence.EvaluatedAt); err != nil {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence evaluated_at is invalid")
+	}
 	if evidence.ExpiresAt != nil && *evidence.ExpiresAt != "" {
 		expires, err := time.Parse(time.RFC3339Nano, *evidence.ExpiresAt)
-		if err == nil && !expires.After(now) {
+		if err != nil {
+			return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence expires_at is invalid")
+		}
+		if !expires.After(now) {
 			return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence is expired")
 		}
 	}
@@ -497,6 +642,17 @@ func value(ptr *string) string {
 		return ""
 	}
 	return *ptr
+}
+
+func normalizeETag(value string) string {
+	return strings.Trim(strings.TrimSpace(value), `"`)
+}
+
+func defaultString(value string, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
 }
 
 func errorCode(err error) string {

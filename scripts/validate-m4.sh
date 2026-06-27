@@ -88,6 +88,15 @@ for needle in ["credit.New", "asset.New", "assetcommit.New", "creditApp", "asset
 
 openapi = yaml.safe_load(Path("api/openapi/business-api.yaml").read_text())
 openapi_paths = set(openapi.get("paths", {}))
+upload_schema = openapi.get("components", {}).get("schemas", {}).get("CreateUploadIntentRequest", {})
+upload_properties = upload_schema.get("properties", {})
+upload_required = set(upload_schema.get("required", []))
+if "safety_evidence_id" in upload_properties:
+    fail("OpenAPI CreateUploadIntentRequest must not accept safety_evidence_id")
+if "safety_evidence" not in upload_properties or "safety_evidence" not in upload_required:
+    fail("OpenAPI CreateUploadIntentRequest must require full safety_evidence object")
+if not openapi.get("components", {}).get("schemas", {}).get("SafetyEvidence"):
+    fail("OpenAPI missing SafetyEvidence schema")
 http_sources = "\n".join(path.read_text() for path in Path("services/business/internal/transport/http").glob("*.go"))
 m4_http_paths = {
     "/api/credits/summary",
@@ -135,6 +144,9 @@ for needle in [
     "EstimateGenerationCredits",
     "createCreditConfirmationInterrupt",
     "runM4ConfirmedGeneration",
+    "artifactUploader.Upload",
+    "confirmationPayloadDigest",
+    "estimateItemsForArtifacts",
     "FreezeCredits",
     "PrepareGeneratedAssetObjects",
     "CommitGeneratedAssetAndCharge",
@@ -150,6 +162,36 @@ for needle in [
 ]:
     if needle not in agent_app:
         fail(f"agent workbench missing M4 close-loop semantic {needle}")
+if '"local-" + artifact.ArtifactID' in agent_app or "local-" in Path("services/agent/internal/application/workbench/uploader.go").read_text():
+    fail("agent M4 upload path must not fabricate local-* etags")
+
+assetcommit_app = Path("services/business/internal/application/assetcommit/app.go").read_text()
+for needle in [
+    "ObjectVerifier",
+    "NewTOSHeadObjectVerifier",
+    "HeadObjectV2",
+    "VerifyGeneratedObject",
+    "CodeAssetSaveFailed",
+    "estimate item does not belong to current freeze",
+    "estimate item is not chargeable by asset commit",
+    "safety evidence does not match credit estimate",
+]:
+    if needle not in assetcommit_app:
+        fail(f"asset commit app missing strict M4 semantic {needle}")
+
+asset_http = Path("services/business/internal/transport/http/handlers_m4.go").read_text()
+if "httpSafetyEvidence" in asset_http or "SafetyEvidenceID" in asset_http:
+    fail("business HTTP upload intent must not fabricate safety evidence from an id")
+
+required_tests = [
+    "services/business/internal/application/credit/app_test.go",
+    "services/business/internal/application/asset/app_test.go",
+    "services/business/internal/application/assetcommit/app_test.go",
+    "services/agent/internal/application/workbench/app_test.go",
+]
+for test_path in required_tests:
+    if not Path(test_path).exists():
+        fail(f"M4 core application test missing: {test_path}")
 
 schema = json.loads(Path("api/agui/agent-workbench-events.schema.json").read_text())
 canonical_events = {

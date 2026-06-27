@@ -302,7 +302,7 @@ func (a *App) EstimateGenerationCredits(ctx context.Context, in EstimateGenerati
 	if strings.TrimSpace(in.ProjectID) == "" || strings.TrimSpace(in.ResourceType) == "" || strings.TrimSpace(in.ModelID) == "" || strings.TrimSpace(in.PricingSnapshotID) == "" {
 		return EstimateDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "project_id, resource_type, model_id and pricing_snapshot_id are required")
 	}
-	if err := validateSafetyEvidence(in.SafetyEvidence, "generation", a.now()); err != nil {
+	if err := validateSafetyEvidence(in.SafetyEvidence, "generation", "prompt", in.Meta.TraceID, a.now()); err != nil {
 		return EstimateDTO{}, err
 	}
 	account, err := a.resolveAccount(ctx, a.repo.DB().WithContext(ctx), in.Auth)
@@ -335,7 +335,7 @@ func (a *App) EstimateToolCredits(ctx context.Context, in EstimateToolInput) (Es
 	if strings.TrimSpace(in.ProjectID) == "" || len(in.ToolUsageItems) == 0 {
 		return EstimateDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "project_id and tool_usage_items are required")
 	}
-	if err := validateSafetyEvidence(in.SafetyEvidence, "generation", a.now()); err != nil {
+	if err := validateSafetyEvidence(in.SafetyEvidence, "generation", "prompt", in.Meta.TraceID, a.now()); err != nil {
 		return EstimateDTO{}, err
 	}
 	account, err := a.resolveAccount(ctx, a.repo.DB().WithContext(ctx), in.Auth)
@@ -460,7 +460,7 @@ func (a *App) ReleaseFrozenCredits(ctx context.Context, in ReleaseInput) (Releas
 		return ReleaseDTO{}, bizerrors.New(bizerrors.CodeProcessing, "release request is processing")
 	}
 	if decision.Mode == idempotency.DecisionReplay {
-		return ReleaseDTO{ReleasedPoints: 0, ReleaseStatus: "replayed"}, nil
+		return a.getReleaseDTO(ctx, in.FreezeID, in.Meta.IdempotencyKey)
 	}
 	var dto ReleaseDTO
 	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -1068,6 +1068,21 @@ func (a *App) lockFreezeAndAccount(tx *gorm.DB, freezeID string) (businesscore.C
 	return freeze, account, nil
 }
 
+func (a *App) getReleaseDTO(ctx context.Context, freezeID, idempotencyKey string) (ReleaseDTO, error) {
+	var freeze businesscore.CreditFreeze
+	if err := a.repo.DB().WithContext(ctx).Where("freeze_id = ?", freezeID).First(&freeze).Error; err != nil {
+		return ReleaseDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "credit freeze not found")
+	}
+	var entry businesscore.CreditLedgerEntry
+	err := a.repo.DB().WithContext(ctx).
+		Where("entry_type = ? AND source_type = ? AND source_id = ? AND idempotency_key = ?", "release", "credit_freeze", freezeID, idempotencyKey).
+		Order("created_at DESC").First(&entry).Error
+	if err != nil {
+		return ReleaseDTO{}, err
+	}
+	return ReleaseDTO{ReleasedPoints: entry.PointsDelta, ReleaseStatus: freeze.Status}, nil
+}
+
 func (a *App) releaseFreezeLocked(tx *gorm.DB, freezeID string, releasePoints int64, reason, runID, traceID, idempotencyKey string) (businesscore.CreditFreeze, int64, error) {
 	freeze, account, err := a.lockFreezeAndAccount(tx, freezeID)
 	if err != nil {
@@ -1202,16 +1217,30 @@ func ensureEstimateItemUnsettled(tx *gorm.DB, estimateItemID string) error {
 	return nil
 }
 
-func validateSafetyEvidence(evidence *businessagent.SafetyEvidenceDTO, expectedScene string, now time.Time) error {
+func validateSafetyEvidence(evidence *businessagent.SafetyEvidenceDTO, expectedScene, expectedTargetType, expectedTraceID string, now time.Time) error {
 	if evidence == nil || strings.TrimSpace(evidence.SafetyEvidenceId) == "" {
 		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence is required")
 	}
-	if evidence.Result_ != "passed" || evidence.Scene != expectedScene || evidence.TargetType != "prompt" {
+	if evidence.Result_ != "passed" || evidence.Scene != expectedScene || evidence.TargetType != expectedTargetType {
 		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence is invalid")
+	}
+	if !strings.HasPrefix(evidence.EvaluatedObjectDigest, "sha256:") ||
+		strings.TrimSpace(evidence.PolicyVersion) == "" || strings.TrimSpace(evidence.EvidenceVersion) == "" ||
+		strings.TrimSpace(evidence.EvaluatedAt) == "" || strings.TrimSpace(evidence.TraceId) == "" {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence fields are incomplete")
+	}
+	if expectedTraceID != "" && evidence.TraceId != expectedTraceID {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence trace_id does not match request")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, evidence.EvaluatedAt); err != nil {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence evaluated_at is invalid")
 	}
 	if evidence.ExpiresAt != nil && *evidence.ExpiresAt != "" {
 		expires, err := time.Parse(time.RFC3339Nano, *evidence.ExpiresAt)
-		if err == nil && !expires.After(now) {
+		if err != nil {
+			return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence expires_at is invalid")
+		}
+		if !expires.After(now) {
 			return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence is expired")
 		}
 	}

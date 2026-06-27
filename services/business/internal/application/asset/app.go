@@ -227,7 +227,7 @@ func (a *App) CreateUploadIntent(ctx context.Context, in CreateUploadIntentInput
 	if in.Meta.IdempotencyKey == "" || in.ProjectID == "" || in.AssetType == "" || in.ContentType == "" || in.SizeBytes <= 0 {
 		return UploadIntentDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "upload intent request is incomplete")
 	}
-	if err := validateSafetyEvidence(in.SafetyEvidence, a.now()); err != nil {
+	if err := validateSafetyEvidence(in.SafetyEvidence, "asset_upload_metadata", "asset_metadata", in.Meta.TraceID, a.now()); err != nil {
 		return UploadIntentDTO{}, err
 	}
 	if err := a.ensureProjectWritable(ctx, in.Auth, in.ProjectID); err != nil {
@@ -236,7 +236,11 @@ func (a *App) CreateUploadIntent(ctx context.Context, in CreateUploadIntentInput
 	if err := validateUpload(in.AssetType, in.ContentType, in.SizeBytes); err != nil {
 		return UploadIntentDTO{}, err
 	}
-	hash := requestHash(in.Meta, in.Auth, map[string]any{"project_id": in.ProjectID, "asset_type": in.AssetType, "content_type": in.ContentType, "size_bytes": in.SizeBytes, "checksum": in.Checksum})
+	hash := requestHash(in.Meta, in.Auth, map[string]any{
+		"project_id": in.ProjectID, "asset_type": in.AssetType, "content_type": in.ContentType,
+		"size_bytes": in.SizeBytes, "checksum": in.Checksum,
+		"safety_evidence_id": in.SafetyEvidence.SafetyEvidenceId, "evaluated_object_digest": in.SafetyEvidence.EvaluatedObjectDigest,
+	})
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "asset.upload_intent", IdempotencyKey: in.Meta.IdempotencyKey, RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID)})
 	if err != nil {
 		return UploadIntentDTO{}, err
@@ -638,16 +642,33 @@ func validateGeneratedArtifact(item GeneratedObjectInput) error {
 	return validateUpload(assetTypeFromResource(item.ResourceType), item.ContentType, item.SizeBytes)
 }
 
-func validateSafetyEvidence(evidence *businessagent.SafetyEvidenceDTO, now time.Time) error {
+func validateSafetyEvidence(evidence *businessagent.SafetyEvidenceDTO, expectedScene, expectedTargetType, expectedTraceID string, now time.Time) error {
 	if evidence == nil {
 		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence is required")
 	}
 	if evidence.Result_ != "passed" {
 		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence must be passed")
 	}
+	if evidence.Scene != expectedScene || evidence.TargetType != expectedTargetType {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence scene or target_type is invalid")
+	}
+	if strings.TrimSpace(evidence.SafetyEvidenceId) == "" || !strings.HasPrefix(evidence.EvaluatedObjectDigest, "sha256:") ||
+		strings.TrimSpace(evidence.PolicyVersion) == "" || strings.TrimSpace(evidence.EvidenceVersion) == "" ||
+		strings.TrimSpace(evidence.EvaluatedAt) == "" || strings.TrimSpace(evidence.TraceId) == "" {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence fields are incomplete")
+	}
+	if expectedTraceID != "" && evidence.TraceId != expectedTraceID {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence trace_id does not match request")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, evidence.EvaluatedAt); err != nil {
+		return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence evaluated_at is invalid")
+	}
 	if evidence.ExpiresAt != nil && *evidence.ExpiresAt != "" {
 		expires, err := time.Parse(time.RFC3339Nano, *evidence.ExpiresAt)
-		if err == nil && !expires.After(now) {
+		if err != nil {
+			return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence expires_at is invalid")
+		}
+		if !expires.After(now) {
 			return bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence is expired")
 		}
 	}

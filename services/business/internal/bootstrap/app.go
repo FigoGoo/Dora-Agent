@@ -72,7 +72,11 @@ func New(cfg config.BusinessConfig) (*App, error) {
 	assetApp := asset.New(repo, guard, auditWriter, asset.TOSOptions{
 		Env: cfg.AppEnv, Bucket: cfg.TOS.Bucket, BaseURL: cfg.TOS.BaseURL,
 	})
-	commitApp := assetcommit.New(repo, guard, auditWriter)
+	commitVerifier, err := assetcommit.NewTOSHeadObjectVerifier(cfg.TOS.Endpoint, cfg.TOS.Region, cfg.TOS.AccessKeyID, cfg.TOS.SecretAccessKey)
+	if err != nil {
+		return nil, fmt.Errorf("create tos object verifier: %w", err)
+	}
+	commitApp := assetcommit.New(repo, guard, auditWriter, commitVerifier)
 	if _, err := adminApp.BootstrapInitialAdmin(contextBackground(), admin.BootstrapInput{
 		Account:             cfg.AdminBootstrapAccount,
 		PasswordHash:        cfg.AdminBootstrapPasswordHash,

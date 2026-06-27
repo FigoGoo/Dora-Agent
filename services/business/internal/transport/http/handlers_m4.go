@@ -122,15 +122,15 @@ func (h m4Handler) createUploadIntent(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Filename         string `json:"filename"`
-		ContentType      string `json:"content_type"`
-		SizeBytes        int64  `json:"size_bytes"`
-		Checksum         string `json:"checksum"`
-		ProjectID        string `json:"project_id"`
-		AssetType        string `json:"asset_type"`
-		MetadataText     string `json:"metadata_text"`
-		SafetyEvidenceID string `json:"safety_evidence_id"`
-		RequestHash      string `json:"request_hash"`
+		Filename       string                           `json:"filename"`
+		ContentType    string                           `json:"content_type"`
+		SizeBytes      int64                            `json:"size_bytes"`
+		Checksum       string                           `json:"checksum"`
+		ProjectID      string                           `json:"project_id"`
+		AssetType      string                           `json:"asset_type"`
+		MetadataText   string                           `json:"metadata_text"`
+		SafetyEvidence *businessagent.SafetyEvidenceDTO `json:"safety_evidence"`
+		RequestHash    string                           `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -142,7 +142,7 @@ func (h m4Handler) createUploadIntent(c *gin.Context) {
 	out, err := h.asset.CreateUploadIntent(c.Request.Context(), asset.CreateUploadIntentInput{
 		Auth: userAuth(c), Meta: meta, ProjectID: req.ProjectID, AssetType: assetType(req.AssetType, req.ContentType),
 		Filename: req.Filename, ContentType: req.ContentType, SizeBytes: req.SizeBytes, Checksum: req.Checksum,
-		MetadataText: req.MetadataText, SafetyEvidence: httpSafetyEvidence(req.SafetyEvidenceID, "asset_upload"),
+		MetadataText: req.MetadataText, SafetyEvidence: req.SafetyEvidence,
 	})
 	respond(c, out, err)
 }
@@ -332,26 +332,6 @@ func assetType(explicit, contentType string) string {
 		return "video"
 	default:
 		return "file"
-	}
-}
-
-func httpSafetyEvidence(id, scene string) *businessagent.SafetyEvidenceDTO {
-	if strings.TrimSpace(id) == "" {
-		return nil
-	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	expires := time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339Nano)
-	return &businessagent.SafetyEvidenceDTO{
-		SafetyEvidenceId:      id,
-		Scene:                 scene,
-		TargetType:            "prompt",
-		Result_:               "passed",
-		PolicyVersion:         "http-m4",
-		EvidenceVersion:       "2026-06-28",
-		EvaluatedObjectDigest: "sha256:http-upload",
-		EvaluatedAt:           now,
-		TraceId:               "business-http",
-		ExpiresAt:             &expires,
 	}
 }
 

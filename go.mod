@@ -5,6 +5,7 @@ go 1.26
 toolchain go1.26.3
 
 require (
+	github.com/cloudwego/eino v0.9.10
 	github.com/cloudwego/gopkg v0.2.0
 	github.com/cloudwego/kitex v0.16.2
 	github.com/gin-gonic/gin v1.12.0
@@ -13,6 +14,8 @@ require (
 	github.com/kitex-contrib/registry-etcd v0.3.0
 	github.com/testcontainers/testcontainers-go v0.43.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.43.0
+	github.com/volcengine/ve-tos-golang-sdk/v2 v2.9.6
+	golang.org/x/crypto v0.51.0
 	gorm.io/datatypes v1.2.7
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.2
@@ -33,7 +36,6 @@ require (
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/cloudwego/configmanager v0.2.3 // indirect
 	github.com/cloudwego/dynamicgo v0.8.0 // indirect
-	github.com/cloudwego/eino v0.9.10 // indirect
 	github.com/cloudwego/fastpb v0.0.6 // indirect
 	github.com/cloudwego/frugal v0.3.1 // indirect
 	github.com/cloudwego/localsession v0.2.1 // indirect
@@ -135,7 +137,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1 // indirect
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect

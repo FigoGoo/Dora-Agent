@@ -1,10 +1,12 @@
 package modeltool
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -40,6 +42,14 @@ type Artifact struct {
 	Checksum        string
 	MetadataSummary map[string]string
 	ElementsSummary map[string]any
+	OpenStream      func(context.Context) (io.ReadCloser, error)
+}
+
+func (a Artifact) Stream(ctx context.Context) (io.ReadCloser, error) {
+	if a.OpenStream == nil {
+		return nil, errors.New("artifact stream is not available")
+	}
+	return a.OpenStream(ctx)
 }
 
 type LocalAdapter struct{}
@@ -77,14 +87,16 @@ func (LocalAdapter) Generate(ctx context.Context, snapshot Snapshot, prompt *ein
 		contentType = "video/mp4"
 		elementType = "video_ref"
 	}
+	body := []byte("dora-local-generated-artifact\n" + snapshot.ModelID + "\n" + snapshot.ResourceType + "\n" + prompt.Content)
+	bodySum := sha256.Sum256(body)
 	artifact := Artifact{
 		ArtifactID:   "art_" + fmt.Sprintf("%x", sum[:8]),
 		ResourceType: resourceType,
 		ElementType:  elementType,
 		Name:         "generated-" + resourceType,
 		ContentType:  contentType,
-		SizeBytes:    int64(1024 + len(prompt.Content)),
-		Checksum:     "sha256:" + fmt.Sprintf("%x", sum[:]),
+		SizeBytes:    int64(len(body)),
+		Checksum:     "sha256:" + fmt.Sprintf("%x", bodySum[:]),
 		MetadataSummary: map[string]string{
 			"model_id":        snapshot.ModelID,
 			"adapter":         "local",
@@ -93,6 +105,9 @@ func (LocalAdapter) Generate(ctx context.Context, snapshot Snapshot, prompt *ein
 		ElementsSummary: map[string]any{
 			"count":                1,
 			"primary_element_type": elementType,
+		},
+		OpenStream: func(context.Context) (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(body)), nil
 		},
 	}
 	return GenerationResult{Status: "completed", Message: prompt, ArtifactCount: 1, Artifacts: []Artifact{artifact}}, nil

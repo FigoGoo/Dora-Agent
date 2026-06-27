@@ -346,14 +346,15 @@ type AssetCommitDTO struct {
 }
 
 type App struct {
-	repo            *repository.Repository
-	gateway         BusinessGateway
-	configVersion   string
-	safetyEvaluator runtimesafety.Evaluator
-	skillRouter     runtimeskill.Router
-	toolChecker     runtimetool.PolicyChecker
-	modelAdapter    modeltool.Adapter
-	turnLoop        turnloop.TurnLoop
+	repo             *repository.Repository
+	gateway          BusinessGateway
+	configVersion    string
+	safetyEvaluator  runtimesafety.Evaluator
+	skillRouter      runtimeskill.Router
+	toolChecker      runtimetool.PolicyChecker
+	modelAdapter     modeltool.Adapter
+	artifactUploader ArtifactUploader
+	turnLoop         turnloop.TurnLoop
 }
 
 func New(repo *repository.Repository, gateway BusinessGateway, configVersion string) *App {
@@ -361,14 +362,21 @@ func New(repo *repository.Repository, gateway BusinessGateway, configVersion str
 		configVersion = "local-dev"
 	}
 	return &App{
-		repo:            repo,
-		gateway:         gateway,
-		configVersion:   configVersion,
-		safetyEvaluator: runtimesafety.NewEvaluator(nil),
-		skillRouter:     runtimeskill.NewRouter(),
-		toolChecker:     runtimetool.NewPolicyChecker(),
-		modelAdapter:    modeltool.LocalAdapter{},
-		turnLoop:        turnloop.New(),
+		repo:             repo,
+		gateway:          gateway,
+		configVersion:    configVersion,
+		safetyEvaluator:  runtimesafety.NewEvaluator(nil),
+		skillRouter:      runtimeskill.NewRouter(),
+		toolChecker:      runtimetool.NewPolicyChecker(),
+		modelAdapter:     modeltool.LocalAdapter{},
+		artifactUploader: NewStreamingArtifactUploader(nil),
+		turnLoop:         turnloop.New(),
+	}
+}
+
+func (a *App) SetArtifactUploader(uploader ArtifactUploader) {
+	if uploader != nil {
+		a.artifactUploader = uploader
 	}
 }
 
@@ -807,6 +815,10 @@ func (a *App) AcceptInterrupt(ctx context.Context, auth AuthContextDTO, runID st
 	if err != nil {
 		return RunDTO{}, err
 	}
+	expectedDigest := confirmationPayloadDigest(interrupt.ConfirmationPayload)
+	if req.ConfirmedPayloadDigest != expectedDigest {
+		return RunDTO{}, apperror.New(apperror.CodeInvalidArgument, "confirmed_payload_digest does not match confirmation payload")
+	}
 	if err := a.repo.ResolveInterrupt(ctx, interrupt.ID, state.InterruptStatusAccepted); err != nil {
 		return RunDTO{}, err
 	}
@@ -820,7 +832,7 @@ func (a *App) AcceptInterrupt(ctx context.Context, auth AuthContextDTO, runID st
 		"interrupt_id":    interrupt.ID,
 		"action":          "confirm",
 		"accepted_at":     time.Now().UTC().Format(time.RFC3339Nano),
-		"payload_digest":  req.ConfirmedPayloadDigest,
+		"payload_digest":  expectedDigest,
 		"next_step":       "resume_turn",
 		"idempotency_key": req.IdempotencyKey,
 	})
@@ -1333,6 +1345,9 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	if a.gateway == nil {
 		return apperror.New(apperror.CodeNotImplemented, "business gateway is not configured")
 	}
+	if a.artifactUploader == nil {
+		a.artifactUploader = NewStreamingArtifactUploader(nil)
+	}
 	run, err := a.repo.GetRun(ctx, runID)
 	if err != nil {
 		return err
@@ -1410,6 +1425,10 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	for _, slot := range slots {
 		slotByArtifact[slot.ArtifactID] = slot
 	}
+	estimateItems, err := estimateItemsForArtifacts(payload.Estimate, result.Artifacts)
+	if err != nil {
+		return a.failM4AfterFreeze(ctx, auth, run, freeze, "estimate_item_unavailable", idempotencyKey, traceID, err)
+	}
 	commitArtifacts := make([]CommitArtifactDTO, 0, len(result.Artifacts))
 	finalElements := make([]FinalElementDTO, 0, len(result.Artifacts))
 	for i, artifact := range result.Artifacts {
@@ -1421,15 +1440,23 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 			"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType, "project_id": run.ProjectID,
 			"freeze_id": freeze.FreezeID, "estimate_id": payload.EstimateID,
 		})
-		estimateItemID := estimateItemForArtifact(payload.Estimate, artifact.ResourceType)
+		uploaded, uploadErr := a.artifactUploader.Upload(ctx, slot, artifact)
+		if uploadErr != nil {
+			_ = a.appendRunEvent(ctx, run, "asset.save.failed", traceID, map[string]any{
+				"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType,
+				"error_code": "ASSET_SAVE_FAILED", "user_message": "产物上传失败", "retryable": true, "support_trace_id": traceID,
+			})
+			return a.failM4AfterFreeze(ctx, auth, run, freeze, "artifact_upload_failed", idempotencyKey, traceID, uploadErr)
+		}
+		estimateItemID := estimateItems[artifact.ArtifactID]
 		commitArtifacts = append(commitArtifacts, CommitArtifactDTO{
 			ArtifactID: artifact.ArtifactID, ResourceType: artifact.ResourceType, ElementType: artifact.ElementType,
-			ArtifactSummary: artifact.MetadataSummary, ContentURIDigest: digestText(slot.ObjectKey),
+			ArtifactSummary: artifact.MetadataSummary, ContentURIDigest: digestText(uploaded.ObjectKey),
 			EstimateItemID: estimateItemID, ToolName: "model_generation", ToolType: artifact.ResourceType, ChargeQuantity: 1,
 			MetadataSummary: artifact.MetadataSummary,
 			StorageObjectRef: CommitStorageObjectRefDTO{
-				ObjectKey: slot.ObjectKey, Bucket: slot.Bucket, ContentType: artifact.ContentType,
-				SizeBytes: artifact.SizeBytes, Checksum: artifact.Checksum, Etag: "local-" + artifact.ArtifactID,
+				ObjectKey: uploaded.ObjectKey, Bucket: uploaded.Bucket, ContentType: uploaded.ContentType,
+				SizeBytes: uploaded.SizeBytes, Checksum: uploaded.Checksum, Etag: uploaded.Etag,
 			},
 		})
 		elementPayload, _ := json.Marshal(map[string]any{"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType, "elements_summary": artifact.ElementsSummary})
@@ -1567,9 +1594,11 @@ func (a *App) createConfirmationInterrupt(ctx context.Context, run *model.Run, i
 	interruptID := securityID("intr_")
 	expiresAt := time.Now().UTC().Add(ttl)
 	confirmationPayload["confirmation_id"] = interruptID
+	payloadJSON := jsonObject(confirmationPayload)
+	payloadDigest := confirmationPayloadDigest(payloadJSON)
 	interrupt := &model.Interrupt{
 		ID: interruptID, RunID: run.ID, InterruptType: interruptType, Status: state.InterruptStatusRequired,
-		Reason: reason, ConfirmationPayload: jsonObject(confirmationPayload), AllowedActions: jsonObject([]string{"confirm", "reject"}),
+		Reason: reason, ConfirmationPayload: payloadJSON, AllowedActions: jsonObject([]string{"confirm", "reject"}),
 		ResumeContext: jsonObject(map[string]any{"next_step": "resume_turn", "source": interruptType}), ExpiresAt: expiresAt, TraceID: traceID,
 	}
 	if err := a.repo.CreateInterrupt(ctx, interrupt); err != nil {
@@ -1594,8 +1623,12 @@ func (a *App) createConfirmationInterrupt(ctx context.Context, run *model.Run, i
 	return a.appendRunEvent(ctx, run, "confirmation.required", traceID, map[string]any{
 		"confirmation_id": interruptID, "interrupt_id": interruptID, "title": title, "summary": summary,
 		"risks": risks, "points": points, "expires_at": expiresAt.Format(time.RFC3339Nano), "actions": []string{"confirm", "reject"},
-		"confirmation_payload": confirmationPayload,
+		"confirmation_payload": confirmationPayload, "payload_digest": payloadDigest,
 	})
+}
+
+func confirmationPayloadDigest(payload datatypes.JSON) string {
+	return digestText(string(payload))
 }
 
 func (a *App) recordPromptSafetyEvaluation(ctx context.Context, run *model.Run, scene, targetType, targetRefID, text, traceID string) (*model.SafetyEvaluation, error) {
@@ -1701,16 +1734,28 @@ func (a *App) latestUserPrompt(ctx context.Context, sessionID string) (string, e
 	return "", apperror.New(apperror.CodeResourceNotFound, "user prompt not found")
 }
 
-func estimateItemForArtifact(estimate CreditEstimateDTO, resourceType string) string {
-	for _, item := range estimate.LineItems {
-		if item.ItemType == "model_generation" && (item.ResourceType == "" || item.ResourceType == resourceType) {
-			return item.EstimateItemID
+func estimateItemsForArtifacts(estimate CreditEstimateDTO, artifacts []modeltool.Artifact) (map[string]string, error) {
+	used := map[int]bool{}
+	out := make(map[string]string, len(artifacts))
+	for _, artifact := range artifacts {
+		matched := -1
+		for i, item := range estimate.LineItems {
+			if used[i] || item.ItemType != "model_generation" || strings.TrimSpace(item.EstimateItemID) == "" {
+				continue
+			}
+			if item.ResourceType != "" && item.ResourceType != artifact.ResourceType {
+				continue
+			}
+			matched = i
+			break
 		}
+		if matched < 0 {
+			return nil, apperror.New(apperror.CodeStateConflict, "generation estimate item is missing for artifact")
+		}
+		used[matched] = true
+		out[artifact.ArtifactID] = estimate.LineItems[matched].EstimateItemID
 	}
-	if len(estimate.LineItems) > 0 {
-		return estimate.LineItems[0].EstimateItemID
-	}
-	return ""
+	return out, nil
 }
 
 func firstArtifactID(artifacts []modeltool.Artifact) string {
