@@ -97,6 +97,15 @@ if "safety_evidence" not in upload_properties or "safety_evidence" not in upload
     fail("OpenAPI CreateUploadIntentRequest must require full safety_evidence object")
 if not openapi.get("components", {}).get("schemas", {}).get("SafetyEvidence"):
     fail("OpenAPI missing SafetyEvidence schema")
+redeem_schema = openapi.get("components", {}).get("schemas", {}).get("CreateRedeemCodesRequest", {})
+redeem_properties = redeem_schema.get("properties", {})
+redeem_required = set(redeem_schema.get("required", []))
+for field in ["count", "points", "code_expires_at", "credit_expires_at", "account_type", "bind_target_type"]:
+    if field not in redeem_properties or field not in redeem_required:
+        fail(f"OpenAPI CreateRedeemCodesRequest missing required code-plan field {field}")
+for legacy_field in ["points_per_code", "code_count", "expires_at", "redeem_channel"]:
+    if legacy_field in redeem_properties:
+        fail(f"OpenAPI CreateRedeemCodesRequest still exposes legacy field {legacy_field}")
 http_sources = "\n".join(path.read_text() for path in Path("services/business/internal/transport/http").glob("*.go"))
 m4_http_paths = {
     "/api/credits/summary",
@@ -182,6 +191,26 @@ for needle in [
 asset_http = Path("services/business/internal/transport/http/handlers_m4.go").read_text()
 if "httpSafetyEvidence" in asset_http or "SafetyEvidenceID" in asset_http:
     fail("business HTTP upload intent must not fabricate safety evidence from an id")
+if 'AccountType: "personal"' in asset_http:
+    fail("business HTTP redeem code creation must not hard-code account_type")
+
+credit_app = Path("services/business/internal/application/credit/app.go").read_text()
+for needle in [
+    "AccountType: accountType",
+    "BindTargetType: bindTargetType",
+    "CodeRedeemCodeTargetMismatch",
+    "target_account_type",
+    "redeemBatchAccountType",
+    "redeemBatchBindTargetType",
+]:
+    if needle not in credit_app:
+        fail(f"credit app missing redeem code account contract semantic {needle}")
+if "strings.Contains(batch.TargetType" in credit_app:
+    fail("credit redeem target validation must not infer account type with strings.Contains(target_type)")
+
+redeem_migration = Path("db/migrations/iterations/2026-06-27-business-core/business/0017_redeem_code_account_contract.up.sql")
+if not redeem_migration.exists() or "account_type" not in redeem_migration.read_text() or "bind_target_type" not in redeem_migration.read_text():
+    fail("missing redeem code account_type/bind_target_type alignment migration")
 
 required_tests = [
     "services/business/internal/application/credit/app_test.go",

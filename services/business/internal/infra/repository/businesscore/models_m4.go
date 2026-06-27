@@ -168,6 +168,9 @@ type RedeemCodeBatch struct {
 	ID                 string     `gorm:"column:id;primaryKey"`
 	BatchNo            string     `gorm:"column:batch_no"`
 	TargetType         string     `gorm:"column:target_type"`
+	AccountType        string     `gorm:"column:account_type"`
+	BindTargetType     string     `gorm:"column:bind_target_type"`
+	BindTargetID       *string    `gorm:"column:bind_target_id"`
 	TargetUserID       *string    `gorm:"column:target_user_id"`
 	TargetEnterpriseID *string    `gorm:"column:target_enterprise_id"`
 	ChannelCode        *string    `gorm:"column:channel_code"`
@@ -177,6 +180,7 @@ type RedeemCodeBatch struct {
 	CreditExpiresAt    *time.Time `gorm:"column:credit_expires_at"`
 	Status             string     `gorm:"column:status"`
 	CreatedByAdminID   *string    `gorm:"column:created_by_admin_id"`
+	Reason             *string    `gorm:"column:reason"`
 	CreatedAt          time.Time  `gorm:"column:created_at"`
 	UpdatedAt          time.Time  `gorm:"column:updated_at"`
 }

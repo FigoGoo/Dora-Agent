@@ -51,6 +51,49 @@ func TestCommitRejectsToolEstimateItem(t *testing.T) {
 	assertNoCommittedAsset(t, env.repo, base.artifactID)
 }
 
+func TestCommitGeneratedAssetAndChargePersistsFullSuccessPath(t *testing.T) {
+	env := newCommitTestEnv(t)
+	base := env.prepare(t, "run_success", nil)
+	estimateItem := base.estimate.LineItems[0]
+	beforeAvailable, beforeFrozen := creditAccountBalance(t, env.repo, base.estimate.CreditAccountID)
+	out, err := env.commit.CommitGeneratedAssetAndCharge(t.Context(), base.commitInput("idem-commit-success", estimateItem.EstimateItemID, "uploaded-success-etag"))
+	if err != nil {
+		t.Fatalf("commit generated asset: %v", err)
+	}
+	if out.CommitStatus != "committed" || out.ChargedPoints != estimateItem.EstimatePoints || out.ReleasedPoints != 0 || len(out.AssetRefs) != 1 {
+		t.Fatalf("unexpected commit result: %#v", out)
+	}
+	if countRows(t, env.repo, &businesscore.Asset{}, "source_ref_id = ?", base.artifactID) != 1 {
+		t.Fatalf("expected generated asset row")
+	}
+	if countRows(t, env.repo, &businesscore.AssetStorageObject{}, "object_key = ?", base.slot.ObjectKey) != 1 {
+		t.Fatalf("expected storage object row")
+	}
+	if countRows(t, env.repo, &businesscore.ProjectAsset{}, "source_artifact_id = ?", base.artifactID) != 1 {
+		t.Fatalf("expected project asset row")
+	}
+	if countRows(t, env.repo, &businesscore.AssetCommitItem{}, "artifact_id = ? AND estimate_item_id = ?", base.artifactID, estimateItem.EstimateItemID) != 1 {
+		t.Fatalf("expected asset commit item row")
+	}
+	if countRows(t, env.repo, &businesscore.CreditLedgerEntry{}, "entry_type = ? AND source_type = ? AND source_id = ?", "asset_commit_charge", "asset_commit", out.LedgerRef) != 0 {
+		t.Fatalf("ledger source_id should be commit_id, not ledger ref")
+	}
+	if countRows(t, env.repo, &businesscore.CreditLedgerEntry{}, "entry_type = ? AND source_type = ? AND points_delta = ?", "asset_commit_charge", "asset_commit", -estimateItem.EstimatePoints) != 1 {
+		t.Fatalf("expected asset commit ledger charge")
+	}
+	var freeze businesscore.CreditFreeze
+	if err := env.repo.DB().WithContext(t.Context()).Where("freeze_id = ?", base.freeze.FreezeID).First(&freeze).Error; err != nil {
+		t.Fatalf("load freeze: %v", err)
+	}
+	if freeze.Status != "charged" || freeze.ChargedPoints != estimateItem.EstimatePoints || freeze.ReleasedPoints != 0 {
+		t.Fatalf("unexpected freeze after commit: %#v", freeze)
+	}
+	afterAvailable, afterFrozen := creditAccountBalance(t, env.repo, base.estimate.CreditAccountID)
+	if afterAvailable != beforeAvailable || afterFrozen != beforeFrozen-estimateItem.EstimatePoints {
+		t.Fatalf("unexpected account balance after commit: before=(%d,%d) after=(%d,%d)", beforeAvailable, beforeFrozen, afterAvailable, afterFrozen)
+	}
+}
+
 type commitTestEnv struct {
 	repo   *businesscore.Repository
 	credit *credit.App
@@ -163,6 +206,24 @@ func assertNoCommittedAsset(t *testing.T, repo *businesscore.Repository, artifac
 	if count != 0 {
 		t.Fatalf("expected no committed assets for %s, found %d", artifactID, count)
 	}
+}
+
+func countRows(t *testing.T, repo *businesscore.Repository, model any, query string, args ...any) int64 {
+	t.Helper()
+	var count int64
+	if err := repo.DB().Model(model).Where(query, args...).Count(&count).Error; err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	return count
+}
+
+func creditAccountBalance(t *testing.T, repo *businesscore.Repository, accountID string) (available, frozen int64) {
+	t.Helper()
+	var account businesscore.CreditAccount
+	if err := repo.DB().Where("id = ?", accountID).First(&account).Error; err != nil {
+		t.Fatalf("load credit account: %v", err)
+	}
+	return account.AvailablePoints, account.FrozenPoints
 }
 
 func codeOf(err error) bizerrors.Code {

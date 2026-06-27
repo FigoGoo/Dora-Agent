@@ -163,10 +163,10 @@ INSERT INTO credit_batches (
 ON CONFLICT DO NOTHING;
 
 INSERT INTO redeem_code_batches (
-  id, batch_no, target_type, target_user_id, target_enterprise_id, channel_code, total_codes, points_per_code, expires_at, status, created_by_admin_id
+  id, batch_no, target_type, account_type, bind_target_type, bind_target_id, target_user_id, target_enterprise_id, channel_code, total_codes, points_per_code, expires_at, credit_expires_at, status, created_by_admin_id, reason
 ) VALUES
-  ('rcb_user_1001', 'RCB-USER-1001', 'user', 'usr_1001', null, 'local', 1, 100, '2026-12-31T23:59:59Z', 'active', 'adm_root'),
-  ('rcb_enterprise_1001', 'RCB-ENT-1001', 'enterprise', null, 'ent_1001', 'enterprise-only', 1, 1000, '2026-12-31T23:59:59Z', 'active', 'adm_root')
+  ('rcb_user_1001', 'RCB-USER-1001', 'user', 'personal', 'user', 'usr_1001', 'usr_1001', null, 'local', 1, 100, '2026-12-31T23:59:59Z', '2026-12-31T23:59:59Z', 'active', 'adm_root', 'seed personal user redeem code'),
+  ('rcb_enterprise_1001', 'RCB-ENT-1001', 'enterprise', 'enterprise', 'enterprise', 'ent_1001', null, 'ent_1001', 'enterprise-only', 1, 1000, '2026-12-31T23:59:59Z', '2026-12-31T23:59:59Z', 'active', 'adm_root', 'seed enterprise redeem code')
 ON CONFLICT (batch_no) DO NOTHING;
 
 INSERT INTO redeem_codes (

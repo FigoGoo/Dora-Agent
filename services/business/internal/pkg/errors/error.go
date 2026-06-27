@@ -19,6 +19,10 @@ const (
 	CodeIdempotencyConflict      Code = "IDEMPOTENCY_CONFLICT"
 	CodeProcessing               Code = "IDEMPOTENCY_PROCESSING"
 	CodeSafetyEvidenceInvalid    Code = "SAFETY_EVIDENCE_INVALID"
+	CodeRedeemCodeInvalid        Code = "REDEEM_CODE_INVALID"
+	CodeRedeemCodeExpired        Code = "REDEEM_CODE_EXPIRED"
+	CodeRedeemCodeUsed           Code = "REDEEM_CODE_USED"
+	CodeRedeemCodeTargetMismatch Code = "REDEEM_CODE_TARGET_MISMATCH"
 	CodeAssetObjectPrepareFailed Code = "ASSET_OBJECT_PREPARE_FAILED"
 	CodeAssetSaveFailed          Code = "ASSET_SAVE_FAILED"
 	CodeInternal                 Code = "INTERNAL_ERROR"
@@ -65,17 +69,17 @@ func (e *BusinessError) HTTPStatus() int {
 		return http.StatusInternalServerError
 	}
 	switch e.Code {
-	case CodeInvalidArgument, CodeSafetyEvidenceInvalid:
+	case CodeInvalidArgument, CodeSafetyEvidenceInvalid, CodeRedeemCodeInvalid:
 		return http.StatusBadRequest
 	case CodeUnauthenticated:
 		return http.StatusUnauthorized
-	case CodePermissionDenied:
+	case CodePermissionDenied, CodeRedeemCodeTargetMismatch:
 		return http.StatusForbidden
 	case CodeCrossSpaceDenied:
 		return http.StatusForbidden
 	case CodeResourceNotFound, CodeProjectNotFound:
 		return http.StatusNotFound
-	case CodeStateConflict, CodeIdempotencyConflict, CodeProcessing, CodeProjectArchived:
+	case CodeStateConflict, CodeIdempotencyConflict, CodeProcessing, CodeProjectArchived, CodeRedeemCodeExpired, CodeRedeemCodeUsed:
 		return http.StatusConflict
 	case CodeAssetObjectPrepareFailed, CodeAssetSaveFailed:
 		return http.StatusBadGateway

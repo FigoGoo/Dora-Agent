@@ -4546,22 +4546,45 @@ components:
       required:
       - batch_id
       - status
-      - points_per_code
-      - code_count
+      - account_type
+      - bind_target_type
+      - points
+      - count
       additionalProperties: false
       properties:
         batch_id:
           type: string
+        batch_no:
+          type: string
         status:
           type: string
-        points_per_code:
-          type: integer
-          format: int64
-        code_count:
-          type: integer
+        account_type:
+          type: string
+          enum:
+          - personal
+          - enterprise
         bind_target_type:
           type: string
-        expires_at:
+          enum:
+          - none
+          - user
+          - enterprise
+          - channel
+        bind_target_id:
+          type: string
+        target_type:
+          type: string
+        channel:
+          type: string
+        points:
+          type: integer
+          format: int64
+        count:
+          type: integer
+        code_expires_at:
+          type: string
+          format: date-time
+        credit_expires_at:
           type: string
           format: date-time
     RedeemCodeExportDTO:
@@ -5389,10 +5412,18 @@ components:
       type: object
       required:
       - redeem_code
+      - target_account_type
       - request_hash
       additionalProperties: false
       properties:
         redeem_code:
+          type: string
+        target_account_type:
+          type: string
+          enum:
+          - personal
+          - enterprise
+        redeem_channel:
           type: string
         request_hash:
           type: string
@@ -5913,26 +5944,44 @@ components:
     CreateRedeemCodesRequest:
       type: object
       required:
-      - points_per_code
-      - code_count
-      - expires_at
+      - count
+      - points
+      - code_expires_at
+      - credit_expires_at
+      - account_type
+      - bind_target_type
       - request_hash
       additionalProperties: false
       properties:
-        points_per_code:
+        count:
+          type: integer
+        points:
           type: integer
           format: int64
-        code_count:
-          type: integer
-        bind_target_type:
-          type: string
-        bind_target_id:
-          type: string
-        redeem_channel:
-          type: string
-        expires_at:
+        code_expires_at:
           type: string
           format: date-time
+        credit_expires_at:
+          type: string
+          format: date-time
+        account_type:
+          type: string
+          enum:
+          - personal
+          - enterprise
+        bind_target_type:
+          type: string
+          enum:
+          - none
+          - user
+          - enterprise
+          - channel
+        bind_target_id:
+          type: string
+        channel:
+          type: string
+        reason:
+          type: string
         request_hash:
           type: string
     DisableRedeemCodeBatchRequest:

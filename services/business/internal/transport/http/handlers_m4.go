@@ -66,8 +66,10 @@ func (h m4Handler) redeemCode(c *gin.Context) {
 		return
 	}
 	var req struct {
-		RedeemCode  string `json:"redeem_code"`
-		RequestHash string `json:"request_hash"`
+		RedeemCode        string `json:"redeem_code"`
+		TargetAccountType string `json:"target_account_type"`
+		RedeemChannel     string `json:"redeem_channel"`
+		RequestHash       string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -76,7 +78,10 @@ func (h m4Handler) redeemCode(c *gin.Context) {
 	if req.RequestHash != "" {
 		meta.RequestHash = req.RequestHash
 	}
-	out, err := h.credit.RedeemCode(c.Request.Context(), credit.RedeemInput{Auth: userAuth(c), Meta: meta, Code: req.RedeemCode})
+	out, err := h.credit.RedeemCode(c.Request.Context(), credit.RedeemInput{
+		Auth: userAuth(c), Meta: meta, Code: req.RedeemCode,
+		TargetAccountType: req.TargetAccountType, RedeemChannel: req.RedeemChannel,
+	})
 	respond(c, out, err)
 }
 
@@ -259,18 +264,47 @@ func (h m4Handler) createRedeemCodes(c *gin.Context) {
 		return
 	}
 	var req struct {
-		PointsPerCode  int64  `json:"points_per_code"`
-		CodeCount      int    `json:"code_count"`
-		BindTargetType string `json:"bind_target_type"`
-		BindTargetID   string `json:"bind_target_id"`
-		RedeemChannel  string `json:"redeem_channel"`
-		ExpiresAt      string `json:"expires_at"`
-		RequestHash    string `json:"request_hash"`
+		Points          int64  `json:"points"`
+		Count           int    `json:"count"`
+		PointsPerCode   int64  `json:"points_per_code"`
+		CodeCount       int    `json:"code_count"`
+		CodeExpiresAt   string `json:"code_expires_at"`
+		CreditExpiresAt string `json:"credit_expires_at"`
+		ExpiresAt       string `json:"expires_at"`
+		AccountType     string `json:"account_type"`
+		BindTargetType  string `json:"bind_target_type"`
+		BindTargetID    string `json:"bind_target_id"`
+		Channel         string `json:"channel"`
+		RedeemChannel   string `json:"redeem_channel"`
+		Reason          string `json:"reason"`
+		RequestHash     string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
-	expiresAt, err := parseRequiredTime(req.ExpiresAt)
+	if req.Count == 0 {
+		req.Count = req.CodeCount
+	}
+	if req.Points == 0 {
+		req.Points = req.PointsPerCode
+	}
+	if req.Channel == "" {
+		req.Channel = req.RedeemChannel
+	}
+	codeExpiresAtRaw := req.CodeExpiresAt
+	if codeExpiresAtRaw == "" {
+		codeExpiresAtRaw = req.ExpiresAt
+	}
+	creditExpiresAtRaw := req.CreditExpiresAt
+	if creditExpiresAtRaw == "" {
+		creditExpiresAtRaw = codeExpiresAtRaw
+	}
+	codeExpiresAt, err := parseRequiredTime(codeExpiresAtRaw)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	creditExpiresAt, err := parseRequiredTime(creditExpiresAtRaw)
 	if err != nil {
 		_ = c.Error(err)
 		return
@@ -280,9 +314,9 @@ func (h m4Handler) createRedeemCodes(c *gin.Context) {
 		meta.RequestHash = req.RequestHash
 	}
 	out, err := h.credit.CreateRedeemCodes(c.Request.Context(), credit.CreateCodesInput{
-		Auth: adminAuth(c), Meta: meta, Count: req.CodeCount, Points: req.PointsPerCode,
-		CodeExpiresAt: expiresAt, CreditExpiresAt: expiresAt, AccountType: "personal",
-		BindTargetType: req.BindTargetType, BindTargetID: req.BindTargetID, Channel: req.RedeemChannel,
+		Auth: adminAuth(c), Meta: meta, Count: req.Count, Points: req.Points,
+		CodeExpiresAt: codeExpiresAt, CreditExpiresAt: creditExpiresAt, AccountType: req.AccountType,
+		BindTargetType: req.BindTargetType, BindTargetID: req.BindTargetID, Channel: req.Channel, Reason: req.Reason,
 	})
 	respond(c, out, err)
 }

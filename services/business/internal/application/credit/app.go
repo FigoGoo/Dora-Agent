@@ -199,9 +199,11 @@ type ChargeToolDTO struct {
 }
 
 type RedeemInput struct {
-	Auth AuthContext
-	Meta RequestMeta
-	Code string
+	Auth              AuthContext
+	Meta              RequestMeta
+	Code              string
+	TargetAccountType string
+	RedeemChannel     string
 }
 
 type RedeemDTO struct {
@@ -252,13 +254,18 @@ type CreateCodesInput struct {
 }
 
 type RedeemCodeDTO struct {
-	BatchID       string     `json:"batch_id"`
-	BatchNo       string     `json:"batch_no"`
-	TargetType    string     `json:"target_type"`
-	TotalCodes    int        `json:"total_codes"`
-	PointsPerCode int64      `json:"points_per_code"`
-	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
-	Status        string     `json:"status"`
+	BatchID         string     `json:"batch_id"`
+	BatchNo         string     `json:"batch_no"`
+	AccountType     string     `json:"account_type"`
+	BindTargetType  string     `json:"bind_target_type"`
+	BindTargetID    string     `json:"bind_target_id,omitempty"`
+	Channel         string     `json:"channel,omitempty"`
+	TargetType      string     `json:"target_type"`
+	TotalCodes      int        `json:"count"`
+	PointsPerCode   int64      `json:"points"`
+	ExpiresAt       *time.Time `json:"code_expires_at,omitempty"`
+	CreditExpiresAt *time.Time `json:"credit_expires_at,omitempty"`
+	Status          string     `json:"status"`
 }
 
 type CreateCodesDTO struct {
@@ -578,11 +585,18 @@ func (a *App) RedeemCode(ctx context.Context, in RedeemInput) (RedeemDTO, error)
 	if in.Code == "" || in.Meta.IdempotencyKey == "" {
 		return RedeemDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "code and idempotency_key are required")
 	}
-	account, err := a.resolveAccount(ctx, a.repo.DB().WithContext(ctx), in.Auth)
+	targetAccountType := normalizeAccountType(in.TargetAccountType)
+	if targetAccountType == "" {
+		return RedeemDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "target_account_type is required")
+	}
+	account, err := a.resolveRedeemAccount(ctx, in.Auth, targetAccountType)
 	if err != nil {
 		return RedeemDTO{}, err
 	}
-	hash := requestHash(in.Meta, in.Auth, map[string]any{"code_digest": codeDigest(in.Code), "account_id": account.ID})
+	hash := requestHash(in.Meta, in.Auth, map[string]any{
+		"code_digest": codeDigest(in.Code), "account_id": account.ID,
+		"target_account_type": targetAccountType, "redeem_channel": strings.TrimSpace(in.RedeemChannel),
+	})
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
 		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.redeem", IdempotencyKey: in.Meta.IdempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
@@ -610,7 +624,7 @@ func (a *App) RedeemCode(ctx context.Context, in RedeemInput) (RedeemDTO, error)
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", code.BatchID).First(&batch).Error; err != nil {
 			return err
 		}
-		if err := validateRedeemTarget(code, batch, account, in.Auth, now); err != nil {
+		if err := validateRedeemTarget(code, batch, account, in.Auth, targetAccountType, in.RedeemChannel, now); err != nil {
 			return err
 		}
 		points := batch.PointsPerCode
@@ -780,10 +794,26 @@ func (a *App) CreateRedeemCodes(ctx context.Context, in CreateCodesInput) (Creat
 	if in.Auth.AdminID == "" {
 		return CreateCodesDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
 	}
-	if in.Count <= 0 || in.Count > 1000 || in.Points <= 0 || !in.CodeExpiresAt.After(a.now()) || !in.CreditExpiresAt.After(a.now()) || in.Meta.IdempotencyKey == "" {
+	now := a.now()
+	accountType := normalizeAccountType(in.AccountType)
+	bindTargetType := normalizeBindTargetType(in.BindTargetType)
+	if in.Count <= 0 || in.Count > 1000 || in.Points <= 0 || !in.CodeExpiresAt.After(now) || !in.CreditExpiresAt.After(now) || in.Meta.IdempotencyKey == "" ||
+		accountType == "" || bindTargetType == "" || !redeemBindTargetMatchesAccount(accountType, bindTargetType) {
 		return CreateCodesDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "invalid redeem code batch request")
 	}
-	hash := requestHash(in.Meta, AuthContext{UserID: in.Auth.AdminID}, map[string]any{"count": in.Count, "points": in.Points, "target": in.BindTargetType + ":" + in.BindTargetID})
+	if (bindTargetType == "user" || bindTargetType == "enterprise") && strings.TrimSpace(in.BindTargetID) == "" {
+		return CreateCodesDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "bind_target_id is required")
+	}
+	if bindTargetType == "channel" && strings.TrimSpace(in.Channel) == "" {
+		return CreateCodesDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "channel is required")
+	}
+	hash := requestHash(in.Meta, AuthContext{UserID: in.Auth.AdminID}, map[string]any{
+		"count": in.Count, "points": in.Points,
+		"code_expires_at":   in.CodeExpiresAt.UTC().Format(time.RFC3339Nano),
+		"credit_expires_at": in.CreditExpiresAt.UTC().Format(time.RFC3339Nano),
+		"account_type":      accountType, "bind_target_type": bindTargetType,
+		"bind_target_id": strings.TrimSpace(in.BindTargetID), "channel": strings.TrimSpace(in.Channel), "reason": strings.TrimSpace(in.Reason),
+	})
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "admin:" + in.Auth.AdminID, Scope: "credit.codes.create", IdempotencyKey: in.Meta.IdempotencyKey, RequestHash: hash, ActorUserID: in.Auth.AdminID})
 	if err != nil {
 		return CreateCodesDTO{}, err
@@ -796,14 +826,14 @@ func (a *App) CreateRedeemCodes(ctx context.Context, in CreateCodesInput) (Creat
 	}
 	var dto CreateCodesDTO
 	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		now := a.now()
 		batchID := security.RandomID("rcb_")
 		batchNo := "RCB-" + strings.ToUpper(batchID[4:12])
 		batch := businesscore.RedeemCodeBatch{
-			ID: batchID, BatchNo: batchNo, TargetType: normalizeTargetType(in.BindTargetType, in.AccountType),
-			TargetUserID: targetPtr(in.BindTargetType, "user", in.BindTargetID), TargetEnterpriseID: targetPtr(in.BindTargetType, "enterprise", in.BindTargetID),
+			ID: batchID, BatchNo: batchNo, TargetType: bindTargetType,
+			AccountType: accountType, BindTargetType: bindTargetType, BindTargetID: optionalString(in.BindTargetID),
+			TargetUserID: targetPtr(bindTargetType, "user", in.BindTargetID), TargetEnterpriseID: targetPtr(bindTargetType, "enterprise", in.BindTargetID),
 			ChannelCode: optionalString(in.Channel), TotalCodes: in.Count, PointsPerCode: in.Points, ExpiresAt: &in.CodeExpiresAt,
-			CreditExpiresAt: &in.CreditExpiresAt, Status: StatusActive, CreatedByAdminID: &in.Auth.AdminID, CreatedAt: now, UpdatedAt: now,
+			CreditExpiresAt: &in.CreditExpiresAt, Status: StatusActive, CreatedByAdminID: &in.Auth.AdminID, Reason: optionalString(in.Reason), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&batch).Error; err != nil {
 			return err
@@ -936,6 +966,32 @@ func (a *App) resolveAccount(ctx context.Context, db *gorm.DB, auth AuthContext)
 		return businesscore.CreditAccount{}, bizerrors.New(bizerrors.CodeResourceNotFound, "personal credit account not found")
 	}
 	return account, nil
+}
+
+func (a *App) resolveRedeemAccount(ctx context.Context, auth AuthContext, accountType string) (businesscore.CreditAccount, error) {
+	if auth.UserID == "" {
+		return businesscore.CreditAccount{}, bizerrors.New(bizerrors.CodeUnauthenticated, "auth context is required")
+	}
+	var account businesscore.CreditAccount
+	switch accountType {
+	case "personal":
+		err := a.repo.DB().WithContext(ctx).Where("account_type = ? AND owner_user_id = ? AND status = ?", "personal", auth.UserID, StatusActive).First(&account).Error
+		if err != nil {
+			return businesscore.CreditAccount{}, bizerrors.New(bizerrors.CodeResourceNotFound, "personal credit account not found")
+		}
+		return account, nil
+	case "enterprise":
+		if auth.EnterpriseID == "" {
+			return businesscore.CreditAccount{}, bizerrors.New(bizerrors.CodeRedeemCodeTargetMismatch, "enterprise context is required")
+		}
+		err := a.repo.DB().WithContext(ctx).Where("account_type = ? AND enterprise_id = ? AND status = ?", "enterprise", auth.EnterpriseID, StatusActive).First(&account).Error
+		if err != nil {
+			return businesscore.CreditAccount{}, bizerrors.New(bizerrors.CodeResourceNotFound, "enterprise credit account not found")
+		}
+		return account, nil
+	default:
+		return businesscore.CreditAccount{}, bizerrors.New(bizerrors.CodeInvalidArgument, "target_account_type is invalid")
+	}
 }
 
 func (a *App) resolveGrantAccount(ctx context.Context, targetType, targetID string) (businesscore.CreditAccount, error) {
@@ -1247,30 +1303,42 @@ func validateSafetyEvidence(evidence *businessagent.SafetyEvidenceDTO, expectedS
 	return nil
 }
 
-func validateRedeemTarget(code businesscore.RedeemCode, batch businesscore.RedeemCodeBatch, account businesscore.CreditAccount, auth AuthContext, now time.Time) error {
-	if code.Status != "unused" || batch.Status != StatusActive {
-		return bizerrors.New(bizerrors.CodeStateConflict, "redeem code is not usable")
+func validateRedeemTarget(code businesscore.RedeemCode, batch businesscore.RedeemCodeBatch, account businesscore.CreditAccount, auth AuthContext, targetAccountType, redeemChannel string, now time.Time) error {
+	if code.Status != "unused" {
+		return bizerrors.New(bizerrors.CodeRedeemCodeUsed, "redeem code has been used")
+	}
+	if batch.Status != StatusActive {
+		return bizerrors.New(bizerrors.CodeRedeemCodeInvalid, "redeem code batch is not active")
 	}
 	if code.ExpiresAt != nil && code.ExpiresAt.Before(now) {
-		return bizerrors.New(bizerrors.CodeStateConflict, "redeem code is expired")
+		return bizerrors.New(bizerrors.CodeRedeemCodeExpired, "redeem code is expired")
 	}
 	if batch.ExpiresAt != nil && batch.ExpiresAt.Before(now) {
-		return bizerrors.New(bizerrors.CodeStateConflict, "redeem code batch is expired")
+		return bizerrors.New(bizerrors.CodeRedeemCodeExpired, "redeem code batch is expired")
+	}
+	if account.AccountType != targetAccountType || redeemBatchAccountType(batch) != targetAccountType {
+		return bizerrors.New(bizerrors.CodeRedeemCodeTargetMismatch, "redeem code account_type does not match")
 	}
 	if account.AccountType == "enterprise" && auth.EnterpriseRole != accountspace.RoleOwner {
 		return bizerrors.New(bizerrors.CodePermissionDenied, "enterprise owner permission is required to redeem enterprise credits")
 	}
-	if batch.TargetUserID != nil && *batch.TargetUserID != auth.UserID {
-		return bizerrors.New(bizerrors.CodePermissionDenied, "redeem code target user does not match")
-	}
-	if batch.TargetEnterpriseID != nil && *batch.TargetEnterpriseID != auth.EnterpriseID {
-		return bizerrors.New(bizerrors.CodePermissionDenied, "redeem code target enterprise does not match")
-	}
-	if strings.Contains(batch.TargetType, "enterprise") && account.AccountType != "enterprise" {
-		return bizerrors.New(bizerrors.CodePermissionDenied, "redeem code is not for personal account")
-	}
-	if strings.Contains(batch.TargetType, "personal") && account.AccountType != "personal" {
-		return bizerrors.New(bizerrors.CodePermissionDenied, "redeem code is not for enterprise account")
+	switch redeemBatchBindTargetType(batch) {
+	case "none":
+		return nil
+	case "user":
+		if redeemBatchBindTargetID(batch) != auth.UserID {
+			return bizerrors.New(bizerrors.CodeRedeemCodeTargetMismatch, "redeem code target user does not match")
+		}
+	case "enterprise":
+		if redeemBatchBindTargetID(batch) != auth.EnterpriseID {
+			return bizerrors.New(bizerrors.CodeRedeemCodeTargetMismatch, "redeem code target enterprise does not match")
+		}
+	case "channel":
+		if value(batch.ChannelCode) == "" || value(batch.ChannelCode) != strings.TrimSpace(redeemChannel) {
+			return bizerrors.New(bizerrors.CodeRedeemCodeTargetMismatch, "redeem code channel does not match")
+		}
+	default:
+		return bizerrors.New(bizerrors.CodeRedeemCodeInvalid, "redeem code bind target is invalid")
 	}
 	return nil
 }
@@ -1420,21 +1488,95 @@ func targetPtr(actual, expected, targetID string) *string {
 	return nil
 }
 
-func normalizeTargetType(bindTargetType, accountType string) string {
-	if bindTargetType == "user" {
-		return "personal_user"
+func normalizeAccountType(accountType string) string {
+	switch strings.TrimSpace(accountType) {
+	case "personal", "enterprise":
+		return strings.TrimSpace(accountType)
+	default:
+		return ""
 	}
-	if bindTargetType == "enterprise" {
+}
+
+func normalizeBindTargetType(bindTargetType string) string {
+	switch strings.TrimSpace(bindTargetType) {
+	case "", "none":
+		return "none"
+	case "user", "enterprise", "channel":
+		return strings.TrimSpace(bindTargetType)
+	default:
+		return ""
+	}
+}
+
+func redeemBindTargetMatchesAccount(accountType, bindTargetType string) bool {
+	switch bindTargetType {
+	case "user":
+		return accountType == "personal"
+	case "enterprise":
+		return accountType == "enterprise"
+	case "none", "channel":
+		return accountType == "personal" || accountType == "enterprise"
+	default:
+		return false
+	}
+}
+
+func redeemBatchAccountType(row businesscore.RedeemCodeBatch) string {
+	if normalized := normalizeAccountType(row.AccountType); normalized != "" {
+		return normalized
+	}
+	if row.TargetType == "enterprise" || row.TargetEnterpriseID != nil {
 		return "enterprise"
 	}
-	if accountType != "" {
-		return accountType
+	return "personal"
+}
+
+func redeemBatchBindTargetType(row businesscore.RedeemCodeBatch) string {
+	if normalized := normalizeBindTargetType(row.BindTargetType); normalized != "" {
+		return normalized
 	}
-	return "personal_enterprise"
+	switch row.TargetType {
+	case "user", "personal_user":
+		return "user"
+	case "enterprise":
+		return "enterprise"
+	case "none":
+		return "none"
+	default:
+		if row.ChannelCode != nil && *row.ChannelCode != "" {
+			return "channel"
+		}
+		return "none"
+	}
+}
+
+func redeemBatchBindTargetID(row businesscore.RedeemCodeBatch) string {
+	if row.BindTargetID != nil && *row.BindTargetID != "" {
+		return *row.BindTargetID
+	}
+	switch redeemBatchBindTargetType(row) {
+	case "user":
+		return value(row.TargetUserID)
+	case "enterprise":
+		return value(row.TargetEnterpriseID)
+	default:
+		return ""
+	}
 }
 
 func redeemBatchDTO(row businesscore.RedeemCodeBatch) RedeemCodeDTO {
-	return RedeemCodeDTO{BatchID: row.ID, BatchNo: row.BatchNo, TargetType: row.TargetType, TotalCodes: row.TotalCodes, PointsPerCode: row.PointsPerCode, ExpiresAt: row.ExpiresAt, Status: row.Status}
+	return RedeemCodeDTO{
+		BatchID: row.ID, BatchNo: row.BatchNo, AccountType: redeemBatchAccountType(row), BindTargetType: redeemBatchBindTargetType(row),
+		BindTargetID: redeemBatchBindTargetID(row), Channel: value(row.ChannelCode), TargetType: row.TargetType, TotalCodes: row.TotalCodes,
+		PointsPerCode: row.PointsPerCode, ExpiresAt: row.ExpiresAt, CreditExpiresAt: row.CreditExpiresAt, Status: row.Status,
+	}
+}
+
+func value(ptr *string) string {
+	if ptr == nil {
+		return ""
+	}
+	return *ptr
 }
 
 func stringMap(in map[string]string) map[string]any {

@@ -7,10 +7,88 @@ import (
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/idempotency"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/auditlog"
+	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
 )
+
+func TestCreateRedeemCodesPersistsAccountTypeAndBindTarget(t *testing.T) {
+	app := newCreditTestApp(t)
+	codeExpiresAt := time.Now().UTC().Add(2 * time.Hour)
+	creditExpiresAt := time.Now().UTC().Add(48 * time.Hour)
+	out, err := app.CreateRedeemCodes(t.Context(), CreateCodesInput{
+		Auth: adminAuth(), Meta: testMeta("trace-code-enterprise", "idem-code-enterprise"),
+		Count: 2, Points: 100, CodeExpiresAt: codeExpiresAt, CreditExpiresAt: creditExpiresAt,
+		AccountType: "enterprise", BindTargetType: "enterprise", BindTargetID: "ent_1001",
+		Channel: "enterprise-campaign", Reason: "enterprise grant",
+	})
+	if err != nil {
+		t.Fatalf("create enterprise redeem codes: %v", err)
+	}
+	var batch businesscore.RedeemCodeBatch
+	if err := app.repo.DB().WithContext(t.Context()).Where("id = ?", out.BatchID).First(&batch).Error; err != nil {
+		t.Fatalf("load redeem code batch: %v", err)
+	}
+	if batch.AccountType != "enterprise" || batch.BindTargetType != "enterprise" || value(batch.BindTargetID) != "ent_1001" {
+		t.Fatalf("redeem code batch did not persist account/bind target fields: %#v", batch)
+	}
+	if batch.TargetType != "enterprise" {
+		t.Fatalf("target_type should remain bind target semantics, got %q", batch.TargetType)
+	}
+	if value(batch.ChannelCode) != "enterprise-campaign" || value(batch.Reason) != "enterprise grant" {
+		t.Fatalf("channel/reason not persisted: %#v", batch)
+	}
+	if batch.CreditExpiresAt == nil || !batch.CreditExpiresAt.Equal(creditExpiresAt) {
+		t.Fatalf("credit_expires_at not persisted, got %#v want %s", batch.CreditExpiresAt, creditExpiresAt)
+	}
+}
+
+func TestCreateRedeemCodesHashIncludesContractFields(t *testing.T) {
+	app := newCreditTestApp(t)
+	codeExpiresAt := time.Now().UTC().Add(2 * time.Hour)
+	creditExpiresAt := time.Now().UTC().Add(48 * time.Hour)
+	base := CreateCodesInput{
+		Auth: adminAuth(), Meta: testMeta("trace-code-hash", "idem-code-hash"),
+		Count: 1, Points: 100, CodeExpiresAt: codeExpiresAt, CreditExpiresAt: creditExpiresAt,
+		AccountType: "personal", BindTargetType: "user", BindTargetID: "usr_1001",
+		Channel: "local", Reason: "first request",
+	}
+	if _, err := app.CreateRedeemCodes(t.Context(), base); err != nil {
+		t.Fatalf("create first redeem code batch: %v", err)
+	}
+	base.AccountType = "enterprise"
+	base.BindTargetType = "enterprise"
+	base.BindTargetID = "ent_1001"
+	base.Reason = "different request"
+	_, err := app.CreateRedeemCodes(t.Context(), base)
+	if codeOf(err) != bizerrors.CodeIdempotencyConflict {
+		t.Fatalf("expected IDEMPOTENCY_CONFLICT for changed contract fields, got %v", err)
+	}
+}
+
+func TestRedeemCodeRejectsAccountTypeMismatchBeforeConsumingCode(t *testing.T) {
+	app := newCreditTestApp(t)
+	enterpriseAuth := AuthContext{
+		UserID: "usr_1001", SpaceID: "sp_enterprise_1001", EnterpriseID: "ent_1001",
+		EnterpriseRole: accountspace.RoleOwner, LoginIdentityType: "enterprise",
+	}
+	_, err := app.RedeemCode(t.Context(), RedeemInput{
+		Auth: enterpriseAuth, Meta: testMeta("trace-redeem-mismatch", "idem-redeem-mismatch"),
+		Code: "seed-user-code", TargetAccountType: "enterprise", RedeemChannel: "local",
+	})
+	if codeOf(err) != bizerrors.CodeRedeemCodeTargetMismatch {
+		t.Fatalf("expected REDEEM_CODE_TARGET_MISMATCH, got %v", err)
+	}
+	var code businesscore.RedeemCode
+	if err := app.repo.DB().WithContext(t.Context()).Where("id = ?", "rc_user_1001").First(&code).Error; err != nil {
+		t.Fatalf("load redeem code: %v", err)
+	}
+	if code.Status != "unused" {
+		t.Fatalf("mismatched redeem consumed code, status=%s", code.Status)
+	}
+}
 
 func TestReleaseFrozenCreditsReplayReturnsOriginalResult(t *testing.T) {
 	app := newCreditTestApp(t)
@@ -64,6 +142,10 @@ func testAuth() AuthContext {
 	return accountspace.AuthContext{UserID: "usr_1001", SpaceID: "sp_personal_1001", LoginIdentityType: "personal"}
 }
 
+func adminAuth() admin.AdminAuth {
+	return admin.AdminAuth{AdminID: "adm_root", Account: "admin@dora.local", SessionID: "admin-session"}
+}
+
 func testMeta(traceID, idem string) RequestMeta {
 	return accountspace.RequestMeta{RequestID: "req-" + idem, TraceID: traceID, IdempotencyKey: idem, Source: "test"}
 }
@@ -76,4 +158,14 @@ func testSafetyEvidence(traceID, sessionID, runID string) *businessagent.SafetyE
 		EvidenceVersion: "2026-06-28", EvaluatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		ExpiresAt: &expires, SourceSessionId: &sessionID, SourceRunId: &runID, TraceId: traceID,
 	}
+}
+
+func codeOf(err error) bizerrors.Code {
+	if err == nil {
+		return ""
+	}
+	if businessErr, ok := err.(*bizerrors.BusinessError); ok {
+		return businessErr.Code
+	}
+	return ""
 }
