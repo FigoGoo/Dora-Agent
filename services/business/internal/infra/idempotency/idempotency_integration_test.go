@@ -24,6 +24,8 @@ func TestBusinessMigrationSeedIdempotencyAuditAndBoundaries(t *testing.T) {
 	guard := idempotency.NewGuard(db.DB, time.Hour, time.Hour)
 	hash := idempotency.HashRequest([]byte(`{"action":"create"}`))
 	input := idempotency.BeginInput{
+		TenantID:       "tenant_space_1",
+		SpaceID:        "space_1",
 		Scope:          "project.create",
 		IdempotencyKey: "idem-key",
 		RequestHash:    hash,
@@ -43,7 +45,7 @@ func TestBusinessMigrationSeedIdempotencyAuditAndBoundaries(t *testing.T) {
 	if processing.Mode != idempotency.DecisionProcessing {
 		t.Fatalf("expected processing, got %s", processing.Mode)
 	}
-	if err := guard.Succeed(t.Context(), decision.Record.ID, "OK", []byte(`{"id":"project_1"}`)); err != nil {
+	if err := guard.Succeed(t.Context(), decision.Record.ID, idempotency.ResultRef{Type: "project", ID: "project_1"}); err != nil {
 		t.Fatalf("succeed idempotency: %v", err)
 	}
 	replay, err := guard.Begin(t.Context(), input)
@@ -53,6 +55,9 @@ func TestBusinessMigrationSeedIdempotencyAuditAndBoundaries(t *testing.T) {
 	if replay.Mode != idempotency.DecisionReplay {
 		t.Fatalf("expected replay, got %s", replay.Mode)
 	}
+	if replay.ReplayResult == nil || replay.ReplayResult.Type != "project" || replay.ReplayResult.ID != "project_1" {
+		t.Fatalf("unexpected replay result: %#v", replay.ReplayResult)
+	}
 	input.RequestHash = idempotency.HashRequest([]byte(`{"action":"different"}`))
 	conflict, err := guard.Begin(t.Context(), input)
 	if err != nil {
@@ -61,19 +66,30 @@ func TestBusinessMigrationSeedIdempotencyAuditAndBoundaries(t *testing.T) {
 	if conflict.Mode != idempotency.DecisionConflict {
 		t.Fatalf("expected conflict, got %s", conflict.Mode)
 	}
+	otherTenant := input
+	otherTenant.TenantID = "tenant_space_2"
+	otherTenant.SpaceID = "space_2"
+	otherTenant.RequestHash = idempotency.HashRequest([]byte(`{"action":"different"}`))
+	crossTenant, err := guard.Begin(t.Context(), otherTenant)
+	if err != nil {
+		t.Fatalf("begin cross-tenant idempotency: %v", err)
+	}
+	if crossTenant.Mode != idempotency.DecisionProceed {
+		t.Fatalf("expected cross-tenant proceed, got %s", crossTenant.Mode)
+	}
 
 	writer := auditlog.NewGormWriter(db.DB)
 	actor := "user_1"
 	if err := writer.Write(t.Context(), &auditlog.AuditRecord{
-		TraceID:           "trace-business-db",
-		RequestID:         "request_1",
-		Source:            "http",
-		ActorUserID:       &actor,
-		LoginIdentityType: "user",
-		Action:            "project.create",
-		ResourceType:      "project",
-		ResourceID:        ptr("project_1"),
-		Result:            "success",
+		TraceID:        "trace-business-db",
+		OperatorType:   "user",
+		OperatorID:     &actor,
+		TenantID:       "tenant_space_1",
+		SpaceID:        ptr("space_1"),
+		BusinessAction: "project.create",
+		ResourceType:   "project",
+		ResourceID:     ptr("project_1"),
+		Result:         "success",
 	}); err != nil {
 		t.Fatalf("write audit: %v", err)
 	}
@@ -83,6 +99,13 @@ func TestBusinessMigrationSeedIdempotencyAuditAndBoundaries(t *testing.T) {
 	}
 	if auditCount != 1 {
 		t.Fatalf("expected 1 audit record, got %d", auditCount)
+	}
+	var uniqueCount int
+	if err := db.DB.Raw("SELECT COUNT(*) FROM pg_indexes WHERE tablename = 'idempotency_records' AND indexdef LIKE '%tenant_id%' AND indexdef LIKE '%scope%' AND indexdef LIKE '%idempotency_key%'").Scan(&uniqueCount).Error; err != nil {
+		t.Fatalf("check tenant idempotency unique index: %v", err)
+	}
+	if uniqueCount == 0 {
+		t.Fatal("expected tenant/scope/idempotency_key unique index")
 	}
 
 	testdb.DownMigrations(t, migrator)

@@ -5,64 +5,67 @@
 
 CREATE TABLE IF NOT EXISTS idempotency_records (
   id varchar(64) PRIMARY KEY,
+  tenant_id varchar(64) NOT NULL,
+  space_id varchar(64),
   idempotency_key varchar(128) NOT NULL,
   request_hash varchar(128) NOT NULL,
-  scope varchar(64) NOT NULL,
+  scope varchar(128) NOT NULL,
   actor_user_id varchar(64) NOT NULL,
-  space_id varchar(64),
   enterprise_id varchar(64),
-  resource_type varchar(64),
-  resource_id varchar(64),
+  result_ref_type varchar(64),
+  result_ref_id varchar(128),
   status varchar(32) NOT NULL DEFAULT 'processing',
-  response_code varchar(64),
-  response_body_digest varchar(128),
-  response_body_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  error_code varchar(64),
   locked_until timestamptz,
   expires_at timestamptz NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (scope, idempotency_key)
+  UNIQUE (tenant_id, scope, idempotency_key)
 );
 
+CREATE INDEX IF NOT EXISTS idx_idempotency_records_tenant_space
+  ON idempotency_records (tenant_id, space_id);
 CREATE INDEX IF NOT EXISTS idx_idempotency_records_actor_created
   ON idempotency_records (actor_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_idempotency_records_request_hash
+  ON idempotency_records (request_hash);
+CREATE INDEX IF NOT EXISTS idx_idempotency_records_result_ref
+  ON idempotency_records (result_ref_type, result_ref_id);
+CREATE INDEX IF NOT EXISTS idx_idempotency_records_error_code
+  ON idempotency_records (error_code);
 CREATE INDEX IF NOT EXISTS idx_idempotency_records_status_locked
   ON idempotency_records (status, locked_until);
 CREATE INDEX IF NOT EXISTS idx_idempotency_records_expires
   ON idempotency_records (expires_at);
 
 CREATE TABLE IF NOT EXISTS business_audit_logs (
-  id varchar(64) PRIMARY KEY,
+  audit_id varchar(64) PRIMARY KEY,
   trace_id varchar(128) NOT NULL,
-  request_id varchar(128) NOT NULL,
-  idempotency_key varchar(128),
-  source varchar(32) NOT NULL,
-  actor_user_id varchar(64),
-  admin_id varchar(64),
-  login_identity_type varchar(32) NOT NULL,
+  operator_type varchar(32) NOT NULL,
+  operator_id varchar(64),
+  tenant_id varchar(64) NOT NULL,
   space_id varchar(64),
-  enterprise_id varchar(64),
-  enterprise_role varchar(64),
-  action varchar(96) NOT NULL,
+  business_action varchar(128) NOT NULL,
   resource_type varchar(64) NOT NULL,
   resource_id varchar(64),
+  before_status varchar(64),
+  after_status varchar(64),
+  reason varchar(512),
   result varchar(32) NOT NULL,
   error_code varchar(64),
-  before_snapshot_digest varchar(128),
-  after_snapshot_digest varchar(128),
-  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
-  client_ip_digest varchar(128),
-  user_agent_digest varchar(128),
+  metadata_summary jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_business_audit_logs_actor_created
-  ON business_audit_logs (actor_user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_business_audit_logs_admin_created
-  ON business_audit_logs (admin_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_business_audit_logs_resource
-  ON business_audit_logs (resource_type, resource_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_business_audit_logs_trace
   ON business_audit_logs (trace_id);
+CREATE INDEX IF NOT EXISTS idx_business_audit_logs_operator_created
+  ON business_audit_logs (operator_type, operator_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_business_audit_logs_tenant_space
+  ON business_audit_logs (tenant_id, space_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_business_audit_logs_resource
+  ON business_audit_logs (resource_type, resource_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_business_audit_logs_action_result
-  ON business_audit_logs (action, result, created_at DESC);
+  ON business_audit_logs (business_action, result, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_business_audit_logs_error_code
+  ON business_audit_logs (error_code);

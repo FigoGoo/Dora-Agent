@@ -3,38 +3,68 @@ package state
 const (
 	SessionStatusActive   = "active"
 	SessionStatusArchived = "archived"
+	SessionStatusExpired  = "expired"
 
-	RunStatusPending     = "pending"
-	RunStatusRunning     = "running"
-	RunStatusInterrupted = "interrupted"
-	RunStatusCompleted   = "completed"
-	RunStatusFailed      = "failed"
-	RunStatusCanceled    = "canceled"
+	RunStatusPending             = "pending"
+	RunStatusRunning             = "running"
+	RunStatusWaitingConfirmation = "waiting_confirmation"
+	RunStatusResuming            = "resuming"
+	RunStatusCompleted           = "completed"
+	RunStatusFailed              = "failed"
+	RunStatusCancelled           = "cancelled"
 
-	InterruptStatusPending  = "pending"
-	InterruptStatusResolved = "resolved"
+	TaskStatusPending   = "pending"
+	TaskStatusRunning   = "running"
+	TaskStatusCompleted = "completed"
+	TaskStatusFailed    = "failed"
+	TaskStatusCancelled = "cancelled"
+
+	InterruptStatusRequired = "required"
+	InterruptStatusAccepted = "accepted"
+	InterruptStatusRejected = "rejected"
 	InterruptStatusExpired  = "expired"
-	InterruptStatusCanceled = "canceled"
+	InterruptStatusResolved = "resolved"
 )
 
 func CanTransitionRun(from, to string) bool {
 	switch from {
 	case RunStatusPending:
-		return to == RunStatusRunning || to == RunStatusCanceled || to == RunStatusFailed
+		return to == RunStatusRunning
 	case RunStatusRunning:
-		return to == RunStatusInterrupted || to == RunStatusCompleted || to == RunStatusFailed || to == RunStatusCanceled
-	case RunStatusInterrupted:
-		return to == RunStatusRunning || to == RunStatusCompleted || to == RunStatusFailed || to == RunStatusCanceled
-	case RunStatusCompleted, RunStatusFailed, RunStatusCanceled:
+		return to == RunStatusWaitingConfirmation || to == RunStatusCompleted || to == RunStatusFailed || to == RunStatusCancelled
+	case RunStatusWaitingConfirmation:
+		return to == RunStatusResuming || to == RunStatusCancelled || to == RunStatusFailed
+	case RunStatusResuming:
+		return to == RunStatusRunning || to == RunStatusFailed
+	case RunStatusCompleted, RunStatusFailed, RunStatusCancelled:
 		return false
 	default:
 		return false
 	}
 }
 
-func CanResolveInterrupt(from, to string) bool {
-	if from != InterruptStatusPending {
+func CanTransitionTask(from, to string) bool {
+	switch from {
+	case TaskStatusPending:
+		return to == TaskStatusRunning || to == TaskStatusCancelled
+	case TaskStatusRunning:
+		return to == TaskStatusCompleted || to == TaskStatusFailed || to == TaskStatusCancelled
+	case TaskStatusCompleted, TaskStatusFailed, TaskStatusCancelled:
+		return false
+	default:
 		return false
 	}
-	return to == InterruptStatusResolved || to == InterruptStatusExpired || to == InterruptStatusCanceled
+}
+
+func CanTransitionInterrupt(from, to string) bool {
+	switch from {
+	case InterruptStatusRequired:
+		return to == InterruptStatusAccepted || to == InterruptStatusRejected || to == InterruptStatusExpired
+	case InterruptStatusAccepted:
+		return to == InterruptStatusResolved
+	case InterruptStatusRejected, InterruptStatusExpired, InterruptStatusResolved:
+		return false
+	default:
+		return false
+	}
 }

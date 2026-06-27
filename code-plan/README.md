@@ -54,7 +54,7 @@ owner：主控 Codex 汇总维护
 | 阶段 | 输入 | 主要产出 | Done 条件 |
 | --- | --- | --- | --- |
 | M0 契约冻结 | Agent 04/06/07、业务 02/15、测试 00 | Thrift、OpenAPI、AG-UI schema、错误码、分页、幂等、fixture 设计冻结 | 契约字段、错误码、幂等键和 fixture 场景在 Agent、业务、测试三侧一致。 |
-| M1 基础设施 | Agent 01/03/11、业务 01/02/14 | 服务骨架、配置、日志、Agent DB、业务 DB、migration、seed | 配置键、日志 trace、SQL up/down、无外键约束和基础测试路径明确。 |
+| M1 基础设施 | Agent 01/03/11、业务 01/02/14 | 服务骨架、配置、日志、Agent DB、业务 DB、migration、seed | 配置键、日志 trace、SQL up/down、无外键约束、Agent 状态机、业务幂等 tenant 维度、审计模型和基础测试路径与 code-plan 语义一致。 |
 | M2 身份项目能力 | 业务 03/04/05、Agent 04/05/07 | 登录空间、企业、管理员、项目、权限、Agent session/run 基础 | session/run 创建前能解析空间、校验项目、区分权限错误和归档状态。 |
 | M3 配置能力 | 业务 06/07/08、Agent 02/08/12/13 | 模型、Tool、Skill、Skill 测试、安全证据、模型 Tool 适配 | Agent 只路由 Published Skill，只执行允许 Tool，安全评估先于预估和生成。 |
 | M4 积分资产闭环 | 业务 09/10/11、Agent 09/10/13 | 预估、确认、冻结、生成、TOS 对象槽、保存、扣费、释放 | 资产保存成功才扣费；失败、取消、归档能释放冻结；DB 事实边界正确。 |

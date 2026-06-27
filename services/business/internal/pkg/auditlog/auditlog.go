@@ -11,28 +11,22 @@ import (
 )
 
 type AuditRecord struct {
-	ID                   string         `gorm:"column:id;primaryKey"`
-	TraceID              string         `gorm:"column:trace_id"`
-	RequestID            string         `gorm:"column:request_id"`
-	IdempotencyKey       *string        `gorm:"column:idempotency_key"`
-	Source               string         `gorm:"column:source"`
-	ActorUserID          *string        `gorm:"column:actor_user_id"`
-	AdminID              *string        `gorm:"column:admin_id"`
-	LoginIdentityType    string         `gorm:"column:login_identity_type"`
-	SpaceID              *string        `gorm:"column:space_id"`
-	EnterpriseID         *string        `gorm:"column:enterprise_id"`
-	EnterpriseRole       *string        `gorm:"column:enterprise_role"`
-	Action               string         `gorm:"column:action"`
-	ResourceType         string         `gorm:"column:resource_type"`
-	ResourceID           *string        `gorm:"column:resource_id"`
-	Result               string         `gorm:"column:result"`
-	ErrorCode            *string        `gorm:"column:error_code"`
-	BeforeSnapshotDigest *string        `gorm:"column:before_snapshot_digest"`
-	AfterSnapshotDigest  *string        `gorm:"column:after_snapshot_digest"`
-	MetadataJSON         datatypes.JSON `gorm:"column:metadata_json;type:jsonb"`
-	ClientIPDigest       *string        `gorm:"column:client_ip_digest"`
-	UserAgentDigest      *string        `gorm:"column:user_agent_digest"`
-	CreatedAt            time.Time      `gorm:"column:created_at"`
+	AuditID         string         `gorm:"column:audit_id;primaryKey"`
+	TraceID         string         `gorm:"column:trace_id"`
+	OperatorType    string         `gorm:"column:operator_type"`
+	OperatorID      *string        `gorm:"column:operator_id"`
+	TenantID        string         `gorm:"column:tenant_id"`
+	SpaceID         *string        `gorm:"column:space_id"`
+	BusinessAction  string         `gorm:"column:business_action"`
+	ResourceType    string         `gorm:"column:resource_type"`
+	ResourceID      *string        `gorm:"column:resource_id"`
+	BeforeStatus    *string        `gorm:"column:before_status"`
+	AfterStatus     *string        `gorm:"column:after_status"`
+	Reason          *string        `gorm:"column:reason"`
+	Result          string         `gorm:"column:result"`
+	ErrorCode       *string        `gorm:"column:error_code"`
+	MetadataSummary datatypes.JSON `gorm:"column:metadata_summary;type:jsonb"`
+	CreatedAt       time.Time      `gorm:"column:created_at"`
 }
 
 func (AuditRecord) TableName() string { return "business_audit_logs" }
@@ -50,14 +44,14 @@ func NewGormWriter(db *gorm.DB) *GormWriter {
 }
 
 func (w *GormWriter) Write(ctx context.Context, record *AuditRecord) error {
-	if record.ID == "" {
-		record.ID = "audit_" + randomHex(16)
+	if record.AuditID == "" {
+		record.AuditID = "audit_" + randomHex(16)
 	}
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = time.Now().UTC()
 	}
-	if len(record.MetadataJSON) == 0 {
-		record.MetadataJSON = datatypes.JSON([]byte(`{}`))
+	if len(record.MetadataSummary) == 0 {
+		record.MetadataSummary = datatypes.JSON([]byte(`{}`))
 	}
 	return w.db.WithContext(ctx).Create(record).Error
 }

@@ -59,11 +59,33 @@ func TestAgentMigrationRepositoryAndBoundaries(t *testing.T) {
 	if err := repo.UpdateRunStatus(t.Context(), run.ID, state.RunStatusRunning, "", ""); err != nil {
 		t.Fatalf("update run running: %v", err)
 	}
-	if err := repo.UpdateRunStatus(t.Context(), run.ID, state.RunStatusCompleted, "", ""); err != nil {
-		t.Fatalf("update run completed: %v", err)
+	if err := repo.UpdateRunStatus(t.Context(), run.ID, state.RunStatusWaitingConfirmation, "", ""); err != nil {
+		t.Fatalf("update run waiting confirmation: %v", err)
+	}
+	if err := repo.UpdateRunStatus(t.Context(), run.ID, state.RunStatusCancelled, "", ""); err != nil {
+		t.Fatalf("update run cancelled: %v", err)
 	}
 	if err := repo.UpdateRunStatus(t.Context(), run.ID, state.RunStatusRunning, "", ""); !errors.Is(err, repository.ErrInvalidStateTransition) {
 		t.Fatalf("expected invalid state transition, got %v", err)
+	}
+	resumableRun := &model.Run{
+		ID:                   "run_2",
+		SessionID:            session.ID,
+		ProjectID:            session.ProjectID,
+		SpaceID:              session.SpaceID,
+		UserID:               session.UserID,
+		TurnNo:               2,
+		RuntimeConfigVersion: "local-dev",
+		IdempotencyKey:       "run-key-2",
+		TraceID:              "trace-agent-db",
+	}
+	if err := repo.CreateRun(t.Context(), resumableRun); err != nil {
+		t.Fatalf("create resumable run: %v", err)
+	}
+	for _, status := range []string{state.RunStatusRunning, state.RunStatusWaitingConfirmation, state.RunStatusResuming, state.RunStatusRunning, state.RunStatusCompleted} {
+		if err := repo.UpdateRunStatus(t.Context(), resumableRun.ID, status, "", ""); err != nil {
+			t.Fatalf("update resumable run to %s: %v", status, err)
+		}
 	}
 
 	events := []model.Event{
@@ -94,11 +116,14 @@ func TestAgentMigrationRepositoryAndBoundaries(t *testing.T) {
 	if err := repo.CreateInterrupt(t.Context(), interrupt); err != nil {
 		t.Fatalf("create interrupt: %v", err)
 	}
-	if got, err := repo.GetPendingInterrupt(t.Context(), run.ID); err != nil || got.ID != interrupt.ID {
-		t.Fatalf("get pending interrupt got=%#v err=%v", got, err)
+	if got, err := repo.GetRequiredInterrupt(t.Context(), run.ID); err != nil || got.ID != interrupt.ID {
+		t.Fatalf("get required interrupt got=%#v err=%v", got, err)
+	}
+	if err := repo.ResolveInterrupt(t.Context(), interrupt.ID, state.InterruptStatusAccepted); err != nil {
+		t.Fatalf("accept interrupt: %v", err)
 	}
 	if err := repo.ResolveInterrupt(t.Context(), interrupt.ID, state.InterruptStatusResolved); err != nil {
-		t.Fatalf("resolve interrupt: %v", err)
+		t.Fatalf("resolve accepted interrupt: %v", err)
 	}
 
 	artifact := &model.Artifact{

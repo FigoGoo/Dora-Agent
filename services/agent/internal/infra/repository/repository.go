@@ -116,7 +116,7 @@ func (r *Repository) UpdateRunStatus(ctx context.Context, id, toStatus, errorCod
 		if toStatus == state.RunStatusRunning && run.StartedAt == nil {
 			updates["started_at"] = now
 		}
-		if toStatus == state.RunStatusCompleted || toStatus == state.RunStatusFailed || toStatus == state.RunStatusCanceled {
+		if toStatus == state.RunStatusCompleted || toStatus == state.RunStatusFailed || toStatus == state.RunStatusCancelled {
 			updates["completed_at"] = now
 		}
 		return tx.Model(&model.Run{}).Where("id = ?", id).Updates(updates).Error
@@ -155,10 +155,10 @@ func (r *Repository) CreateInterrupt(ctx context.Context, interrupt *model.Inter
 	return r.db.WithContext(ctx).Create(interrupt).Error
 }
 
-func (r *Repository) GetPendingInterrupt(ctx context.Context, runID string) (*model.Interrupt, error) {
+func (r *Repository) GetRequiredInterrupt(ctx context.Context, runID string) (*model.Interrupt, error) {
 	var interrupt model.Interrupt
 	if err := r.db.WithContext(ctx).
-		Where("run_id = ? AND status = ? AND deleted_at IS NULL", runID, state.InterruptStatusPending).
+		Where("run_id = ? AND status = ? AND deleted_at IS NULL", runID, state.InterruptStatusRequired).
 		Order("created_at DESC").
 		First(&interrupt).Error; err != nil {
 		return nil, err
@@ -174,15 +174,18 @@ func (r *Repository) ResolveInterrupt(ctx context.Context, id, toStatus string) 
 			First(&interrupt).Error; err != nil {
 			return err
 		}
-		if !state.CanResolveInterrupt(interrupt.Status, toStatus) {
+		if !state.CanTransitionInterrupt(interrupt.Status, toStatus) {
 			return fmt.Errorf("%w: %s -> %s", ErrInvalidStateTransition, interrupt.Status, toStatus)
 		}
 		now := time.Now().UTC()
-		return tx.Model(&model.Interrupt{}).Where("id = ?", id).Updates(map[string]any{
-			"status":      toStatus,
-			"resolved_at": now,
-			"updated_at":  now,
-		}).Error
+		updates := map[string]any{
+			"status":     toStatus,
+			"updated_at": now,
+		}
+		if toStatus == state.InterruptStatusRejected || toStatus == state.InterruptStatusExpired || toStatus == state.InterruptStatusResolved {
+			updates["resolved_at"] = now
+		}
+		return tx.Model(&model.Interrupt{}).Where("id = ?", id).Updates(updates).Error
 	})
 }
 
@@ -299,7 +302,7 @@ func normalizeInterrupt(interrupt *model.Interrupt) {
 		interrupt.UpdatedAt = now
 	}
 	if interrupt.Status == "" {
-		interrupt.Status = state.InterruptStatusPending
+		interrupt.Status = state.InterruptStatusRequired
 	}
 	if len(interrupt.ConfirmationPayload) == 0 {
 		interrupt.ConfirmationPayload = jsonObject()

@@ -93,6 +93,84 @@ if missing:
 print(f"config keys ok: agent={len(agent_keys)} business={len(business_keys)}")
 PY
 
+echo "== M1 semantic alignment with code-plan =="
+python3 - <<'PY'
+from pathlib import Path
+
+def fail(message: str) -> None:
+    raise SystemExit(message)
+
+business_sql = Path("db/migrations/iterations/2026-06-27-business-core/business/0001_common_idempotency_audit.up.sql").read_text()
+idempotency_src = Path("services/business/internal/infra/idempotency/idempotency.go").read_text()
+audit_src = Path("services/business/internal/pkg/auditlog/auditlog.go").read_text()
+state_src = Path("services/agent/internal/domain/state/state.go").read_text()
+
+required_sql = [
+    "tenant_id varchar(64) NOT NULL",
+    "UNIQUE (tenant_id, scope, idempotency_key)",
+    "result_ref_type varchar(64)",
+    "result_ref_id varchar(128)",
+    "error_code varchar(64)",
+    "audit_id varchar(64) PRIMARY KEY",
+    "operator_type varchar(32) NOT NULL",
+    "operator_id varchar(64)",
+    "business_action varchar(128) NOT NULL",
+    "metadata_summary jsonb",
+]
+for needle in required_sql:
+    if needle not in business_sql:
+        fail(f"business migration missing code-plan field/constraint: {needle}")
+
+required_idempotency = [
+    "TenantID",
+    'Where("tenant_id = ? AND scope = ? AND idempotency_key = ?"',
+    "ReplayResult *ResultRef",
+    "ResultRefType",
+    "ResultRefID",
+]
+for needle in required_idempotency:
+    if needle not in idempotency_src:
+        fail(f"idempotency implementation missing tenant/result semantic: {needle}")
+if 'Where("scope = ? AND idempotency_key = ?"' in idempotency_src:
+    fail("idempotency implementation still queries by scope + key without tenant")
+
+required_audit = [
+    "AuditID",
+    "OperatorType",
+    "OperatorID",
+    "TenantID",
+    "BusinessAction",
+    "MetadataSummary",
+]
+for needle in required_audit:
+    if needle not in audit_src:
+        fail(f"audit implementation missing code-plan field: {needle}")
+
+required_states = [
+    'RunStatusWaitingConfirmation = "waiting_confirmation"',
+    'RunStatusResuming            = "resuming"',
+    'RunStatusCancelled           = "cancelled"',
+    'InterruptStatusRequired = "required"',
+    'InterruptStatusAccepted = "accepted"',
+    'InterruptStatusRejected = "rejected"',
+    'InterruptStatusExpired  = "expired"',
+    'InterruptStatusResolved = "resolved"',
+    "RunStatusWaitingConfirmation || to == RunStatusCompleted",
+    "RunStatusResuming || to == RunStatusCancelled || to == RunStatusFailed",
+    "to == RunStatusRunning || to == RunStatusFailed",
+    "InterruptStatusAccepted || to == InterruptStatusRejected || to == InterruptStatusExpired",
+]
+for needle in required_states:
+    if needle not in state_src:
+        fail(f"agent state machine missing code-plan semantic: {needle}")
+
+for forbidden in ["RunStatusInterrupted", 'RunStatusCanceled', "InterruptStatusPending", "InterruptStatusCanceled"]:
+    if forbidden in state_src:
+        fail(f"agent state machine still contains stale semantic: {forbidden}")
+
+print("m1 semantic alignment ok")
+PY
+
 echo "== Go tests, including Testcontainers PostgreSQL integration =="
 go test ./...
 
