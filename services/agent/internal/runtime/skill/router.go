@@ -5,6 +5,8 @@ import "strings"
 type Summary struct {
 	SkillID    string
 	SkillName  string
+	SkillScope string
+	Version    string
 	Status     string
 	RouteHints map[string]string
 }
@@ -27,9 +29,9 @@ func (Router) Route(prompt string, candidates []Summary) RouteResult {
 		if candidate.Status != "published" {
 			continue
 		}
-		for _, hint := range candidate.RouteHints {
+		for key, hint := range candidate.RouteHints {
 			if hint != "" && strings.Contains(prompt, strings.ToLower(hint)) {
-				return RouteResult{Matched: true, Skill: candidate}
+				return RouteResult{Matched: true, Skill: candidate, Reason: "route_hint:" + key}
 			}
 		}
 	}

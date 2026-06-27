@@ -212,8 +212,10 @@ func (g *BusinessGateway) ListAssetElementTypes(ctx context.Context, auth workbe
 	out := make([]workbench.AssetElementTypeDTO, 0, len(resp.ElementTypes))
 	for _, item := range resp.ElementTypes {
 		out = append(out, workbench.AssetElementTypeDTO{
-			ElementType: item.ElementType, DisplayName: item.DisplayName, Category: item.Category,
-			SchemaVersion: item.SchemaVersion, Active: item.Active, SortOrder: item.SortOrder,
+			ElementType: item.ElementType, DisplayName: item.DisplayName, Category: item.Category, SchemaVersion: item.SchemaVersion,
+			SchemaHintJSON: item.SchemaHintJson, RenderHintJSON: value(item.RenderHintJson), Active: item.Active, SortOrder: item.SortOrder,
+			ResourceType: item.ResourceType, Status: item.Status, UsageStage: item.UsageStage, DraftEnabled: item.DraftEnabled,
+			FinalEnabled: item.FinalEnabled, Editable: item.Editable, Referable: item.Referable, RenderHint: value(item.RenderHint),
 		})
 	}
 	return out, resp.SchemaVersion, nil
@@ -222,8 +224,10 @@ func (g *BusinessGateway) ListAssetElementTypes(ctx context.Context, auth workbe
 func (g *BusinessGateway) SaveSkillTestResult(ctx context.Context, auth workbench.AuthContextDTO, req workbench.SkillTestResultRequest, traceID string) (workbench.SkillTestResultDTO, error) {
 	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
 	defer cancel()
+	meta := rpcMeta(traceID)
+	meta.IdempotencyKey = optionalString(req.IdempotencyKey)
 	resp, err := g.skill.SaveSkillTestResult_(callCtx, &businessagent.SaveSkillTestResultRequest{
-		AuthContext: rpcAuth(auth), RequestMeta: rpcMeta(traceID), SkillId: req.SkillID, VersionId: req.VersionID,
+		AuthContext: rpcAuth(auth), RequestMeta: meta, SkillId: req.SkillID, VersionId: req.VersionID,
 		TestRunId: req.TestRunID, TestCaseId: optionalString(req.TestCaseID), Status: req.Status, ActualElementsJson: req.ActualElementsJSON,
 		ErrorCode: optionalString(req.ErrorCode), ErrorSummary: optionalString(req.ErrorSummary), SafetyEvidenceJson: optionalString(req.SafetyEvidenceJSON), AgentTraceId: req.AgentTraceID,
 	}, callopt.WithRPCTimeout(g.timeout))

@@ -139,7 +139,12 @@ func (g StaticGateway) ListAssetElementTypes(ctx context.Context, auth AuthConte
 	if g.ElementTypes != nil {
 		return g.ElementTypes, "2026-06-27", nil
 	}
-	return []AssetElementTypeDTO{{ElementType: "image.primary", DisplayName: "Primary Image", Category: "image", SchemaVersion: "2026-06-27", Active: true, SortOrder: 10}}, "2026-06-27", nil
+	return []AssetElementTypeDTO{{
+		ElementType: "image.primary", DisplayName: "Primary Image", Category: "image", SchemaVersion: "2026-06-27",
+		SchemaHintJSON: `{"type":"object","required":["asset_id"]}`, RenderHintJSON: `{"component":"image_preview"}`,
+		Active: true, SortOrder: 10, ResourceType: "image", Status: "active", UsageStage: "draft_final",
+		DraftEnabled: true, FinalEnabled: true, Editable: true, Referable: true, RenderHint: "image_preview",
+	}}, "2026-06-27", nil
 }
 
 func (g StaticGateway) SaveSkillTestResult(ctx context.Context, auth AuthContextDTO, req SkillTestResultRequest, traceID string) (SkillTestResultDTO, error) {

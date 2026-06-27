@@ -2,7 +2,10 @@ package skillcatalog
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -13,7 +16,6 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/security"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 const (
@@ -22,6 +24,8 @@ const (
 	statusSubmitted  = "submitted"
 	statusPublished  = "published"
 	statusDeprecated = "deprecated"
+
+	defaultConfirmationPolicyJSON = `{"requires_confirmation":false}`
 )
 
 type App struct {
@@ -150,11 +154,16 @@ func (a *App) GetPublishedSkillSpec(ctx context.Context, auth accountspace.AuthC
 	return SkillSpecDTO{
 		SkillID: skill.ID, Version: sv.Version, SkillSpecJSON: string(sv.SkillSpecJSON),
 		OutputSchemaJSON: string(sv.OutputSchemaJSON), ToolRefs: toolRefs, MemoryPolicyJSON: string(sv.MemoryPolicyJSON),
-		ConfirmationPolicyJSON: `{"requires_confirmation":false}`, ExecutionPolicySummaryJSON: executionSummary(toolRefs),
+		ConfirmationPolicyJSON: jsonString(sv.ConfirmationPolicyJSON, defaultConfirmationPolicyJSON), ExecutionPolicySummaryJSON: executionSummary(toolRefs),
 	}, nil
 }
 
-func (a *App) GetReviewCandidateSkillSpec(ctx context.Context, _ accountspace.AuthContext, skillID, versionID, testCaseID string) (ReviewCandidateDTO, error) {
+func (a *App) GetReviewCandidateSkillSpec(ctx context.Context, auth accountspace.AuthContext, skillID, versionID, testCaseID string) (ReviewCandidateDTO, error) {
+	if auth.LoginIdentityType != "admin" {
+		if _, err := a.visibleSkill(ctx, auth, skillID); err != nil {
+			return ReviewCandidateDTO{}, err
+		}
+	}
 	var sv businesscore.SkillVersion
 	if err := a.repo.DB().WithContext(ctx).Where("id = ? AND skill_id = ?", versionID, skillID).First(&sv).Error; err != nil {
 		return ReviewCandidateDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "skill version not found")
@@ -166,7 +175,7 @@ func (a *App) GetReviewCandidateSkillSpec(ctx context.Context, _ accountspace.Au
 	dto := ReviewCandidateDTO{
 		SkillID: skillID, VersionID: sv.ID, SkillSpecJSON: string(sv.SkillSpecJSON),
 		InputSchemaJSON: string(sv.InputSchemaJSON), OutputSchemaJSON: string(sv.OutputSchemaJSON),
-		ToolRefs: toolRefs, MemoryPolicyJSON: string(sv.MemoryPolicyJSON), ConfirmationPolicyJSON: `{"requires_confirmation":false}`,
+		ToolRefs: toolRefs, MemoryPolicyJSON: string(sv.MemoryPolicyJSON), ConfirmationPolicyJSON: jsonString(sv.ConfirmationPolicyJSON, defaultConfirmationPolicyJSON),
 	}
 	if strings.TrimSpace(testCaseID) != "" {
 		var testCase businesscore.SkillTestCase
@@ -179,19 +188,24 @@ func (a *App) GetReviewCandidateSkillSpec(ctx context.Context, _ accountspace.Au
 	return dto, nil
 }
 
-func (a *App) SaveSkillTestResult(ctx context.Context, auth accountspace.AuthContext, skillID, versionID, testRunID, testCaseID, status, actualElementsJSON, errorCode, errorSummary, safetyEvidenceJSON, agentTraceID string) (TestResultDTO, error) {
+func (a *App) SaveSkillTestResult(ctx context.Context, auth accountspace.AuthContext, skillID, versionID, testRunID, testCaseID, idempotencyKey, status, actualElementsJSON, errorCode, errorSummary, safetyEvidenceJSON, agentTraceID string) (TestResultDTO, error) {
 	if strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(testRunID) == "" {
 		return TestResultDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "skill_id, version_id and test_run_id are required")
 	}
+	if strings.TrimSpace(idempotencyKey) != "skill_test:"+testRunID {
+		return TestResultDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "request_meta.idempotency_key must be skill_test:<test_run_id>")
+	}
 	now := a.now()
+	runStatus, ok := normalizeSkillTestStatus(status)
+	if !ok {
+		return TestResultDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "status must be passed, failed, blocked, timeout or rejected")
+	}
 	if !json.Valid([]byte(actualElementsJSON)) {
 		return TestResultDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "actual_elements_json must be json")
 	}
-	if strings.TrimSpace(safetyEvidenceJSON) == "" {
-		safetyEvidenceJSON = "{}"
-	}
-	if !json.Valid([]byte(safetyEvidenceJSON)) {
-		return TestResultDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "safety_evidence_json must be json")
+	evidenceJSON, err := validateSkillTestSafetyEvidence(testRunID, testCaseID, runStatus, safetyEvidenceJSON, agentTraceID, now)
+	if err != nil {
+		return TestResultDTO{}, err
 	}
 	var testCasePtr *string
 	var inputJSON datatypes.JSON = datatypes.JSON([]byte("{}"))
@@ -202,21 +216,37 @@ func (a *App) SaveSkillTestResult(ctx context.Context, auth accountspace.AuthCon
 			inputJSON = testCase.TestInputJSON
 		}
 	}
-	runStatus := normalizeStatus(status, "created")
+	requestHash := skillTestRequestHash(skillID, versionID, testRunID, testCaseID, runStatus, actualElementsJSON, errorCode, errorSummary, evidenceJSON, agentTraceID)
+	db := a.repo.DB().WithContext(ctx)
+	var existing businesscore.SkillTestRun
+	err = db.Where("idempotency_key = ?", idempotencyKey).First(&existing).Error
+	if err == nil {
+		if value(existing.RequestHash) != requestHash {
+			return TestResultDTO{}, bizerrors.New(bizerrors.CodeIdempotencyConflict, "skill test idempotency key conflicts with a different request")
+		}
+		return TestResultDTO{TestRunID: existing.ID, Status: existing.Status, Saved: true}, nil
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return TestResultDTO{}, err
+	}
+	err = db.Where("id = ?", testRunID).First(&existing).Error
+	if err == nil {
+		if value(existing.RequestHash) == requestHash {
+			return TestResultDTO{TestRunID: existing.ID, Status: existing.Status, Saved: true}, nil
+		}
+		return TestResultDTO{}, bizerrors.New(bizerrors.CodeIdempotencyConflict, "test_run_id conflicts with a different skill test request")
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return TestResultDTO{}, err
+	}
 	row := businesscore.SkillTestRun{
 		ID: testRunID, SkillID: skillID, VersionID: versionID, TestCaseID: testCasePtr, Status: runStatus,
 		ExecutionMode: "sandbox", InputJSON: inputJSON, ActualElementsJSON: datatypes.JSON([]byte(actualElementsJSON)),
-		SafetyEvidenceJSON: datatypes.JSON([]byte(safetyEvidenceJSON)), ErrorCode: optionalString(errorCode), ErrorSummary: optionalString(errorSummary),
-		AgentTraceID: optionalString(agentTraceID), FinishedAt: &now, CreatedByUserID: optionalString(auth.UserID), CreatedAt: now, UpdatedAt: now,
+		SafetyEvidenceJSON: datatypes.JSON([]byte(evidenceJSON)), ErrorCode: optionalString(errorCode), ErrorSummary: optionalString(errorSummary),
+		AgentTraceID: optionalString(agentTraceID), IdempotencyKey: optionalString(idempotencyKey), RequestHash: optionalString(requestHash),
+		FinishedAt: &now, CreatedByUserID: optionalString(auth.UserID), CreatedAt: now, UpdatedAt: now,
 	}
-	err := a.repo.DB().WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"status", "test_case_id", "input_json", "actual_elements_json", "safety_evidence_json",
-			"error_code", "error_summary", "agent_trace_id", "finished_at", "updated_at",
-		}),
-	}).Create(&row).Error
-	if err != nil {
+	if err := db.Create(&row).Error; err != nil {
 		return TestResultDTO{}, err
 	}
 	return TestResultDTO{TestRunID: testRunID, Status: runStatus, Saved: true}, nil
@@ -242,17 +272,18 @@ func (a *App) ListSkills(ctx context.Context, auth accountspace.AuthContext, sta
 }
 
 type SaveSkillInput struct {
-	Auth             accountspace.AuthContext
-	SkillID          string
-	SkillKey         string
-	SkillName        string
-	SkillScope       string
-	RouteHints       map[string]string
-	Version          string
-	SkillSpecJSON    string
-	InputSchemaJSON  string
-	OutputSchemaJSON string
-	MemoryPolicyJSON string
+	Auth                   accountspace.AuthContext
+	SkillID                string
+	SkillKey               string
+	SkillName              string
+	SkillScope             string
+	RouteHints             map[string]string
+	Version                string
+	SkillSpecJSON          string
+	InputSchemaJSON        string
+	OutputSchemaJSON       string
+	MemoryPolicyJSON       string
+	ConfirmationPolicyJSON string
 }
 
 func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO, error) {
@@ -262,7 +293,7 @@ func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO,
 	if strings.TrimSpace(in.SkillKey) == "" || strings.TrimSpace(in.SkillName) == "" {
 		return SkillDetailDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "skill_key and skill_name are required")
 	}
-	if !validJSONOrEmpty(in.SkillSpecJSON) || !validJSONOrEmpty(in.InputSchemaJSON) || !validJSONOrEmpty(in.OutputSchemaJSON) {
+	if !validJSONOrEmpty(in.SkillSpecJSON) || !validJSONOrEmpty(in.InputSchemaJSON) || !validJSONOrEmpty(in.OutputSchemaJSON) || !validJSONOrEmpty(in.ConfirmationPolicyJSON) {
 		return SkillDetailDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "skill schemas must be json")
 	}
 	now := a.now()
@@ -286,10 +317,12 @@ func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO,
 	versionID := security.RandomID("skv_")
 	version := normalizeStatus(in.Version, "0.1.0")
 	memory := normalizeJSON(in.MemoryPolicyJSON, `{"enabled":true}`)
+	confirmation := normalizeJSON(in.ConfirmationPolicyJSON, defaultConfirmationPolicyJSON)
 	sv := businesscore.SkillVersion{
 		ID: versionID, SkillID: skill.ID, Version: version, Status: statusDraft, SkillSpecJSON: datatypes.JSON([]byte(normalizeJSON(in.SkillSpecJSON, "{}"))),
 		InputSchemaJSON: datatypes.JSON([]byte(normalizeJSON(in.InputSchemaJSON, "{}"))), OutputSchemaJSON: datatypes.JSON([]byte(normalizeJSON(in.OutputSchemaJSON, "{}"))),
-		MemoryPolicyJSON: datatypes.JSON([]byte(memory)), SubmittedByUserID: &userID, CreatedAt: now, UpdatedAt: now,
+		MemoryPolicyJSON: datatypes.JSON([]byte(memory)), ConfirmationPolicyJSON: datatypes.JSON([]byte(confirmation)),
+		SubmittedByUserID: &userID, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := a.repo.DB().WithContext(ctx).Create(&sv).Error; err != nil {
 		return SkillDetailDTO{}, err
@@ -541,6 +574,102 @@ func stringMap(raw datatypes.JSON) map[string]string {
 	return out
 }
 
+type skillTestSafetyEvidence struct {
+	Scene                 string `json:"scene"`
+	TargetType            string `json:"target_type"`
+	TargetRefID           string `json:"target_ref_id"`
+	EvaluatedObjectDigest string `json:"evaluated_object_digest"`
+	PolicyVersion         string `json:"policy_version"`
+	EvidenceVersion       string `json:"evidence_version"`
+	Result                string `json:"result"`
+	SourceRunID           string `json:"source_run_id"`
+	TraceID               string `json:"trace_id"`
+	ExpiresAt             string `json:"expires_at"`
+}
+
+func normalizeSkillTestStatus(status string) (string, bool) {
+	switch strings.TrimSpace(status) {
+	case "passed", "failed", "blocked", "timeout", "rejected":
+		return strings.TrimSpace(status), true
+	default:
+		return "", false
+	}
+}
+
+func validateSkillTestSafetyEvidence(testRunID, testCaseID, status, raw, agentTraceID string, now time.Time) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if status == "rejected" {
+			return "null", nil
+		}
+		return "", bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety_evidence_json is required")
+	}
+	if !json.Valid([]byte(raw)) {
+		return "", bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety_evidence_json must be json")
+	}
+	var evidence skillTestSafetyEvidence
+	if err := json.Unmarshal([]byte(raw), &evidence); err != nil {
+		return "", bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety_evidence_json must match SafetyEvidenceDTO")
+	}
+	targetRefID := testRunID
+	if strings.TrimSpace(testCaseID) != "" {
+		targetRefID = testCaseID
+	}
+	if evidence.Scene != "skill_test" ||
+		evidence.TargetType != "skill_test_prompt" ||
+		evidence.TargetRefID != targetRefID ||
+		evidence.EvaluatedObjectDigest == "" ||
+		evidence.PolicyVersion == "" ||
+		evidence.EvidenceVersion == "" ||
+		evidence.SourceRunID != testRunID ||
+		evidence.TraceID == "" {
+		return "", bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence fields do not match skill test contract")
+	}
+	if strings.TrimSpace(agentTraceID) != "" && evidence.TraceID != strings.TrimSpace(agentTraceID) {
+		return "", bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence trace_id must match agent_trace_id")
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, evidence.ExpiresAt)
+	if err != nil || !expiresAt.After(now) {
+		return "", bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence expires_at must be in the future")
+	}
+	switch evidence.Result {
+	case "passed", "blocked", "failed":
+	default:
+		return "", bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "safety evidence result must be passed, blocked or failed")
+	}
+	if status == "passed" && evidence.Result != "passed" {
+		return "", bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "passed skill test requires passed safety evidence")
+	}
+	if status == "blocked" && evidence.Result != "blocked" {
+		return "", bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "blocked skill test requires blocked safety evidence")
+	}
+	if status == "rejected" && evidence.Result == "passed" {
+		return "", bizerrors.New(bizerrors.CodeSafetyEvidenceInvalid, "rejected skill test cannot carry passed safety evidence")
+	}
+	return raw, nil
+}
+
+func skillTestRequestHash(skillID, versionID, testRunID, testCaseID, status, actualElementsJSON, errorCode, errorSummary, safetyEvidenceJSON, agentTraceID string) string {
+	payload := map[string]any{
+		"skill_id":             strings.TrimSpace(skillID),
+		"version_id":           strings.TrimSpace(versionID),
+		"test_run_id":          strings.TrimSpace(testRunID),
+		"test_case_id":         strings.TrimSpace(testCaseID),
+		"status":               strings.TrimSpace(status),
+		"actual_elements_json": json.RawMessage(actualElementsJSON),
+		"error_code":           strings.TrimSpace(errorCode),
+		"error_summary":        strings.TrimSpace(errorSummary),
+		"safety_evidence_json": json.RawMessage(safetyEvidenceJSON),
+		"agent_trace_id":       strings.TrimSpace(agentTraceID),
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		encoded = []byte(fmt.Sprintf("%s|%s|%s|%s|%s", skillID, versionID, testRunID, testCaseID, status))
+	}
+	sum := sha256.Sum256(encoded)
+	return fmt.Sprintf("sha256:%x", sum[:])
+}
+
 func mustJSON(value any) datatypes.JSON {
 	if value == nil {
 		return datatypes.JSON([]byte("{}"))
@@ -563,6 +692,14 @@ func normalizeJSON(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func jsonString(raw datatypes.JSON, fallback string) string {
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return fallback
+	}
+	return text
 }
 
 func executionSummary(toolRefs []string) string {

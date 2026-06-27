@@ -39,14 +39,31 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 		"session_id": sessionID,
 		"project_id": "prj_active_1001",
 		"user_input": map[string]any{"client_message_id": "cm_1", "content_type": "text", "text": "hello"},
+		"referenced_assets": []map[string]any{{
+			"asset_id": "ast_generated_1001", "project_id": "prj_active_1001", "source": "project_asset", "purpose": "style_reference", "metadata_digest": "sha256:asset",
+		}},
+		"control_inputs": []map[string]any{{
+			"control_id": "aspect_ratio", "type": "string", "value": "1:1", "display_label": "Aspect ratio", "required": true, "validation_digest": "sha256:control",
+		}},
 	})
 	runID := runResp["run_id"].(string)
-	if runResp["status"] != "pending" {
-		t.Fatalf("expected pending run, got %#v", runResp)
+	if runResp["status"] != "running" {
+		t.Fatalf("expected running run after M3 runtime start, got %#v", runResp)
+	}
+	createdRun, err := repo.GetRun(t.Context(), runID)
+	if err != nil {
+		t.Fatalf("get created run: %v", err)
+	}
+	var inputSummary map[string]any
+	if err := json.Unmarshal(createdRun.InputSummary, &inputSummary); err != nil {
+		t.Fatalf("decode input summary: %v", err)
+	}
+	if inputSummary["referenced_asset_count"] != float64(1) || inputSummary["control_input_count"] != float64(1) {
+		t.Fatalf("run input summary dropped referenced assets or controls: %#v", inputSummary)
 	}
 	stream := httptest.NewRecorder()
 	router.ServeHTTP(stream, agentRequest(http.MethodGet, "/api/agent/runs/"+runID+"/stream", "", nil))
-	if stream.Code != http.StatusOK || !strings.Contains(stream.Body.String(), "agent.run.created") {
+	if stream.Code != http.StatusOK || !strings.Contains(stream.Body.String(), "agent.run.started") {
 		t.Fatalf("stream route did not replay run event, status=%d body=%s", stream.Code, stream.Body.String())
 	}
 	appended := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+runID+"/messages", "idem-append", map[string]any{
@@ -54,6 +71,16 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 	})
 	if appended["run_id"] != runID {
 		t.Fatalf("append input returned unexpected run: %#v", appended)
+	}
+	replayAfterAppend := agentJSON(t, router, http.MethodGet, "/api/agent/runs/"+runID+"/events?after_sequence=0&limit=100", "", nil)
+	events := replayAfterAppend["events"].([]any)
+	assertCanonicalAgentEvents(t, events)
+	assertNoProviderRuntimeRef(t, events)
+	if countEvent(events, "safety.prompt.evaluating") < 2 || countEvent(events, "safety.prompt.evaluated") < 2 {
+		t.Fatalf("expected start and append safety evaluation events: %#v", events)
+	}
+	if !hasAssetElementHints(events) {
+		t.Fatalf("platform dictionary event dropped schema/render hints: %#v", events)
 	}
 
 	conflict := httptest.NewRecorder()
@@ -103,7 +130,7 @@ func TestM2AgentInterruptRoutes(t *testing.T) {
 	accepted := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+acceptRunID+"/interrupts/intr_accept_1001/accept", "idem-accept", map[string]any{
 		"run_id": acceptRunID, "interrupt_id": "intr_accept_1001", "action": "confirm", "confirmed_payload_digest": "sha256:payload",
 	})
-	if accepted["status"] != "resuming" {
+	if accepted["status"] != "running" {
 		t.Fatalf("accept interrupt response = %#v", accepted)
 	}
 
@@ -152,6 +179,17 @@ func TestM2AgentDeniedAccessBodyBlocksResumeActions(t *testing.T) {
 		Space:  workbench.SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
 		Access: workbench.ProjectAccessDTO{Allowed: false, ProjectStatus: "active", CreativeAllowed: true, UserMessage: "project permission denied"},
 	}, "local-dev")})
+	for _, path := range []string{
+		"/api/agent/runs/" + runID,
+		"/api/agent/sessions/" + sessionID + "/messages",
+		"/api/agent/runs/" + runID + "/events?after_sequence=0",
+		"/api/agent/runs/" + runID + "/snapshot",
+	} {
+		readResp := agentRaw(t, deniedRouter, http.MethodGet, path, "", nil)
+		if readResp.Code != http.StatusForbidden || readResp.ErrorCode() != "PERMISSION_DENIED" {
+			t.Fatalf("expected denied read path %s, status=%d body=%#v", path, readResp.Code, readResp.Body)
+		}
+	}
 	acceptResp := agentRaw(t, deniedRouter, http.MethodPost, "/api/agent/runs/"+interruptRunID+"/interrupts/intr_denied_accept_1001/accept", "idem-denied-accept", map[string]any{
 		"run_id": interruptRunID, "interrupt_id": "intr_denied_accept_1001", "action": "confirm", "confirmed_payload_digest": "sha256:payload",
 	})
@@ -228,6 +266,90 @@ func (r agentRawResponse) ErrorCode() string {
 	return ""
 }
 
+func assertCanonicalAgentEvents(t *testing.T, events []any) {
+	t.Helper()
+	allowed := map[string]bool{
+		"agent.run.started": true, "agent.run.completed": true, "agent.run.cancelled": true, "agent.run.failed": true,
+		"agent.thinking.started": true, "agent.thinking.delta": true, "agent.thinking.completed": true,
+		"agent.message.delta": true, "agent.message.completed": true, "agent.skill.selected": true, "agent.skill.missing": true,
+		"platform.tags.updated": true, "chat.controls.requested": true, "chat.controls.locked": true,
+		"safety.prompt.evaluating": true, "safety.prompt.evaluated": true, "safety.prompt.blocked": true, "safety.prompt.failed": true,
+		"credits.estimated": true, "confirmation.required": true, "confirmation.accepted": true, "confirmation.rejected": true,
+		"resume.accepted": true, "credits.frozen": true, "credits.charged": true, "credits.released": true, "credits.insufficient": true,
+		"tool.call.started": true, "tool.call.progress": true, "tool.call.completed": true, "tool.call.failed": true,
+		"generation.progress": true, "generation.artifact.completed": true,
+		"asset.save.started": true, "asset.save.completed": true, "asset.save.failed": true,
+		"workspace.assets.updated": true, "workspace.blackboard.updated": true, "process.snapshot.saved": true,
+		"project.archived.blocked": true,
+	}
+	requiredTopLevel := []string{"event_id", "type", "session_id", "run_id", "project_id", "space_id", "actor_user_id", "sequence", "timestamp", "component", "trace_id", "payload"}
+	for _, raw := range events {
+		event, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("event is not object: %#v", raw)
+		}
+		for _, field := range requiredTopLevel {
+			if _, ok := event[field]; !ok {
+				t.Fatalf("event missing AG-UI top-level field %s: %#v", field, event)
+			}
+		}
+		eventType, _ := event["type"].(string)
+		if !allowed[eventType] {
+			t.Fatalf("non-canonical AG-UI event type %q in %#v", eventType, event)
+		}
+		if _, ok := event["created_at"]; ok {
+			t.Fatalf("AG-UI event leaked non-schema created_at: %#v", event)
+		}
+	}
+}
+
+func countEvent(events []any, eventType string) int {
+	count := 0
+	for _, raw := range events {
+		event, ok := raw.(map[string]any)
+		if ok && event["type"] == eventType {
+			count++
+		}
+	}
+	return count
+}
+
+func hasAssetElementHints(events []any) bool {
+	for _, raw := range events {
+		event, ok := raw.(map[string]any)
+		if !ok || event["type"] != "platform.tags.updated" {
+			continue
+		}
+		payload, ok := event["payload"].(map[string]any)
+		if !ok {
+			continue
+		}
+		items, ok := payload["element_types"].([]any)
+		if !ok || len(items) == 0 {
+			continue
+		}
+		first, ok := items[0].(map[string]any)
+		if ok && first["schema_hint_json"] != "" && first["render_hint_json"] != "" && first["usage_stage"] != "" && first["resource_type"] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func assertNoProviderRuntimeRef(t *testing.T, events []any) {
+	t.Helper()
+	for _, raw := range events {
+		event, ok := raw.(map[string]any)
+		if !ok || event["type"] != "generation.progress" {
+			continue
+		}
+		payload, _ := event["payload"].(map[string]any)
+		if _, exists := payload["provider_runtime_ref"]; exists {
+			t.Fatalf("generation.progress leaked provider_runtime_ref: %#v", event)
+		}
+	}
+}
+
 func agentRaw(t *testing.T, router http.Handler, method, path, idem string, body any) agentRawResponse {
 	t.Helper()
 	req := agentRequest(method, path, idem, body)
@@ -268,8 +390,14 @@ func createWaitingInterruptRun(t *testing.T, router http.Handler, repo *reposito
 		"user_input": map[string]any{"client_message_id": "cm_" + suffix, "content_type": "text", "text": "needs confirmation"},
 	})
 	runID := runResp["run_id"].(string)
-	if err := repo.UpdateRunStatus(t.Context(), runID, state.RunStatusRunning, "", ""); err != nil {
-		t.Fatalf("mark running: %v", err)
+	run, err := repo.GetRun(t.Context(), runID)
+	if err != nil {
+		t.Fatalf("get run before interrupt: %v", err)
+	}
+	if run.Status == state.RunStatusPending {
+		if err := repo.UpdateRunStatus(t.Context(), runID, state.RunStatusRunning, "", ""); err != nil {
+			t.Fatalf("mark running: %v", err)
+		}
 	}
 	if err := repo.UpdateRunStatus(t.Context(), runID, state.RunStatusWaitingConfirmation, "", ""); err != nil {
 		t.Fatalf("mark waiting confirmation: %v", err)

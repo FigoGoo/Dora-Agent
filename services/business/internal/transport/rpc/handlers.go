@@ -211,10 +211,10 @@ func (h *Handler) SaveSkillTestResult_(ctx context.Context, req *businessagent.S
 	if h.Skill == nil {
 		return nil, bizerrors.NotImplemented("SkillCatalogService.SaveSkillTestResult")
 	}
-	if req == nil || req.AuthContext == nil {
-		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "auth_context is required")
+	if req == nil || req.AuthContext == nil || req.RequestMeta == nil {
+		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "auth_context and request_meta are required")
 	}
-	out, err := h.Skill.SaveSkillTestResult(ctx, authContextFromRPC(req.AuthContext), req.SkillId, req.VersionId, req.TestRunId, req.GetTestCaseId(), req.Status, req.ActualElementsJson, req.GetErrorCode(), req.GetErrorSummary(), req.GetSafetyEvidenceJson(), req.AgentTraceId)
+	out, err := h.Skill.SaveSkillTestResult(ctx, authContextFromRPC(req.AuthContext), req.SkillId, req.VersionId, req.TestRunId, req.GetTestCaseId(), value(req.RequestMeta.IdempotencyKey), req.Status, req.ActualElementsJson, req.GetErrorCode(), req.GetErrorSummary(), req.GetSafetyEvidenceJson(), req.AgentTraceId)
 	if err != nil {
 		return nil, err
 	}
@@ -303,6 +303,8 @@ func (h *Handler) ListAssetElementTypes(ctx context.Context, req *businessagent.
 		out = append(out, &businessagent.AssetElementTypeDTO{
 			ElementType: item.ElementType, DisplayName: item.DisplayName, Category: item.Category, SchemaVersion: item.SchemaVersion,
 			SchemaHintJson: item.SchemaHintJSON, RenderHintJson: item.RenderHintJSON, Active: item.Active, SortOrder: item.SortOrder,
+			ResourceType: item.ResourceType, Status: item.Status, UsageStage: item.UsageStage, DraftEnabled: item.DraftEnabled,
+			FinalEnabled: item.FinalEnabled, Editable: item.Editable, Referable: item.Referable, RenderHint: item.RenderHint,
 		})
 	}
 	return &businessagent.ListAssetElementTypesResponse{ElementTypes: out, SchemaVersion: version}, nil

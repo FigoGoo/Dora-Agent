@@ -173,13 +173,14 @@
           "request_id": "req_skill_skill_test_result_save_success",
           "trace_id": "trace_skill_skill_test_result_save_success",
           "source": "agent_service",
-          "idempotency_key": "idem_skill_skill_test_result_save_success"
+          "idempotency_key": "skill_test:skrun_candidate_001"
         },
         "skill_id": "sk_candidate",
         "version_id": "skv_candidate_001",
         "test_run_id": "skrun_candidate_001",
         "status": "passed",
         "actual_elements_json": "[]",
+        "safety_evidence_json": "{\"scene\":\"skill_test\",\"result\":\"passed\",\"target_type\":\"skill_test_prompt\",\"target_ref_id\":\"skrun_candidate_001\",\"evaluated_object_digest\":\"sha256:skill-test-prompt-digest\",\"policy_version\":\"safety-policy-2026-06\",\"evidence_version\":\"1\",\"evaluated_at\":\"2026-06-27T12:00:00Z\",\"expires_at\":\"2026-12-31T12:30:00Z\",\"source_run_id\":\"skrun_candidate_001\",\"trace_id\":\"trace_skill_skill_test_result_save_success\"}",
         "agent_trace_id": "trace_skill_skill_test_result_save_success"
       },
       "assertions": [

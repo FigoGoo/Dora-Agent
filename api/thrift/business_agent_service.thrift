@@ -472,6 +472,14 @@ struct AssetElementTypeDTO {
   6: optional string render_hint_json,
   7: required bool active,
   8: required i32 sort_order,
+  9: required string resource_type,
+  10: required string status,
+  11: required string usage_stage,
+  12: required bool draft_enabled,
+  13: required bool final_enabled,
+  14: required bool editable,
+  15: required bool referable,
+  16: optional string render_hint,
 }
 
 struct ListAssetElementTypesResponse {

@@ -102,15 +102,16 @@ func (h m3Handler) saveSkill(c *gin.Context, skillID string) {
 		return
 	}
 	var req struct {
-		SkillKey         string            `json:"skill_key"`
-		SkillName        string            `json:"skill_name"`
-		SkillScope       string            `json:"skill_scope"`
-		RouteHints       map[string]string `json:"route_hints"`
-		Version          string            `json:"version"`
-		SkillSpecJSON    string            `json:"skill_spec_json"`
-		InputSchemaJSON  string            `json:"input_schema_json"`
-		OutputSchemaJSON string            `json:"output_schema_json"`
-		MemoryPolicyJSON string            `json:"memory_policy_json"`
+		SkillKey               string            `json:"skill_key"`
+		SkillName              string            `json:"skill_name"`
+		SkillScope             string            `json:"skill_scope"`
+		RouteHints             map[string]string `json:"route_hints"`
+		Version                string            `json:"version"`
+		SkillSpecJSON          string            `json:"skill_spec_json"`
+		InputSchemaJSON        string            `json:"input_schema_json"`
+		OutputSchemaJSON       string            `json:"output_schema_json"`
+		MemoryPolicyJSON       string            `json:"memory_policy_json"`
+		ConfirmationPolicyJSON string            `json:"confirmation_policy_json"`
 	}
 	if !bindJSON(c, &req) {
 		return
@@ -118,7 +119,7 @@ func (h m3Handler) saveSkill(c *gin.Context, skillID string) {
 	out, err := h.skill.SaveSkill(c.Request.Context(), skillcatalog.SaveSkillInput{
 		Auth: userAuth(c), SkillID: skillID, SkillKey: req.SkillKey, SkillName: req.SkillName, SkillScope: req.SkillScope,
 		RouteHints: req.RouteHints, Version: req.Version, SkillSpecJSON: req.SkillSpecJSON, InputSchemaJSON: req.InputSchemaJSON,
-		OutputSchemaJSON: req.OutputSchemaJSON, MemoryPolicyJSON: req.MemoryPolicyJSON,
+		OutputSchemaJSON: req.OutputSchemaJSON, MemoryPolicyJSON: req.MemoryPolicyJSON, ConfirmationPolicyJSON: req.ConfirmationPolicyJSON,
 	})
 	respond(c, out, err)
 }
@@ -143,7 +144,7 @@ func (h m3Handler) submitSkillTest(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	out, err := h.skill.SaveSkillTestResult(c.Request.Context(), userAuth(c), c.Param("skill_id"), req.VersionID, req.TestRunID, req.TestCaseID, req.Status, req.ActualElementsJSON, req.ErrorCode, req.ErrorSummary, req.SafetyEvidenceJSON, req.AgentTraceID)
+	out, err := h.skill.SaveSkillTestResult(c.Request.Context(), userAuth(c), c.Param("skill_id"), req.VersionID, req.TestRunID, req.TestCaseID, c.GetHeader("Idempotency-Key"), req.Status, req.ActualElementsJSON, req.ErrorCode, req.ErrorSummary, req.SafetyEvidenceJSON, req.AgentTraceID)
 	respond(c, out, err)
 }
 
@@ -337,21 +338,22 @@ func (h m3Handler) adminListSystemSkills(c *gin.Context) {
 
 func (h m3Handler) adminCreateSystemSkill(c *gin.Context) {
 	var req struct {
-		SkillKey         string            `json:"skill_key"`
-		SkillName        string            `json:"skill_name"`
-		RouteHints       map[string]string `json:"route_hints"`
-		Version          string            `json:"version"`
-		SkillSpecJSON    string            `json:"skill_spec_json"`
-		InputSchemaJSON  string            `json:"input_schema_json"`
-		OutputSchemaJSON string            `json:"output_schema_json"`
-		MemoryPolicyJSON string            `json:"memory_policy_json"`
+		SkillKey               string            `json:"skill_key"`
+		SkillName              string            `json:"skill_name"`
+		RouteHints             map[string]string `json:"route_hints"`
+		Version                string            `json:"version"`
+		SkillSpecJSON          string            `json:"skill_spec_json"`
+		InputSchemaJSON        string            `json:"input_schema_json"`
+		OutputSchemaJSON       string            `json:"output_schema_json"`
+		MemoryPolicyJSON       string            `json:"memory_policy_json"`
+		ConfirmationPolicyJSON string            `json:"confirmation_policy_json"`
 	}
 	if !bindJSON(c, &req) {
 		return
 	}
 	auth := userAuth(c)
 	auth.UserID = adminAuth(c).AdminID
-	out, err := h.skill.SaveSkill(c.Request.Context(), skillcatalog.SaveSkillInput{Auth: auth, SkillKey: req.SkillKey, SkillName: req.SkillName, SkillScope: "public", RouteHints: req.RouteHints, Version: req.Version, SkillSpecJSON: req.SkillSpecJSON, InputSchemaJSON: req.InputSchemaJSON, OutputSchemaJSON: req.OutputSchemaJSON, MemoryPolicyJSON: req.MemoryPolicyJSON})
+	out, err := h.skill.SaveSkill(c.Request.Context(), skillcatalog.SaveSkillInput{Auth: auth, SkillKey: req.SkillKey, SkillName: req.SkillName, SkillScope: "public", RouteHints: req.RouteHints, Version: req.Version, SkillSpecJSON: req.SkillSpecJSON, InputSchemaJSON: req.InputSchemaJSON, OutputSchemaJSON: req.OutputSchemaJSON, MemoryPolicyJSON: req.MemoryPolicyJSON, ConfirmationPolicyJSON: req.ConfirmationPolicyJSON})
 	respond(c, out, err)
 }
 
@@ -369,7 +371,7 @@ func (h m3Handler) adminSkillTest(c *gin.Context) {
 	}
 	auth := userAuth(c)
 	auth.UserID = adminAuth(c).AdminID
-	out, err := h.skill.SaveSkillTestResult(c.Request.Context(), auth, c.Param("skill_id"), req.VersionID, req.TestRunID, req.TestCaseID, req.Status, req.ActualElementsJSON, "", "", req.SafetyEvidenceJSON, loggerTrace(c))
+	out, err := h.skill.SaveSkillTestResult(c.Request.Context(), auth, c.Param("skill_id"), req.VersionID, req.TestRunID, req.TestCaseID, c.GetHeader("Idempotency-Key"), req.Status, req.ActualElementsJSON, "", "", req.SafetyEvidenceJSON, loggerTrace(c))
 	respond(c, out, err)
 }
 

@@ -214,6 +214,7 @@ type SkillVersion struct {
 	InputSchemaJSON         datatypes.JSON `gorm:"column:input_schema_json;type:jsonb"`
 	OutputSchemaJSON        datatypes.JSON `gorm:"column:output_schema_json;type:jsonb"`
 	MemoryPolicyJSON        datatypes.JSON `gorm:"column:memory_policy_json;type:jsonb"`
+	ConfirmationPolicyJSON  datatypes.JSON `gorm:"column:confirmation_policy_json;type:jsonb"`
 	Changelog               *string        `gorm:"column:changelog"`
 	SubmittedByUserID       *string        `gorm:"column:submitted_by_user_id"`
 	ReviewedByAdminID       *string        `gorm:"column:reviewed_by_admin_id"`
@@ -279,6 +280,8 @@ type SkillTestRun struct {
 	ErrorCode          *string        `gorm:"column:error_code"`
 	ErrorSummary       *string        `gorm:"column:error_summary"`
 	AgentTraceID       *string        `gorm:"column:agent_trace_id"`
+	IdempotencyKey     *string        `gorm:"column:idempotency_key"`
+	RequestHash        *string        `gorm:"column:request_hash"`
 	StartedAt          *time.Time     `gorm:"column:started_at"`
 	FinishedAt         *time.Time     `gorm:"column:finished_at"`
 	CreatedByUserID    *string        `gorm:"column:created_by_user_id"`

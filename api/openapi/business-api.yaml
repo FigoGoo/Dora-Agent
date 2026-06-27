@@ -4016,6 +4016,13 @@ components:
       - display_name
       - category
       - schema_version
+      - resource_type
+      - status
+      - usage_stage
+      - draft_enabled
+      - final_enabled
+      - editable
+      - referable
       - active
       additionalProperties: false
       properties:
@@ -4035,6 +4042,22 @@ components:
           type: boolean
         sort_order:
           type: integer
+        resource_type:
+          type: string
+        status:
+          type: string
+        usage_stage:
+          type: string
+        draft_enabled:
+          type: boolean
+        final_enabled:
+          type: boolean
+        editable:
+          type: boolean
+        referable:
+          type: boolean
+        render_hint:
+          type: string
     WorkSummaryDTO:
       type: object
       required:

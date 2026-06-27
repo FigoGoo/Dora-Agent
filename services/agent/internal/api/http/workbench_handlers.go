@@ -50,7 +50,7 @@ func (h workbenchHandler) getSession(c *gin.Context) {
 }
 
 func (h workbenchHandler) listMessages(c *gin.Context) {
-	out, err := h.app.ListMessages(c.Request.Context(), auth(c), c.Param("session_id"), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	out, err := h.app.ListMessages(c.Request.Context(), auth(c), c.Param("session_id"), intQuery(c, "limit", 10), intQuery(c, "offset", 0), traceID(c))
 	respond(c, out, err)
 }
 
@@ -65,7 +65,7 @@ func (h workbenchHandler) createRun(c *gin.Context) {
 }
 
 func (h workbenchHandler) getRun(c *gin.Context) {
-	out, err := h.app.GetRun(c.Request.Context(), auth(c), c.Param("run_id"))
+	out, err := h.app.GetRun(c.Request.Context(), auth(c), c.Param("run_id"), traceID(c))
 	respond(c, out, err)
 }
 
@@ -76,7 +76,7 @@ func (h workbenchHandler) openRunStream(c *gin.Context) {
 			after = parsed
 		}
 	}
-	out, err := h.app.ReplayEvents(c.Request.Context(), auth(c), c.Param("run_id"), after, 200)
+	out, err := h.app.ReplayEvents(c.Request.Context(), auth(c), c.Param("run_id"), after, 200, traceID(c))
 	if err != nil {
 		_ = c.Error(err)
 		return
@@ -97,7 +97,7 @@ func (h workbenchHandler) openRunStream(c *gin.Context) {
 		case <-c.Request.Context().Done():
 			return
 		case <-heartbeat.C:
-			replay, replayErr := h.app.ReplayEvents(c.Request.Context(), auth(c), c.Param("run_id"), next, 200)
+			replay, replayErr := h.app.ReplayEvents(c.Request.Context(), auth(c), c.Param("run_id"), next, 200, traceID(c))
 			if replayErr != nil {
 				_ = c.Error(replayErr)
 				return
@@ -121,7 +121,7 @@ func (h workbenchHandler) replayEvents(c *gin.Context) {
 			after = parsed
 		}
 	}
-	out, err := h.app.ReplayEvents(c.Request.Context(), auth(c), c.Param("run_id"), after, intQuery(c, "limit", 10))
+	out, err := h.app.ReplayEvents(c.Request.Context(), auth(c), c.Param("run_id"), after, intQuery(c, "limit", 10), traceID(c))
 	respond(c, out, err)
 }
 

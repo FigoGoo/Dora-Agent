@@ -4785,6 +4785,14 @@ type AssetElementTypeDTO struct {
 	RenderHintJson *string `thrift:"render_hint_json,6,optional" frugal:"6,optional,string" json:"render_hint_json,omitempty"`
 	Active         bool    `thrift:"active,7,required" frugal:"7,required,bool" json:"active"`
 	SortOrder      int32   `thrift:"sort_order,8,required" frugal:"8,required,i32" json:"sort_order"`
+	ResourceType   string  `thrift:"resource_type,9,required" frugal:"9,required,string" json:"resource_type"`
+	Status         string  `thrift:"status,10,required" frugal:"10,required,string" json:"status"`
+	UsageStage     string  `thrift:"usage_stage,11,required" frugal:"11,required,string" json:"usage_stage"`
+	DraftEnabled   bool    `thrift:"draft_enabled,12,required" frugal:"12,required,bool" json:"draft_enabled"`
+	FinalEnabled   bool    `thrift:"final_enabled,13,required" frugal:"13,required,bool" json:"final_enabled"`
+	Editable       bool    `thrift:"editable,14,required" frugal:"14,required,bool" json:"editable"`
+	Referable      bool    `thrift:"referable,15,required" frugal:"15,required,bool" json:"referable"`
+	RenderHint     *string `thrift:"render_hint,16,optional" frugal:"16,optional,string" json:"render_hint,omitempty"`
 }
 
 func NewAssetElementTypeDTO() *AssetElementTypeDTO {
@@ -4830,6 +4838,43 @@ func (p *AssetElementTypeDTO) GetActive() (v bool) {
 func (p *AssetElementTypeDTO) GetSortOrder() (v int32) {
 	return p.SortOrder
 }
+
+func (p *AssetElementTypeDTO) GetResourceType() (v string) {
+	return p.ResourceType
+}
+
+func (p *AssetElementTypeDTO) GetStatus() (v string) {
+	return p.Status
+}
+
+func (p *AssetElementTypeDTO) GetUsageStage() (v string) {
+	return p.UsageStage
+}
+
+func (p *AssetElementTypeDTO) GetDraftEnabled() (v bool) {
+	return p.DraftEnabled
+}
+
+func (p *AssetElementTypeDTO) GetFinalEnabled() (v bool) {
+	return p.FinalEnabled
+}
+
+func (p *AssetElementTypeDTO) GetEditable() (v bool) {
+	return p.Editable
+}
+
+func (p *AssetElementTypeDTO) GetReferable() (v bool) {
+	return p.Referable
+}
+
+var AssetElementTypeDTO_RenderHint_DEFAULT string
+
+func (p *AssetElementTypeDTO) GetRenderHint() (v string) {
+	if !p.IsSetRenderHint() {
+		return AssetElementTypeDTO_RenderHint_DEFAULT
+	}
+	return *p.RenderHint
+}
 func (p *AssetElementTypeDTO) SetElementType(val string) {
 	p.ElementType = val
 }
@@ -4854,9 +4899,37 @@ func (p *AssetElementTypeDTO) SetActive(val bool) {
 func (p *AssetElementTypeDTO) SetSortOrder(val int32) {
 	p.SortOrder = val
 }
+func (p *AssetElementTypeDTO) SetResourceType(val string) {
+	p.ResourceType = val
+}
+func (p *AssetElementTypeDTO) SetStatus(val string) {
+	p.Status = val
+}
+func (p *AssetElementTypeDTO) SetUsageStage(val string) {
+	p.UsageStage = val
+}
+func (p *AssetElementTypeDTO) SetDraftEnabled(val bool) {
+	p.DraftEnabled = val
+}
+func (p *AssetElementTypeDTO) SetFinalEnabled(val bool) {
+	p.FinalEnabled = val
+}
+func (p *AssetElementTypeDTO) SetEditable(val bool) {
+	p.Editable = val
+}
+func (p *AssetElementTypeDTO) SetReferable(val bool) {
+	p.Referable = val
+}
+func (p *AssetElementTypeDTO) SetRenderHint(val *string) {
+	p.RenderHint = val
+}
 
 func (p *AssetElementTypeDTO) IsSetRenderHintJson() bool {
 	return p.RenderHintJson != nil
+}
+
+func (p *AssetElementTypeDTO) IsSetRenderHint() bool {
+	return p.RenderHint != nil
 }
 
 func (p *AssetElementTypeDTO) String() string {
@@ -4867,14 +4940,22 @@ func (p *AssetElementTypeDTO) String() string {
 }
 
 var fieldIDToName_AssetElementTypeDTO = map[int16]string{
-	1: "element_type",
-	2: "display_name",
-	3: "category",
-	4: "schema_version",
-	5: "schema_hint_json",
-	6: "render_hint_json",
-	7: "active",
-	8: "sort_order",
+	1:  "element_type",
+	2:  "display_name",
+	3:  "category",
+	4:  "schema_version",
+	5:  "schema_hint_json",
+	6:  "render_hint_json",
+	7:  "active",
+	8:  "sort_order",
+	9:  "resource_type",
+	10: "status",
+	11: "usage_stage",
+	12: "draft_enabled",
+	13: "final_enabled",
+	14: "editable",
+	15: "referable",
+	16: "render_hint",
 }
 
 type ListAssetElementTypesResponse struct {

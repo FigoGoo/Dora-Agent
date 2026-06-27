@@ -34,6 +34,14 @@ type AssetElementTypeDTO struct {
 	RenderHintJSON *string `json:"render_hint_json,omitempty"`
 	Active         bool    `json:"active"`
 	SortOrder      int32   `json:"sort_order"`
+	ResourceType   string  `json:"resource_type"`
+	Status         string  `json:"status"`
+	UsageStage     string  `json:"usage_stage"`
+	DraftEnabled   bool    `json:"draft_enabled"`
+	FinalEnabled   bool    `json:"final_enabled"`
+	Editable       bool    `json:"editable"`
+	Referable      bool    `json:"referable"`
+	RenderHint     *string `json:"render_hint,omitempty"`
 }
 
 type Page[T any] struct {
@@ -134,9 +142,22 @@ func elementDTO(row businesscore.AssetElementType) AssetElementTypeDTO {
 	if category == "" {
 		category = categoryFromElementType(row.ElementType)
 	}
+	resourceType := stringValue(schemaObj["resource_type"], category)
+	usageStage := stringValue(schemaObj["usage_stage"], "draft_final")
+	renderHintText := stringValue(schemaObj["render_hint"], "")
+	if renderHintText == "" && renderHint != "" {
+		renderHintText = renderHint
+	}
+	var renderHintPtr *string
+	if renderHintText != "" {
+		renderHintPtr = &renderHintText
+	}
 	return AssetElementTypeDTO{
 		ElementType: row.ElementType, DisplayName: row.DisplayName, Category: category, SchemaVersion: row.SchemaVersion,
 		SchemaHintJSON: string(row.SchemaJSON), RenderHintJSON: renderPtr, Active: row.Status == activeStatus, SortOrder: sortOrder,
+		ResourceType: resourceType, Status: row.Status, UsageStage: usageStage,
+		DraftEnabled: boolValue(schemaObj["draft_enabled"], true), FinalEnabled: boolValue(schemaObj["final_enabled"], true),
+		Editable: boolValue(schemaObj["editable"], true), Referable: boolValue(schemaObj["referable"], true), RenderHint: renderHintPtr,
 	}
 }
 
@@ -183,6 +204,27 @@ func numberValue(value any, fallback int) int {
 	default:
 		return fallback
 	}
+}
+
+func stringValue(value any, fallback string) string {
+	switch typed := value.(type) {
+	case string:
+		if strings.TrimSpace(typed) != "" {
+			return strings.TrimSpace(typed)
+		}
+	case map[string]any:
+		if component, ok := typed["component"].(string); ok && strings.TrimSpace(component) != "" {
+			return strings.TrimSpace(component)
+		}
+	}
+	return fallback
+}
+
+func boolValue(value any, fallback bool) bool {
+	if typed, ok := value.(bool); ok {
+		return typed
+	}
+	return fallback
 }
 
 func clampLimit(value, fallback, max int) int {

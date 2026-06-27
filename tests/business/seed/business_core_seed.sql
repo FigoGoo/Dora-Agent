@@ -114,9 +114,9 @@ INSERT INTO skills (
 ) ON CONFLICT (skill_key) DO NOTHING;
 
 INSERT INTO skill_versions (
-  id, skill_id, version, status, skill_spec_json, input_schema_json, output_schema_json, memory_policy_json, submitted_by_user_id, reviewed_by_admin_id, submitted_at, reviewed_at, published_at
+  id, skill_id, version, status, skill_spec_json, input_schema_json, output_schema_json, memory_policy_json, confirmation_policy_json, submitted_by_user_id, reviewed_by_admin_id, submitted_at, reviewed_at, published_at
 ) VALUES (
-  'skv_seed_storyboard_100', 'sk_seed_storyboard', '1.0.0', 'published', '{"name":"storyboard","steps":["parse","compose"]}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z'
+  'skv_seed_storyboard_100', 'sk_seed_storyboard', '1.0.0', 'published', '{"name":"storyboard","steps":["parse","compose"]}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, '{"requires_confirmation":false,"required_actions":[],"min_confirm_level":"none","lock_fields":[],"expires_in_seconds":900}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z'
 ) ON CONFLICT (skill_id, version) DO NOTHING;
 
 INSERT INTO skill_tool_bindings (
@@ -179,20 +179,20 @@ ON CONFLICT (code_digest) DO NOTHING;
 INSERT INTO asset_element_types (
   id, element_type, display_name, schema_version, schema_json, status
 ) VALUES
-  ('aet_image_primary', 'image.primary', 'Primary Image', '2026-06-27', '{"type":"object","category":"image","sort_order":10,"render_hint":{"component":"image"}}'::jsonb, 'active'),
-  ('aet_image_variation', 'image.variation', 'Image Variation', '2026-06-27', '{"type":"object","category":"image","sort_order":20,"render_hint":{"component":"gallery"}}'::jsonb, 'active'),
-  ('aet_image_mask', 'image.mask', 'Image Mask', '2026-06-27', '{"type":"object","category":"image","sort_order":30,"render_hint":{"component":"mask"}}'::jsonb, 'active'),
-  ('aet_image_thumbnail', 'image.thumbnail', 'Image Thumbnail', '2026-06-27', '{"type":"object","category":"image","sort_order":40,"render_hint":{"component":"thumbnail"}}'::jsonb, 'active'),
-  ('aet_text_caption', 'text.caption', 'Caption', '2026-06-27', '{"type":"object","category":"text","sort_order":110,"render_hint":{"component":"caption"}}'::jsonb, 'active'),
-  ('aet_text_prompt', 'text.prompt', 'Prompt', '2026-06-27', '{"type":"object","category":"text","sort_order":120,"render_hint":{"component":"prompt"}}'::jsonb, 'active'),
-  ('aet_text_alt', 'text.alt', 'Alt Text', '2026-06-27', '{"type":"object","category":"text","sort_order":130,"render_hint":{"component":"plain_text"}}'::jsonb, 'active'),
-  ('aet_text_storyboard', 'text.storyboard', 'Storyboard Text', '2026-06-27', '{"type":"object","category":"text","sort_order":140,"render_hint":{"component":"storyboard"}}'::jsonb, 'active'),
-  ('aet_audio_voiceover', 'audio.voiceover', 'Voiceover', '2026-06-27', '{"type":"object","category":"audio","sort_order":210,"render_hint":{"component":"audio"}}'::jsonb, 'active'),
-  ('aet_video_clip', 'video.clip', 'Video Clip', '2026-06-27', '{"type":"object","category":"video","sort_order":310,"render_hint":{"component":"video"}}'::jsonb, 'active'),
-  ('aet_layout_frame', 'layout.frame', 'Layout Frame', '2026-06-27', '{"type":"object","category":"layout","sort_order":410,"render_hint":{"component":"frame"}}'::jsonb, 'active'),
-  ('aet_layout_scene', 'layout.scene', 'Layout Scene', '2026-06-27', '{"type":"object","category":"layout","sort_order":420,"render_hint":{"component":"scene"}}'::jsonb, 'active'),
-  ('aet_metadata_generation', 'metadata.generation', 'Generation Metadata', '2026-06-27', '{"type":"object","category":"metadata","sort_order":510,"render_hint":{"component":"metadata"}}'::jsonb, 'active'),
-  ('aet_safety_evidence', 'safety.evidence', 'Safety Evidence', '2026-06-27', '{"type":"object","category":"safety","sort_order":610,"render_hint":{"component":"evidence"}}'::jsonb, 'active')
+  ('aet_image_primary', 'image.primary', 'Primary Image', '2026-06-27', '{"type":"object","category":"image","resource_type":"image","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":10,"render_hint":{"component":"image"}}'::jsonb, 'active'),
+  ('aet_image_variation', 'image.variation', 'Image Variation', '2026-06-27', '{"type":"object","category":"image","resource_type":"image","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":20,"render_hint":{"component":"gallery"}}'::jsonb, 'active'),
+  ('aet_image_mask', 'image.mask', 'Image Mask', '2026-06-27', '{"type":"object","category":"image","resource_type":"image","usage_stage":"draft","draft_enabled":true,"final_enabled":false,"editable":true,"referable":true,"sort_order":30,"render_hint":{"component":"mask"}}'::jsonb, 'active'),
+  ('aet_image_thumbnail', 'image.thumbnail', 'Image Thumbnail', '2026-06-27', '{"type":"object","category":"image","resource_type":"image","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":40,"render_hint":{"component":"thumbnail"}}'::jsonb, 'active'),
+  ('aet_text_caption', 'text.caption', 'Caption', '2026-06-27', '{"type":"object","category":"text","resource_type":"text","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":110,"render_hint":{"component":"caption"}}'::jsonb, 'active'),
+  ('aet_text_prompt', 'text.prompt', 'Prompt', '2026-06-27', '{"type":"object","category":"text","resource_type":"text","usage_stage":"draft","draft_enabled":true,"final_enabled":false,"editable":true,"referable":true,"sort_order":120,"render_hint":{"component":"prompt"}}'::jsonb, 'active'),
+  ('aet_text_alt', 'text.alt', 'Alt Text', '2026-06-27', '{"type":"object","category":"text","resource_type":"text","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":130,"render_hint":{"component":"plain_text"}}'::jsonb, 'active'),
+  ('aet_text_storyboard', 'text.storyboard', 'Storyboard Text', '2026-06-27', '{"type":"object","category":"text","resource_type":"text","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":140,"render_hint":{"component":"storyboard"}}'::jsonb, 'active'),
+  ('aet_audio_voiceover', 'audio.voiceover', 'Voiceover', '2026-06-27', '{"type":"object","category":"audio","resource_type":"audio","usage_stage":"final","draft_enabled":false,"final_enabled":true,"editable":false,"referable":true,"sort_order":210,"render_hint":{"component":"audio"}}'::jsonb, 'active'),
+  ('aet_video_clip', 'video.clip', 'Video Clip', '2026-06-27', '{"type":"object","category":"video","resource_type":"video","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":310,"render_hint":{"component":"video"}}'::jsonb, 'active'),
+  ('aet_layout_frame', 'layout.frame', 'Layout Frame', '2026-06-27', '{"type":"object","category":"layout","resource_type":"layout","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":410,"render_hint":{"component":"frame"}}'::jsonb, 'active'),
+  ('aet_layout_scene', 'layout.scene', 'Layout Scene', '2026-06-27', '{"type":"object","category":"layout","resource_type":"layout","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":420,"render_hint":{"component":"scene"}}'::jsonb, 'active'),
+  ('aet_metadata_generation', 'metadata.generation', 'Generation Metadata', '2026-06-27', '{"type":"object","category":"metadata","resource_type":"metadata","usage_stage":"final","draft_enabled":false,"final_enabled":true,"editable":false,"referable":true,"sort_order":510,"render_hint":{"component":"metadata"}}'::jsonb, 'active'),
+  ('aet_safety_evidence', 'safety.evidence', 'Safety Evidence', '2026-06-27', '{"type":"object","category":"safety","resource_type":"safety","usage_stage":"final","draft_enabled":false,"final_enabled":true,"editable":false,"referable":true,"sort_order":610,"render_hint":{"component":"evidence"}}'::jsonb, 'active')
 ON CONFLICT (element_type) DO NOTHING;
 
 INSERT INTO assets (

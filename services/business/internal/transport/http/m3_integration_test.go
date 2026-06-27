@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -59,6 +60,12 @@ func TestM3BusinessConfigHTTPAndRPC(t *testing.T) {
 	if got := len(elements["data"].(map[string]any)["element_types"].([]any)); got < 14 {
 		t.Fatalf("expected 14 asset element types, got %d: %#v", got, elements)
 	}
+	firstElement := elements["data"].(map[string]any)["element_types"].([]any)[0].(map[string]any)
+	for _, field := range []string{"resource_type", "status", "usage_stage", "draft_enabled", "final_enabled", "editable", "referable", "render_hint"} {
+		if _, ok := firstElement[field]; !ok {
+			t.Fatalf("asset element type missing %s: %#v", field, firstElement)
+		}
+	}
 
 	adminToken := loginAdmin(t, router, "admin@dora.local", "local-admin-change-me")
 	for _, path := range []string{
@@ -98,7 +105,7 @@ func TestM3BusinessConfigHTTPAndRPC(t *testing.T) {
 		t.Fatalf("list routable skills resp=%#v err=%v", listSkills, err)
 	}
 	spec, err := handler.GetPublishedSkillSpec(t.Context(), &businessagent.GetPublishedSkillSpecRequest{AuthContext: auth, RequestMeta: rpcMeta("m3-spec"), SkillId: "sk_seed_storyboard"})
-	if err != nil || len(spec.ToolRefs) == 0 {
+	if err != nil || len(spec.ToolRefs) == 0 || spec.ConfirmationPolicyJson == `{"requires_confirmation":false}` {
 		t.Fatalf("get skill spec resp=%#v err=%v", spec, err)
 	}
 	tool, err := handler.CheckToolExecutionPolicy(t.Context(), &businessagent.CheckToolExecutionPolicyRequest{AuthContext: auth, RequestMeta: rpcMeta("m3-tool"), ToolName: "image_generate", ToolType: "model_generation", ProjectId: "prj_active_1001"})
@@ -117,13 +124,41 @@ func TestM3BusinessConfigHTTPAndRPC(t *testing.T) {
 	if err != nil || len(dict.ElementTypes) < 14 {
 		t.Fatalf("dictionary resp=%#v err=%v", dict, err)
 	}
+	if dict.ElementTypes[0].UsageStage == "" || dict.ElementTypes[0].ResourceType == "" || dict.ElementTypes[0].RenderHint == nil {
+		t.Fatalf("dictionary dropped asset element type M3 fields: %#v", dict.ElementTypes[0])
+	}
+	safetyEvidence := skillTestEvidenceJSON("skrun_m3_001", "", "passed", "trace-m3-skill-test")
 	saved, err := handler.SaveSkillTestResult_(t.Context(), &businessagent.SaveSkillTestResultRequest{
-		AuthContext: auth, RequestMeta: &businessagent.RequestMeta{RequestId: "req-m3-skill-test", TraceId: "trace-m3-skill-test", Source: "agent_service", IdempotencyKey: ptr("idem-m3-skill-test")},
+		AuthContext: auth, RequestMeta: &businessagent.RequestMeta{RequestId: "req-m3-skill-test", TraceId: "trace-m3-skill-test", Source: "agent_service", IdempotencyKey: ptr("skill_test:skrun_m3_001")},
 		SkillId: "sk_seed_storyboard", VersionId: "skv_seed_storyboard_100", TestRunId: "skrun_m3_001", Status: "passed",
-		ActualElementsJson: `[{"element_type":"image.primary"}]`, AgentTraceId: "trace-m3-skill-test",
+		ActualElementsJson: `[{"element_type":"image.primary"}]`, SafetyEvidenceJson: ptr(safetyEvidence), AgentTraceId: "trace-m3-skill-test",
 	})
 	if err != nil || !saved.Saved {
 		t.Fatalf("save skill test result resp=%#v err=%v", saved, err)
+	}
+	replayed, err := handler.SaveSkillTestResult_(t.Context(), &businessagent.SaveSkillTestResultRequest{
+		AuthContext: auth, RequestMeta: &businessagent.RequestMeta{RequestId: "req-m3-skill-test-replay", TraceId: "trace-m3-skill-test", Source: "agent_service", IdempotencyKey: ptr("skill_test:skrun_m3_001")},
+		SkillId: "sk_seed_storyboard", VersionId: "skv_seed_storyboard_100", TestRunId: "skrun_m3_001", Status: "passed",
+		ActualElementsJson: `[{"element_type":"image.primary"}]`, SafetyEvidenceJson: ptr(safetyEvidence), AgentTraceId: "trace-m3-skill-test",
+	})
+	if err != nil || replayed.TestRunId != "skrun_m3_001" {
+		t.Fatalf("expected skill test replay resp=%#v err=%v", replayed, err)
+	}
+	_, err = handler.SaveSkillTestResult_(t.Context(), &businessagent.SaveSkillTestResultRequest{
+		AuthContext: auth, RequestMeta: &businessagent.RequestMeta{RequestId: "req-m3-skill-test-conflict", TraceId: "trace-m3-skill-test", Source: "agent_service", IdempotencyKey: ptr("skill_test:skrun_m3_001")},
+		SkillId: "sk_seed_storyboard", VersionId: "skv_seed_storyboard_100", TestRunId: "skrun_m3_001", Status: "failed",
+		ActualElementsJson: `[{"element_type":"text.caption"}]`, SafetyEvidenceJson: ptr(skillTestEvidenceJSON("skrun_m3_001", "", "passed", "trace-m3-skill-test")), AgentTraceId: "trace-m3-skill-test",
+	})
+	if codeOf(err) != bizerrors.CodeIdempotencyConflict {
+		t.Fatalf("expected skill test idempotency conflict, got %v", err)
+	}
+	_, err = handler.SaveSkillTestResult_(t.Context(), &businessagent.SaveSkillTestResultRequest{
+		AuthContext: auth, RequestMeta: &businessagent.RequestMeta{RequestId: "req-m3-skill-test-no-evidence", TraceId: "trace-m3-skill-test-2", Source: "agent_service", IdempotencyKey: ptr("skill_test:skrun_m3_002")},
+		SkillId: "sk_seed_storyboard", VersionId: "skv_seed_storyboard_100", TestRunId: "skrun_m3_002", Status: "passed",
+		ActualElementsJson: `[{"element_type":"image.primary"}]`, AgentTraceId: "trace-m3-skill-test-2",
+	})
+	if codeOf(err) != bizerrors.CodeSafetyEvidenceInvalid {
+		t.Fatalf("expected safety evidence validation error, got %v", err)
 	}
 }
 
@@ -133,4 +168,13 @@ func rpcMeta(traceID string) *businessagent.RequestMeta {
 
 func int32ptr(value int32) *int32 {
 	return &value
+}
+
+func skillTestEvidenceJSON(testRunID, testCaseID, result, traceID string) string {
+	targetRefID := testRunID
+	if testCaseID != "" {
+		targetRefID = testCaseID
+	}
+	return fmt.Sprintf(`{"scene":"skill_test","target_type":"skill_test_prompt","target_ref_id":%q,"evaluated_object_digest":"sha256:test-prompt","policy_version":"local-m3","evidence_version":"2026-06-27","result":%q,"source_run_id":%q,"trace_id":%q,"expires_at":%q}`,
+		targetRefID, result, testRunID, traceID, time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano))
 }

@@ -107,10 +107,74 @@ for needle in [
     "CheckToolExecutionPolicy",
     "ResolveDefaultModel",
     "CreateSafetyEvaluation",
-    "m4.asset_credit.deferred",
+    "generation.progress",
+    "safety.prompt.evaluating",
+    "safety.prompt.evaluated",
 ]:
     if needle not in agent_app:
         fail(f"agent workbench missing M3 start-turn semantic: {needle}")
+
+schema = json.loads(Path("api/agui/agent-workbench-events.schema.json").read_text())
+canonical_events = {
+    item.get("if", {}).get("properties", {}).get("type", {}).get("const")
+    for item in schema.get("allOf", [])
+}
+canonical_events.discard(None)
+runtime_events = set(re.findall(r'appendRunEvent\([^\\n]+?\"([a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+)\"', agent_app))
+runtime_events |= set(re.findall(r'Type:\\s*\"([a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+)\"', agent_app))
+unknown_runtime_events = runtime_events - canonical_events
+if unknown_runtime_events:
+    fail(f"agent runtime writes non-canonical AG-UI events: {sorted(unknown_runtime_events)}")
+for forbidden in [
+    "agent.run.created",
+    "tool.confirmation.required",
+    "safety.evaluation.passed",
+    "skill.route.",
+    "model.snapshot.",
+    "m4.asset_credit.deferred",
+]:
+    if forbidden in agent_app:
+        fail(f"agent runtime still writes non-canonical event semantic {forbidden}")
+for field in ["SessionID", "ProjectID", "SpaceID", "ActorUserID", "Timestamp", "Component"]:
+    if field not in agent_app:
+        fail(f"agent EventDTO missing AG-UI top-level field {field}")
+for field in ["SchemaHintJSON", "RenderHintJSON", "SchemaHintJson", "RenderHintJson"]:
+    if field not in agent_app + agent_gateway:
+        fail(f"agent asset element mapping missing {field}")
+for field in [
+    "ResourceType", "Status", "UsageStage", "DraftEnabled", "FinalEnabled", "Editable", "Referable", "RenderHint",
+]:
+    if field not in idl + agent_app + agent_gateway:
+        fail(f"asset element DTO mapping missing M3 field {field}")
+for needle in [
+    "requireViewProjectAccess(ctx, auth, session.ProjectID",
+    "requireViewProjectAccess(ctx, auth, run.ProjectID",
+    "ensureViewProjectAccess(access)",
+]:
+    if needle not in agent_app:
+        fail(f"agent read/view permission semantic missing: {needle}")
+for needle in [
+    "validateRunInputs(req)",
+    "runInputSummary(req)",
+    "\"referenced_assets\"",
+    "\"control_inputs\"",
+    "\"safety_targets\"",
+    "\"generation_plan\"",
+]:
+    if needle not in agent_app:
+        fail(f"agent run input summary missing {needle}")
+if '"provider_runtime_ref": snapshot.ProviderRuntimeRef' in agent_app:
+    fail("generation.progress leaks provider_runtime_ref")
+for needle in [
+    "\"skill_scope\"",
+    "\"matched_reason\"",
+    "\"fallback_reason\"",
+    "\"tool_refs_digest\"",
+    "\"execution_space_id\"",
+    "\"billing_credit_account_scope\"",
+]:
+    if needle not in agent_app:
+        fail(f"agent skill_selection snapshot missing {needle}")
 
 for directory in [
     "services/agent/internal/runtime/eino",
@@ -119,7 +183,10 @@ for directory in [
     "services/agent/internal/runtime/tool",
     "services/agent/internal/runtime/safety",
     "services/agent/internal/runtime/modeltool",
+    "services/agent/internal/runtime/memory",
     "services/agent/internal/runtime/skilltest",
+    "services/agent/internal/domain/event",
+    "services/agent/internal/events/agui",
     "services/agent/internal/events/stream",
 ]:
     if not Path(directory).is_dir():
@@ -128,7 +195,42 @@ for directory in [
 if "github.com/cloudwego/eino v0.9.10" not in Path("go.mod").read_text():
     fail("go.mod missing pinned github.com/cloudwego/eino v0.9.10")
 
+skill_model = Path("services/business/internal/infra/repository/businesscore/models_m3.go").read_text()
+skill_app = Path("services/business/internal/application/skillcatalog/app.go").read_text()
+for needle in ["confirmation_policy_json", "ConfirmationPolicyJSON"]:
+    if needle not in skill_model + skill_app:
+        fail(f"skill confirmation policy not persisted/read from DB: {needle}")
+if 'ConfirmationPolicyJSON: `{"requires_confirmation":false}`' in skill_app:
+    fail("skill confirmation policy is still hard-coded in business application response")
+if not Path("db/migrations/iterations/2026-06-27-business-core/business/0014_skill_confirmation_policy.up.sql").exists():
+    fail("missing M3 skill confirmation policy migration")
+if not Path("db/migrations/iterations/2026-06-27-business-core/business/0015_skill_test_result_idempotency.up.sql").exists():
+    fail("missing M3 skill test result idempotency migration")
+for needle in [
+    "idempotency_key",
+    "request_hash",
+    "skill_test:<test_run_id>",
+    "CodeSafetyEvidenceInvalid",
+    "validateSkillTestSafetyEvidence",
+]:
+    if needle not in skill_model + skill_app:
+        fail(f"skill test contract semantic missing {needle}")
+if 'safetyEvidenceJSON = "{}"' in skill_app:
+    fail("skill test safety evidence still defaults to loose empty JSON")
+
+skilltest_runner = Path("services/agent/internal/runtime/skilltest/runner.go").read_text()
+for needle in ["ElementTypeSpec", "StageViolations", "UnrenderableHints", "DraftEnabled", "FinalEnabled", "RenderHint"]:
+    if needle not in skilltest_runner:
+        fail(f"skill output validation missing {needle}")
+
 business_openapi = yaml.safe_load(Path("api/openapi/business-api.yaml").read_text())
+asset_schema = business_openapi["components"]["schemas"]["AssetElementTypeDTO"]
+for field in ["resource_type", "status", "usage_stage", "draft_enabled", "final_enabled", "editable", "referable", "render_hint"]:
+    if field not in asset_schema.get("properties", {}):
+        fail(f"business OpenAPI AssetElementTypeDTO missing {field}")
+for field in ["resource_type", "status", "usage_stage", "draft_enabled", "final_enabled", "editable", "referable"]:
+    if field not in asset_schema.get("required", []):
+        fail(f"business OpenAPI AssetElementTypeDTO required list missing {field}")
 business_router = Path("services/business/internal/transport/http/handlers_m3.go").read_text()
 m3_routes = [
     ("get", "/api/models/generation", "/api/models/generation"),
@@ -208,6 +310,8 @@ if seed.count("'skcase_storyboard_") < 3:
 for needle in ["model_providers", "tool_policies", "skills", "skill_test_cases", "asset_element_types"]:
     if needle not in seed:
         fail(f"seed missing {needle}")
+if "confirmation_policy_json" not in seed:
+    fail("seed missing skill confirmation policy baseline")
 
 print("m3 semantic source checks ok")
 PY

@@ -27,7 +27,15 @@
         "schema_hint_json": "{\"type\":\"object\",\"required\":[\"asset_id\"]}",
         "render_hint_json": "{\"component\":\"image_preview\"}",
         "active": true,
-        "sort_order": 10
+        "sort_order": 10,
+        "resource_type": "image",
+        "status": "active",
+        "usage_stage": "draft_final",
+        "draft_enabled": true,
+        "final_enabled": true,
+        "editable": true,
+        "referable": true,
+        "render_hint": "image_preview"
       },
       {
         "element_type": "text.caption",
@@ -37,7 +45,15 @@
         "schema_hint_json": "{\"type\":\"object\",\"required\":[\"text\"]}",
         "render_hint_json": "{\"component\":\"text_block\"}",
         "active": true,
-        "sort_order": 20
+        "sort_order": 20,
+        "resource_type": "text",
+        "status": "active",
+        "usage_stage": "draft_final",
+        "draft_enabled": true,
+        "final_enabled": true,
+        "editable": true,
+        "referable": true,
+        "render_hint": "text_block"
       }
     ]
   },

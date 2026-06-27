@@ -2,8 +2,10 @@ package workbench
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +15,12 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
+	runtimeeino "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/eino"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/modeltool"
+	runtimesafety "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/safety"
+	runtimeskill "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skill"
+	runtimetool "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/tool"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/turnloop"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -108,12 +116,22 @@ type ModelRuntimeSnapshotDTO struct {
 }
 
 type AssetElementTypeDTO struct {
-	ElementType   string
-	DisplayName   string
-	Category      string
-	SchemaVersion string
-	Active        bool
-	SortOrder     int32
+	ElementType    string `json:"element_type"`
+	DisplayName    string `json:"display_name"`
+	Category       string `json:"category"`
+	SchemaVersion  string `json:"schema_version"`
+	SchemaHintJSON string `json:"schema_hint_json"`
+	RenderHintJSON string `json:"render_hint_json"`
+	Active         bool   `json:"active"`
+	SortOrder      int32  `json:"sort_order"`
+	ResourceType   string `json:"resource_type"`
+	Status         string `json:"status"`
+	UsageStage     string `json:"usage_stage"`
+	DraftEnabled   bool   `json:"draft_enabled"`
+	FinalEnabled   bool   `json:"final_enabled"`
+	Editable       bool   `json:"editable"`
+	Referable      bool   `json:"referable"`
+	RenderHint     string `json:"render_hint"`
 }
 
 type SkillTestResultRequest struct {
@@ -121,6 +139,7 @@ type SkillTestResultRequest struct {
 	VersionID          string
 	TestRunID          string
 	TestCaseID         string
+	IdempotencyKey     string
 	Status             string
 	ActualElementsJSON string
 	ErrorCode          string
@@ -136,16 +155,30 @@ type SkillTestResultDTO struct {
 }
 
 type App struct {
-	repo          *repository.Repository
-	gateway       BusinessGateway
-	configVersion string
+	repo            *repository.Repository
+	gateway         BusinessGateway
+	configVersion   string
+	safetyEvaluator runtimesafety.Evaluator
+	skillRouter     runtimeskill.Router
+	toolChecker     runtimetool.PolicyChecker
+	modelAdapter    modeltool.Adapter
+	turnLoop        turnloop.TurnLoop
 }
 
 func New(repo *repository.Repository, gateway BusinessGateway, configVersion string) *App {
 	if configVersion == "" {
 		configVersion = "local-dev"
 	}
-	return &App{repo: repo, gateway: gateway, configVersion: configVersion}
+	return &App{
+		repo:            repo,
+		gateway:         gateway,
+		configVersion:   configVersion,
+		safetyEvaluator: runtimesafety.NewEvaluator(nil),
+		skillRouter:     runtimeskill.NewRouter(),
+		toolChecker:     runtimetool.NewPolicyChecker(),
+		modelAdapter:    modeltool.LocalAdapter{},
+		turnLoop:        turnloop.New(),
+	}
 }
 
 func (a *App) ResolveAuthContextFromToken(ctx context.Context, authorization string, expectedSpaceID string, traceID string) (AuthContextDTO, error) {
@@ -268,13 +301,18 @@ type MessageDTO struct {
 }
 
 type EventDTO struct {
-	EventID   string         `json:"event_id"`
-	Type      string         `json:"type"`
-	RunID     string         `json:"run_id"`
-	Sequence  int64          `json:"sequence"`
-	TraceID   string         `json:"trace_id"`
-	Payload   map[string]any `json:"payload"`
-	CreatedAt time.Time      `json:"created_at"`
+	EventID     string         `json:"event_id"`
+	Type        string         `json:"type"`
+	SessionID   string         `json:"session_id"`
+	RunID       string         `json:"run_id"`
+	ProjectID   string         `json:"project_id"`
+	SpaceID     string         `json:"space_id"`
+	ActorUserID string         `json:"actor_user_id"`
+	Sequence    int64          `json:"sequence"`
+	Timestamp   time.Time      `json:"timestamp"`
+	Component   string         `json:"component"`
+	TraceID     string         `json:"trace_id"`
+	Payload     map[string]any `json:"payload"`
 }
 
 type SnapshotResponse struct {
@@ -367,12 +405,14 @@ func (a *App) GetSession(ctx context.Context, auth AuthContextDTO, sessionID str
 	return a.BuildSessionSnapshot(ctx, auth, sessionID, traceID)
 }
 
-func (a *App) ListMessages(ctx context.Context, auth AuthContextDTO, sessionID string, limit, offset int) (ListMessagesResponse, error) {
+func (a *App) ListMessages(ctx context.Context, auth AuthContextDTO, sessionID string, limit, offset int, traceID string) (ListMessagesResponse, error) {
 	session, err := a.requireSession(ctx, auth, sessionID)
 	if err != nil {
 		return ListMessagesResponse{}, err
 	}
-	_ = session
+	if _, err := a.requireViewProjectAccess(ctx, auth, session.ProjectID, traceID); err != nil {
+		return ListMessagesResponse{}, err
+	}
 	limit, offset = normalizePage(limit, offset, 100)
 	rows, err := a.repo.ListMessages(ctx, sessionID, limit, offset)
 	if err != nil {
@@ -391,6 +431,9 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	}
 	if req.UserInput.ClientMessageID == "" || req.UserInput.ContentType == "" || strings.TrimSpace(req.UserInput.Text) == "" {
 		return CreateRunResponse{}, apperror.New(apperror.CodeInvalidArgument, "user_input is incomplete")
+	}
+	if err := validateRunInputs(req); err != nil {
+		return CreateRunResponse{}, err
 	}
 	if existing, err := a.repo.GetRunByIdempotencyKey(ctx, req.IdempotencyKey); err == nil {
 		return runResponse(*existing), nil
@@ -426,7 +469,7 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	runID := securityID("run_")
 	run := &model.Run{
 		ID: runID, SessionID: session.ID, ProjectID: session.ProjectID, SpaceID: session.SpaceID, UserID: session.UserID,
-		TurnNo: 1, Status: state.RunStatusPending, InputSummary: jsonObject(map[string]any{"client_message_id": req.UserInput.ClientMessageID}),
+		TurnNo: 1, Status: state.RunStatusPending, InputSummary: jsonObject(runInputSummary(req)),
 		ModelSelectionSnapshot: jsonObject(req.ModelSelection), RuntimeConfigVersion: a.configVersion, IdempotencyKey: req.IdempotencyKey, TraceID: traceID,
 	}
 	if err := a.repo.CreateRun(ctx, run); err != nil {
@@ -434,20 +477,28 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	}
 	message := &model.Message{
 		ID: securityID("msg_"), SessionID: session.ID, RunID: run.ID, Role: "user", ContentType: req.UserInput.ContentType,
-		Content: req.UserInput.Text, Sequence: 1, TraceID: traceID, Metadata: jsonObject(map[string]any{"client_message_id": req.UserInput.ClientMessageID}),
+		Content: req.UserInput.Text, Sequence: 1, TraceID: traceID, Metadata: jsonObject(map[string]any{
+			"client_message_id": req.UserInput.ClientMessageID,
+			"referenced_assets": req.ReferencedAssets,
+			"control_inputs":    req.ControlInputs,
+		}),
 	}
 	if err := a.repo.CreateMessage(ctx, message); err != nil {
 		return CreateRunResponse{}, err
 	}
 	event := &model.Event{
-		EventID: securityID("evt_"), Type: "agent.run.created", SessionID: session.ID, RunID: run.ID, ProjectID: session.ProjectID,
-		SpaceID: session.SpaceID, ActorUserID: session.UserID, Sequence: 1, Component: "agent", Payload: jsonObject(map[string]any{"run_id": run.ID}),
+		EventID: securityID("evt_"), Type: "agent.run.started", SessionID: session.ID, RunID: run.ID, ProjectID: session.ProjectID,
+		SpaceID: session.SpaceID, ActorUserID: session.UserID, Sequence: 1, Component: "agent",
+		Payload: jsonObject(map[string]any{
+			"run_id": run.ID, "run_status": run.Status, "project_id": session.ProjectID,
+			"session_id": session.ID, "started_at": time.Now().UTC().Format(time.RFC3339Nano),
+		}),
 		PayloadSchemaVersion: "2026-06-27", Visibility: "user", TraceID: traceID,
 	}
 	if err := a.repo.AppendEvent(ctx, event); err != nil {
 		return CreateRunResponse{}, err
 	}
-	if err := a.recordM3StartEvents(ctx, auth, run, traceID); err != nil {
+	if err := a.recordM3StartEvents(ctx, auth, run, req.UserInput.Text, traceID); err != nil {
 		return CreateRunResponse{}, err
 	}
 	if updated, err := a.repo.GetRun(ctx, run.ID); err == nil {
@@ -456,12 +507,15 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	return runResponse(*run), nil
 }
 
-func (a *App) GetRun(ctx context.Context, auth AuthContextDTO, runID string) (RunDTO, error) {
+func (a *App) GetRun(ctx context.Context, auth AuthContextDTO, runID string, traceID string) (RunDTO, error) {
 	run, err := a.repo.GetRun(ctx, runID)
 	if err != nil {
 		return RunDTO{}, apperror.New(apperror.CodeResourceNotFound, "run not found")
 	}
 	if _, err := a.requireSession(ctx, auth, run.SessionID); err != nil {
+		return RunDTO{}, err
+	}
+	if _, err := a.requireViewProjectAccess(ctx, auth, run.ProjectID, traceID); err != nil {
 		return RunDTO{}, err
 	}
 	dto := runDTO(*run)
@@ -520,6 +574,24 @@ func (a *App) AppendUserInput(ctx context.Context, auth AuthContextDTO, runID st
 		"client_message_id":            req.UserInput.ClientMessageID,
 		"additional_input_idempotency": req.IdempotencyKey,
 	})
+	if _, err := a.recordPromptSafetyEvaluation(ctx, run, "additional_input", "message", message.ID, req.UserInput.Text, traceID); err != nil {
+		return RunDTO{}, err
+	}
+	resume, err := a.turnLoop.ResumeTurn(ctx, turnloop.ResumeInput{RunID: run.ID, Action: "additional_input", IdempotencyKey: req.IdempotencyKey})
+	if err != nil {
+		return RunDTO{}, err
+	}
+	if resume.Status == state.RunStatusRunning {
+		current, err := a.repo.GetRun(ctx, run.ID)
+		if err != nil {
+			return RunDTO{}, err
+		}
+		if current.Status == state.RunStatusResuming {
+			if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusRunning, "", ""); err != nil {
+				return RunDTO{}, err
+			}
+		}
+	}
 	updated, err := a.repo.GetRun(ctx, run.ID)
 	if err != nil {
 		return RunDTO{}, err
@@ -558,6 +630,21 @@ func (a *App) AcceptInterrupt(ctx context.Context, auth AuthContextDTO, runID st
 		"next_step":       "resume_turn",
 		"idempotency_key": req.IdempotencyKey,
 	})
+	resume, err := a.turnLoop.ResumeTurn(ctx, turnloop.ResumeInput{RunID: run.ID, Action: "confirm", InterruptID: interrupt.ID, IdempotencyKey: req.IdempotencyKey})
+	if err != nil {
+		return RunDTO{}, err
+	}
+	if resume.Status == state.RunStatusRunning {
+		current, err := a.repo.GetRun(ctx, run.ID)
+		if err != nil {
+			return RunDTO{}, err
+		}
+		if current.Status == state.RunStatusResuming {
+			if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusRunning, "", ""); err != nil {
+				return RunDTO{}, err
+			}
+		}
+	}
 	updated, err := a.repo.GetRun(ctx, run.ID)
 	if err != nil {
 		return RunDTO{}, err
@@ -615,12 +702,18 @@ func (a *App) CancelRun(ctx context.Context, auth AuthContextDTO, runID string, 
 	if err != nil {
 		return RunDTO{}, err
 	}
-	_, err = a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, businessagent.ProjectAccessPurpose_VIEW, traceID)
-	if err != nil {
-		return RunDTO{}, mapBusinessError(err)
+	if _, err := a.requireViewProjectAccess(ctx, auth, run.ProjectID, traceID); err != nil {
+		return RunDTO{}, err
 	}
 	if run.Status == state.RunStatusCompleted || run.Status == state.RunStatusFailed || run.Status == state.RunStatusCancelled {
 		return runDTO(*run), nil
+	}
+	cancelResult, err := a.turnLoop.CancelRun(ctx, turnloop.CancelInput{RunID: run.ID, Reason: reason, IdempotencyKey: idempotencyKey})
+	if err != nil {
+		return RunDTO{}, err
+	}
+	if strings.TrimSpace(reason) == "" {
+		reason = cancelResult.Phase
 	}
 	if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusCancelled, "USER_CANCELLED", reason); err != nil {
 		return RunDTO{}, err
@@ -628,19 +721,29 @@ func (a *App) CancelRun(ctx context.Context, auth AuthContextDTO, runID string, 
 	event := &model.Event{
 		EventID: securityID("evt_"), Type: "agent.run.cancelled", SessionID: session.ID, RunID: run.ID, ProjectID: run.ProjectID,
 		SpaceID: run.SpaceID, ActorUserID: run.UserID, Sequence: session.LastEventSequence + 1, Component: "agent",
-		Payload: jsonObject(map[string]any{"reason": reason}), PayloadSchemaVersion: "2026-06-27", Visibility: "user", TraceID: traceID,
+		Payload: jsonObject(map[string]any{
+			"run_status":          state.RunStatusCancelled,
+			"cancel_reason":       reason,
+			"cancelled_at":        time.Now().UTC().Format(time.RFC3339Nano),
+			"released_points":     0,
+			"last_event_sequence": session.LastEventSequence + 1,
+			"idempotency_key":     idempotencyKey,
+		}), PayloadSchemaVersion: "2026-06-27", Visibility: "user", TraceID: traceID,
 	}
 	_ = a.repo.AppendEvent(ctx, event)
 	updated, _ := a.repo.GetRun(ctx, run.ID)
 	return runDTO(*updated), nil
 }
 
-func (a *App) ReplayEvents(ctx context.Context, auth AuthContextDTO, runID string, afterSequence int64, limit int) (EventReplayResponse, error) {
+func (a *App) ReplayEvents(ctx context.Context, auth AuthContextDTO, runID string, afterSequence int64, limit int, traceID string) (EventReplayResponse, error) {
 	run, err := a.repo.GetRun(ctx, runID)
 	if err != nil {
 		return EventReplayResponse{}, apperror.New(apperror.CodeResourceNotFound, "run not found")
 	}
 	if _, err := a.requireSession(ctx, auth, run.SessionID); err != nil {
+		return EventReplayResponse{}, err
+	}
+	if _, err := a.requireViewProjectAccess(ctx, auth, run.ProjectID, traceID); err != nil {
 		return EventReplayResponse{}, err
 	}
 	limit, _ = normalizePage(limit, 0, 200)
@@ -679,9 +782,11 @@ func (a *App) buildSnapshot(ctx context.Context, auth AuthContextDTO, sessionID 
 		return SnapshotResponse{}, err
 	}
 	readonly := ""
-	if access, err := a.gateway.CheckProjectAccess(ctx, auth, session.ProjectID, businessagent.ProjectAccessPurpose_VIEW, traceID); err != nil {
-		return SnapshotResponse{}, mapBusinessError(err)
-	} else if access.ProjectStatus == "archived" {
+	access, err := a.requireViewProjectAccess(ctx, auth, session.ProjectID, traceID)
+	if err != nil {
+		return SnapshotResponse{}, err
+	}
+	if access.ProjectStatus == "archived" {
 		readonly = "project_archived"
 	}
 	messages, err := a.repo.ListMessages(ctx, session.ID, 10, 0)
@@ -720,6 +825,20 @@ func (a *App) requireSession(ctx context.Context, auth AuthContextDTO, sessionID
 	return session, nil
 }
 
+func (a *App) requireViewProjectAccess(ctx context.Context, auth AuthContextDTO, projectID string, traceID string) (ProjectAccessDTO, error) {
+	if a.gateway == nil {
+		return ProjectAccessDTO{}, apperror.New(apperror.CodeNotImplemented, "business gateway is not configured")
+	}
+	access, err := a.gateway.CheckProjectAccess(ctx, auth, projectID, businessagent.ProjectAccessPurpose_VIEW, traceID)
+	if err != nil {
+		return ProjectAccessDTO{}, mapBusinessError(err)
+	}
+	if err := ensureViewProjectAccess(access); err != nil {
+		return ProjectAccessDTO{}, err
+	}
+	return access, nil
+}
+
 func (a *App) requireInterrupt(ctx context.Context, auth AuthContextDTO, runID string, interruptID string, purpose businessagent.ProjectAccessPurpose, traceID string) (*model.Run, *model.Interrupt, error) {
 	run, err := a.repo.GetRun(ctx, runID)
 	if err != nil {
@@ -736,6 +855,8 @@ func (a *App) requireInterrupt(ctx context.Context, auth AuthContextDTO, runID s
 		if err := ensureCreativeProjectAccess(access); err != nil {
 			return nil, nil, err
 		}
+	} else if err := ensureViewProjectAccess(access); err != nil {
+		return nil, nil, err
 	}
 	interrupt, err := a.repo.GetInterrupt(ctx, run.ID, interruptID)
 	if err != nil {
@@ -761,58 +882,136 @@ func (a *App) appendRunEvent(ctx context.Context, run *model.Run, eventType stri
 	return a.repo.AppendEvent(ctx, event)
 }
 
-func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, traceID string) error {
+func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, traceID string) error {
 	if a.gateway == nil {
 		return nil
 	}
+	skillSelectionSnapshot := map[string]any{
+		"skill_id":                     "",
+		"skill_version":                "",
+		"skill_scope":                  "",
+		"matched_reason":               "",
+		"fallback_reason":              "",
+		"tool_refs_digest":             digestStrings(nil),
+		"tool_refs_count":              0,
+		"execution_space_id":           auth.SpaceID,
+		"billing_credit_account_scope": creditAccountScope(auth),
+	}
+	defer func() {
+		_ = a.repo.DB().WithContext(ctx).Model(&model.Run{}).Where("id = ?", run.ID).Update("skill_selection", jsonObject(skillSelectionSnapshot))
+	}()
+	safetyEvidence, err := a.recordPromptSafetyEvaluation(ctx, run, "generation", "run", run.ID, prompt, traceID)
+	if err != nil {
+		return err
+	}
+	selectedSkillID := ""
 	skills, _, err := a.gateway.ListRoutableSkills(ctx, auth, "", 10, "", traceID)
 	if err != nil {
-		_ = a.appendRunEvent(ctx, run, "skill.route.failed", traceID, map[string]any{"error": err.Error()})
-	} else if len(skills) == 0 {
-		_ = a.appendRunEvent(ctx, run, "skill.route.fallback", traceID, map[string]any{"reason": "no_published_skill_matched", "mode": "text_fallback"})
+		_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_catalog_unavailable", err.Error())
+		skillSelectionSnapshot["fallback_reason"] = "skill_catalog_unavailable"
 	} else {
-		selected := skills[0]
-		_ = a.appendRunEvent(ctx, run, "skill.route.matched", traceID, map[string]any{
-			"skill_id": selected.SkillID, "skill_name": selected.SkillName, "version": selected.Version, "route_hints": selected.RouteHints,
-		})
-		spec, specErr := a.gateway.GetPublishedSkillSpec(ctx, auth, selected.SkillID, selected.Version, traceID)
-		if specErr != nil {
-			_ = a.appendRunEvent(ctx, run, "skill.spec.failed", traceID, map[string]any{"skill_id": selected.SkillID, "error": specErr.Error()})
+		route := a.skillRouter.Route(prompt, runtimeSkillSummaries(skills))
+		if !route.Matched {
+			_ = a.appendSkillMissingEvent(ctx, run, traceID, route.Reason, "未命中可路由 Skill，使用文本模型兜底")
+			skillSelectionSnapshot["fallback_reason"] = route.Reason
 		} else {
-			if err := a.recordToolPolicyEvents(ctx, auth, run, spec.ToolRefs, traceID); err != nil {
-				return err
+			selectedSkillID = route.Skill.SkillID
+			skillSelectionSnapshot["skill_id"] = route.Skill.SkillID
+			skillSelectionSnapshot["skill_version"] = route.Skill.Version
+			skillSelectionSnapshot["version"] = route.Skill.Version
+			skillSelectionSnapshot["skill_scope"] = route.Skill.SkillScope
+			skillSelectionSnapshot["matched_reason"] = route.Reason
+			_ = a.appendRunEvent(ctx, run, "agent.skill.selected", traceID, map[string]any{
+				"skill_id":       route.Skill.SkillID,
+				"skill_name":     route.Skill.SkillName,
+				"skill_scope":    route.Skill.SkillScope,
+				"skill_version":  route.Skill.Version,
+				"matched_reason": route.Reason,
+				"route_hints":    route.Skill.RouteHints,
+			})
+			spec, specErr := a.gateway.GetPublishedSkillSpec(ctx, auth, route.Skill.SkillID, route.Skill.Version, traceID)
+			if specErr != nil {
+				_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_spec_unavailable", specErr.Error())
+				skillSelectionSnapshot["fallback_reason"] = "skill_spec_unavailable"
+			} else {
+				skillSelectionSnapshot["confirmation_policy"] = spec.ConfirmationPolicyJSON
+				skillSelectionSnapshot["tool_refs_digest"] = digestStrings(spec.ToolRefs)
+				skillSelectionSnapshot["tool_refs_count"] = len(spec.ToolRefs)
+				if err := a.recordToolPolicyEvents(ctx, auth, run, spec.ToolRefs, traceID); err != nil {
+					return err
+				}
+				if skillRequiresConfirmation(spec.ConfirmationPolicyJSON) {
+					if err := a.createSkillConfirmationInterrupt(ctx, run, spec, traceID); err != nil {
+						return err
+					}
+				}
 			}
 		}
 	}
+	modelID := ""
 	modelSummary, err := a.gateway.ResolveDefaultModel(ctx, auth, "image", traceID)
 	if err != nil {
-		_ = a.appendRunEvent(ctx, run, "model.default.failed", traceID, map[string]any{"resource_type": "image", "error": err.Error()})
+		_ = a.appendGenerationProgress(ctx, run, traceID, "image", "model_default_failed", 0, false, map[string]any{"error": err.Error()})
 	} else {
+		modelID = modelSummary.ModelID
 		snapshot, snapErr := a.gateway.ResolveGenerationModelSnapshot(ctx, auth, modelSummary.ResourceType, modelSummary.ModelID, modelSummary.PricingSnapshotID, traceID)
 		if snapErr != nil {
-			_ = a.appendRunEvent(ctx, run, "model.snapshot.failed", traceID, map[string]any{"model_id": modelSummary.ModelID, "error": snapErr.Error()})
+			_ = a.appendGenerationProgress(ctx, run, traceID, modelSummary.ResourceType, "model_snapshot_failed", 0, false, map[string]any{
+				"model_id": modelSummary.ModelID, "error": snapErr.Error(),
+			})
 		} else {
 			_ = a.repo.DB().WithContext(ctx).Model(&model.Run{}).Where("id = ?", run.ID).Update("model_selection_snapshot", jsonObject(snapshot))
-			_ = a.appendRunEvent(ctx, run, "model.snapshot.resolved", traceID, map[string]any{
-				"model_id": snapshot.ModelID, "resource_type": snapshot.ResourceType, "pricing_snapshot_id": snapshot.PricingSnapshotID,
-				"provider_runtime_ref": snapshot.ProviderRuntimeRef, "timeout_ms": snapshot.TimeoutMS,
+			_ = a.appendGenerationProgress(ctx, run, traceID, snapshot.ResourceType, "model_snapshot_resolved", 5, false, map[string]any{
+				"model_id": snapshot.ModelID, "pricing_snapshot_id": snapshot.PricingSnapshotID, "timeout_ms": snapshot.TimeoutMS,
 			})
+			result, genErr := a.modelAdapter.Generate(ctx, modeltool.Snapshot{
+				ModelID: snapshot.ModelID, ResourceType: snapshot.ResourceType, ProviderRuntimeRef: snapshot.ProviderRuntimeRef, TimeoutMS: snapshot.TimeoutMS,
+			}, runtimeeino.UserPrompt(prompt))
+			if genErr != nil {
+				_ = a.appendGenerationProgress(ctx, run, traceID, snapshot.ResourceType, "model_adapter_failed", 0, false, map[string]any{"error": genErr.Error()})
+			} else {
+				_ = a.appendGenerationProgress(ctx, run, traceID, snapshot.ResourceType, result.Status, 10, false, map[string]any{
+					"artifact_count":  result.ArtifactCount,
+					"deferred_reason": "real_provider_generation_tos_asset_credit_belongs_to_m4",
+				})
+			}
 		}
 	}
 	if types, version, err := a.gateway.ListAssetElementTypes(ctx, auth, 50, "", traceID); err == nil {
-		_ = a.appendRunEvent(ctx, run, "platform.dictionary.loaded", traceID, map[string]any{"asset_element_type_count": len(types), "schema_version": version})
+		_ = a.appendRunEvent(ctx, run, "platform.tags.updated", traceID, map[string]any{
+			"tags":                     assetElementTags(types),
+			"asset_element_type_count": len(types),
+			"schema_version":           version,
+			"element_types":            types,
+		})
 	}
-	now := time.Now().UTC()
-	safety := &model.SafetyEvaluation{
-		SafetyEvidenceID: securityID("safety_"), Scene: "generation", TargetType: "run", TargetRefID: run.ID,
-		EvaluatedObjectDigest: "sha256:local-m3:" + run.ID, PolicyVersion: "local-m3", EvidenceVersion: "2026-06-27",
-		Result: state.SafetyResultPassed, SourceSessionID: run.SessionID, SourceRunID: run.ID, TraceID: traceID,
-		EvaluatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+	hasPendingConfirmation := false
+	if _, err := a.repo.GetRequiredInterrupt(ctx, run.ID); err == nil {
+		hasPendingConfirmation = true
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
 	}
-	if err := a.repo.CreateSafetyEvaluation(ctx, safety); err == nil {
-		_ = a.appendRunEvent(ctx, run, "safety.evaluation.passed", traceID, map[string]any{"safety_evidence_id": safety.SafetyEvidenceID, "result": safety.Result})
+	result, err := a.turnLoop.StartTurn(ctx, turnloop.StartInput{
+		RunID: run.ID, ProjectID: run.ProjectID, Prompt: prompt, SkillID: selectedSkillID, ModelID: modelID,
+		SafetyResult: safetyEvidence.Result, HasPendingConfirmation: hasPendingConfirmation, IdempotencyKey: run.IdempotencyKey,
+	})
+	if err != nil {
+		return err
 	}
-	_ = a.appendRunEvent(ctx, run, "m4.asset_credit.deferred", traceID, map[string]any{"reason": "credit_asset_commit_belongs_to_m4", "status": "deferred_to_m4"})
+	switch result.Status {
+	case state.RunStatusRunning:
+		current, getErr := a.repo.GetRun(ctx, run.ID)
+		if getErr != nil {
+			return getErr
+		}
+		if current.Status == state.RunStatusPending || current.Status == state.RunStatusResuming {
+			if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusRunning, "", ""); err != nil {
+				return err
+			}
+		}
+	case state.RunStatusFailed:
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "TURNLOOP_FAILED", result.Phase)
+	}
 	return nil
 }
 
@@ -822,20 +1021,31 @@ func (a *App) recordToolPolicyEvents(ctx context.Context, auth AuthContextDTO, r
 		if toolName == "" || toolType == "" {
 			continue
 		}
+		toolCallID := securityID("tool_")
 		policy, err := a.gateway.CheckToolExecutionPolicy(ctx, auth, toolName, toolType, run.ProjectID, map[string]string{"source": "m3_start_turn"}, traceID)
 		if err != nil {
-			_ = a.appendRunEvent(ctx, run, "tool.policy.failed", traceID, map[string]any{"tool_ref": ref, "error": err.Error()})
+			_ = a.appendRunEvent(ctx, run, "tool.call.failed", traceID, map[string]any{
+				"tool_call_id": toolCallID, "error_code": "TOOL_POLICY_RPC_FAILED", "user_message": "工具策略校验失败",
+				"retryable": true, "support_trace_id": traceID, "tool_ref": ref, "error": err.Error(),
+			})
 			return mapBusinessError(err)
 		}
-		_ = a.appendRunEvent(ctx, run, "tool.policy.checked", traceID, map[string]any{
-			"tool_name": toolName, "tool_type": toolType, "allowed": policy.Allowed, "risk_level": policy.RiskLevel,
-			"requires_confirmation": policy.RequiresConfirmation, "timeout_ms": policy.TimeoutMS,
+		decision := a.toolChecker.Decide(runtimetool.Policy{
+			Allowed: policy.Allowed, RiskLevel: policy.RiskLevel, RequiresConfirmation: policy.RequiresConfirmation, TimeoutMS: policy.TimeoutMS,
 		})
-		if !policy.Allowed {
+		_ = a.appendRunEvent(ctx, run, "tool.call.started", traceID, map[string]any{
+			"tool_call_id": toolCallID, "tool_name": toolName, "tool_type": toolType, "risk_level": policy.RiskLevel, "timeout_ms": policy.TimeoutMS,
+			"policy_allowed": policy.Allowed, "requires_confirmation": policy.RequiresConfirmation, "decision": decision.Reason,
+		})
+		if !decision.Allowed {
 			_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "TOOL_POLICY_DENIED", "required tool is disabled")
+			_ = a.appendRunEvent(ctx, run, "tool.call.failed", traceID, map[string]any{
+				"tool_call_id": toolCallID, "error_code": "TOOL_POLICY_DENIED", "user_message": "required tool is disabled",
+				"retryable": false, "support_trace_id": traceID,
+			})
 			return apperror.New(apperror.CodePermissionDenied, "required tool is disabled")
 		}
-		if policy.RequiresConfirmation {
+		if decision.RequiresConfirmation {
 			if err := a.createToolConfirmationInterrupt(ctx, run, toolName, toolType, policy, traceID); err != nil {
 				return err
 			}
@@ -846,34 +1056,268 @@ func (a *App) recordToolPolicyEvents(ctx context.Context, auth AuthContextDTO, r
 }
 
 func (a *App) createToolConfirmationInterrupt(ctx context.Context, run *model.Run, toolName, toolType string, policy ToolExecutionPolicyDTO, traceID string) error {
-	if run.Status == state.RunStatusPending {
+	return a.createConfirmationInterrupt(ctx, run, "risk_confirmation", "high risk tool requires confirmation", map[string]any{
+		"tool_name": toolName, "tool_type": toolType, "risk_level": policy.RiskLevel,
+	}, "工具调用确认", "高风险工具需要人工确认后继续", []string{policy.RiskLevel, toolName + ":" + toolType}, 15*time.Minute, traceID)
+}
+
+func (a *App) createSkillConfirmationInterrupt(ctx context.Context, run *model.Run, spec SkillSpecDTO, traceID string) error {
+	policy := confirmationPolicyFromJSON(spec.ConfirmationPolicyJSON)
+	risks := append([]string{}, policy.RequiredActions...)
+	if policy.RiskSummary != "" {
+		risks = append(risks, policy.RiskSummary)
+	}
+	if len(risks) == 0 {
+		risks = []string{"skill_confirmation_policy"}
+	}
+	expires := time.Duration(policy.ExpiresInSeconds) * time.Second
+	if expires <= 0 {
+		expires = 15 * time.Minute
+	}
+	return a.createConfirmationInterrupt(ctx, run, "skill_confirmation", "skill confirmation policy requires confirmation", map[string]any{
+		"skill_id": spec.SkillID, "skill_version": spec.Version, "confirmation_policy": spec.ConfirmationPolicyJSON,
+	}, "Skill 执行确认", "当前 Skill 策略要求确认后继续", risks, expires, traceID)
+}
+
+func (a *App) createConfirmationInterrupt(ctx context.Context, run *model.Run, interruptType, reason string, confirmationPayload map[string]any, title, summary string, risks []string, ttl time.Duration, traceID string) error {
+	if _, err := a.repo.GetRequiredInterrupt(ctx, run.ID); err == nil {
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	current, err := a.repo.GetRun(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	if current.Status == state.RunStatusPending {
 		if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusRunning, "", ""); err != nil {
 			return err
 		}
+		current.Status = state.RunStatusRunning
 	}
 	interruptID := securityID("intr_")
+	expiresAt := time.Now().UTC().Add(ttl)
+	confirmationPayload["confirmation_id"] = interruptID
 	interrupt := &model.Interrupt{
-		ID: interruptID, RunID: run.ID, InterruptType: "risk_confirmation", Status: state.InterruptStatusRequired,
-		Reason: "high risk tool requires confirmation",
-		ConfirmationPayload: jsonObject(map[string]any{
-			"confirmation_id": interruptID, "tool_name": toolName, "tool_type": toolType, "risk_level": policy.RiskLevel,
-		}),
-		AllowedActions: jsonObject([]string{"confirm", "reject"}),
-		ResumeContext:  jsonObject(map[string]any{"next_step": "resume_turn", "source": "m3_tool_policy"}),
-		ExpiresAt:      time.Now().UTC().Add(15 * time.Minute),
-		TraceID:        traceID,
+		ID: interruptID, RunID: run.ID, InterruptType: interruptType, Status: state.InterruptStatusRequired,
+		Reason: reason, ConfirmationPayload: jsonObject(confirmationPayload), AllowedActions: jsonObject([]string{"confirm", "reject"}),
+		ResumeContext: jsonObject(map[string]any{"next_step": "resume_turn", "source": interruptType}), ExpiresAt: expiresAt, TraceID: traceID,
 	}
 	if err := a.repo.CreateInterrupt(ctx, interrupt); err != nil {
 		return err
 	}
-	if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusWaitingConfirmation, "", ""); err != nil {
-		return err
+	if current.Status != state.RunStatusWaitingConfirmation {
+		if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusWaitingConfirmation, "", ""); err != nil {
+			return err
+		}
 	}
 	run.Status = state.RunStatusWaitingConfirmation
-	return a.appendRunEvent(ctx, run, "tool.confirmation.required", traceID, map[string]any{
-		"interrupt_id": interruptID, "tool_name": toolName, "tool_type": toolType, "risk_level": policy.RiskLevel,
-		"allowed_actions": []string{"confirm", "reject"},
+	return a.appendRunEvent(ctx, run, "confirmation.required", traceID, map[string]any{
+		"confirmation_id": interruptID, "interrupt_id": interruptID, "title": title, "summary": summary,
+		"risks": risks, "points": 0, "expires_at": expiresAt.Format(time.RFC3339Nano), "actions": []string{"confirm", "reject"},
+		"confirmation_payload": confirmationPayload,
 	})
+}
+
+func (a *App) recordPromptSafetyEvaluation(ctx context.Context, run *model.Run, scene, targetType, targetRefID, text, traceID string) (*model.SafetyEvaluation, error) {
+	checked := map[string]any{"digest": digestText(text), "content_type": "text"}
+	_ = a.appendRunEvent(ctx, run, "safety.prompt.evaluating", traceID, map[string]any{
+		"scene": scene, "target_type": targetType, "target_ref_id": targetRefID, "checked_target": checked,
+	})
+	evidence := a.safetyEvaluator.Evaluate(ctx, scene, targetType, targetRefID, text)
+	expiresAt := evidence.EvaluatedAt.Add(24 * time.Hour)
+	safety := &model.SafetyEvaluation{
+		SafetyEvidenceID: evidence.EvidenceID, Scene: evidence.Scene, TargetType: evidence.TargetType, TargetRefID: evidence.TargetRefID,
+		EvaluatedObjectDigest: checked["digest"].(string), PolicyVersion: "local-m3", EvidenceVersion: "2026-06-27",
+		Result: evidence.Result, UserVisibleReason: evidence.Reason, SourceSessionID: run.SessionID, SourceRunID: run.ID,
+		TraceID: traceID, EvaluatedAt: evidence.EvaluatedAt, ExpiresAt: expiresAt,
+	}
+	if err := a.repo.CreateSafetyEvaluation(ctx, safety); err != nil {
+		return nil, err
+	}
+	switch evidence.Result {
+	case state.SafetyResultPassed:
+		_ = a.appendRunEvent(ctx, run, "safety.prompt.evaluated", traceID, map[string]any{
+			"safety_status": safety.Result, "safety_evidence_id": safety.SafetyEvidenceID, "policy_version": safety.PolicyVersion,
+			"expires_at": safety.ExpiresAt.Format(time.RFC3339Nano),
+		})
+		return safety, nil
+	case state.SafetyResultBlocked:
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "SAFETY_BLOCKED", evidence.Reason)
+		_ = a.appendRunEvent(ctx, run, "safety.prompt.blocked", traceID, map[string]any{
+			"safety_status": state.SafetyResultBlocked, "user_message": "输入未通过安全检查", "retryable": true, "support_trace_id": traceID,
+			"safety_evidence_id": safety.SafetyEvidenceID,
+		})
+		return safety, apperror.New(apperror.CodePermissionDenied, "input blocked by safety policy")
+	default:
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "SAFETY_FAILED", evidence.Reason)
+		_ = a.appendRunEvent(ctx, run, "safety.prompt.failed", traceID, map[string]any{
+			"safety_status": state.SafetyResultFailed, "error_code": "SAFETY_EVALUATION_FAILED", "user_message": "安全检查失败",
+			"retryable": true, "support_trace_id": traceID, "safety_evidence_id": safety.SafetyEvidenceID,
+		})
+		return safety, apperror.New(apperror.CodeInternal, "safety evaluation failed")
+	}
+}
+
+func (a *App) appendSkillMissingEvent(ctx context.Context, run *model.Run, traceID string, reason string, message string) error {
+	if strings.TrimSpace(reason) == "" {
+		reason = "no_published_skill"
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "未命中可路由 Skill，使用文本模型兜底"
+	}
+	return a.appendRunEvent(ctx, run, "agent.skill.missing", traceID, map[string]any{
+		"fallback_mode": "text_model", "matched_tags": []string{}, "user_message": message, "reason": reason,
+	})
+}
+
+func validateRunInputs(req CreateRunRequest) error {
+	for i, asset := range req.ReferencedAssets {
+		if strings.TrimSpace(asset.AssetID) == "" || strings.TrimSpace(asset.Source) == "" || strings.TrimSpace(asset.Purpose) == "" {
+			return apperror.New(apperror.CodeInvalidArgument, fmt.Sprintf("referenced_assets[%d] requires asset_id, source and purpose", i))
+		}
+		if asset.ProjectID != "" && asset.ProjectID != req.ProjectID {
+			return apperror.New(apperror.CodePermissionDenied, "referenced asset belongs to a different project")
+		}
+	}
+	for i, input := range req.ControlInputs {
+		if strings.TrimSpace(input.ControlID) == "" || strings.TrimSpace(input.Type) == "" {
+			return apperror.New(apperror.CodeInvalidArgument, fmt.Sprintf("control_inputs[%d] requires control_id and type", i))
+		}
+		if input.Required && emptyControlValue(input.Value) {
+			return apperror.New(apperror.CodeInvalidArgument, fmt.Sprintf("control_inputs[%d] is required", i))
+		}
+	}
+	return nil
+}
+
+func runInputSummary(req CreateRunRequest) map[string]any {
+	safetyTargets := []map[string]string{{
+		"target_type": "user_input",
+		"target_ref":  req.UserInput.ClientMessageID,
+	}}
+	for _, asset := range req.ReferencedAssets {
+		safetyTargets = append(safetyTargets, map[string]string{
+			"target_type": "referenced_asset",
+			"target_ref":  asset.AssetID,
+			"purpose":     asset.Purpose,
+		})
+	}
+	resourceType := "image"
+	if req.ModelSelection != nil && strings.TrimSpace(req.ModelSelection.ResourceType) != "" {
+		resourceType = req.ModelSelection.ResourceType
+	}
+	return map[string]any{
+		"client_message_id":      req.UserInput.ClientMessageID,
+		"content_type":           req.UserInput.ContentType,
+		"language":               req.UserInput.Language,
+		"referenced_assets":      req.ReferencedAssets,
+		"referenced_asset_count": len(req.ReferencedAssets),
+		"control_inputs":         req.ControlInputs,
+		"control_input_count":    len(req.ControlInputs),
+		"safety_targets":         safetyTargets,
+		"generation_plan": map[string]any{
+			"resource_type":         resourceType,
+			"has_referenced_assets": len(req.ReferencedAssets) > 0,
+			"control_input_count":   len(req.ControlInputs),
+		},
+	}
+}
+
+func emptyControlValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text) == ""
+	}
+	return false
+}
+
+func (a *App) appendGenerationProgress(ctx context.Context, run *model.Run, traceID, resourceType, status string, progress int, partialCompleted bool, extra map[string]any) error {
+	payload := map[string]any{
+		"task_id": "task_" + run.ID, "resource_type": resourceType, "status": status, "progress": progress, "partial_completed": partialCompleted,
+	}
+	for key, value := range extra {
+		if key == "provider_runtime_ref" || key == "secret_ref" {
+			continue
+		}
+		payload[key] = value
+	}
+	return a.appendRunEvent(ctx, run, "generation.progress", traceID, payload)
+}
+
+func runtimeSkillSummaries(items []SkillSummaryDTO) []runtimeskill.Summary {
+	out := make([]runtimeskill.Summary, 0, len(items))
+	for _, item := range items {
+		out = append(out, runtimeskill.Summary{
+			SkillID: item.SkillID, SkillName: item.SkillName, SkillScope: item.SkillScope, Version: item.Version,
+			Status: item.Status, RouteHints: item.RouteHints,
+		})
+	}
+	return out
+}
+
+func assetElementTags(items []AssetElementTypeDTO) []string {
+	tags := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.ElementType != "" {
+			tags = append(tags, item.ElementType)
+		}
+	}
+	return tags
+}
+
+type confirmationPolicy struct {
+	RequiresConfirmation bool     `json:"requires_confirmation"`
+	RequiredActions      []string `json:"required_actions"`
+	RiskSummary          string   `json:"risk_summary"`
+	MinConfirmLevel      string   `json:"min_confirm_level"`
+	LockFields           []string `json:"lock_fields"`
+	ExpiresInSeconds     int      `json:"expires_in_seconds"`
+}
+
+func confirmationPolicyFromJSON(raw string) confirmationPolicy {
+	policy := confirmationPolicy{MinConfirmLevel: "none"}
+	if strings.TrimSpace(raw) == "" {
+		return policy
+	}
+	_ = json.Unmarshal([]byte(raw), &policy)
+	return policy
+}
+
+func skillRequiresConfirmation(raw string) bool {
+	policy := confirmationPolicyFromJSON(raw)
+	return policy.RequiresConfirmation || len(policy.RequiredActions) > 0 || (policy.MinConfirmLevel != "" && policy.MinConfirmLevel != "none")
+}
+
+func digestText(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("sha256:%x", sum[:])
+}
+
+func digestStrings(values []string) string {
+	data, _ := json.Marshal(values)
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("sha256:%x", sum[:])
+}
+
+func creditAccountScope(auth AuthContextDTO) string {
+	if auth.EnterpriseID != "" || auth.LoginIdentityType == "enterprise_member" {
+		return "enterprise"
+	}
+	return "personal"
+}
+
+func ensureViewProjectAccess(access ProjectAccessDTO) error {
+	if !access.Allowed {
+		message := strings.TrimSpace(access.UserMessage)
+		if message == "" {
+			message = "project access denied"
+		}
+		return apperror.New(apperror.CodePermissionDenied, message)
+	}
+	return nil
 }
 
 func ensureCreativeProjectAccess(access ProjectAccessDTO) error {
@@ -922,7 +1366,11 @@ func eventDTO(event model.Event) EventDTO {
 	if len(event.Payload) > 0 {
 		_ = json.Unmarshal(event.Payload, &payload)
 	}
-	return EventDTO{EventID: event.EventID, Type: event.Type, RunID: event.RunID, Sequence: event.Sequence, TraceID: event.TraceID, Payload: payload, CreatedAt: event.CreatedAt}
+	return EventDTO{
+		EventID: event.EventID, Type: event.Type, SessionID: event.SessionID, RunID: event.RunID, ProjectID: event.ProjectID,
+		SpaceID: event.SpaceID, ActorUserID: event.ActorUserID, Sequence: event.Sequence, Timestamp: event.CreatedAt,
+		Component: event.Component, TraceID: event.TraceID, Payload: payload,
+	}
 }
 
 func jsonObject(value any) datatypes.JSON {

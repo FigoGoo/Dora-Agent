@@ -8,18 +8,19 @@ import (
 type Code string
 
 const (
-	CodeInvalidArgument     Code = "INVALID_ARGUMENT"
-	CodeUnauthenticated     Code = "UNAUTHENTICATED"
-	CodePermissionDenied    Code = "PERMISSION_DENIED"
-	CodeCrossSpaceDenied    Code = "CROSS_SPACE_DENIED"
-	CodeResourceNotFound    Code = "RESOURCE_NOT_FOUND"
-	CodeProjectNotFound     Code = "PROJECT_NOT_FOUND"
-	CodeProjectArchived     Code = "PROJECT_ARCHIVED"
-	CodeStateConflict       Code = "STATE_CONFLICT"
-	CodeIdempotencyConflict Code = "IDEMPOTENCY_CONFLICT"
-	CodeProcessing          Code = "IDEMPOTENCY_PROCESSING"
-	CodeInternal            Code = "INTERNAL_ERROR"
-	CodeNotImplemented      Code = "NOT_IMPLEMENTED"
+	CodeInvalidArgument       Code = "INVALID_ARGUMENT"
+	CodeUnauthenticated       Code = "UNAUTHENTICATED"
+	CodePermissionDenied      Code = "PERMISSION_DENIED"
+	CodeCrossSpaceDenied      Code = "CROSS_SPACE_DENIED"
+	CodeResourceNotFound      Code = "RESOURCE_NOT_FOUND"
+	CodeProjectNotFound       Code = "PROJECT_NOT_FOUND"
+	CodeProjectArchived       Code = "PROJECT_ARCHIVED"
+	CodeStateConflict         Code = "STATE_CONFLICT"
+	CodeIdempotencyConflict   Code = "IDEMPOTENCY_CONFLICT"
+	CodeProcessing            Code = "IDEMPOTENCY_PROCESSING"
+	CodeSafetyEvidenceInvalid Code = "SAFETY_EVIDENCE_INVALID"
+	CodeInternal              Code = "INTERNAL_ERROR"
+	CodeNotImplemented        Code = "NOT_IMPLEMENTED"
 )
 
 type BusinessError struct {
@@ -62,7 +63,7 @@ func (e *BusinessError) HTTPStatus() int {
 		return http.StatusInternalServerError
 	}
 	switch e.Code {
-	case CodeInvalidArgument:
+	case CodeInvalidArgument, CodeSafetyEvidenceInvalid:
 		return http.StatusBadRequest
 	case CodeUnauthenticated:
 		return http.StatusUnauthorized
