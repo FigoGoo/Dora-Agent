@@ -89,9 +89,14 @@ def validate_openapi(path: Path, require_named_components: bool) -> int:
 def validate_business_write_idempotency() -> None:
     doc = yaml.safe_load(Path("api/openapi/business-api.yaml").read_text())
     components = doc.get("components", {})
+    preview_operations = {"previewShareWork", "previewTakeDownPublicWork"}
+    server_hash_operations = {"confirmShareWork", "confirmTakeDownPublicWork"}
     for route, item in doc["paths"].items():
         for method, operation in item.items():
             if method.lower() not in {"post", "patch", "put", "delete"}:
+                continue
+            operation_id = operation["operationId"]
+            if operation_id in preview_operations:
                 continue
             params = operation.get("parameters", [])
             has_idempotency = False
@@ -101,17 +106,19 @@ def validate_business_write_idempotency() -> None:
                 if param.get("name") == "Idempotency-Key" and param.get("in") == "header":
                     has_idempotency = True
             if not has_idempotency:
-                fail(f"business OpenAPI write operation missing Idempotency-Key: {operation['operationId']}")
+                fail(f"business OpenAPI write operation missing Idempotency-Key: {operation_id}")
             request_body = operation.get("requestBody")
             if not request_body:
-                fail(f"business OpenAPI write operation missing requestBody: {operation['operationId']}")
+                fail(f"business OpenAPI write operation missing requestBody: {operation_id}")
             if "$ref" in request_body:
                 request_body = components["requestBodies"][request_body["$ref"].rsplit("/", 1)[-1]]
             schema = request_body["content"]["application/json"]["schema"]
             if "$ref" in schema:
                 schema = components["schemas"][schema["$ref"].rsplit("/", 1)[-1]]
+            if operation_id in server_hash_operations:
+                continue
             if "request_hash" not in schema.get("properties", {}) or "request_hash" not in set(schema.get("required", [])):
-                fail(f"business OpenAPI write request missing required request_hash: {operation['operationId']}")
+                fail(f"business OpenAPI write request missing required request_hash: {operation_id}")
 
 
 business_count = validate_openapi(Path("api/openapi/business-api.yaml"), require_named_components=True)

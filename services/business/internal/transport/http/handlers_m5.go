@@ -22,12 +22,12 @@ func registerM5Routes(router *gin.Engine, opts RouterOptions) {
 	router.POST("/api/works", auth.userAuth(), requireIdempotency(), h.createWork)
 	router.GET("/api/works/:work_id", auth.userAuth(), h.getWork)
 	router.PATCH("/api/works/:work_id", auth.userAuth(), requireIdempotency(), h.updateWork)
-	router.POST("/api/works/:work_id/share/preview", auth.userAuth(), requireIdempotency(), h.previewShareWork)
+	router.POST("/api/works/:work_id/share/preview", auth.userAuth(), h.previewShareWork)
 	router.POST("/api/works/:work_id/share/confirm", auth.userAuth(), requireIdempotency(), h.confirmShareWork)
 	router.POST("/api/works/:work_id/unshare", auth.userAuth(), requireIdempotency(), h.unshareWork)
 
 	router.GET("/api/admin/works/public", auth.adminAuth(false), h.adminListPublicWorks)
-	router.POST("/api/admin/works/public/:public_work_id/take-down/preview", auth.adminAuth(false), requireIdempotency(), h.adminPreviewTakeDownWork)
+	router.POST("/api/admin/works/public/:public_work_id/take-down/preview", auth.adminAuth(false), h.adminPreviewTakeDownWork)
 	router.POST("/api/admin/works/public/:public_work_id/take-down/confirm", auth.adminAuth(false), requireIdempotency(), h.adminConfirmTakeDownWork)
 
 	router.GET("/api/notifications", auth.userAuth(), h.listNotifications)
@@ -200,7 +200,6 @@ func (h m5Handler) previewShareWork(c *gin.Context) {
 		PublicDescription string                           `json:"public_description"`
 		Tags              []string                         `json:"tags"`
 		SafetyEvidence    *businessagent.SafetyEvidenceDTO `json:"safety_evidence"`
-		RequestHash       string                           `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -219,15 +218,11 @@ func (h m5Handler) confirmShareWork(c *gin.Context) {
 	}
 	var req struct {
 		PreviewToken string `json:"preview_token"`
-		RequestHash  string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.work.ConfirmShareWork(c.Request.Context(), work.ConfirmShareWorkInput{Auth: userAuth(c), Meta: meta, WorkID: c.Param("work_id"), PreviewToken: req.PreviewToken})
 	respond(c, out, err)
 }
@@ -269,7 +264,6 @@ func (h m5Handler) adminPreviewTakeDownWork(c *gin.Context) {
 	var req struct {
 		Reason       string `json:"reason"`
 		NotifyAuthor bool   `json:"notify_author"`
-		RequestHash  string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -289,15 +283,11 @@ func (h m5Handler) adminConfirmTakeDownWork(c *gin.Context) {
 		PreviewToken string `json:"preview_token"`
 		Reason       string `json:"reason"`
 		NotifyAuthor bool   `json:"notify_author"`
-		RequestHash  string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.work.ConfirmTakeDownWork(c.Request.Context(), work.ConfirmTakeDownWorkInput{
 		Auth: adminAuth(c), Meta: meta, PublicWorkID: c.Param("public_work_id"),
 		PreviewToken: req.PreviewToken, Reason: req.Reason, NotifyAuthor: req.NotifyAuthor,

@@ -1022,7 +1022,6 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/WorkId'
-      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         $ref: '#/components/requestBodies/PreviewShareWorkBody'
   /api/works/{work_id}/share/confirm:
@@ -2240,7 +2239,6 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/PublicWorkId'
-      - $ref: '#/components/parameters/IdempotencyKey'
       - $ref: '#/components/parameters/AdminReason'
       requestBody:
         $ref: '#/components/requestBodies/PreviewTakeDownPublicWorkBody'
@@ -4184,34 +4182,54 @@ components:
       required:
       - work_id
       - preview_token
+      - public_title
+      - public_description_digest
+      - tags
+      - privacy_redaction_summary
+      - public_media_summary
       - expires_at
-      - safety_evidence_id
-      - safety_evidence_digest
       additionalProperties: false
       properties:
         work_id:
           type: string
         preview_token:
           type: string
-        expires_at:
+        public_title:
           type: string
-          format: date-time
-        safety_evidence_id:
-          type: string
-        safety_evidence_digest:
-          type: string
-        sanitized_title:
-          type: string
-        sanitized_description:
+        public_description_digest:
           type: string
         tags:
           type: array
           items:
             type: string
-        public_media_refs:
+        privacy_redaction_summary:
           type: array
           items:
             type: string
+        public_media_summary:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicMediaRefDTO'
+        expires_at:
+          type: string
+          format: date-time
+    PublicMediaRefDTO:
+      type: object
+      required:
+      - public_media_id
+      - resource_type
+      - variant
+      - public_media_url
+      additionalProperties: false
+      properties:
+        public_media_id:
+          type: string
+        resource_type:
+          type: string
+        variant:
+          type: string
+        public_media_url:
+          type: string
     WorkShareResultDTO:
       type: object
       required:
@@ -4328,10 +4346,9 @@ components:
       required:
       - notification_id
       - type
+      - title
       - summary
-      - body
       - navigation_hint
-      - status
       - created_at
       additionalProperties: false
       properties:
@@ -4339,25 +4356,25 @@ components:
           type: string
         type:
           type: string
+        title:
+          type: string
         summary:
           type: string
         body:
           type: string
+        related_resource_type:
+          type: string
+        related_resource_id:
+          type: string
         navigation_hint:
           $ref: '#/components/schemas/NotificationNavigationHintDTO'
-        status:
-          type: string
-          enum:
-          - unread
-          - read
         read_at:
           type: string
           format: date-time
+          nullable: true
         created_at:
           type: string
           format: date-time
-        trace_id:
-          type: string
     NotificationNavigationHintDTO:
       type: object
       required:
@@ -4792,27 +4809,24 @@ components:
       type: object
       required:
       - items
-      - page_size
-      - has_more
+      - limit
+      - offset
+      - total
       additionalProperties: false
       properties:
         items:
           type: array
           items:
             $ref: '#/components/schemas/EnterpriseMemberDTO'
-        page:
-          type: integer
-        page_size:
+        limit:
           type: integer
           default: 10
           maximum: 50
+        offset:
+          type: integer
         total:
           type: integer
           format: int64
-        next_page_token:
-          type: string
-        has_more:
-          type: boolean
     ProjectListDTO:
       type: object
       required:
@@ -5067,27 +5081,24 @@ components:
       type: object
       required:
       - items
-      - page_size
-      - has_more
+      - limit
+      - offset
+      - total
       additionalProperties: false
       properties:
         items:
           type: array
           items:
             $ref: '#/components/schemas/NotificationDTO'
-        page:
-          type: integer
-        page_size:
+        limit:
           type: integer
           default: 10
           maximum: 50
+        offset:
+          type: integer
         total:
           type: integer
           format: int64
-        next_page_token:
-          type: string
-        has_more:
-          type: boolean
     AdminListDTO:
       type: object
       required:
@@ -5735,43 +5746,27 @@ components:
     PreviewShareWorkRequest:
       type: object
       required:
-      - safety_evidence_id
-      - request_hash
+      - public_title
+      - safety_evidence
       additionalProperties: false
       properties:
-        title:
+        public_title:
           type: string
-        description:
+        public_description:
           type: string
         tags:
           type: array
           items:
             type: string
-        safety_evidence_id:
-          type: string
-        request_hash:
-          type: string
+        safety_evidence:
+          $ref: '#/components/schemas/SafetyEvidence'
     ConfirmShareWorkRequest:
       type: object
       required:
       - preview_token
-      - safety_evidence_id
-      - request_hash
       additionalProperties: false
       properties:
         preview_token:
-          type: string
-        title:
-          type: string
-        description:
-          type: string
-        tags:
-          type: array
-          items:
-            type: string
-        safety_evidence_id:
-          type: string
-        request_hash:
           type: string
     UnshareWorkRequest:
       type: object
@@ -6205,7 +6200,6 @@ components:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         reason:
@@ -6213,14 +6207,11 @@ components:
         notify_author:
           type: boolean
           default: true
-        request_hash:
-          type: string
     ConfirmTakeDownPublicWorkRequest:
       type: object
       required:
       - reason
       - preview_token
-      - request_hash
       additionalProperties: false
       properties:
         reason:
@@ -6230,8 +6221,6 @@ components:
         notify_author:
           type: boolean
           default: true
-        request_hash:
-          type: string
     LoginOkEnvelope:
       type: object
       required:

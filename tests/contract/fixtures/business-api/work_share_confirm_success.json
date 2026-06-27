@@ -7,12 +7,7 @@
     "Idempotency-Key": "idem_m5_share_confirm_001"
   },
   "request_body": {
-    "preview_token": "preview.share.work.seed",
-    "title": "Seed public storyboard",
-    "description": "A sanitized public description.",
-    "tags": ["demo", "storyboard"],
-    "safety_evidence_id": "safe_work_share_seed",
-    "request_hash": "sha256:m5-share-confirm-request"
+    "preview_token": "preview.share.work.seed"
   },
   "response_status": 200,
   "response_body": {
@@ -28,7 +23,8 @@
     "trace_id": "trace_api_m5_share_confirm_001"
   },
   "assertions": [
-    "confirm requires Idempotency-Key and request_hash",
-    "public snapshot is created from sanitized preview payload"
+    "confirm requires Idempotency-Key",
+    "confirm request body only carries preview_token",
+    "server computes canonical request hash from preview_token and auth context"
   ]
 }

@@ -4,13 +4,11 @@
   "path": "/api/admin/works/public/pubw_seed_storyboard/take-down/preview",
   "request_headers": {
     "Authorization": "Bearer admin_session_token",
-    "X-Admin-Reason": "policy violation",
-    "Idempotency-Key": "idem_m5_takedown_preview_001"
+    "X-Admin-Reason": "policy violation"
   },
   "request_body": {
     "reason": "policy violation",
-    "notify_author": true,
-    "request_hash": "sha256:m5-takedown-preview-request"
+    "notify_author": true
   },
   "response_status": 200,
   "response_body": {
@@ -18,8 +16,11 @@
     "message": "ok",
     "data": {
       "public_work_id": "pubw_seed_storyboard",
+      "work_id": "wrk_seed_public",
       "current_status": "active",
-      "reason": "policy violation",
+      "impact_items": ["public link will be inaccessible", "source asset retained"],
+      "public_link_will_be_inaccessible": true,
+      "source_asset_retained": true,
       "preview_token": "preview.takedown.work.seed",
       "expires_at": "2026-06-27T00:10:00Z",
       "notify_author": true
@@ -28,6 +29,7 @@
   },
   "assertions": [
     "admin preview token binds public_work_id, reason and admin id",
+    "preview does not require Idempotency-Key or request_hash",
     "preview does not mutate public snapshot status"
   ]
 }

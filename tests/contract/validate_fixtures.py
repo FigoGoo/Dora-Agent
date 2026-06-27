@@ -91,6 +91,7 @@ DOMAIN_REQUIREMENTS = {
 }
 
 REQUIRED_HTTP_STATUS = {200, 401, 403, 404, 409, 422, 500}
+SERVER_HASH_HTTP_SUFFIXES = ("/share/confirm", "/take-down/confirm")
 REQUIRED_SEED_KEYWORDS = {
     "adm_root": "initial admin",
     "sp_personal_1001": "personal space",
@@ -261,7 +262,8 @@ def validate_api_fixture(path: Path, data: dict[str, Any]) -> int:
     if data["method"] in {"POST", "PATCH", "PUT", "DELETE"}:
         headers = data.get("request_headers", {})
         body = data.get("request_body")
-        if "Idempotency-Key" in headers and isinstance(body, dict) and "request_hash" not in body:
+        server_hash = any(str(data["path"]).endswith(suffix) for suffix in SERVER_HASH_HTTP_SUFFIXES)
+        if "Idempotency-Key" in headers and isinstance(body, dict) and "request_hash" not in body and not server_hash:
             fail(f"{path}: idempotent HTTP fixture missing request_body.request_hash")
     return status
 

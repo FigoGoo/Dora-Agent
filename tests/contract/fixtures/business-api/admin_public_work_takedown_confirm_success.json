@@ -10,8 +10,7 @@
   "request_body": {
     "reason": "policy violation",
     "preview_token": "preview.takedown.work.seed",
-    "notify_author": true,
-    "request_hash": "sha256:m5-takedown-confirm-request"
+    "notify_author": true
   },
   "response_status": 200,
   "response_body": {
@@ -19,14 +18,18 @@
     "message": "ok",
     "data": {
       "public_work_id": "pubw_seed_storyboard",
+      "work_id": "wrk_seed_public",
+      "title": "Seed public storyboard",
       "status": "taken_down",
-      "audit_id": "audit_m5_takedown_001",
+      "published_at": "2026-06-27T12:00:00Z",
+      "taken_down_at": "2026-06-27T12:10:00Z",
       "notification_status": "created"
     },
     "trace_id": "trace_api_m5_takedown_confirm_001"
   },
   "assertions": [
     "confirm writes moderation and audit records",
+    "confirm requires Idempotency-Key but request body does not carry request_hash",
     "notification failure would be compensated without rolling back takedown"
   ]
 }

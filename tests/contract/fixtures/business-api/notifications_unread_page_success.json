@@ -1,7 +1,7 @@
 {
   "case_id": "business_api_notifications_unread_page_success",
   "method": "GET",
-  "path": "/api/notifications?status=unread&page_size=10",
+  "path": "/api/notifications?read_status=unread&limit=10&offset=0",
   "request_headers": {
     "Authorization": "Bearer user_session_token"
   },
@@ -14,27 +14,28 @@
         {
           "notification_id": "ntf_skill_review_001",
           "type": "skill_review_approved",
+          "title": "Skill approved",
           "summary": "Skill approved",
           "body": "Your skill has been approved.",
+          "related_resource_type": "skill_version",
+          "related_resource_id": "skv_seed_storyboard_100",
           "navigation_hint": {
             "target_type": "skill_version",
             "target_id": "skv_seed_storyboard_100",
             "path": "/skills/skv_seed_storyboard_100"
           },
-          "status": "unread",
           "read_at": null,
-          "created_at": "2026-06-27T00:00:00Z",
-          "trace_id": "trace_seed_notification"
+          "created_at": "2026-06-27T00:00:00Z"
         }
       ],
-      "page_size": 10,
-      "next_page_token": null,
-      "has_more": false
+      "limit": 10,
+      "offset": 0,
+      "total": 1
     },
     "trace_id": "trace_api_notifications_001"
   },
   "assertions": [
     "jump target permission is checked before frontend navigation",
-    "unread list uses paginated response shape"
+    "unread list uses items/limit/offset/total response shape"
   ]
 }

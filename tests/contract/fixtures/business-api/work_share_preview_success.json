@@ -3,15 +3,24 @@
   "method": "POST",
   "path": "/api/works/wrk_seed_public/share/preview",
   "request_headers": {
-    "Authorization": "Bearer user_session_token",
-    "Idempotency-Key": "idem_m5_share_preview_001"
+    "Authorization": "Bearer user_session_token"
   },
   "request_body": {
-    "title": "Seed public storyboard",
-    "description": "A sanitized public description.",
+    "public_title": "Seed public storyboard",
+    "public_description": "A sanitized public description.",
     "tags": ["demo", "storyboard"],
-    "safety_evidence_id": "safe_work_share_seed",
-    "request_hash": "sha256:m5-share-preview-request"
+    "safety_evidence": {
+      "safety_evidence_id": "safe_work_share_seed",
+      "scene": "work_share",
+      "target_type": "work_share_text",
+      "result": "passed",
+      "evaluated_object_digest": "sha256:work-share-title-description-tags",
+      "policy_version": "local-m5",
+      "evidence_version": "2026-06-28",
+      "evaluated_at": "2026-06-27T00:00:00Z",
+      "expires_at": "2026-06-27T00:10:00Z",
+      "trace_id": "trace_api_m5_share_preview_001"
+    }
   },
   "response_status": 200,
   "response_body": {
@@ -20,20 +29,25 @@
     "data": {
       "work_id": "wrk_seed_public",
       "preview_token": "preview.share.work.seed",
-      "expires_at": "2026-06-27T00:10:00Z",
-      "safety_evidence_id": "safe_work_share_seed",
-      "safety_evidence_digest": "sha256:work-share-title-description-tags",
-      "sanitized_title": "Seed public storyboard",
-      "sanitized_description": "A sanitized public description.",
+      "public_title": "Seed public storyboard",
+      "public_description_digest": "sha256:work-share-title-description-tags",
       "tags": ["demo", "storyboard"],
-      "public_media_refs": [
-        "local/public/works/preview/snapshots/preview/media/ast_generated_1001"
-      ]
+      "privacy_redaction_summary": ["project_id", "session_id", "blackboard", "prompt", "credit", "model_cost"],
+      "public_media_summary": [
+        {
+          "public_media_id": "pm_seed_preview",
+          "resource_type": "image",
+          "variant": "preview",
+          "public_media_url": "http://localhost/tos/local/public/works/preview/snapshots/preview/media/pm_seed_preview/preview"
+        }
+      ],
+      "expires_at": "2026-06-27T00:10:00Z"
     },
     "trace_id": "trace_api_m5_share_preview_001"
   },
   "assertions": [
-    "preview uses work_share safety evidence",
+    "preview uses public_title/public_description/tags and full work_share safety evidence",
+    "preview does not require Idempotency-Key or request_hash",
     "preview response contains no private object key or signed URL"
   ]
 }

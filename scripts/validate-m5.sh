@@ -93,11 +93,14 @@ for old_gin in [
         fail(f"business Gin router still exposes old single-step M5 route {old_gin}")
 
 schema_requirements = {
-    "ShareWorkPreviewDTO": {"preview_token", "expires_at", "safety_evidence_id", "safety_evidence_digest"},
-    "ConfirmShareWorkRequest": {"preview_token", "safety_evidence_id", "request_hash"},
+    "PreviewShareWorkRequest": {"public_title", "public_description", "tags", "safety_evidence"},
+    "ShareWorkPreviewDTO": {"preview_token", "work_id", "public_title", "public_description_digest", "tags", "privacy_redaction_summary", "public_media_summary", "expires_at"},
+    "ConfirmShareWorkRequest": {"preview_token"},
+    "PreviewTakeDownPublicWorkRequest": {"reason", "notify_author"},
     "TakeDownPublicWorkPreviewDTO": {"preview_token", "expires_at", "notify_author"},
-    "ConfirmTakeDownPublicWorkRequest": {"preview_token", "reason", "request_hash"},
-    "NotificationDTO": {"type", "summary", "body", "navigation_hint", "read_at", "created_at"},
+    "ConfirmTakeDownPublicWorkRequest": {"preview_token", "reason", "notify_author"},
+    "NotificationDTO": {"type", "title", "summary", "navigation_hint", "read_at", "created_at", "related_resource_type", "related_resource_id"},
+    "NotificationListDTO": {"items", "limit", "offset", "total"},
     "NotificationNavigationHintDTO": {"target_type", "target_id", "path"},
 }
 for schema_name, fields in schema_requirements.items():
@@ -108,6 +111,18 @@ for schema_name, fields in schema_requirements.items():
     missing = fields - props
     if missing:
         fail(f"OpenAPI schema {schema_name} missing fields {sorted(missing)}")
+
+for schema_name in ["PreviewShareWorkRequest", "ConfirmShareWorkRequest", "PreviewTakeDownPublicWorkRequest", "ConfirmTakeDownPublicWorkRequest"]:
+    props = set(schemas[schema_name].get("properties", {}))
+    forbidden = {"title", "description", "safety_evidence_id", "request_hash"} & props
+    if forbidden:
+        fail(f"OpenAPI schema {schema_name} still exposes stale fields {sorted(forbidden)}")
+notification_props = set(schemas["NotificationDTO"].get("properties", {}))
+if "status" in notification_props:
+    fail("OpenAPI NotificationDTO still exposes stale status field")
+notification_list_props = set(schemas["NotificationListDTO"].get("properties", {}))
+if {"page_size", "has_more", "next_page_token"} & notification_list_props:
+    fail("OpenAPI NotificationListDTO still exposes stale page_size/has_more/next_page_token fields")
 
 public_detail = schemas.get("PublicWorkDetailDTO", {})
 if "work_id" in public_detail.get("required", []) or "work_id" in public_detail.get("properties", {}):
@@ -130,6 +145,8 @@ for needle in [
     'Result_ != "passed"',
     "ConfirmShareWork",
     "ConfirmTakeDownWork",
+    "DecisionReplay",
+    "requireActiveEnterpriseMember",
     "recordNotificationFailure",
     "notification_status",
     "public/works",
@@ -142,6 +159,8 @@ for needle in [
     "MarkNotificationRead",
     "MarkAllNotificationsRead",
     "GetNotificationNavigation",
+    "DecisionReplay",
+    "enterprise member is not active",
     "RecordCreateFailure",
     "RelatedResourceType",
     "NavigationHint",
@@ -167,6 +186,12 @@ for needle in [
 ]:
     if needle not in handlers:
         fail(f"business M5 HTTP handler missing {needle}")
+for stale_preview in [
+    'router.POST("/api/works/:work_id/share/preview", auth.userAuth(), requireIdempotency()',
+    'router.POST("/api/admin/works/public/:public_work_id/take-down/preview", auth.adminAuth(false), requireIdempotency()',
+]:
+    if stale_preview in handlers:
+        fail("M5 preview route must not require Idempotency-Key or request_hash")
 
 migration = Path("db/migrations/iterations/2026-06-27-business-core/business/0018_m5_work_notification_alignment.up.sql")
 if not migration.exists():
@@ -191,9 +216,12 @@ for needle in ["wrk_seed_public", "pubw_seed_storyboard", "wps_seed_public", "nt
         fail(f"business seed missing M5 seed {needle}")
 
 fixture_cases = set()
+fixture_by_id = {}
 for path in Path("tests/contract/fixtures/business-api").glob("*.json"):
     data = json.loads(path.read_text())
-    fixture_cases.add(data.get("case_id", ""))
+    case_id = data.get("case_id", "")
+    fixture_cases.add(case_id)
+    fixture_by_id[case_id] = data
 required_fixture_cases = {
     "business_api_m5_work_share_preview_success",
     "business_api_m5_work_share_confirm_success",
@@ -208,6 +236,47 @@ required_fixture_cases = {
 missing = required_fixture_cases - fixture_cases
 if missing:
     fail(f"missing M5 business-api fixtures {sorted(missing)}")
+
+preview_fixture = fixture_by_id["business_api_m5_work_share_preview_success"]
+if "Idempotency-Key" in preview_fixture.get("request_headers", {}):
+    fail("work share preview fixture must not require Idempotency-Key")
+preview_body = preview_fixture.get("request_body", {})
+for field in ["public_title", "public_description", "tags", "safety_evidence"]:
+    if field not in preview_body:
+        fail(f"work share preview fixture missing {field}")
+if {"title", "description", "safety_evidence_id", "request_hash"} & set(preview_body):
+    fail("work share preview fixture still uses stale request fields")
+
+confirm_fixture = fixture_by_id["business_api_m5_work_share_confirm_success"]
+if set(confirm_fixture.get("request_body", {})) != {"preview_token"}:
+    fail("work share confirm fixture body must contain only preview_token")
+if "Idempotency-Key" not in confirm_fixture.get("request_headers", {}):
+    fail("work share confirm fixture missing Idempotency-Key")
+
+takedown_preview = fixture_by_id["business_api_m5_admin_public_work_takedown_preview_success"]
+if "Idempotency-Key" in takedown_preview.get("request_headers", {}):
+    fail("take-down preview fixture must not require Idempotency-Key")
+if "request_hash" in takedown_preview.get("request_body", {}):
+    fail("take-down preview fixture must not carry request_hash")
+
+takedown_confirm = fixture_by_id["business_api_m5_admin_public_work_takedown_confirm_success"]
+if "request_hash" in takedown_confirm.get("request_body", {}):
+    fail("take-down confirm fixture must not carry request_hash")
+if "Idempotency-Key" not in takedown_confirm.get("request_headers", {}):
+    fail("take-down confirm fixture missing Idempotency-Key")
+
+notification_fixture = fixture_by_id["business_api_m5_notification_read_success"]["response_body"]["data"]
+if "status" in notification_fixture:
+    fail("notification fixture still exposes stale status")
+for field in ["title", "related_resource_type", "related_resource_id", "navigation_hint", "read_at", "created_at"]:
+    if field not in notification_fixture:
+        fail(f"notification fixture missing {field}")
+notification_page = fixture_by_id["business_api_notifications_unread_page_success"]["response_body"]["data"]
+if {"page_size", "has_more", "next_page_token"} & set(notification_page):
+    fail("notification page fixture still exposes stale pagination fields")
+for field in ["items", "limit", "offset", "total"]:
+    if field not in notification_page:
+        fail(f"notification page fixture missing {field}")
 
 agent_text = "\n".join(path.read_text() for path in Path("services/agent").rglob("*.go"))
 for forbidden in [

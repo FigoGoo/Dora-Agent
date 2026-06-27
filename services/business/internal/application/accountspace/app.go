@@ -984,6 +984,13 @@ func (a *App) AuthenticateToken(ctx context.Context, rawToken string) (AuthConte
 	if session.CurrentEnterpriseID != nil {
 		enterpriseID = *session.CurrentEnterpriseID
 	}
+	if enterpriseID != "" {
+		member, _, err := a.requireActiveEnterpriseMember(ctx, session.UserID, enterpriseID)
+		if err != nil {
+			return AuthContext{}, err
+		}
+		role = member.Role
+	}
 	return AuthContext{
 		UserID: session.UserID, LoginIdentityType: session.LoginIdentityType, SpaceID: session.CurrentSpaceID,
 		EnterpriseID: enterpriseID, EnterpriseRole: role, SessionID: session.ID, AccessToken: rawToken,

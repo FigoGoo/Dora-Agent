@@ -7,10 +7,7 @@
     "Idempotency-Key": "idem_m5_share_confirm_001"
   },
   "request_body": {
-    "preview_token": "preview.share.work.seed",
-    "title": "Different title",
-    "safety_evidence_id": "safe_work_share_seed",
-    "request_hash": "sha256:m5-share-confirm-conflict"
+    "preview_token": "preview.share.work.seed.different"
   },
   "response_status": 409,
   "response_body": {
@@ -25,7 +22,7 @@
     "trace_id": "trace_api_m5_share_idem_001"
   },
   "assertions": [
-    "same idempotency key with different semantic request is rejected",
+    "same idempotency key with different preview_token is rejected",
     "tenant/space/actor dimensions are part of request hash handling"
   ]
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/auditlog"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
+	"gorm.io/datatypes"
 )
 
 func TestShareWorkPreviewConfirmCreatesSanitizedPublicSnapshot(t *testing.T) {
@@ -60,9 +61,30 @@ func TestShareWorkPreviewConfirmCreatesSanitizedPublicSnapshot(t *testing.T) {
 		t.Fatalf("public detail did not use public snapshot media prefix: %s", payload)
 	}
 
-	_, err = app.UnshareWork(t.Context(), UnshareWorkInput{Auth: auth, Meta: workMeta("trace-work-unshare", "idem-work-unshare"), WorkID: created.Work.WorkID, Reason: "owner request"})
+	liked, err := app.LikePublicWork(t.Context(), LikePublicWorkInput{Auth: auth, Meta: workMeta("trace-like", "idem-like"), PublicWorkID: shared.PublicWorkID})
+	if err != nil || !liked.Liked || liked.LikeCount == 0 {
+		t.Fatalf("like public work: %#v err=%v", liked, err)
+	}
+	likeReplay, err := app.LikePublicWork(t.Context(), LikePublicWorkInput{Auth: auth, Meta: workMeta("trace-like", "idem-like"), PublicWorkID: shared.PublicWorkID})
+	if err != nil || !likeReplay.Liked || likeReplay.PublicWorkID != shared.PublicWorkID {
+		t.Fatalf("expected like replay: %#v err=%v", likeReplay, err)
+	}
+	unliked, err := app.UnlikePublicWork(t.Context(), LikePublicWorkInput{Auth: auth, Meta: workMeta("trace-unlike", "idem-unlike"), PublicWorkID: shared.PublicWorkID})
+	if err != nil || unliked.Liked {
+		t.Fatalf("unlike public work: %#v err=%v", unliked, err)
+	}
+	unlikeReplay, err := app.UnlikePublicWork(t.Context(), LikePublicWorkInput{Auth: auth, Meta: workMeta("trace-unlike", "idem-unlike"), PublicWorkID: shared.PublicWorkID})
+	if err != nil || unlikeReplay.Liked {
+		t.Fatalf("expected unlike replay: %#v err=%v", unlikeReplay, err)
+	}
+
+	unshared, err := app.UnshareWork(t.Context(), UnshareWorkInput{Auth: auth, Meta: workMeta("trace-work-unshare", "idem-work-unshare"), WorkID: created.Work.WorkID, Reason: "owner request"})
 	if err != nil {
 		t.Fatalf("unshare work: %v", err)
+	}
+	replayedUnshare, err := app.UnshareWork(t.Context(), UnshareWorkInput{Auth: auth, Meta: workMeta("trace-work-unshare", "idem-work-unshare"), WorkID: created.Work.WorkID, Reason: "owner request"})
+	if err != nil || replayedUnshare.Work.WorkID != unshared.Work.WorkID || replayedUnshare.Work.ShareStatus != StatusPrivate {
+		t.Fatalf("expected unshare replay: %#v err=%v", replayedUnshare, err)
 	}
 	_, err = app.GetPublicWork(t.Context(), GetPublicWorkInput{PublicWorkID: shared.PublicWorkID})
 	if codeOf(err) != bizerrors.CodeResourceNotFound {
@@ -113,6 +135,13 @@ func TestTakeDownDoesNotRollbackWhenNotificationFailsAndRecordsCompensation(t *t
 	if takenDown.NotificationStatus != "failed" {
 		t.Fatalf("expected failed notification status, got %#v", takenDown)
 	}
+	replayedTakeDown, err := app.ConfirmTakeDownWork(t.Context(), ConfirmTakeDownWorkInput{
+		Auth: adminAuth, Meta: adminMeta("trace-takedown", "idem-takedown"), PublicWorkID: shared.PublicWorkID,
+		PreviewToken: takedownPreview.PreviewToken, Reason: "policy risk", NotifyAuthor: true,
+	})
+	if err != nil || replayedTakeDown.Status != "taken_down" || replayedTakeDown.NotificationStatus != "failed" {
+		t.Fatalf("expected takedown replay: %#v err=%v", replayedTakeDown, err)
+	}
 	if got := app.CountNotificationFailuresForTest(t.Context(), shared.PublicWorkID); got != 1 {
 		t.Fatalf("expected one notification compensation failure, got %d", got)
 	}
@@ -125,6 +154,47 @@ func TestTakeDownDoesNotRollbackWhenNotificationFailsAndRecordsCompensation(t *t
 	})
 	if codeOf(err) != bizerrors.CodeStateConflict {
 		t.Fatalf("expected taken_down direct share conflict, got %v", err)
+	}
+}
+
+func TestEnterpriseRemovedMemberCannotManageWorks(t *testing.T) {
+	app := newWorkTestApp(t, nil)
+	auth := accountspace.AuthContext{UserID: "usr_1001", SpaceID: "sp_enterprise_1001", EnterpriseID: "ent_1001", EnterpriseRole: "owner", LoginIdentityType: "enterprise_member"}
+	now := time.Now().UTC()
+	entID := "ent_1001"
+	if err := app.repo.DB().WithContext(t.Context()).Create(&businesscore.Project{
+		ID: "prj_enterprise_removed", ProjectNo: "P-ENT-REMOVED", OwnerUserID: auth.UserID, SpaceID: auth.SpaceID, EnterpriseID: &entID,
+		Title: "Enterprise removed project", Status: "active", CreativeStatus: "editable", CreativeAllowed: true, LastActivityAt: now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed enterprise project: %v", err)
+	}
+	if err := app.repo.DB().WithContext(t.Context()).Create(&businesscore.Work{
+		ID: "wrk_enterprise_removed", WorkNo: "W-ENT-REMOVED", ProjectID: "prj_enterprise_removed", OwnerUserID: auth.UserID, SpaceID: auth.SpaceID,
+		Title: "Enterprise removed work", TagsJSON: datatypes.JSON([]byte("[]")), ShareStatus: StatusPrivate, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed enterprise work: %v", err)
+	}
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.EnterpriseMember{}).
+		Where("enterprise_id = ? AND user_id = ?", auth.EnterpriseID, auth.UserID).
+		Updates(map[string]any{"status": "removed", "updated_at": now}).Error; err != nil {
+		t.Fatalf("remove enterprise member: %v", err)
+	}
+
+	if _, err := app.ListMyWorks(t.Context(), ListWorksInput{Auth: auth}); codeOf(err) != bizerrors.CodePermissionDenied {
+		t.Fatalf("expected list denied for removed enterprise member, got %v", err)
+	}
+	if _, err := app.GetWorkDetail(t.Context(), auth, "wrk_enterprise_removed"); codeOf(err) != bizerrors.CodePermissionDenied {
+		t.Fatalf("expected detail denied for removed enterprise member, got %v", err)
+	}
+	title := "blocked update"
+	if _, err := app.UpdateWork(t.Context(), UpdateWorkInput{Auth: auth, Meta: workMeta("trace-ent-update", "idem-ent-update"), WorkID: "wrk_enterprise_removed", Title: &title}); codeOf(err) != bizerrors.CodePermissionDenied {
+		t.Fatalf("expected update denied for removed enterprise member, got %v", err)
+	}
+	if _, err := app.PreviewShareWork(t.Context(), PreviewShareWorkInput{Auth: auth, WorkID: "wrk_enterprise_removed", PublicTitle: "blocked share", SafetyEvidence: workShareEvidence("trace-ent-share", "blocked share", "", nil)}); codeOf(err) != bizerrors.CodePermissionDenied {
+		t.Fatalf("expected share denied for removed enterprise member, got %v", err)
+	}
+	if _, err := app.UnshareWork(t.Context(), UnshareWorkInput{Auth: auth, Meta: workMeta("trace-ent-unshare", "idem-ent-unshare"), WorkID: "wrk_enterprise_removed"}); codeOf(err) != bizerrors.CodePermissionDenied {
+		t.Fatalf("expected unshare denied for removed enterprise member, got %v", err)
 	}
 }
 

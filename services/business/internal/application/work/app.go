@@ -457,6 +457,9 @@ func (a *App) ListMyWorks(ctx context.Context, in ListWorksInput) (Page[WorkDTO]
 	if err := validateAuth(in.Auth); err != nil {
 		return Page[WorkDTO]{}, err
 	}
+	if err := a.requireActiveEnterpriseMember(ctx, in.Auth); err != nil {
+		return Page[WorkDTO]{}, err
+	}
 	limit, offset := normalizePage(in.Limit, in.Offset)
 	db := a.repo.DB().WithContext(ctx).Model(&businesscore.Work{}).
 		Where("space_id = ? AND owner_user_id = ? AND deleted_at IS NULL", in.Auth.SpaceID, in.Auth.UserID)
@@ -637,6 +640,9 @@ func (a *App) UnshareWork(ctx context.Context, in UnshareWorkInput) (WorkDetailD
 	if decision.Mode == idempotency.DecisionConflict {
 		return WorkDetailDTO{}, bizerrors.New(bizerrors.CodeIdempotencyConflict, "work unshare idempotency key conflicts")
 	}
+	if decision.Mode == idempotency.DecisionReplay && decision.ReplayResult != nil {
+		return a.GetWorkDetail(ctx, in.Auth, decision.ReplayResult.ID)
+	}
 	var detail WorkDetailDTO
 	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		work, err := a.getOwnedWorkTx(tx.Clauses(clause.Locking{Strength: "UPDATE"}), in.Auth, in.WorkID)
@@ -778,6 +784,9 @@ func (a *App) ConfirmTakeDownWork(ctx context.Context, in ConfirmTakeDownWorkInp
 	if decision.Mode == idempotency.DecisionConflict {
 		return AdminPublicWorkDTO{}, bizerrors.New(bizerrors.CodeIdempotencyConflict, "take-down idempotency key conflicts")
 	}
+	if decision.Mode == idempotency.DecisionReplay && decision.ReplayResult != nil {
+		return a.adminPublicWorkByID(ctx, decision.ReplayResult.ID)
+	}
 	var out AdminPublicWorkDTO
 	var authorUserID string
 	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -879,6 +888,9 @@ func (a *App) setLike(ctx context.Context, in LikePublicWorkInput, liked bool) (
 	if decision.Mode == idempotency.DecisionConflict {
 		return PublicWorkLikeDTO{}, bizerrors.New(bizerrors.CodeIdempotencyConflict, "public work reaction idempotency key conflicts")
 	}
+	if decision.Mode == idempotency.DecisionReplay && decision.ReplayResult != nil {
+		return a.publicWorkLikeResult(ctx, decision.ReplayResult.ID, liked)
+	}
 	var out PublicWorkLikeDTO
 	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		snapshot, err := a.getActiveSnapshotTx(tx.Clauses(clause.Locking{Strength: "UPDATE"}), in.PublicWorkID)
@@ -943,6 +955,52 @@ func (a *App) setLike(ctx context.Context, in LikePublicWorkInput, liked bool) (
 	return out, nil
 }
 
+func (a *App) publicWorkLikeResult(ctx context.Context, publicWorkID string, liked bool) (PublicWorkLikeDTO, error) {
+	var snapshot businesscore.WorkPublicSnapshot
+	err := a.repo.DB().WithContext(ctx).Where("public_work_id = ?", publicWorkID).First(&snapshot).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return PublicWorkLikeDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "public work not found")
+	}
+	if err != nil {
+		return PublicWorkLikeDTO{}, err
+	}
+	return PublicWorkLikeDTO{PublicWorkID: snapshot.PublicWorkID, Liked: liked, LikeCount: snapshot.LikeCount}, nil
+}
+
+func (a *App) adminPublicWorkByID(ctx context.Context, publicWorkID string) (AdminPublicWorkDTO, error) {
+	var snapshot businesscore.WorkPublicSnapshot
+	err := a.repo.DB().WithContext(ctx).Where("public_work_id = ?", publicWorkID).First(&snapshot).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return AdminPublicWorkDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "public work not found")
+	}
+	if err != nil {
+		return AdminPublicWorkDTO{}, err
+	}
+	out := AdminPublicWorkDTO{
+		PublicWorkID: snapshot.PublicWorkID, WorkID: snapshot.WorkID, Title: snapshotPayload(snapshot).Title,
+		Status: snapshot.Status, PublishedAt: snapshot.PublishedAt, TakenDownAt: snapshot.TakenDownAt,
+	}
+	if snapshot.Status == StatusTakenDown {
+		out.NotificationStatus = a.takedownNotificationStatus(ctx, snapshot.PublicWorkID)
+	}
+	return out, nil
+}
+
+func (a *App) takedownNotificationStatus(ctx context.Context, publicWorkID string) string {
+	var count int64
+	err := a.repo.DB().WithContext(ctx).Model(&businesscore.Notification{}).
+		Where("idempotency_key = ?", "work_takedown:"+publicWorkID).Count(&count).Error
+	if err == nil && count > 0 {
+		return "created"
+	}
+	err = a.repo.DB().WithContext(ctx).Model(&businesscore.NotificationCreateFailure{}).
+		Where("idempotency_key = ?", "work_takedown:"+publicWorkID).Count(&count).Error
+	if err == nil && count > 0 {
+		return "failed"
+	}
+	return "skipped"
+}
+
 func (a *App) notifyTakenDown(ctx context.Context, recipientUserID string, out AdminPublicWorkDTO, meta RequestMeta) error {
 	if a.opts.Notification == nil {
 		return nil
@@ -1001,13 +1059,8 @@ func (a *App) getProjectForWriteTx(tx *gorm.DB, auth AuthContext, projectID stri
 		return businesscore.Project{}, bizerrors.New(bizerrors.CodeProjectArchived, "project is archived")
 	}
 	if auth.EnterpriseID != "" {
-		var count int64
-		if err := tx.Model(&businesscore.EnterpriseMember{}).
-			Where("enterprise_id = ? AND user_id = ? AND status = ?", auth.EnterpriseID, auth.UserID, "active").Count(&count).Error; err != nil {
+		if err := a.requireActiveEnterpriseMemberTx(tx, auth); err != nil {
 			return businesscore.Project{}, err
-		}
-		if count == 0 {
-			return businesscore.Project{}, bizerrors.New(bizerrors.CodePermissionDenied, "enterprise member is not active")
 		}
 	}
 	return project, nil
@@ -1032,16 +1085,30 @@ func (a *App) getOwnedWorkTx(tx *gorm.DB, auth AuthContext, workID string) (busi
 		return businesscore.Work{}, bizerrors.New(bizerrors.CodePermissionDenied, "work is not owned by current user")
 	}
 	if auth.EnterpriseID != "" {
-		var count int64
-		if err := tx.Model(&businesscore.EnterpriseMember{}).
-			Where("enterprise_id = ? AND user_id = ? AND status = ?", auth.EnterpriseID, auth.UserID, "active").Count(&count).Error; err != nil {
+		if err := a.requireActiveEnterpriseMemberTx(tx, auth); err != nil {
 			return businesscore.Work{}, err
-		}
-		if count == 0 {
-			return businesscore.Work{}, bizerrors.New(bizerrors.CodePermissionDenied, "enterprise member is not active")
 		}
 	}
 	return work, nil
+}
+
+func (a *App) requireActiveEnterpriseMember(ctx context.Context, auth AuthContext) error {
+	return a.requireActiveEnterpriseMemberTx(a.repo.DB().WithContext(ctx), auth)
+}
+
+func (a *App) requireActiveEnterpriseMemberTx(tx *gorm.DB, auth AuthContext) error {
+	if auth.EnterpriseID == "" {
+		return nil
+	}
+	var count int64
+	if err := tx.Session(&gorm.Session{NewDB: true}).Model(&businesscore.EnterpriseMember{}).
+		Where("enterprise_id = ? AND user_id = ? AND status = ?", auth.EnterpriseID, auth.UserID, "active").Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return bizerrors.New(bizerrors.CodePermissionDenied, "enterprise member is not active")
+	}
+	return nil
 }
 
 func (a *App) validateProjectAssetsTx(tx *gorm.DB, projectID string, assetIDs []string, coverAssetID string) error {

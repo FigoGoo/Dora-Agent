@@ -9,6 +9,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/idempotency"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
+	"gorm.io/datatypes"
 )
 
 func TestNotificationsAreUserScopedAndReadIdempotently(t *testing.T) {
@@ -58,9 +59,44 @@ func TestNotificationsAreUserScopedAndReadIdempotently(t *testing.T) {
 	if err != nil || allRead.UnreadCount != 0 {
 		t.Fatalf("mark all read: %#v err=%v", allRead, err)
 	}
+	allReadReplay, err := app.MarkAllNotificationsRead(t.Context(), auth, notificationMeta("trace-read-all", "idem-read-all"), "")
+	if err != nil || allReadReplay.UnreadCount != 0 {
+		t.Fatalf("expected mark all read replay: %#v err=%v", allReadReplay, err)
+	}
 	nav, err := app.GetNotificationNavigation(t.Context(), auth, created.NotificationID)
 	if err != nil || !nav.Allowed || nav.TargetResourceID != "sk_seed_storyboard" {
 		t.Fatalf("navigation: %#v err=%v", nav, err)
+	}
+
+	now := time.Now().UTC()
+	if err := app.repo.DB().WithContext(t.Context()).Create(&businesscore.Work{
+		ID: "wrk_enterprise_notification", WorkNo: "W-ENT-NTF", ProjectID: "prj_enterprise_notification",
+		OwnerUserID: "usr_1001", SpaceID: "sp_enterprise_1001", Title: "Enterprise notification work", TagsJSON: datatypes.JSON([]byte("[]")), ShareStatus: "private",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed enterprise work: %v", err)
+	}
+	entNotification, err := app.CreateNotification(t.Context(), CreateNotificationInput{
+		RecipientUserID: "usr_1001", Type: "work_public_taken_down", Title: "Work taken down", Summary: "Enterprise work",
+		RelatedResourceType: "work", RelatedResourceID: "wrk_enterprise_notification",
+		NavigationHint: map[string]any{"target_route": "/works/wrk_enterprise_notification", "target_resource_id": "wrk_enterprise_notification"},
+		IdempotencyKey: "ntf:enterprise:removed", TraceID: "trace-enterprise-notification",
+	})
+	if err != nil {
+		t.Fatalf("create enterprise notification: %v", err)
+	}
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.EnterpriseMember{}).
+		Where("enterprise_id = ? AND user_id = ?", "ent_1001", "usr_1001").
+		Updates(map[string]any{"status": "removed", "updated_at": now}).Error; err != nil {
+		t.Fatalf("remove enterprise member: %v", err)
+	}
+	enterpriseAuth := accountspace.AuthContext{UserID: "usr_1001", SpaceID: "sp_enterprise_1001", EnterpriseID: "ent_1001", LoginIdentityType: "enterprise_member"}
+	blockedNav, err := app.GetNotificationNavigation(t.Context(), enterpriseAuth, entNotification.NotificationID)
+	if err != nil {
+		t.Fatalf("navigation should return denied DTO, got err=%v", err)
+	}
+	if blockedNav.Allowed || blockedNav.DeniedReason != string(bizerrors.CodePermissionDenied) {
+		t.Fatalf("expected removed member navigation denied, got %#v", blockedNav)
 	}
 }
 

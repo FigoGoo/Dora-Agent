@@ -62,7 +62,7 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 	workID := created["data"].(map[string]any)["work"].(map[string]any)["work_id"].(string)
 	title := "HTTP Public Work"
 	description := "HTTP public description"
-	preview := requestJSON(t, router, http.MethodPost, "/api/works/"+workID+"/share/preview", userToken, "idem-http-work-share-preview", map[string]any{
+	preview := requestJSON(t, router, http.MethodPost, "/api/works/"+workID+"/share/preview", userToken, "", map[string]any{
 		"public_title": title, "public_description": description, "tags": []string{"http"},
 		"safety_evidence": map[string]any{
 			"safety_evidence_id": "safe_http_work_share", "scene": "work_share", "result": "passed", "target_type": "work_share_text",
@@ -70,22 +70,21 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 			"policy_version":          "local-m5", "evidence_version": "2026-06-28", "evaluated_at": time.Now().UTC().Format(time.RFC3339Nano),
 			"expires_at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano), "trace_id": "trace-http-work-share",
 		},
-		"request_hash": "hash-http-work-share-preview",
 	})
 	previewToken := preview["data"].(map[string]any)["preview_token"].(string)
 	shared := requestJSON(t, router, http.MethodPost, "/api/works/"+workID+"/share/confirm", userToken, "idem-http-work-share", map[string]any{
-		"preview_token": previewToken, "request_hash": "hash-http-work-share",
+		"preview_token": previewToken,
 	})
 	publicWorkID := shared["data"].(map[string]any)["public_work_id"].(string)
 	requestJSON(t, router, http.MethodPost, "/api/public/works/"+publicWorkID+"/like", userToken, "idem-http-like", map[string]any{"request_hash": "hash-http-like"})
 
 	adminToken := loginAdmin(t, router, "admin@dora.local", "local-admin-change-me")
-	takedownPreview := requestJSON(t, router, http.MethodPost, "/api/admin/works/public/"+publicWorkID+"/take-down/preview", adminToken, "idem-http-takedown-preview", map[string]any{
-		"reason": "policy risk", "notify_author": true, "request_hash": "hash-http-takedown-preview",
+	takedownPreview := requestJSON(t, router, http.MethodPost, "/api/admin/works/public/"+publicWorkID+"/take-down/preview", adminToken, "", map[string]any{
+		"reason": "policy risk", "notify_author": true,
 	})
 	takedownToken := takedownPreview["data"].(map[string]any)["preview_token"].(string)
 	takenDown := requestJSON(t, router, http.MethodPost, "/api/admin/works/public/"+publicWorkID+"/take-down/confirm", adminToken, "idem-http-takedown", map[string]any{
-		"preview_token": takedownToken, "reason": "policy risk", "notify_author": true, "request_hash": "hash-http-takedown",
+		"preview_token": takedownToken, "reason": "policy risk", "notify_author": true,
 	})
 	if got := takenDown["data"].(map[string]any)["notification_status"]; got != "created" {
 		t.Fatalf("expected created notification status, got %#v", takenDown)

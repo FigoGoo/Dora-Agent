@@ -238,6 +238,9 @@ func (a *App) MarkAllNotificationsRead(ctx context.Context, auth AuthContext, me
 	if decision.Mode == idempotency.DecisionConflict {
 		return UnreadCountDTO{}, bizerrors.New(bizerrors.CodeIdempotencyConflict, "notification read-all idempotency key conflicts")
 	}
+	if decision.Mode == idempotency.DecisionReplay && decision.ReplayResult != nil {
+		return a.GetUnreadCount(ctx, auth)
+	}
 	now := a.now()
 	db := a.repo.DB().WithContext(ctx).Model(&businesscore.Notification{}).
 		Where("recipient_user_id = ? AND read_at IS NULL", auth.UserID)
@@ -334,14 +337,27 @@ func (a *App) checkNavigationPermission(ctx context.Context, auth AuthContext, r
 	}
 	switch strings.TrimSpace(resourceType) {
 	case "work":
-		var count int64
-		err := a.repo.DB().WithContext(ctx).Model(&businesscore.Work{}).
-			Where("id = ? AND owner_user_id = ?", resourceID, auth.UserID).Count(&count).Error
+		var work businesscore.Work
+		err := a.repo.DB().WithContext(ctx).Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", resourceID, auth.UserID).First(&work).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return bizerrors.New(bizerrors.CodePermissionDenied, "work is not visible")
+		}
 		if err != nil {
 			return err
 		}
-		if count == 0 {
+		if work.SpaceID != auth.SpaceID {
 			return bizerrors.New(bizerrors.CodePermissionDenied, "work is not visible")
+		}
+		if auth.EnterpriseID != "" {
+			var count int64
+			err = a.repo.DB().WithContext(ctx).Model(&businesscore.EnterpriseMember{}).
+				Where("enterprise_id = ? AND user_id = ? AND status = ?", auth.EnterpriseID, auth.UserID, "active").Count(&count).Error
+			if err != nil {
+				return err
+			}
+			if count == 0 {
+				return bizerrors.New(bizerrors.CodePermissionDenied, "enterprise member is not active")
+			}
 		}
 	case "skill", "skill_version":
 		var count int64
