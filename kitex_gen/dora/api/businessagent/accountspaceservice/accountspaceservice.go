@@ -20,6 +20,13 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"ResolveAuthContextFromToken": kitex.NewMethodInfo(
+		resolveAuthContextFromTokenHandler,
+		newAccountSpaceServiceResolveAuthContextFromTokenArgs,
+		newAccountSpaceServiceResolveAuthContextFromTokenResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 }
 
 var (
@@ -104,6 +111,24 @@ func newAccountSpaceServiceResolveCurrentSpaceContextResult() interface{} {
 	return businessagent.NewAccountSpaceServiceResolveCurrentSpaceContextResult()
 }
 
+func resolveAuthContextFromTokenHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*businessagent.AccountSpaceServiceResolveAuthContextFromTokenArgs)
+	realResult := result.(*businessagent.AccountSpaceServiceResolveAuthContextFromTokenResult)
+	success, err := handler.(businessagent.AccountSpaceService).ResolveAuthContextFromToken(ctx, realArg.Req)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newAccountSpaceServiceResolveAuthContextFromTokenArgs() interface{} {
+	return businessagent.NewAccountSpaceServiceResolveAuthContextFromTokenArgs()
+}
+
+func newAccountSpaceServiceResolveAuthContextFromTokenResult() interface{} {
+	return businessagent.NewAccountSpaceServiceResolveAuthContextFromTokenResult()
+}
+
 type kClient struct {
 	c client.Client
 }
@@ -119,6 +144,16 @@ func (p *kClient) ResolveCurrentSpaceContext(ctx context.Context, req *businessa
 	_args.Req = req
 	var _result businessagent.AccountSpaceServiceResolveCurrentSpaceContextResult
 	if err = p.c.Call(ctx, "ResolveCurrentSpaceContext", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) ResolveAuthContextFromToken(ctx context.Context, req *businessagent.ResolveAuthContextFromTokenRequest) (r *businessagent.ResolveAuthContextFromTokenResponse, err error) {
+	var _args businessagent.AccountSpaceServiceResolveAuthContextFromTokenArgs
+	_args.Req = req
+	var _result businessagent.AccountSpaceServiceResolveAuthContextFromTokenResult
+	if err = p.c.Call(ctx, "ResolveAuthContextFromToken", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil

@@ -56,7 +56,7 @@ owner：主控 Codex 汇总维护
 | M0 契约冻结 | Agent 04/06/07、业务 02/15、测试 00 | Thrift、OpenAPI、AG-UI schema、错误码、分页、幂等、fixture 设计冻结 | 契约字段、错误码、幂等键和 fixture 场景在 Agent、业务、测试三侧一致。 |
 | M1 基础设施 | Agent 01/03/11、业务 01/02/14 | 服务骨架、配置、日志、Agent DB、业务 DB、migration、seed | 配置键、日志 trace、SQL up/down、无外键约束、Agent 状态机、业务幂等 tenant 维度、审计模型和基础测试路径与 code-plan 语义一致。 |
 | M2 身份项目能力 | 业务 03/04/05、Agent 04/05、Agent 07 中 `AccountSpaceService.ResolveCurrentSpaceContext` 与 `ProjectService.CheckProjectAccess` 子集 | 登录空间、企业、管理员、项目、权限、Agent session/run 基础 | session/run 创建前能解析空间、校验项目、区分权限错误和归档状态；Agent 07 中 Skill、Tool、模型、积分和资产 RPC 不计入 M2，分别归入 M3/M4。 |
-| M3 配置能力 | 业务 06/07/08、Agent 02/08/12/13、Agent 07 中 Skill / Tool / Model / PlatformDictionary RPC 子集 | 模型、Tool、Skill、Skill 测试、安全证据、模型 Tool 适配 | Agent 只路由 Published Skill，只执行允许 Tool，安全评估先于预估和生成。 |
+| M3 配置能力 | 业务 06/07/08、Agent 02/08/12/13、Agent 04 token 鉴权、Agent 07 中 `AccountSpaceService.ResolveAuthContextFromToken` 与 Skill / Tool / Model / PlatformDictionary RPC 子集 | 模型、Tool、Skill、Skill 测试、安全证据、模型 Tool 适配 | Agent 通过业务 RPC 解析 Authorization token，只路由 Published Skill，只执行允许 Tool，安全评估先于预估和生成。 |
 | M4 积分资产闭环 | 业务 09/10/11、Agent 09/10/13、Agent 07 中 Credit / Asset / AssetCreditCommit / 资产写入权限 RPC 子集 | 预估、确认、冻结、生成、TOS 对象槽、保存、扣费、释放 | 资产保存成功才扣费；失败、取消、归档能释放冻结；DB 事实边界正确。 |
 | M5 公开触达和通知 | 业务 12/13、Agent 06/10 | 作品公开快照、点赞、下架、站内信、AG-UI 展示事件 | 公开内容不泄露隐私，通知和公开状态由业务服务维护。 |
 | M6 服务级验收 | 测试 00、Agent 14、业务 15 | RPC contract、HTTP contract、AG-UI replay、DB 验证、跨服务主链路报告 | 非前端、非部署范围内的阻断缺陷清零，未执行项有原因和风险说明。 |
@@ -68,7 +68,7 @@ owner：主控 Codex 汇总维护
 | 全局阶段 | Agent 07 范围 | 验收口径 |
 | --- | --- | --- |
 | M2 身份项目能力 | `AccountSpaceService.ResolveCurrentSpaceContext`、`ProjectService.CheckProjectAccess` 的 `view` 与 `continue_creation` 用法 | session/run 创建、追加输入、interrupt accept/reject、cancel 和 snapshot 前完成空间解析与项目权限校验；同时检查 RPC error 与正常响应中的 `allowed`、`creative_allowed`。 |
-| M3 配置能力 | `SkillCatalogService.ListRoutableSkills`、`GetPublishedSkillSpec`、`GetReviewCandidateSkillSpec`、`SaveSkillTestResult`；`ToolCapabilityService.CheckToolExecutionPolicy`；`ModelConfigService.ListAvailableGenerationModels`、`ResolveDefaultModel`、`ResolveGenerationModelSnapshot`；`PlatformDictionaryService.ListAssetElementTypes` | Skill 路由、Skill 测试、Tool 策略、模型选择、模型快照和元素类型字典完成后才可标记通过。 |
+| M3 配置能力 | `AccountSpaceService.ResolveAuthContextFromToken`；`SkillCatalogService.ListRoutableSkills`、`GetPublishedSkillSpec`、`GetReviewCandidateSkillSpec`、`SaveSkillTestResult`；`ToolCapabilityService.CheckToolExecutionPolicy`；`ModelConfigService.ListAvailableGenerationModels`、`ResolveDefaultModel`、`ResolveGenerationModelSnapshot`；`PlatformDictionaryService.ListAssetElementTypes` | Agent API token 鉴权、Skill 路由、Skill 测试、Tool 策略、模型选择、模型快照和元素类型字典完成后才可标记通过。 |
 | M4 积分资产闭环 | `CreditService.EstimateGenerationCredits`、`EstimateToolCredits`、`FreezeCredits`、`ChargeToolUsageCredits`、`ReleaseFrozenCredits`；`AssetService.BatchCheckAssetAccess`、`PrepareGeneratedAssetObjects`；`AssetCreditCommitService.CommitGeneratedAssetAndCharge`；`ProjectService.CheckProjectAccess` 的 `attach_asset`、`commit_asset`、`create_work` 用法 | 预估、确认、冻结、扣费、释放、资产访问校验、上传槽、资产保存和创作结果提交完成后才可标记通过。 |
 
 ### M3 / M4 / M6 阻断任务承接
@@ -77,7 +77,7 @@ owner：主控 Codex 汇总维护
 
 | 阶段 | 阻断任务 | Done 口径 |
 | --- | --- | --- |
-| M3 配置能力 | Agent 07 中 Skill / Tool / Model / PlatformDictionary RPC client 与业务 Kitex server；Agent 01 的 `runtime/eino`、`runtime/tool`、`runtime/skill`、`runtime/memory`、`events` 分层；Agent 04 的 token 鉴权、真实 SSE、输入引用校验、view 权限校验和错误码；Agent 05 的 `StartTurn` / `ResumeTurn` / `CancelRun` 基础 TurnLoop；Agent 03 中支撑 M3 的 session/run/event/snapshot/artifact repository；Agent 11 中 provider 配置、trace 和配置测试；业务 01/02 中支撑 M3 RPC 的分层、BusinessError 和公共字段基线。 | M3 相关 RPC 不再返回 `NOT_IMPLEMENTED`；Agent gateway 有对应 client 字段和 mapper；业务 06/07/08 与 `PlatformDictionaryService.ListAssetElementTypes` 只读字典子集有真实应用服务、contract fixture 和测试；M3 报告不得把未执行项写为通过。 |
+| M3 配置能力 | Agent 07 中 `ResolveAuthContextFromToken`、Skill / Tool / Model / PlatformDictionary RPC client 与业务 Kitex server；Agent 01 的 `runtime/eino`、`runtime/tool`、`runtime/skill`、`runtime/memory`、`events` 分层；Agent 04 的 token 鉴权、真实 SSE、输入引用校验、view 权限校验和错误码；Agent 05 的 `StartTurn` / `ResumeTurn` / `CancelRun` 基础 TurnLoop；Agent 03 中支撑 M3 的 session/run/event/snapshot/artifact repository；Agent 11 中 provider 配置、trace 和配置测试；业务 01/02 中支撑 M3 RPC 的分层、BusinessError 和公共字段基线。 | M3 相关 RPC 不再返回 `NOT_IMPLEMENTED`；Agent gateway 有对应 client 字段和 mapper；Agent API 不信任 `X-Actor-User-Id` / `X-Space-Id` 作为身份事实；业务 06/07/08 与 `PlatformDictionaryService.ListAssetElementTypes` 只读字典子集有真实应用服务、contract fixture 和测试；M3 报告不得把未执行项写为通过。 |
 | M4 积分资产闭环 | Agent 07 中 Credit / Asset / AssetCreditCommit RPC client 与业务 Kitex server；`ProjectService.CheckProjectAccess` 的 `attach_asset`、`commit_asset`、`create_work` 用法；Agent 05/09 中安全通过后预估、确认、冻结、生成、上传槽、保存、扣费、释放和失败补偿；业务 09/10/11 的积分、资产、元素、保存扣费事务；项目资产绑定和资产权限校验。 | M4 相关 RPC 不再返回 `NOT_IMPLEMENTED`；保存成功前不扣费，失败/取消/归档能释放冻结；资产 object key 由业务签发，Agent 只保存业务返回引用；业务 DB 和 Agent DB 边界测试通过。 |
 | M6 服务级验收 | M2 遗留的业务 03/04/05 RPC / Application 完整性、业务 04 后台 RPC、业务 05 项目 RPC 和资产绑定、业务 14 真实测试矩阵、Agent/业务架构依赖方向测试、全量 route parity、全量 contract fixture 和 `NOT_IMPLEMENTED` 扫描。 | 非前端、非部署范围内的 Agent、业务、RPC、OpenAPI、AG-UI、DB、fixture 和服务级主链路阻断项清零；测试报告只记录真实执行结果，未执行项写明原因、影响和 owner。 |
 

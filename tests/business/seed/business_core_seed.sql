@@ -134,9 +134,11 @@ INSERT INTO skill_output_element_schemas (
 
 INSERT INTO skill_test_cases (
   id, skill_id, version_id, case_name, test_input_json, expected_elements_json, status, created_by_user_id
-) VALUES (
-  'skcase_storyboard_basic', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'basic storyboard', '{"prompt":"make a product storyboard"}'::jsonb, '[{"element_type":"image.primary"}]'::jsonb, 'active', 'usr_1001'
-) ON CONFLICT DO NOTHING;
+) VALUES
+  ('skcase_storyboard_basic', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'basic storyboard', '{"prompt":"make a product storyboard"}'::jsonb, '[{"element_type":"image.primary"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_storyboard_caption', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'captioned storyboard', '{"prompt":"make a storyboard with captions"}'::jsonb, '[{"element_type":"image.primary"},{"element_type":"text.caption"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_storyboard_variants', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'variant storyboard', '{"prompt":"make three visual variants"}'::jsonb, '[{"element_type":"image.variation"},{"element_type":"metadata.generation"}]'::jsonb, 'active', 'usr_1001')
+ON CONFLICT DO NOTHING;
 
 INSERT INTO skill_test_runs (
   id, skill_id, version_id, test_case_id, status, execution_mode, input_json, created_by_user_id
@@ -177,8 +179,20 @@ ON CONFLICT (code_digest) DO NOTHING;
 INSERT INTO asset_element_types (
   id, element_type, display_name, schema_version, schema_json, status
 ) VALUES
-  ('aet_image_primary', 'image.primary', 'Primary Image', '2026-06-27', '{"type":"object"}'::jsonb, 'active'),
-  ('aet_text_caption', 'text.caption', 'Caption', '2026-06-27', '{"type":"object"}'::jsonb, 'active')
+  ('aet_image_primary', 'image.primary', 'Primary Image', '2026-06-27', '{"type":"object","category":"image","sort_order":10,"render_hint":{"component":"image"}}'::jsonb, 'active'),
+  ('aet_image_variation', 'image.variation', 'Image Variation', '2026-06-27', '{"type":"object","category":"image","sort_order":20,"render_hint":{"component":"gallery"}}'::jsonb, 'active'),
+  ('aet_image_mask', 'image.mask', 'Image Mask', '2026-06-27', '{"type":"object","category":"image","sort_order":30,"render_hint":{"component":"mask"}}'::jsonb, 'active'),
+  ('aet_image_thumbnail', 'image.thumbnail', 'Image Thumbnail', '2026-06-27', '{"type":"object","category":"image","sort_order":40,"render_hint":{"component":"thumbnail"}}'::jsonb, 'active'),
+  ('aet_text_caption', 'text.caption', 'Caption', '2026-06-27', '{"type":"object","category":"text","sort_order":110,"render_hint":{"component":"caption"}}'::jsonb, 'active'),
+  ('aet_text_prompt', 'text.prompt', 'Prompt', '2026-06-27', '{"type":"object","category":"text","sort_order":120,"render_hint":{"component":"prompt"}}'::jsonb, 'active'),
+  ('aet_text_alt', 'text.alt', 'Alt Text', '2026-06-27', '{"type":"object","category":"text","sort_order":130,"render_hint":{"component":"plain_text"}}'::jsonb, 'active'),
+  ('aet_text_storyboard', 'text.storyboard', 'Storyboard Text', '2026-06-27', '{"type":"object","category":"text","sort_order":140,"render_hint":{"component":"storyboard"}}'::jsonb, 'active'),
+  ('aet_audio_voiceover', 'audio.voiceover', 'Voiceover', '2026-06-27', '{"type":"object","category":"audio","sort_order":210,"render_hint":{"component":"audio"}}'::jsonb, 'active'),
+  ('aet_video_clip', 'video.clip', 'Video Clip', '2026-06-27', '{"type":"object","category":"video","sort_order":310,"render_hint":{"component":"video"}}'::jsonb, 'active'),
+  ('aet_layout_frame', 'layout.frame', 'Layout Frame', '2026-06-27', '{"type":"object","category":"layout","sort_order":410,"render_hint":{"component":"frame"}}'::jsonb, 'active'),
+  ('aet_layout_scene', 'layout.scene', 'Layout Scene', '2026-06-27', '{"type":"object","category":"layout","sort_order":420,"render_hint":{"component":"scene"}}'::jsonb, 'active'),
+  ('aet_metadata_generation', 'metadata.generation', 'Generation Metadata', '2026-06-27', '{"type":"object","category":"metadata","sort_order":510,"render_hint":{"component":"metadata"}}'::jsonb, 'active'),
+  ('aet_safety_evidence', 'safety.evidence', 'Safety Evidence', '2026-06-27', '{"type":"object","category":"safety","sort_order":610,"render_hint":{"component":"evidence"}}'::jsonb, 'active')
 ON CONFLICT (element_type) DO NOTHING;
 
 INSERT INTO assets (

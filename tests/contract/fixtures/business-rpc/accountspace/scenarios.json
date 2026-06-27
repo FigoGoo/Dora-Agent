@@ -2,6 +2,65 @@
   "domain": "accountspace",
   "scenarios": [
     {
+      "case_id": "accountspace_resolve_auth_context_from_token_success",
+      "service": "AccountSpaceService",
+      "method": "ResolveAuthContextFromToken",
+      "scenario": "resolve_auth_context_from_token_success",
+      "request": {
+        "authorization": "Bearer user_seed_token",
+        "expected_space_id": "sp_personal_1001",
+        "request_meta": {
+          "request_id": "req_accountspace_resolve_auth_context_from_token_success",
+          "trace_id": "trace_accountspace_resolve_auth_context_from_token_success",
+          "source": "agent_service"
+        }
+      },
+      "assertions": [
+        "agent authorization token is resolved by business service",
+        "client identity headers are not trusted by agent"
+      ],
+      "response": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "space_context": {
+          "space_id": "sp_personal_1001",
+          "space_type": "personal",
+          "credit_account_scope": "personal",
+          "credit_account_id": "ca_personal_1001",
+          "skill_scope_keys": [
+            "personal"
+          ]
+        },
+        "session_id": "sess_seed_1001"
+      }
+    },
+    {
+      "case_id": "accountspace_resolve_auth_context_from_token_cross_space_denied",
+      "service": "AccountSpaceService",
+      "method": "ResolveAuthContextFromToken",
+      "scenario": "resolve_auth_context_from_token_cross_space_denied",
+      "request": {
+        "authorization": "Bearer user_seed_token",
+        "expected_space_id": "sp_other_space",
+        "request_meta": {
+          "request_id": "req_accountspace_resolve_auth_context_from_token_cross_space_denied",
+          "trace_id": "trace_accountspace_resolve_auth_context_from_token_cross_space_denied",
+          "source": "agent_service"
+        }
+      },
+      "assertions": [
+        "expected_space_id mismatch is rejected by business service"
+      ],
+      "error": {
+        "code": "CROSS_SPACE_DENIED",
+        "message": "expected space does not match current session space",
+        "retryable": false
+      }
+    },
+    {
       "case_id": "accountspace_unauthenticated_error",
       "service": "AccountSpaceService",
       "method": "ResolveCurrentSpaceContext",

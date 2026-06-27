@@ -200,10 +200,13 @@ type CreateRunResult struct {
 
 | Header | 必填 | 说明 |
 | --- | --- | --- |
-| `Authorization` | 是 | 登录态 token，由 API 网关或 Agent HTTP middleware 解析为 `AuthContextDTO`。 |
+| `Authorization` | 是 | 登录态 token，Agent HTTP middleware 必须通过 `AccountSpaceService.ResolveAuthContextFromToken` 解析为 `AuthContextDTO` 和 `SpaceContextDTO`。 |
 | `Idempotency-Key` | 写操作必填 | 创建 session/run、confirm、reject、cancel 使用。 |
 | `X-Request-ID` | 否 | 无则 Agent 生成 `trace_id`。 |
+| `X-Space-Id` | 否 | 仅作为 `expected_space_id` 传给业务服务校验，不作为身份事实。 |
 | `Last-Event-ID` | SSE 可选 | SSE 重连时用于定位补偿起点。 |
+
+鉴权约束：Agent API 不得信任 `X-Actor-User-Id`、`X-Login-Identity-Type`、`X-Enterprise-Id`、`X-Enterprise-Role` 等客户端身份头；这些字段只能来自业务服务对 `Authorization` token 的解析结果。缺 token、token 失效、用户禁用、企业成员移除或 expected space 不匹配必须返回稳定 401/403，不得继续创建 session/run。
 
 ## Handler 设计
 

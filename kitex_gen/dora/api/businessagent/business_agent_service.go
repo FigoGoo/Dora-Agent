@@ -571,6 +571,154 @@ var fieldIDToName_ResolveCurrentSpaceContextRequest = map[int16]string{
 	3: "expected_space_id",
 }
 
+type ResolveAuthContextFromTokenRequest struct {
+	Authorization   string       `thrift:"authorization,1,required" frugal:"1,required,string" json:"authorization"`
+	RequestMeta     *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	ExpectedSpaceId *string      `thrift:"expected_space_id,3,optional" frugal:"3,optional,string" json:"expected_space_id,omitempty"`
+}
+
+func NewResolveAuthContextFromTokenRequest() *ResolveAuthContextFromTokenRequest {
+	return &ResolveAuthContextFromTokenRequest{}
+}
+
+func (p *ResolveAuthContextFromTokenRequest) InitDefault() {
+}
+
+func (p *ResolveAuthContextFromTokenRequest) GetAuthorization() (v string) {
+	return p.Authorization
+}
+
+var ResolveAuthContextFromTokenRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *ResolveAuthContextFromTokenRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return ResolveAuthContextFromTokenRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+var ResolveAuthContextFromTokenRequest_ExpectedSpaceId_DEFAULT string
+
+func (p *ResolveAuthContextFromTokenRequest) GetExpectedSpaceId() (v string) {
+	if !p.IsSetExpectedSpaceId() {
+		return ResolveAuthContextFromTokenRequest_ExpectedSpaceId_DEFAULT
+	}
+	return *p.ExpectedSpaceId
+}
+func (p *ResolveAuthContextFromTokenRequest) SetAuthorization(val string) {
+	p.Authorization = val
+}
+func (p *ResolveAuthContextFromTokenRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *ResolveAuthContextFromTokenRequest) SetExpectedSpaceId(val *string) {
+	p.ExpectedSpaceId = val
+}
+
+func (p *ResolveAuthContextFromTokenRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *ResolveAuthContextFromTokenRequest) IsSetExpectedSpaceId() bool {
+	return p.ExpectedSpaceId != nil
+}
+
+func (p *ResolveAuthContextFromTokenRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ResolveAuthContextFromTokenRequest(%+v)", *p)
+}
+
+var fieldIDToName_ResolveAuthContextFromTokenRequest = map[int16]string{
+	1: "authorization",
+	2: "request_meta",
+	3: "expected_space_id",
+}
+
+type ResolveAuthContextFromTokenResponse struct {
+	AuthContext  *AuthContext                        `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	SpaceContext *ResolveCurrentSpaceContextResponse `thrift:"space_context,2,required" frugal:"2,required,ResolveCurrentSpaceContextResponse" json:"space_context"`
+	SessionId    string                              `thrift:"session_id,3,required" frugal:"3,required,string" json:"session_id"`
+	ExpiresAt    *string                             `thrift:"expires_at,4,optional" frugal:"4,optional,string" json:"expires_at,omitempty"`
+}
+
+func NewResolveAuthContextFromTokenResponse() *ResolveAuthContextFromTokenResponse {
+	return &ResolveAuthContextFromTokenResponse{}
+}
+
+func (p *ResolveAuthContextFromTokenResponse) InitDefault() {
+}
+
+var ResolveAuthContextFromTokenResponse_AuthContext_DEFAULT *AuthContext
+
+func (p *ResolveAuthContextFromTokenResponse) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return ResolveAuthContextFromTokenResponse_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var ResolveAuthContextFromTokenResponse_SpaceContext_DEFAULT *ResolveCurrentSpaceContextResponse
+
+func (p *ResolveAuthContextFromTokenResponse) GetSpaceContext() (v *ResolveCurrentSpaceContextResponse) {
+	if !p.IsSetSpaceContext() {
+		return ResolveAuthContextFromTokenResponse_SpaceContext_DEFAULT
+	}
+	return p.SpaceContext
+}
+
+func (p *ResolveAuthContextFromTokenResponse) GetSessionId() (v string) {
+	return p.SessionId
+}
+
+var ResolveAuthContextFromTokenResponse_ExpiresAt_DEFAULT string
+
+func (p *ResolveAuthContextFromTokenResponse) GetExpiresAt() (v string) {
+	if !p.IsSetExpiresAt() {
+		return ResolveAuthContextFromTokenResponse_ExpiresAt_DEFAULT
+	}
+	return *p.ExpiresAt
+}
+func (p *ResolveAuthContextFromTokenResponse) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *ResolveAuthContextFromTokenResponse) SetSpaceContext(val *ResolveCurrentSpaceContextResponse) {
+	p.SpaceContext = val
+}
+func (p *ResolveAuthContextFromTokenResponse) SetSessionId(val string) {
+	p.SessionId = val
+}
+func (p *ResolveAuthContextFromTokenResponse) SetExpiresAt(val *string) {
+	p.ExpiresAt = val
+}
+
+func (p *ResolveAuthContextFromTokenResponse) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *ResolveAuthContextFromTokenResponse) IsSetSpaceContext() bool {
+	return p.SpaceContext != nil
+}
+
+func (p *ResolveAuthContextFromTokenResponse) IsSetExpiresAt() bool {
+	return p.ExpiresAt != nil
+}
+
+func (p *ResolveAuthContextFromTokenResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ResolveAuthContextFromTokenResponse(%+v)", *p)
+}
+
+var fieldIDToName_ResolveAuthContextFromTokenResponse = map[int16]string{
+	1: "auth_context",
+	2: "space_context",
+	3: "session_id",
+	4: "expires_at",
+}
+
 type ResolveCurrentSpaceContextResponse struct {
 	SpaceId            string            `thrift:"space_id,1,required" frugal:"1,required,string" json:"space_id"`
 	SpaceType          string            `thrift:"space_type,2,required" frugal:"2,required,string" json:"space_type"`
@@ -5236,6 +5384,8 @@ var fieldIDToName_SaveSkillTestResultResponse = map[int16]string{
 
 type AccountSpaceService interface {
 	ResolveCurrentSpaceContext(ctx context.Context, req *ResolveCurrentSpaceContextRequest) (r *ResolveCurrentSpaceContextResponse, err error)
+
+	ResolveAuthContextFromToken(ctx context.Context, req *ResolveAuthContextFromTokenRequest) (r *ResolveAuthContextFromTokenResponse, err error)
 }
 
 type AccountSpaceServiceResolveCurrentSpaceContextArgs struct {
@@ -5311,6 +5461,82 @@ func (p *AccountSpaceServiceResolveCurrentSpaceContextResult) String() string {
 }
 
 var fieldIDToName_AccountSpaceServiceResolveCurrentSpaceContextResult = map[int16]string{
+	0: "success",
+}
+
+type AccountSpaceServiceResolveAuthContextFromTokenArgs struct {
+	Req *ResolveAuthContextFromTokenRequest `thrift:"req,1" frugal:"1,default,ResolveAuthContextFromTokenRequest" json:"req"`
+}
+
+func NewAccountSpaceServiceResolveAuthContextFromTokenArgs() *AccountSpaceServiceResolveAuthContextFromTokenArgs {
+	return &AccountSpaceServiceResolveAuthContextFromTokenArgs{}
+}
+
+func (p *AccountSpaceServiceResolveAuthContextFromTokenArgs) InitDefault() {
+}
+
+var AccountSpaceServiceResolveAuthContextFromTokenArgs_Req_DEFAULT *ResolveAuthContextFromTokenRequest
+
+func (p *AccountSpaceServiceResolveAuthContextFromTokenArgs) GetReq() (v *ResolveAuthContextFromTokenRequest) {
+	if !p.IsSetReq() {
+		return AccountSpaceServiceResolveAuthContextFromTokenArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *AccountSpaceServiceResolveAuthContextFromTokenArgs) SetReq(val *ResolveAuthContextFromTokenRequest) {
+	p.Req = val
+}
+
+func (p *AccountSpaceServiceResolveAuthContextFromTokenArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *AccountSpaceServiceResolveAuthContextFromTokenArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AccountSpaceServiceResolveAuthContextFromTokenArgs(%+v)", *p)
+}
+
+var fieldIDToName_AccountSpaceServiceResolveAuthContextFromTokenArgs = map[int16]string{
+	1: "req",
+}
+
+type AccountSpaceServiceResolveAuthContextFromTokenResult struct {
+	Success *ResolveAuthContextFromTokenResponse `thrift:"success,0,optional" frugal:"0,optional,ResolveAuthContextFromTokenResponse" json:"success,omitempty"`
+}
+
+func NewAccountSpaceServiceResolveAuthContextFromTokenResult() *AccountSpaceServiceResolveAuthContextFromTokenResult {
+	return &AccountSpaceServiceResolveAuthContextFromTokenResult{}
+}
+
+func (p *AccountSpaceServiceResolveAuthContextFromTokenResult) InitDefault() {
+}
+
+var AccountSpaceServiceResolveAuthContextFromTokenResult_Success_DEFAULT *ResolveAuthContextFromTokenResponse
+
+func (p *AccountSpaceServiceResolveAuthContextFromTokenResult) GetSuccess() (v *ResolveAuthContextFromTokenResponse) {
+	if !p.IsSetSuccess() {
+		return AccountSpaceServiceResolveAuthContextFromTokenResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AccountSpaceServiceResolveAuthContextFromTokenResult) SetSuccess(x interface{}) {
+	p.Success = x.(*ResolveAuthContextFromTokenResponse)
+}
+
+func (p *AccountSpaceServiceResolveAuthContextFromTokenResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AccountSpaceServiceResolveAuthContextFromTokenResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AccountSpaceServiceResolveAuthContextFromTokenResult(%+v)", *p)
+}
+
+var fieldIDToName_AccountSpaceServiceResolveAuthContextFromTokenResult = map[int16]string{
 	0: "success",
 }
 

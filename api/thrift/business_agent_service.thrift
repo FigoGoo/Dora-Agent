@@ -59,6 +59,19 @@ struct ResolveCurrentSpaceContextRequest {
   3: optional string expected_space_id,
 }
 
+struct ResolveAuthContextFromTokenRequest {
+  1: required string authorization,
+  2: required RequestMeta request_meta,
+  3: optional string expected_space_id,
+}
+
+struct ResolveAuthContextFromTokenResponse {
+  1: required AuthContext auth_context,
+  2: required ResolveCurrentSpaceContextResponse space_context,
+  3: required string session_id,
+  4: optional string expires_at,
+}
+
 struct ResolveCurrentSpaceContextResponse {
   1: required string space_id,
   2: required string space_type,
@@ -511,6 +524,7 @@ struct SaveSkillTestResultResponse {
 
 service AccountSpaceService {
   ResolveCurrentSpaceContextResponse ResolveCurrentSpaceContext(1: ResolveCurrentSpaceContextRequest req)
+  ResolveAuthContextFromTokenResponse ResolveAuthContextFromToken(1: ResolveAuthContextFromTokenRequest req)
 }
 
 service ProjectService {

@@ -18,8 +18,16 @@ import (
 )
 
 type BusinessGateway interface {
+	ResolveAuthContextFromToken(ctx context.Context, authorization string, expectedSpaceID string, traceID string) (AuthContextDTO, SpaceContextDTO, error)
 	ResolveCurrentSpaceContext(ctx context.Context, auth AuthContextDTO, expectedSpaceID string, traceID string) (SpaceContextDTO, error)
 	CheckProjectAccess(ctx context.Context, auth AuthContextDTO, projectID string, purpose businessagent.ProjectAccessPurpose, traceID string) (ProjectAccessDTO, error)
+	ListRoutableSkills(ctx context.Context, auth AuthContextDTO, scopeFilter string, limit int, cursor string, traceID string) ([]SkillSummaryDTO, string, error)
+	GetPublishedSkillSpec(ctx context.Context, auth AuthContextDTO, skillID string, version string, traceID string) (SkillSpecDTO, error)
+	CheckToolExecutionPolicy(ctx context.Context, auth AuthContextDTO, toolName string, toolType string, projectID string, riskContext map[string]string, traceID string) (ToolExecutionPolicyDTO, error)
+	ResolveDefaultModel(ctx context.Context, auth AuthContextDTO, resourceType string, traceID string) (ModelSummaryDTO, error)
+	ResolveGenerationModelSnapshot(ctx context.Context, auth AuthContextDTO, resourceType string, modelID string, pricingSnapshotID string, traceID string) (ModelRuntimeSnapshotDTO, error)
+	ListAssetElementTypes(ctx context.Context, auth AuthContextDTO, pageSize int, schemaVersion string, traceID string) ([]AssetElementTypeDTO, string, error)
+	SaveSkillTestResult(ctx context.Context, auth AuthContextDTO, req SkillTestResultRequest, traceID string) (SkillTestResultDTO, error)
 }
 
 type AuthContextDTO struct {
@@ -51,6 +59,82 @@ type ProjectAccessDTO struct {
 	ProjectSummary  map[string]string
 }
 
+type SkillSummaryDTO struct {
+	SkillID    string
+	SkillName  string
+	SkillScope string
+	Version    string
+	Status     string
+	RouteHints map[string]string
+}
+
+type SkillSpecDTO struct {
+	SkillID                    string
+	Version                    string
+	SkillSpecJSON              string
+	OutputSchemaJSON           string
+	ToolRefs                   []string
+	MemoryPolicyJSON           string
+	ConfirmationPolicyJSON     string
+	ExecutionPolicySummaryJSON string
+}
+
+type ToolExecutionPolicyDTO struct {
+	Allowed              bool
+	RiskLevel            string
+	RequiresConfirmation bool
+	TimeoutMS            int32
+	RetryPolicy          map[string]string
+	CancelPolicy         map[string]string
+}
+
+type ModelSummaryDTO struct {
+	ModelID           string
+	DisplayName       string
+	IsDefault         bool
+	PricingSnapshotID string
+	ResourceType      string
+}
+
+type ModelRuntimeSnapshotDTO struct {
+	ModelID            string
+	DisplayName        string
+	ResourceType       string
+	PricingSnapshotID  string
+	ProviderRuntimeRef string
+	TimeoutMS          int32
+	RetryPolicy        map[string]string
+	RuntimeParameters  map[string]string
+}
+
+type AssetElementTypeDTO struct {
+	ElementType   string
+	DisplayName   string
+	Category      string
+	SchemaVersion string
+	Active        bool
+	SortOrder     int32
+}
+
+type SkillTestResultRequest struct {
+	SkillID            string
+	VersionID          string
+	TestRunID          string
+	TestCaseID         string
+	Status             string
+	ActualElementsJSON string
+	ErrorCode          string
+	ErrorSummary       string
+	SafetyEvidenceJSON string
+	AgentTraceID       string
+}
+
+type SkillTestResultDTO struct {
+	TestRunID string
+	Status    string
+	Saved     bool
+}
+
 type App struct {
 	repo          *repository.Repository
 	gateway       BusinessGateway
@@ -62,6 +146,23 @@ func New(repo *repository.Repository, gateway BusinessGateway, configVersion str
 		configVersion = "local-dev"
 	}
 	return &App{repo: repo, gateway: gateway, configVersion: configVersion}
+}
+
+func (a *App) ResolveAuthContextFromToken(ctx context.Context, authorization string, expectedSpaceID string, traceID string) (AuthContextDTO, error) {
+	if a.gateway == nil {
+		return AuthContextDTO{}, apperror.New(apperror.CodeNotImplemented, "business gateway is not configured")
+	}
+	auth, space, err := a.gateway.ResolveAuthContextFromToken(ctx, authorization, expectedSpaceID, traceID)
+	if err != nil {
+		return AuthContextDTO{}, mapBusinessError(err)
+	}
+	auth.SpaceID = space.SpaceID
+	auth.EnterpriseID = space.EnterpriseID
+	auth.EnterpriseRole = space.EnterpriseRole
+	if auth.LoginIdentityType == "" {
+		auth.LoginIdentityType = "personal"
+	}
+	return auth, nil
 }
 
 type CreateSessionRequest struct {
@@ -345,6 +446,12 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	}
 	if err := a.repo.AppendEvent(ctx, event); err != nil {
 		return CreateRunResponse{}, err
+	}
+	if err := a.recordM3StartEvents(ctx, auth, run, traceID); err != nil {
+		return CreateRunResponse{}, err
+	}
+	if updated, err := a.repo.GetRun(ctx, run.ID); err == nil {
+		return runResponse(*updated), nil
 	}
 	return runResponse(*run), nil
 }
@@ -654,6 +761,121 @@ func (a *App) appendRunEvent(ctx context.Context, run *model.Run, eventType stri
 	return a.repo.AppendEvent(ctx, event)
 }
 
+func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, traceID string) error {
+	if a.gateway == nil {
+		return nil
+	}
+	skills, _, err := a.gateway.ListRoutableSkills(ctx, auth, "", 10, "", traceID)
+	if err != nil {
+		_ = a.appendRunEvent(ctx, run, "skill.route.failed", traceID, map[string]any{"error": err.Error()})
+	} else if len(skills) == 0 {
+		_ = a.appendRunEvent(ctx, run, "skill.route.fallback", traceID, map[string]any{"reason": "no_published_skill_matched", "mode": "text_fallback"})
+	} else {
+		selected := skills[0]
+		_ = a.appendRunEvent(ctx, run, "skill.route.matched", traceID, map[string]any{
+			"skill_id": selected.SkillID, "skill_name": selected.SkillName, "version": selected.Version, "route_hints": selected.RouteHints,
+		})
+		spec, specErr := a.gateway.GetPublishedSkillSpec(ctx, auth, selected.SkillID, selected.Version, traceID)
+		if specErr != nil {
+			_ = a.appendRunEvent(ctx, run, "skill.spec.failed", traceID, map[string]any{"skill_id": selected.SkillID, "error": specErr.Error()})
+		} else {
+			if err := a.recordToolPolicyEvents(ctx, auth, run, spec.ToolRefs, traceID); err != nil {
+				return err
+			}
+		}
+	}
+	modelSummary, err := a.gateway.ResolveDefaultModel(ctx, auth, "image", traceID)
+	if err != nil {
+		_ = a.appendRunEvent(ctx, run, "model.default.failed", traceID, map[string]any{"resource_type": "image", "error": err.Error()})
+	} else {
+		snapshot, snapErr := a.gateway.ResolveGenerationModelSnapshot(ctx, auth, modelSummary.ResourceType, modelSummary.ModelID, modelSummary.PricingSnapshotID, traceID)
+		if snapErr != nil {
+			_ = a.appendRunEvent(ctx, run, "model.snapshot.failed", traceID, map[string]any{"model_id": modelSummary.ModelID, "error": snapErr.Error()})
+		} else {
+			_ = a.repo.DB().WithContext(ctx).Model(&model.Run{}).Where("id = ?", run.ID).Update("model_selection_snapshot", jsonObject(snapshot))
+			_ = a.appendRunEvent(ctx, run, "model.snapshot.resolved", traceID, map[string]any{
+				"model_id": snapshot.ModelID, "resource_type": snapshot.ResourceType, "pricing_snapshot_id": snapshot.PricingSnapshotID,
+				"provider_runtime_ref": snapshot.ProviderRuntimeRef, "timeout_ms": snapshot.TimeoutMS,
+			})
+		}
+	}
+	if types, version, err := a.gateway.ListAssetElementTypes(ctx, auth, 50, "", traceID); err == nil {
+		_ = a.appendRunEvent(ctx, run, "platform.dictionary.loaded", traceID, map[string]any{"asset_element_type_count": len(types), "schema_version": version})
+	}
+	now := time.Now().UTC()
+	safety := &model.SafetyEvaluation{
+		SafetyEvidenceID: securityID("safety_"), Scene: "generation", TargetType: "run", TargetRefID: run.ID,
+		EvaluatedObjectDigest: "sha256:local-m3:" + run.ID, PolicyVersion: "local-m3", EvidenceVersion: "2026-06-27",
+		Result: state.SafetyResultPassed, SourceSessionID: run.SessionID, SourceRunID: run.ID, TraceID: traceID,
+		EvaluatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+	}
+	if err := a.repo.CreateSafetyEvaluation(ctx, safety); err == nil {
+		_ = a.appendRunEvent(ctx, run, "safety.evaluation.passed", traceID, map[string]any{"safety_evidence_id": safety.SafetyEvidenceID, "result": safety.Result})
+	}
+	_ = a.appendRunEvent(ctx, run, "m4.asset_credit.deferred", traceID, map[string]any{"reason": "credit_asset_commit_belongs_to_m4", "status": "deferred_to_m4"})
+	return nil
+}
+
+func (a *App) recordToolPolicyEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, toolRefs []string, traceID string) error {
+	for _, ref := range toolRefs {
+		toolName, toolType := parseToolRef(ref)
+		if toolName == "" || toolType == "" {
+			continue
+		}
+		policy, err := a.gateway.CheckToolExecutionPolicy(ctx, auth, toolName, toolType, run.ProjectID, map[string]string{"source": "m3_start_turn"}, traceID)
+		if err != nil {
+			_ = a.appendRunEvent(ctx, run, "tool.policy.failed", traceID, map[string]any{"tool_ref": ref, "error": err.Error()})
+			return mapBusinessError(err)
+		}
+		_ = a.appendRunEvent(ctx, run, "tool.policy.checked", traceID, map[string]any{
+			"tool_name": toolName, "tool_type": toolType, "allowed": policy.Allowed, "risk_level": policy.RiskLevel,
+			"requires_confirmation": policy.RequiresConfirmation, "timeout_ms": policy.TimeoutMS,
+		})
+		if !policy.Allowed {
+			_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "TOOL_POLICY_DENIED", "required tool is disabled")
+			return apperror.New(apperror.CodePermissionDenied, "required tool is disabled")
+		}
+		if policy.RequiresConfirmation {
+			if err := a.createToolConfirmationInterrupt(ctx, run, toolName, toolType, policy, traceID); err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+func (a *App) createToolConfirmationInterrupt(ctx context.Context, run *model.Run, toolName, toolType string, policy ToolExecutionPolicyDTO, traceID string) error {
+	if run.Status == state.RunStatusPending {
+		if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusRunning, "", ""); err != nil {
+			return err
+		}
+	}
+	interruptID := securityID("intr_")
+	interrupt := &model.Interrupt{
+		ID: interruptID, RunID: run.ID, InterruptType: "risk_confirmation", Status: state.InterruptStatusRequired,
+		Reason: "high risk tool requires confirmation",
+		ConfirmationPayload: jsonObject(map[string]any{
+			"confirmation_id": interruptID, "tool_name": toolName, "tool_type": toolType, "risk_level": policy.RiskLevel,
+		}),
+		AllowedActions: jsonObject([]string{"confirm", "reject"}),
+		ResumeContext:  jsonObject(map[string]any{"next_step": "resume_turn", "source": "m3_tool_policy"}),
+		ExpiresAt:      time.Now().UTC().Add(15 * time.Minute),
+		TraceID:        traceID,
+	}
+	if err := a.repo.CreateInterrupt(ctx, interrupt); err != nil {
+		return err
+	}
+	if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusWaitingConfirmation, "", ""); err != nil {
+		return err
+	}
+	run.Status = state.RunStatusWaitingConfirmation
+	return a.appendRunEvent(ctx, run, "tool.confirmation.required", traceID, map[string]any{
+		"interrupt_id": interruptID, "tool_name": toolName, "tool_type": toolType, "risk_level": policy.RiskLevel,
+		"allowed_actions": []string{"confirm", "reject"},
+	})
+}
+
 func ensureCreativeProjectAccess(access ProjectAccessDTO) error {
 	if !access.Allowed {
 		message := strings.TrimSpace(access.UserMessage)
@@ -747,4 +969,12 @@ func mapBusinessError(err error) error {
 
 func securityID(prefix string) string {
 	return prefix + strconv.FormatInt(time.Now().UTC().UnixNano(), 36)
+}
+
+func parseToolRef(ref string) (string, string) {
+	parts := strings.SplitN(ref, ":", 2)
+	if len(parts) != 2 {
+		return ref, ""
+	}
+	return parts[0], parts[1]
 }

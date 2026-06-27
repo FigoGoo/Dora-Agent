@@ -970,6 +970,10 @@ func (a *App) AuthenticateToken(ctx context.Context, rawToken string) (AuthConte
 		First(&session).Error; err != nil {
 		return AuthContext{}, bizerrors.New(bizerrors.CodeUnauthenticated, "session is invalid")
 	}
+	var user businesscore.User
+	if err := a.repo.DB().WithContext(ctx).Where("id = ? AND status = ?", session.UserID, StatusActive).First(&user).Error; err != nil {
+		return AuthContext{}, bizerrors.New(bizerrors.CodePermissionDenied, "user is not active")
+	}
 	role := ""
 	if session.EnterpriseRole != nil {
 		role = *session.EnterpriseRole

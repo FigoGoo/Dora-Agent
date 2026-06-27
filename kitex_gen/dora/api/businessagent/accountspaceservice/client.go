@@ -12,6 +12,7 @@ import (
 // Client is designed to provide IDL-compatible methods with call-option parameter for kitex framework.
 type Client interface {
 	ResolveCurrentSpaceContext(ctx context.Context, req *businessagent.ResolveCurrentSpaceContextRequest, callOptions ...callopt.Option) (r *businessagent.ResolveCurrentSpaceContextResponse, err error)
+	ResolveAuthContextFromToken(ctx context.Context, req *businessagent.ResolveAuthContextFromTokenRequest, callOptions ...callopt.Option) (r *businessagent.ResolveAuthContextFromTokenResponse, err error)
 }
 
 // NewClient creates a client for the service defined in IDL.
@@ -46,4 +47,9 @@ type kAccountSpaceServiceClient struct {
 func (p *kAccountSpaceServiceClient) ResolveCurrentSpaceContext(ctx context.Context, req *businessagent.ResolveCurrentSpaceContextRequest, callOptions ...callopt.Option) (r *businessagent.ResolveCurrentSpaceContextResponse, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.ResolveCurrentSpaceContext(ctx, req)
+}
+
+func (p *kAccountSpaceServiceClient) ResolveAuthContextFromToken(ctx context.Context, req *businessagent.ResolveAuthContextFromTokenRequest, callOptions ...callopt.Option) (r *businessagent.ResolveAuthContextFromTokenResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.ResolveAuthContextFromToken(ctx, req)
 }

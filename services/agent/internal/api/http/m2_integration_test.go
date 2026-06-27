@@ -178,6 +178,33 @@ func TestM2AgentAuthRequired(t *testing.T) {
 	}
 }
 
+func TestM3AgentAuthUsesAuthorizationToken(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_agent_m3_auth")
+	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/20260627_agent_runtime/agent")
+	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
+
+	router := NewRouter(RouterOptions{App: workbench.New(repository.New(db.DB), workbench.StaticGateway{
+		Auth:   workbench.AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"},
+		Space:  workbench.SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
+		Access: workbench.ProjectAccessDTO{Allowed: true, ProjectStatus: "active", CreativeAllowed: true, AllowedActions: []string{"view", "continue_creation"}},
+	}, "local-dev")})
+	req := agentRequest(http.MethodPost, "/api/agent/sessions", "idem-m3-auth-token", map[string]any{"project_id": "prj_active_1001", "initial_title": "auth"})
+	req.Header.Set("X-Actor-User-Id", "malicious_user")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create session with token auth status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode auth response: %v", err)
+	}
+	session := out["snapshot"].(map[string]any)["session"].(map[string]any)
+	if session["user_id"] != "usr_1001" {
+		t.Fatalf("agent trusted identity header instead of token RPC: %#v", session)
+	}
+}
+
 func agentJSON(t *testing.T, router http.Handler, method, path, idem string, body any) map[string]any {
 	t.Helper()
 	resp := agentRaw(t, router, method, path, idem, body)
@@ -220,6 +247,7 @@ func agentRequest(method, path, idem string, body any) *http.Request {
 	}
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-agent-token")
 	req.Header.Set("X-Trace-Id", "trace-agent-m2")
 	req.Header.Set("X-Actor-User-Id", "usr_1001")
 	req.Header.Set("X-Space-Id", "sp_personal_1001")

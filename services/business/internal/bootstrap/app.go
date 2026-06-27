@@ -12,7 +12,11 @@ import (
 
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetdict"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/modelconfig"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/skillcatalog"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/toolpolicy"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/config"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/idempotency"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/logger"
@@ -34,6 +38,10 @@ type App struct {
 	Account    *accountspace.App
 	Admin      *admin.App
 	Project    *project.App
+	Model      *modelconfig.App
+	Tool       *toolpolicy.App
+	Skill      *skillcatalog.App
+	Dictionary *assetdict.App
 	Kitex      server.Server
 	HTTPServer *http.Server
 }
@@ -50,6 +58,10 @@ func New(cfg config.BusinessConfig) (*App, error) {
 	accountApp := accountspace.New(repo, guard, auditWriter)
 	adminApp := admin.New(repo, guard, auditWriter)
 	projectApp := project.New(repo, guard, auditWriter)
+	modelApp := modelconfig.New(repo)
+	toolApp := toolpolicy.New(repo)
+	skillApp := skillcatalog.New(repo)
+	dictionaryApp := assetdict.New(repo)
 	if _, err := adminApp.BootstrapInitialAdmin(contextBackground(), admin.BootstrapInput{
 		Account:             cfg.AdminBootstrapAccount,
 		PasswordHash:        cfg.AdminBootstrapPasswordHash,
@@ -59,7 +71,7 @@ func New(cfg config.BusinessConfig) (*App, error) {
 		return nil, fmt.Errorf("bootstrap initial admin: %w", err)
 	}
 
-	kitexServer, err := NewKitexServer(cfg, rpc.NewHandler(accountApp, projectApp))
+	kitexServer, err := NewKitexServer(cfg, rpc.NewHandler(accountApp, projectApp, modelApp, toolApp, skillApp, dictionaryApp))
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +88,10 @@ func New(cfg config.BusinessConfig) (*App, error) {
 			AccountSpace: accountApp,
 			Admin:        adminApp,
 			Project:      projectApp,
+			Model:        modelApp,
+			Tool:         toolApp,
+			Skill:        skillApp,
+			Dictionary:   dictionaryApp,
 		})
 		httpServer = &http.Server{
 			Addr:              cfg.HTTPAddr,
@@ -91,6 +107,10 @@ func New(cfg config.BusinessConfig) (*App, error) {
 		Account:    accountApp,
 		Admin:      adminApp,
 		Project:    projectApp,
+		Model:      modelApp,
+		Tool:       toolApp,
+		Skill:      skillApp,
+		Dictionary: dictionaryApp,
 		Kitex:      kitexServer,
 		HTTPServer: httpServer,
 	}, nil

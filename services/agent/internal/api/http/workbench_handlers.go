@@ -6,6 +6,7 @@ import (
 	nethttp "net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/apperror"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/application/workbench"
@@ -84,15 +85,31 @@ func (h workbenchHandler) openRunStream(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Status(nethttp.StatusOK)
-	for _, event := range out.Events {
-		data, marshalErr := json.Marshal(event)
-		if marshalErr != nil {
-			_ = c.Error(apperror.New(apperror.CodeInternal, "failed to marshal event"))
+	writeSSEEvents(c, out.Events)
+	if !strings.Contains(c.GetHeader("Accept"), "text/event-stream") {
+		return
+	}
+	next := out.NextSequence
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
 			return
-		}
-		_, _ = fmt.Fprintf(c.Writer, "id: %d\nevent: %s\ndata: %s\n\n", event.Sequence, event.Type, data)
-		if flusher, ok := c.Writer.(nethttp.Flusher); ok {
-			flusher.Flush()
+		case <-heartbeat.C:
+			replay, replayErr := h.app.ReplayEvents(c.Request.Context(), auth(c), c.Param("run_id"), next, 200)
+			if replayErr != nil {
+				_ = c.Error(replayErr)
+				return
+			}
+			writeSSEEvents(c, replay.Events)
+			next = replay.NextSequence
+			if len(replay.Events) == 0 {
+				_, _ = fmt.Fprint(c.Writer, ": heartbeat\n\n")
+				if flusher, ok := c.Writer.(nethttp.Flusher); ok {
+					flusher.Flush()
+				}
+			}
 		}
 	}
 }
@@ -164,28 +181,39 @@ func (h workbenchHandler) authRequired() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		auth := workbench.AuthContextDTO{
-			ActorUserID:       c.GetHeader("X-Actor-User-Id"),
-			LoginIdentityType: c.GetHeader("X-Login-Identity-Type"),
-			SpaceID:           c.GetHeader("X-Space-Id"),
-			EnterpriseID:      c.GetHeader("X-Enterprise-Id"),
-			EnterpriseRole:    c.GetHeader("X-Enterprise-Role"),
-		}
-		if auth.LoginIdentityType == "" {
-			auth.LoginIdentityType = "personal"
-		}
-		if auth.ActorUserID == "" {
-			_ = c.Error(apperror.New(apperror.CodeUnauthenticated, "X-Actor-User-Id is required"))
+		authorization := c.GetHeader("Authorization")
+		if authorization == "" {
+			_ = c.Error(apperror.New(apperror.CodeUnauthenticated, "Authorization is required"))
 			c.Abort()
 			return
 		}
-		if auth.SpaceID == "" {
-			_ = c.Error(apperror.New(apperror.CodeUnauthenticated, "X-Space-Id is required"))
+		auth, err := h.app.ResolveAuthContextFromToken(c.Request.Context(), authorization, c.GetHeader("X-Space-Id"), traceID(c))
+		if err != nil {
+			_ = c.Error(err)
+			c.Abort()
+			return
+		}
+		if auth.ActorUserID == "" || auth.SpaceID == "" {
+			_ = c.Error(apperror.New(apperror.CodeUnauthenticated, "authorization token is invalid"))
 			c.Abort()
 			return
 		}
 		c.Set("auth", auth)
 		c.Next()
+	}
+}
+
+func writeSSEEvents(c *gin.Context, events []workbench.EventDTO) {
+	for _, event := range events {
+		data, marshalErr := json.Marshal(event)
+		if marshalErr != nil {
+			_ = c.Error(apperror.New(apperror.CodeInternal, "failed to marshal event"))
+			return
+		}
+		_, _ = fmt.Fprintf(c.Writer, "id: %d\nevent: %s\ndata: %s\n\n", event.Sequence, event.Type, data)
+		if flusher, ok := c.Writer.(nethttp.Flusher); ok {
+			flusher.Flush()
+		}
 	}
 }
 
