@@ -44,7 +44,7 @@ owner：浏览器、RPC 与数据库测试工程师
 | 契约 | 结果 | 证据 |
 | --- | --- | --- |
 | RPC code-plan 对齐 | passed | `scripts/validate-m0.sh` 校验 `GeneratedAssetObjectInput`、`GeneratedAssetUploadSlot`、`CommittedAssetRefDTO`、`skill_scope_filter`、`account_id` 等关键字段，并阻断旧 DTO。 |
-| 业务 OpenAPI | passed | `api/openapi/business-api.yaml` 解析通过，100 个 operation 均有命名 200 response；所有 POST/PATCH/PUT/DELETE 均有 `Idempotency-Key`、命名 request body 和必填 `request_hash`。 |
+| 业务 OpenAPI | passed | `api/openapi/business-api.yaml` 解析通过，101 个 operation 均有命名 200 response；所有 POST/PATCH/PUT/DELETE 均有 `Idempotency-Key`、命名 request body 和必填 `request_hash`。 |
 | Agent OpenAPI | passed | `api/openapi/agent-workbench.yaml` 解析通过，12 个 operation 无 `additionalProperties: true` 泛型兜底；消息、事件回放和 snapshot 使用命名 DTO。 |
 | OpenAPI 占位名 | passed | `rg -n "JsonBody\|ApiResponse\|PageResponse" api/openapi` 无输出。 |
 | AG-UI schema 与 fixture | passed | AG-UI schema 覆盖 40 个 payload 分支；`python3 tests/agent/agui/validate_fixtures.py` 通过 9 个 fixture，含 `additional_input_resume_safety.json`。 |

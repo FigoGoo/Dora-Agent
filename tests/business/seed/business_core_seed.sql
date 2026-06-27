@@ -188,6 +188,13 @@ INSERT INTO assets (
   ('ast_other_space_1002', 'A2001', 'usr_1002', 'sp_personal_1002', null, 'prj_other_space_1002', 'image', 'Cross-space asset', 'active', 'private', 'upload', 'upload_seed_2001', 'sha256:other-space-content', '{}'::jsonb)
 ON CONFLICT (asset_no) DO NOTHING;
 
+INSERT INTO project_assets (
+  id, project_id, asset_id, asset_role, attached_by_user_id, attached_by, status, source_session_id, source_run_id, source_artifact_id, source_type
+) VALUES
+  ('pa_generated_1001_cover', 'prj_active_1001', 'ast_generated_1001', 'cover', 'usr_1001', 'agent', 'active', 'sess_seed_1001', 'run_seed_1001', 'art_1001', 'agent_commit'),
+  ('pa_other_space_1002_cover', 'prj_other_space_1002', 'ast_other_space_1002', 'cover', 'usr_1002', 'user', 'active', null, null, null, 'upload')
+ON CONFLICT (project_id, asset_id, asset_role) DO NOTHING;
+
 INSERT INTO asset_storage_objects (
   id, asset_id, bucket, object_key_digest, object_uri, mime_type, size_bytes, checksum, storage_status, preview_uri
 ) VALUES (

@@ -361,6 +361,28 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/ProjectId'
+    patch:
+      tags:
+      - Account
+      operationId: updateProject
+      responses:
+        '200':
+          $ref: '#/components/responses/UpdateProjectOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/ProjectId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/UpdateProjectBody'
   /api/projects/{project_id}/archive:
     post:
       tags:
@@ -2354,6 +2376,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/CreateProjectRequest'
+    UpdateProjectBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UpdateProjectRequest'
     ArchiveProjectBody:
       required: true
       content:
@@ -2775,6 +2803,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/GetProjectOkEnvelope'
+    UpdateProjectOk:
+      description: updateProject successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UpdateProjectOkEnvelope'
     ArchiveProjectOk:
       description: archiveProject successful response.
       content:
@@ -3604,6 +3638,8 @@ components:
         title:
           type: string
         description:
+          type: string
+        cover_asset_id:
           type: string
         status:
           type: string
@@ -5104,28 +5140,29 @@ components:
       type: object
       required:
       - target_identity_type
-      - target_space_id
       - request_hash
       additionalProperties: false
       properties:
         target_identity_type:
           type: string
-        target_space_id:
+        target_enterprise_id:
           type: string
-        enterprise_id:
+        return_path:
           type: string
         request_hash:
           type: string
     CreateEnterpriseRequest:
       type: object
       required:
-      - name
+      - enterprise_name
       - request_hash
       additionalProperties: false
       properties:
-        name:
+        enterprise_name:
           type: string
         owner_display_name:
+          type: string
+        contact_email:
           type: string
         request_hash:
           type: string
@@ -5220,6 +5257,23 @@ components:
           type: string
         source:
           type: string
+        request_hash:
+          type: string
+    UpdateProjectRequest:
+      type: object
+      required:
+      - request_hash
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        cover_asset_id:
+          type: string
+        base_updated_at:
+          type: string
+          format: date-time
         request_hash:
           type: string
     ArchiveProjectRequest:
@@ -6134,6 +6188,25 @@ components:
         trace_id:
           type: string
     GetProjectOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ProjectDetailDTO'
+        trace_id:
+          type: string
+    UpdateProjectOkEnvelope:
       type: object
       required:
       - code

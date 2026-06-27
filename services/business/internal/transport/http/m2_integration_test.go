@@ -40,6 +40,47 @@ func TestM2BusinessHTTPAndRPCIdentityProject(t *testing.T) {
 		t.Fatalf("unexpected current-space response: %#v", current)
 	}
 
+	seedProject := requestJSON(t, router, http.MethodGet, "/api/projects/prj_active_1001", userToken, "", nil)
+	baseUpdatedAt := seedProject["data"].(map[string]any)["updated_at"].(string)
+	updated := requestJSON(t, router, http.MethodPatch, "/api/projects/prj_active_1001", userToken, "idem-project-update", map[string]any{
+		"title": "M2 Updated Project", "cover_asset_id": "ast_generated_1001", "base_updated_at": baseUpdatedAt,
+	})
+	if updated["data"].(map[string]any)["cover_asset_id"] != "ast_generated_1001" {
+		t.Fatalf("project update did not keep project cover: %#v", updated)
+	}
+	stale := requestRaw(t, router, http.MethodPatch, "/api/projects/prj_active_1001", userToken, "idem-project-update-stale", map[string]any{
+		"title": "stale update", "base_updated_at": baseUpdatedAt,
+	})
+	if stale.Code != http.StatusConflict || stale.CodeValue() != string(bizerrors.CodeStateConflict) {
+		t.Fatalf("expected stale base_updated_at conflict, status=%d body=%#v", stale.Code, stale.Body)
+	}
+	currentProject := requestJSON(t, router, http.MethodGet, "/api/projects/prj_active_1001", userToken, "", nil)
+	currentBase := currentProject["data"].(map[string]any)["updated_at"].(string)
+	invalidCover := requestRaw(t, router, http.MethodPatch, "/api/projects/prj_active_1001", userToken, "idem-project-update-cover-denied", map[string]any{
+		"cover_asset_id": "ast_other_space_1002", "base_updated_at": currentBase,
+	})
+	if invalidCover.Code != http.StatusForbidden || invalidCover.CodeValue() != string(bizerrors.CodePermissionDenied) {
+		t.Fatalf("expected cover asset permission denied, status=%d body=%#v", invalidCover.Code, invalidCover.Body)
+	}
+
+	enterprise := requestJSON(t, router, http.MethodPost, "/api/enterprise/register", userToken, "idem-enterprise-create", map[string]any{
+		"enterprise_name": "M2 Enterprise", "owner_display_name": "Owner", "contact_email": "owner@dora.local",
+	})
+	enterpriseID := enterprise["data"].(map[string]any)["enterprise_id"].(string)
+	switched := requestJSON(t, router, http.MethodPost, "/api/account/switch-identity", userToken, "idem-enterprise-switch", map[string]any{
+		"target_identity_type": "enterprise_member", "target_enterprise_id": enterpriseID,
+	})
+	if switched["data"].(map[string]any)["login_identity_type"] != "enterprise_member" {
+		t.Fatalf("switch identity response = %#v", switched)
+	}
+	members := requestJSON(t, router, http.MethodGet, "/api/enterprise/members", userToken, "", nil)
+	if members["data"].(map[string]any)["total"].(float64) < 1 {
+		t.Fatalf("enterprise owner member missing: %#v", members)
+	}
+	requestJSON(t, router, http.MethodPost, "/api/account/switch-identity", userToken, "idem-personal-switch-back", map[string]any{
+		"target_identity_type": "personal",
+	})
+
 	created := requestJSON(t, router, http.MethodPost, "/api/projects", userToken, "idem-project-create", map[string]any{"title": "M2 Project"})
 	projectID := created["data"].(map[string]any)["project_id"].(string)
 	archived := requestJSON(t, router, http.MethodPost, "/api/projects/"+projectID+"/archive", userToken, "idem-project-archive", map[string]any{"reason": "done"})
@@ -86,6 +127,30 @@ func TestM2BusinessHTTPAndRPCIdentityProject(t *testing.T) {
 	if codeOf(err) != bizerrors.CodeCrossSpaceDenied {
 		t.Fatalf("expected CROSS_SPACE_DENIED for wrong expected space, got %v", err)
 	}
+
+	adminToken := loginAdmin(t, router, "admin@dora.local", "local-admin-change-me")
+	rotated := requestJSON(t, router, http.MethodPost, "/api/admin/auth/rotate-password", adminToken, "idem-admin-rotate", map[string]any{
+		"current_password": "local-admin-change-me", "new_password": "local-admin-change-me-rotated", "reason": "m2 forced rotation",
+	})
+	adminToken = rotated["data"].(map[string]any)["access_token"].(string)
+	preview := requestJSON(t, router, http.MethodPost, "/api/admin/users/usr_1001/status/preview", adminToken, "", map[string]any{
+		"target_status": "disabled", "reason": "m2 disable user",
+	})
+	previewToken := preview["data"].(map[string]any)["preview_token"].(string)
+	disabled := requestJSON(t, router, http.MethodPost, "/api/admin/users/usr_1001/status/confirm", adminToken, "idem-user-disable", map[string]any{
+		"target_status": "disabled", "preview_token": previewToken, "reason": "m2 disable user",
+	})
+	if disabled["data"].(map[string]any)["status"] != "disabled" {
+		t.Fatalf("user disable response = %#v", disabled)
+	}
+	_, err = handler.ResolveCurrentSpaceContext(t.Context(), &businessagent.ResolveCurrentSpaceContextRequest{
+		AuthContext:     &businessagent.AuthContext{ActorUserId: "usr_1001", LoginIdentityType: businessagent.LoginIdentityType_PERSONAL, SpaceId: ptr("sp_personal_1001")},
+		RequestMeta:     &businessagent.RequestMeta{RequestId: "req-rpc-disabled", TraceId: "trace-rpc", Source: "test"},
+		ExpectedSpaceId: ptr("sp_personal_1001"),
+	})
+	if codeOf(err) != bizerrors.CodePermissionDenied {
+		t.Fatalf("expected PERMISSION_DENIED for disabled user RPC, got %v", err)
+	}
 }
 
 func loginUser(t *testing.T, router http.Handler, account, password string) string {
@@ -98,7 +163,34 @@ func loginUser(t *testing.T, router http.Handler, account, password string) stri
 	return token
 }
 
-func requestJSON(t *testing.T, router http.Handler, method, path, token, idem string, body any) map[string]any {
+func loginAdmin(t *testing.T, router http.Handler, account, password string) string {
+	t.Helper()
+	resp := requestJSON(t, router, http.MethodPost, "/api/admin/auth/login", "", "", map[string]any{"account": account, "password": password})
+	token := resp["data"].(map[string]any)["access_token"].(string)
+	if token == "" {
+		t.Fatalf("admin login did not return access token: %#v", resp)
+	}
+	return token
+}
+
+type rawResponse struct {
+	Code int
+	Body map[string]any
+}
+
+func (r rawResponse) CodeValue() string {
+	if value, ok := r.Body["code"].(string); ok {
+		return value
+	}
+	if errBody, ok := r.Body["error"].(map[string]any); ok {
+		if value, ok := errBody["code"].(string); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+func requestRaw(t *testing.T, router http.Handler, method, path, token, idem string, body any) rawResponse {
 	t.Helper()
 	var buf bytes.Buffer
 	if body != nil {
@@ -117,14 +209,20 @@ func requestJSON(t *testing.T, router http.Handler, method, path, token, idem st
 	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("%s %s status=%d body=%s", method, path, rec.Code, rec.Body.String())
-	}
 	var out map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
+		t.Fatalf("decode raw response: %v body=%s", err, rec.Body.String())
 	}
-	return out
+	return rawResponse{Code: rec.Code, Body: out}
+}
+
+func requestJSON(t *testing.T, router http.Handler, method, path, token, idem string, body any) map[string]any {
+	t.Helper()
+	resp := requestRaw(t, router, method, path, token, idem, body)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("%s %s status=%d body=%#v", method, path, resp.Code, resp.Body)
+	}
+	return resp.Body
 }
 
 func ptr(value string) *string {

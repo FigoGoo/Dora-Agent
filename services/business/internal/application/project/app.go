@@ -81,6 +81,7 @@ type ProjectDetailDTO struct {
 	ProjectID            string    `json:"project_id"`
 	Title                string    `json:"title"`
 	Description          string    `json:"description,omitempty"`
+	CoverAssetID         string    `json:"cover_asset_id,omitempty"`
 	Status               string    `json:"status"`
 	CreativeAllowed      bool      `json:"creative_allowed"`
 	AllowedActions       []string  `json:"allowed_actions"`
@@ -246,7 +247,11 @@ func (a *App) UpdateProject(ctx context.Context, in UpdateInput) (ProjectDetailD
 		if project.Status == StatusArchived {
 			return bizerrors.New(bizerrors.CodeProjectArchived, "project is archived")
 		}
-		updates := map[string]any{"updated_at": a.now(), "last_activity_at": a.now()}
+		if err := checkBaseUpdatedAt(project.UpdatedAt, in.BaseUpdatedAt); err != nil {
+			return err
+		}
+		now := a.now()
+		updates := map[string]any{"updated_at": now, "last_activity_at": now}
 		if in.Title != nil {
 			title := strings.TrimSpace(*in.Title)
 			if title == "" || len(title) > 120 {
@@ -264,12 +269,20 @@ func (a *App) UpdateProject(ctx context.Context, in UpdateInput) (ProjectDetailD
 			project.Description = optionalString(desc)
 		}
 		if in.CoverAssetID != nil {
-			updates["cover_asset_id"] = optionalString(*in.CoverAssetID)
-			project.CoverAssetID = optionalString(*in.CoverAssetID)
+			coverAssetID := strings.TrimSpace(*in.CoverAssetID)
+			if coverAssetID != "" {
+				if err := validateCoverAssetTx(tx, project.ID, coverAssetID); err != nil {
+					return err
+				}
+			}
+			updates["cover_asset_id"] = optionalString(coverAssetID)
+			project.CoverAssetID = optionalString(coverAssetID)
 		}
 		if err := tx.Model(&businesscore.Project{}).Where("id = ?", project.ID).Updates(updates).Error; err != nil {
 			return err
 		}
+		project.UpdatedAt = now
+		project.LastActivityAt = now
 		dto = detailDTO(project)
 		audit := auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, "project.update", "project", project.ID, "success")
 		return tx.Create(audit).Error
@@ -449,8 +462,12 @@ func detailDTO(project businesscore.Project) ProjectDetailDTO {
 	if project.Description != nil {
 		desc = *project.Description
 	}
+	coverAssetID := ""
+	if project.CoverAssetID != nil {
+		coverAssetID = *project.CoverAssetID
+	}
 	return ProjectDetailDTO{
-		ProjectID: project.ID, Title: project.Title, Description: desc, Status: project.Status,
+		ProjectID: project.ID, Title: project.Title, Description: desc, CoverAssetID: coverAssetID, Status: project.Status,
 		CreativeAllowed: project.Status == StatusActive && project.CreativeAllowed,
 		AllowedActions:  allowedActions(project), AgentSessionQueryRef: "project_id=" + project.ID, UpdatedAt: project.UpdatedAt,
 	}
@@ -510,6 +527,34 @@ func value(ptr *string) string {
 		return ""
 	}
 	return *ptr
+}
+
+func checkBaseUpdatedAt(current time.Time, baseUpdatedAt string) error {
+	baseUpdatedAt = strings.TrimSpace(baseUpdatedAt)
+	if baseUpdatedAt == "" {
+		return nil
+	}
+	base, err := time.Parse(time.RFC3339Nano, baseUpdatedAt)
+	if err != nil {
+		return bizerrors.New(bizerrors.CodeInvalidArgument, "base_updated_at must be RFC3339 timestamp")
+	}
+	if !current.UTC().Equal(base.UTC()) {
+		return bizerrors.New(bizerrors.CodeStateConflict, "project was updated by another request")
+	}
+	return nil
+}
+
+func validateCoverAssetTx(tx *gorm.DB, projectID string, coverAssetID string) error {
+	var count int64
+	if err := tx.Model(&businesscore.ProjectAsset{}).
+		Where("project_id = ? AND asset_id = ? AND status = ?", projectID, coverAssetID, StatusActive).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return bizerrors.New(bizerrors.CodePermissionDenied, "cover asset is not referable in this project")
+	}
+	return nil
 }
 
 func errorCode(err error) string {

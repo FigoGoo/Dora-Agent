@@ -107,9 +107,13 @@ func (h m2Handler) switchIdentity(c *gin.Context) {
 	var req struct {
 		TargetIdentityType string `json:"target_identity_type"`
 		TargetEnterpriseID string `json:"target_enterprise_id"`
+		EnterpriseID       string `json:"enterprise_id"`
 	}
 	if !h.bind(c, &req) {
 		return
+	}
+	if req.TargetEnterpriseID == "" {
+		req.TargetEnterpriseID = req.EnterpriseID
 	}
 	out, err := h.account.SwitchIdentity(c.Request.Context(), accountspace.SwitchIdentityInput{
 		Auth: userAuth(c), TargetIdentityType: req.TargetIdentityType, TargetEnterpriseID: req.TargetEnterpriseID, Meta: h.meta(c, true),
@@ -120,11 +124,15 @@ func (h m2Handler) switchIdentity(c *gin.Context) {
 func (h m2Handler) createEnterprise(c *gin.Context) {
 	var req struct {
 		EnterpriseName   string `json:"enterprise_name"`
+		Name             string `json:"name"`
 		OwnerDisplayName string `json:"owner_display_name"`
 		ContactEmail     string `json:"contact_email"`
 	}
 	if !h.bind(c, &req) {
 		return
+	}
+	if req.EnterpriseName == "" {
+		req.EnterpriseName = req.Name
 	}
 	out, err := h.account.CreateEnterprise(c.Request.Context(), accountspace.CreateEnterpriseInput{
 		Auth: userAuth(c), EnterpriseName: req.EnterpriseName, OwnerDisplayName: req.OwnerDisplayName, ContactEmail: req.ContactEmail, Meta: h.meta(c, true),

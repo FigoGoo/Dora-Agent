@@ -129,19 +129,23 @@ func SignPreviewToken(secret, kind, subject string, ttl time.Duration) string {
 
 func VerifyPreviewToken(secret, token, kind, subject string) bool {
 	parts := strings.Split(token, ":")
-	if len(parts) != 4 {
+	if len(parts) < 4 {
 		return false
 	}
-	if parts[0] != kind || parts[1] != subject {
+	tokenKind := parts[0]
+	tokenSubject := strings.Join(parts[1:len(parts)-2], ":")
+	tokenExpires := parts[len(parts)-2]
+	tokenMAC := parts[len(parts)-1]
+	if tokenKind != kind || tokenSubject != subject {
 		return false
 	}
-	expires, err := strconv.ParseInt(parts[2], 10, 64)
+	expires, err := strconv.ParseInt(tokenExpires, 10, 64)
 	if err != nil || time.Now().UTC().Unix() > expires {
 		return false
 	}
-	body := strings.Join(parts[:3], ":")
+	body := strings.Join(parts[:len(parts)-1], ":")
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(body))
 	expected := hex.EncodeToString(mac.Sum(nil))
-	return subtle.ConstantTimeCompare([]byte(expected), []byte(parts[3])) == 1
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(tokenMAC)) == 1
 }

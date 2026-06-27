@@ -14,9 +14,10 @@
 
 ## 验收覆盖
 
-- 业务 HTTP：登录、当前空间、项目创建/归档。
-- 业务 RPC：`ResolveCurrentSpaceContext`、`CheckProjectAccess`，含跨空间和项目归档错误。
-- Agent API：session 创建、run 创建、同 session active run 冲突、取消、事件 replay、归档只读 snapshot。
+- 业务 HTTP：登录、当前空间、身份切换、企业创建和成员列表、项目创建/更新/归档、项目封面归属校验、`base_updated_at` 冲突、管理员登录/强制轮换/用户禁用。
+- 业务 RPC：`ResolveCurrentSpaceContext`、`CheckProjectAccess`，含跨空间、项目归档、项目只读和禁用用户错误。
+- Agent API：session 创建、run 创建、SSE stream、追加输入、interrupt accept/reject、同 session active run 冲突、取消、事件 replay、归档只读 snapshot。
+- 契约一致性：`scripts/validate-m2.sh` 校验 Agent OpenAPI 与 Gin route parity、Business Project PATCH OpenAPI 与 Gin route parity。
 - DB 边界：业务 DB 与 Agent DB 仍由各自 Testcontainers migration 测试验证。
 - 幂等/审计：业务写操作通过 `Idempotency-Key`、request hash 和审计表写入测试覆盖。
 

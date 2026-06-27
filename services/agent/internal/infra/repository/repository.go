@@ -115,6 +115,16 @@ func (r *Repository) CreateMessage(ctx context.Context, message *model.Message) 
 	return r.db.WithContext(ctx).Create(message).Error
 }
 
+func (r *Repository) NextMessageSequence(ctx context.Context, sessionID string) (int64, error) {
+	var maxSequence int64
+	err := r.db.WithContext(ctx).
+		Model(&model.Message{}).
+		Where("session_id = ? AND deleted_at IS NULL", sessionID).
+		Select("COALESCE(MAX(sequence), 0)").
+		Scan(&maxSequence).Error
+	return maxSequence + 1, err
+}
+
 func (r *Repository) ListMessages(ctx context.Context, sessionID string, limit, offset int) ([]model.Message, error) {
 	limit = normalizeLimit(limit, 10, 100)
 	var messages []model.Message
@@ -198,6 +208,16 @@ func (r *Repository) GetRequiredInterrupt(ctx context.Context, runID string) (*m
 	return &interrupt, nil
 }
 
+func (r *Repository) GetInterrupt(ctx context.Context, runID, interruptID string) (*model.Interrupt, error) {
+	var interrupt model.Interrupt
+	if err := r.db.WithContext(ctx).
+		Where("id = ? AND run_id = ? AND deleted_at IS NULL", interruptID, runID).
+		First(&interrupt).Error; err != nil {
+		return nil, err
+	}
+	return &interrupt, nil
+}
+
 func (r *Repository) ResolveInterrupt(ctx context.Context, id, toStatus string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var interrupt model.Interrupt
@@ -205,6 +225,9 @@ func (r *Repository) ResolveInterrupt(ctx context.Context, id, toStatus string) 
 			Where("id = ? AND deleted_at IS NULL", id).
 			First(&interrupt).Error; err != nil {
 			return err
+		}
+		if interrupt.Status == toStatus {
+			return nil
 		}
 		if !state.CanTransitionInterrupt(interrupt.Status, toStatus) {
 			return fmt.Errorf("%w: %s -> %s", ErrInvalidStateTransition, interrupt.Status, toStatus)

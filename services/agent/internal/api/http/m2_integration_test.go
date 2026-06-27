@@ -5,11 +5,16 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/application/workbench"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
+	"gorm.io/datatypes"
 )
 
 func TestM2AgentSessionRunProjectGate(t *testing.T) {
@@ -38,6 +43,17 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 	runID := runResp["run_id"].(string)
 	if runResp["status"] != "pending" {
 		t.Fatalf("expected pending run, got %#v", runResp)
+	}
+	stream := httptest.NewRecorder()
+	router.ServeHTTP(stream, agentRequest(http.MethodGet, "/api/agent/runs/"+runID+"/stream", "", nil))
+	if stream.Code != http.StatusOK || !strings.Contains(stream.Body.String(), "agent.run.created") {
+		t.Fatalf("stream route did not replay run event, status=%d body=%s", stream.Code, stream.Body.String())
+	}
+	appended := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+runID+"/messages", "idem-append", map[string]any{
+		"user_input": map[string]any{"client_message_id": "cm_append", "content_type": "text", "text": "more context"},
+	})
+	if appended["run_id"] != runID {
+		t.Fatalf("append input returned unexpected run: %#v", appended)
 	}
 
 	conflict := httptest.NewRecorder()
@@ -68,6 +84,35 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 	snapshot := agentJSON(t, archivedRouter, http.MethodGet, "/api/agent/runs/"+runID+"/snapshot", "", nil)
 	if snapshot["readonly_reason"] != "project_archived" {
 		t.Fatalf("expected archived readonly snapshot, got %#v", snapshot)
+	}
+}
+
+func TestM2AgentInterruptRoutes(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_agent_m2_interrupt")
+	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/20260627_agent_runtime/agent")
+	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
+
+	repo := repository.New(db.DB)
+	app := workbench.New(repo, workbench.StaticGateway{
+		Space:  workbench.SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
+		Access: workbench.ProjectAccessDTO{Allowed: true, ProjectStatus: "active", CreativeAllowed: true, AllowedActions: []string{"view", "continue_creation"}},
+	}, "local-dev")
+	router := NewRouter(RouterOptions{App: app})
+
+	acceptRunID := createWaitingInterruptRun(t, router, repo, "accept", "intr_accept_1001")
+	accepted := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+acceptRunID+"/interrupts/intr_accept_1001/accept", "idem-accept", map[string]any{
+		"run_id": acceptRunID, "interrupt_id": "intr_accept_1001", "action": "confirm", "confirmed_payload_digest": "sha256:payload",
+	})
+	if accepted["status"] != "resuming" {
+		t.Fatalf("accept interrupt response = %#v", accepted)
+	}
+
+	rejectRunID := createWaitingInterruptRun(t, router, repo, "reject", "intr_reject_1001")
+	rejected := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+rejectRunID+"/interrupts/intr_reject_1001/reject", "idem-reject", map[string]any{
+		"run_id": rejectRunID, "interrupt_id": "intr_reject_1001", "reason_code": "user_rejected",
+	})
+	if rejected["status"] != "failed" || rejected["error_code"] != "INTERRUPT_REJECTED" {
+		t.Fatalf("reject interrupt response = %#v", rejected)
 	}
 }
 
@@ -112,4 +157,30 @@ func agentRequest(method, path, idem string, body any) *http.Request {
 		req.Header.Set("Idempotency-Key", idem)
 	}
 	return req
+}
+
+func createWaitingInterruptRun(t *testing.T, router http.Handler, repo *repository.Repository, suffix string, interruptID string) string {
+	t.Helper()
+	sessionResp := agentJSON(t, router, http.MethodPost, "/api/agent/sessions", "idem-session-"+suffix, map[string]any{"project_id": "prj_active_1001", "initial_title": suffix})
+	sessionID := sessionResp["session_id"].(string)
+	runResp := agentJSON(t, router, http.MethodPost, "/api/agent/runs", "idem-run-"+suffix, map[string]any{
+		"session_id": sessionID,
+		"project_id": "prj_active_1001",
+		"user_input": map[string]any{"client_message_id": "cm_" + suffix, "content_type": "text", "text": "needs confirmation"},
+	})
+	runID := runResp["run_id"].(string)
+	if err := repo.UpdateRunStatus(t.Context(), runID, state.RunStatusRunning, "", ""); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+	if err := repo.UpdateRunStatus(t.Context(), runID, state.RunStatusWaitingConfirmation, "", ""); err != nil {
+		t.Fatalf("mark waiting confirmation: %v", err)
+	}
+	if err := repo.CreateInterrupt(t.Context(), &model.Interrupt{
+		ID: interruptID, RunID: runID, InterruptType: "risk_confirmation", Status: state.InterruptStatusRequired,
+		Reason: "manual confirmation", ConfirmationPayload: datatypes.JSON([]byte(`{"confirmation_id":"` + interruptID + `"}`)),
+		AllowedActions: datatypes.JSON([]byte(`["confirm","reject"]`)), ExpiresAt: time.Now().UTC().Add(time.Hour), TraceID: "trace-agent-m2",
+	}); err != nil {
+		t.Fatalf("create interrupt: %v", err)
+	}
+	return runID
 }

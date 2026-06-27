@@ -1,6 +1,8 @@
 package http
 
 import (
+	"encoding/json"
+	"fmt"
 	nethttp "net/http"
 	"strconv"
 	"strings"
@@ -18,7 +20,11 @@ func registerWorkbenchRoutes(router *gin.Engine, app *workbench.App) {
 	router.GET("/api/agent/sessions/:session_id/messages", h.authRequired(), h.listMessages)
 	router.POST("/api/agent/runs", h.authRequired(), h.createRun)
 	router.GET("/api/agent/runs/:run_id", h.authRequired(), h.getRun)
+	router.GET("/api/agent/runs/:run_id/stream", h.authRequired(), h.openRunStream)
 	router.GET("/api/agent/runs/:run_id/events", h.authRequired(), h.replayEvents)
+	router.POST("/api/agent/runs/:run_id/messages", h.authRequired(), h.appendUserInput)
+	router.POST("/api/agent/runs/:run_id/interrupts/:interrupt_id/accept", h.authRequired(), h.acceptInterrupt)
+	router.POST("/api/agent/runs/:run_id/interrupts/:interrupt_id/reject", h.authRequired(), h.rejectInterrupt)
 	router.POST("/api/agent/runs/:run_id/cancel", h.authRequired(), h.cancelRun)
 	router.GET("/api/agent/runs/:run_id/snapshot", h.authRequired(), h.getRunSnapshot)
 }
@@ -62,6 +68,35 @@ func (h workbenchHandler) getRun(c *gin.Context) {
 	respond(c, out, err)
 }
 
+func (h workbenchHandler) openRunStream(c *gin.Context) {
+	after := int64(0)
+	if lastEventID := c.GetHeader("Last-Event-ID"); lastEventID != "" {
+		if parsed, err := strconv.ParseInt(lastEventID, 10, 64); err == nil {
+			after = parsed
+		}
+	}
+	out, err := h.app.ReplayEvents(c.Request.Context(), auth(c), c.Param("run_id"), after, 200)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Status(nethttp.StatusOK)
+	for _, event := range out.Events {
+		data, marshalErr := json.Marshal(event)
+		if marshalErr != nil {
+			_ = c.Error(apperror.New(apperror.CodeInternal, "failed to marshal event"))
+			return
+		}
+		_, _ = fmt.Fprintf(c.Writer, "id: %d\nevent: %s\ndata: %s\n\n", event.Sequence, event.Type, data)
+		if flusher, ok := c.Writer.(nethttp.Flusher); ok {
+			flusher.Flush()
+		}
+	}
+}
+
 func (h workbenchHandler) replayEvents(c *gin.Context) {
 	after := int64(intQuery(c, "after_sequence", 0))
 	if lastEventID := c.GetHeader("Last-Event-ID"); lastEventID != "" {
@@ -70,6 +105,40 @@ func (h workbenchHandler) replayEvents(c *gin.Context) {
 		}
 	}
 	out, err := h.app.ReplayEvents(c.Request.Context(), auth(c), c.Param("run_id"), after, intQuery(c, "limit", 10))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) appendUserInput(c *gin.Context) {
+	var req workbench.AppendUserInputRequest
+	if !bind(c, &req) {
+		return
+	}
+	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	out, err := h.app.AppendUserInput(c.Request.Context(), auth(c), c.Param("run_id"), req, traceID(c))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) acceptInterrupt(c *gin.Context) {
+	var req workbench.ConfirmInterruptRequest
+	if !bind(c, &req) {
+		return
+	}
+	req.RunID = c.Param("run_id")
+	req.InterruptID = c.Param("interrupt_id")
+	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	out, err := h.app.AcceptInterrupt(c.Request.Context(), auth(c), c.Param("run_id"), req, traceID(c))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) rejectInterrupt(c *gin.Context) {
+	var req workbench.RejectInterruptRequest
+	if !bind(c, &req) {
+		return
+	}
+	req.RunID = c.Param("run_id")
+	req.InterruptID = c.Param("interrupt_id")
+	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	out, err := h.app.RejectInterrupt(c.Request.Context(), auth(c), c.Param("run_id"), req, traceID(c))
 	respond(c, out, err)
 }
 

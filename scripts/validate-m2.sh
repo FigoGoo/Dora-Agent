@@ -23,6 +23,7 @@ echo "== M2 semantic source checks =="
 python3 - <<'PY'
 from pathlib import Path
 import json
+import yaml
 
 def fail(msg: str) -> None:
     raise SystemExit(msg)
@@ -44,6 +45,7 @@ for route in [
     "/api/admin/auth/rotate-password",
     "/api/admin/users/:user_id/status/confirm",
     "/api/projects",
+    "/api/projects/:project_id",
     "/api/projects/:project_id/archive",
 ]:
     if route not in business_router:
@@ -53,12 +55,38 @@ for route in [
     "/api/agent/sessions",
     "/api/agent/sessions/:session_id/messages",
     "/api/agent/runs",
+    "/api/agent/runs/:run_id/stream",
     "/api/agent/runs/:run_id/events",
+    "/api/agent/runs/:run_id/messages",
+    "/api/agent/runs/:run_id/interrupts/:interrupt_id/accept",
+    "/api/agent/runs/:run_id/interrupts/:interrupt_id/reject",
     "/api/agent/runs/:run_id/cancel",
     "/api/agent/runs/:run_id/snapshot",
 ]:
     if route not in agent_router:
         fail(f"agent M2 route missing: {route}")
+
+def normalize_openapi_route(path: str, prefix: str = "") -> str:
+    return prefix + path.replace("{session_id}", ":session_id").replace("{run_id}", ":run_id").replace("{interrupt_id}", ":interrupt_id").replace("{project_id}", ":project_id").replace("{user_id}", ":user_id")
+
+agent_openapi = yaml.safe_load(Path("api/openapi/agent-workbench.yaml").read_text())
+for method, path in [
+    ("get", "/runs/{run_id}/stream"),
+    ("post", "/runs/{run_id}/messages"),
+    ("post", "/runs/{run_id}/interrupts/{interrupt_id}/accept"),
+    ("post", "/runs/{run_id}/interrupts/{interrupt_id}/reject"),
+]:
+    if method not in agent_openapi["paths"].get(path, {}):
+        fail(f"agent OpenAPI missing {method.upper()} {path}")
+    route = normalize_openapi_route(path, "/api/agent")
+    if route not in agent_router:
+        fail(f"agent Gin route missing OpenAPI route {route}")
+
+business_openapi = yaml.safe_load(Path("api/openapi/business-api.yaml").read_text())
+if "patch" not in business_openapi["paths"].get("/api/projects/{project_id}", {}):
+    fail("business OpenAPI missing PATCH /api/projects/{project_id}")
+if "/api/projects/:project_id" not in business_router:
+    fail("business Gin route missing PATCH /api/projects/:project_id")
 
 for needle in [
     "h.Account.ResolveCurrentSpaceContext",
@@ -76,9 +104,22 @@ for needle in [
     "ProjectAccessPurpose_VIEW",
     "readonly = \"project_archived\"",
     "CountActiveRuns",
+    "AppendUserInput",
+    "AcceptInterrupt",
+    "RejectInterrupt",
 ]:
     if needle not in agent_app:
         fail(f"agent session/run project gate missing: {needle}")
+
+project_app = Path("services/business/internal/application/project/app.go").read_text()
+for needle in [
+    "checkBaseUpdatedAt",
+    "validateCoverAssetTx",
+    "CodeStateConflict",
+    "cover asset is not referable",
+]:
+    if needle not in project_app:
+        fail(f"project update contract guard missing: {needle}")
 
 for needle in [
     "email_hash",
