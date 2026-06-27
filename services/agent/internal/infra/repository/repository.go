@@ -14,6 +14,7 @@ import (
 )
 
 var ErrInvalidStateTransition = errors.New("invalid agent state transition")
+var ErrInvalidSafetyEvidence = errors.New("invalid agent safety evidence")
 
 type Repository struct {
 	db *gorm.DB
@@ -208,6 +209,9 @@ func (r *Repository) ListArtifacts(ctx context.Context, sessionID string, limit,
 
 func (r *Repository) CreateSafetyEvaluation(ctx context.Context, safety *model.SafetyEvaluation) error {
 	normalizeSafety(safety)
+	if !state.IsValidSafetyResult(safety.Result) {
+		return fmt.Errorf("%w: result=%s", ErrInvalidSafetyEvidence, safety.Result)
+	}
 	return r.db.WithContext(ctx).Create(safety).Error
 }
 

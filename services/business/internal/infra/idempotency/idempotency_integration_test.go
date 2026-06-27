@@ -1,6 +1,8 @@
 package idempotency_test
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,7 +24,12 @@ func TestBusinessMigrationSeedIdempotencyAuditAndBoundaries(t *testing.T) {
 	testdb.ExecSQL(t, db.DB, testdb.MustReadSQL(t, "tests/business/seed/business_core_seed.sql"))
 
 	guard := idempotency.NewGuard(db.DB, time.Hour, time.Hour)
-	hash := idempotency.HashRequest([]byte(`{"action":"create"}`))
+	hash := mustHash(t, idempotency.RequestHashInput{
+		TenantID:    "tenant_space_1",
+		SpaceID:     "space_1",
+		ActorUserID: "user_1",
+		Body:        []byte(`{"action":"create"}`),
+	})
 	input := idempotency.BeginInput{
 		TenantID:       "tenant_space_1",
 		SpaceID:        "space_1",
@@ -58,7 +65,12 @@ func TestBusinessMigrationSeedIdempotencyAuditAndBoundaries(t *testing.T) {
 	if replay.ReplayResult == nil || replay.ReplayResult.Type != "project" || replay.ReplayResult.ID != "project_1" {
 		t.Fatalf("unexpected replay result: %#v", replay.ReplayResult)
 	}
-	input.RequestHash = idempotency.HashRequest([]byte(`{"action":"different"}`))
+	input.RequestHash = mustHash(t, idempotency.RequestHashInput{
+		TenantID:    "tenant_space_1",
+		SpaceID:     "space_1",
+		ActorUserID: "user_1",
+		Body:        []byte(`{"action":"different"}`),
+	})
 	conflict, err := guard.Begin(t.Context(), input)
 	if err != nil {
 		t.Fatalf("begin conflict idempotency: %v", err)
@@ -69,7 +81,12 @@ func TestBusinessMigrationSeedIdempotencyAuditAndBoundaries(t *testing.T) {
 	otherTenant := input
 	otherTenant.TenantID = "tenant_space_2"
 	otherTenant.SpaceID = "space_2"
-	otherTenant.RequestHash = idempotency.HashRequest([]byte(`{"action":"different"}`))
+	otherTenant.RequestHash = mustHash(t, idempotency.RequestHashInput{
+		TenantID:    "tenant_space_2",
+		SpaceID:     "space_2",
+		ActorUserID: "user_1",
+		Body:        []byte(`{"action":"different"}`),
+	})
 	crossTenant, err := guard.Begin(t.Context(), otherTenant)
 	if err != nil {
 		t.Fatalf("begin cross-tenant idempotency: %v", err)
@@ -77,6 +94,7 @@ func TestBusinessMigrationSeedIdempotencyAuditAndBoundaries(t *testing.T) {
 	if crossTenant.Mode != idempotency.DecisionProceed {
 		t.Fatalf("expected cross-tenant proceed, got %s", crossTenant.Mode)
 	}
+	testConcurrentSameKeyBegin(t, guard)
 
 	writer := auditlog.NewGormWriter(db.DB)
 	actor := "user_1"
@@ -116,4 +134,74 @@ func TestBusinessMigrationSeedIdempotencyAuditAndBoundaries(t *testing.T) {
 
 func ptr(value string) *string {
 	return &value
+}
+
+func testConcurrentSameKeyBegin(t *testing.T, guard *idempotency.IdempotencyGuard) {
+	t.Helper()
+	requestHash := mustHash(t, idempotency.RequestHashInput{
+		TenantID:    "tenant_concurrent",
+		SpaceID:     "space_concurrent",
+		ActorUserID: "user_concurrent",
+		Body:        []byte(`{"action":"concurrent"}`),
+	})
+	input := idempotency.BeginInput{
+		TenantID:       "tenant_concurrent",
+		SpaceID:        "space_concurrent",
+		Scope:          "project.create",
+		IdempotencyKey: "idem-concurrent",
+		RequestHash:    requestHash,
+		ActorUserID:    "user_concurrent",
+	}
+
+	const workers = 8
+	start := make(chan struct{})
+	results := make(chan string, workers)
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			decision, err := guard.Begin(t.Context(), input)
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- decision.Mode
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for err := range errs {
+		t.Fatalf("concurrent begin returned database error: %v", err)
+	}
+	counts := map[string]int{}
+	for mode := range results {
+		counts[mode]++
+	}
+	if counts[idempotency.DecisionProceed] != 1 {
+		t.Fatalf("expected exactly one proceed, got counts=%v", counts)
+	}
+	if counts[idempotency.DecisionProcessing] != workers-1 {
+		t.Fatalf("expected remaining workers to see processing, got counts=%v", counts)
+	}
+
+	differentHash := input
+	differentHash.RequestHash = mustHash(t, idempotency.RequestHashInput{
+		TenantID:    input.TenantID,
+		SpaceID:     input.SpaceID,
+		ActorUserID: input.ActorUserID,
+		Body:        []byte(`{"action":"other"}`),
+	})
+	decision, err := guard.Begin(t.Context(), differentHash)
+	if err != nil {
+		t.Fatalf("conflict after concurrent begin: %v", err)
+	}
+	if decision.Mode != idempotency.DecisionConflict {
+		t.Fatalf("expected conflict after concurrent begin, got %s (%s)", decision.Mode, fmt.Sprint(counts))
+	}
 }

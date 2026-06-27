@@ -102,8 +102,10 @@ def fail(message: str) -> None:
 
 business_sql = Path("db/migrations/iterations/2026-06-27-business-core/business/0001_common_idempotency_audit.up.sql").read_text()
 idempotency_src = Path("services/business/internal/infra/idempotency/idempotency.go").read_text()
+idempotency_tests = "\n".join(p.read_text() for p in Path("services/business/internal/infra/idempotency").glob("*_test.go"))
 audit_src = Path("services/business/internal/pkg/auditlog/auditlog.go").read_text()
 state_src = Path("services/agent/internal/domain/state/state.go").read_text()
+agent_repository_test = Path("services/agent/internal/infra/repository/repository_integration_test.go").read_text()
 
 required_sql = [
     "tenant_id varchar(64) NOT NULL",
@@ -127,12 +129,32 @@ required_idempotency = [
     "ReplayResult *ResultRef",
     "ResultRefType",
     "ResultRefID",
+    "RequestHashInput",
+    "canonicalBody",
+    "shouldIgnoreHashField",
+    '"tenant_id": input.TenantID',
+    '"space_id"',
+    '"actor_user_id"',
+    "clause.OnConflict",
 ]
 for needle in required_idempotency:
     if needle not in idempotency_src:
         fail(f"idempotency implementation missing tenant/result semantic: {needle}")
 if 'Where("scope = ? AND idempotency_key = ?"' in idempotency_src:
     fail("idempotency implementation still queries by scope + key without tenant")
+if "sha256.Sum256(body)" in idempotency_src:
+    fail("idempotency request hash still hashes raw body bytes")
+
+required_idempotency_tests = [
+    "TestHashRequestCanonicalizesJSONAndIgnoresObservabilityFields",
+    "TestHashRequestRequiresTenantAndActor",
+    "testConcurrentSameKeyBegin",
+    "DecisionProcessing",
+    "DecisionConflict",
+]
+for needle in required_idempotency_tests:
+    if needle not in idempotency_tests:
+        fail(f"idempotency tests missing M1 semantic coverage: {needle}")
 
 required_audit = [
     "AuditID",
@@ -163,10 +185,18 @@ required_states = [
 for needle in required_states:
     if needle not in state_src:
         fail(f"agent state machine missing code-plan semantic: {needle}")
+for needle in ['SafetyResultPassed  = "passed"', 'SafetyResultBlocked = "blocked"', 'SafetyResultFailed  = "failed"', "IsValidSafetyResult"]:
+    if needle not in state_src:
+        fail(f"agent safety result semantic missing: {needle}")
 
 for forbidden in ["RunStatusInterrupted", 'RunStatusCanceled', "InterruptStatusPending", "InterruptStatusCanceled"]:
     if forbidden in state_src:
         fail(f"agent state machine still contains stale semantic: {forbidden}")
+for forbidden in ['Result:                "allow"', 'got.Result != "allow"', 'Scene:                 "asset_publish"', 'TargetType:            "artifact"']:
+    if forbidden in agent_repository_test:
+        fail(f"agent repository test still contains stale safety semantic: {forbidden}")
+if "ErrInvalidSafetyEvidence" not in agent_repository_test:
+    fail("agent repository test does not reject stale safety evidence result")
 
 print("m1 semantic alignment ok")
 PY

@@ -146,21 +146,27 @@ func TestAgentMigrationRepositoryAndBoundaries(t *testing.T) {
 
 	safety := &model.SafetyEvaluation{
 		SafetyEvidenceID:      "safety_1",
-		Scene:                 "asset_publish",
-		TargetType:            "artifact",
-		TargetRefID:           artifact.ID,
+		Scene:                 "generation",
+		TargetType:            "prompt",
+		TargetRefID:           run.ID,
 		EvaluatedObjectDigest: "sha256",
 		PolicyVersion:         "local-v1",
 		EvidenceVersion:       "v1",
-		Result:                "allow",
+		Result:                state.SafetyResultPassed,
 		TraceID:               "trace-agent-db",
 		ExpiresAt:             now.Add(24 * time.Hour),
 	}
 	if err := repo.CreateSafetyEvaluation(t.Context(), safety); err != nil {
 		t.Fatalf("create safety: %v", err)
 	}
-	if got, err := repo.GetSafetyEvaluation(t.Context(), safety.SafetyEvidenceID); err != nil || got.Result != "allow" {
+	if got, err := repo.GetSafetyEvaluation(t.Context(), safety.SafetyEvidenceID); err != nil || got.Result != state.SafetyResultPassed {
 		t.Fatalf("get safety got=%#v err=%v", got, err)
+	}
+	legacySafety := *safety
+	legacySafety.SafetyEvidenceID = "safety_legacy"
+	legacySafety.Result = "allow"
+	if err := repo.CreateSafetyEvaluation(t.Context(), &legacySafety); !errors.Is(err, repository.ErrInvalidSafetyEvidence) {
+		t.Fatalf("expected invalid legacy safety result, got %v", err)
 	}
 
 	runtimeConfig := &model.RuntimeConfig{

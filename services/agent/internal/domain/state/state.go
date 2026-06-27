@@ -24,6 +24,10 @@ const (
 	InterruptStatusRejected = "rejected"
 	InterruptStatusExpired  = "expired"
 	InterruptStatusResolved = "resolved"
+
+	SafetyResultPassed  = "passed"
+	SafetyResultBlocked = "blocked"
+	SafetyResultFailed  = "failed"
 )
 
 func CanTransitionRun(from, to string) bool {
@@ -67,4 +71,8 @@ func CanTransitionInterrupt(from, to string) bool {
 	default:
 		return false
 	}
+}
+
+func IsValidSafetyResult(result string) bool {
+	return result == SafetyResultPassed || result == SafetyResultBlocked || result == SafetyResultFailed
 }
