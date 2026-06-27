@@ -1,0 +1,32 @@
+{
+  "case_id": "business_rpc_resolve_default_model_timeout",
+  "service": "ModelConfigService",
+  "method": "ResolveDefaultModel",
+  "request": {
+    "auth_context": {
+      "actor_user_id": "usr_1001",
+      "login_identity_type": "PERSONAL",
+      "space_id": "sp_personal_1001"
+    },
+    "request_meta": {
+      "request_id": "req_default_model_timeout_001",
+      "trace_id": "trace_default_model_timeout_001",
+      "source": "agent_service"
+    },
+    "resource_type": "video"
+  },
+  "error": {
+    "code": "UPSTREAM_TIMEOUT",
+    "message": "model configuration dependency timed out",
+    "retryable": true
+  },
+  "timeout": {
+    "method_timeout_ms": 2000,
+    "retry_attempts": 1,
+    "backoff_ms": 100
+  },
+  "assertions": [
+    "read RPC timeout can be retried once by Agent client",
+    "Agent must map timeout to a recoverable model configuration error"
+  ]
+}

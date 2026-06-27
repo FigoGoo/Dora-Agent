@@ -5,7 +5,8 @@ owner：Go Eino 智能体微服务架构工程师
 更新时间：2026-06-27
 适用范围：Agent HTTP API、session、run、message、interrupt、cancel、snapshot、SSE 入口
 相关代码路径：`services/agent/internal/api/http/**`、`services/agent/internal/application/**`
-相关契约：`api/openapi/agent-workbench.yaml`
+相关设计契约：`code-plan/agent/00-事实源需求映射与开发顺序.md`
+后续实现落点：`api/openapi/agent-workbench.yaml`
 
 ## 文档目标
 

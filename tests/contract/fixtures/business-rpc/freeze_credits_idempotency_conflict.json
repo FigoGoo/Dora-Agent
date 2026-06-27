@@ -1,0 +1,40 @@
+{
+  "case_id": "business_rpc_freeze_credits_idempotency_conflict",
+  "service": "CreditService",
+  "method": "FreezeCredits",
+  "request_hash": "sha256:freeze-credits-conflicting-request",
+  "audit_expectation": {
+    "action": "credit.freeze",
+    "actor_user_id": "usr_1001",
+    "resource_id": "est_tool_001",
+    "trace_id": "trace_freeze_conflict_001",
+    "result": "failed"
+  },
+  "request": {
+    "auth_context": {
+      "actor_user_id": "usr_1001",
+      "login_identity_type": "PERSONAL",
+      "space_id": "sp_personal_1001"
+    },
+    "request_meta": {
+      "request_id": "req_freeze_conflict_001",
+      "trace_id": "trace_freeze_conflict_001",
+      "idempotency_key": "idem_freeze_est_tool_001",
+      "source": "agent_service"
+    },
+    "estimate_id": "est_tool_001",
+    "points": 99,
+    "run_id": "run_1001",
+    "confirmation_id": "confirm_1001",
+    "account_id": "ca_personal_1001"
+  },
+  "error": {
+    "code": "IDEMPOTENCY_CONFLICT",
+    "message": "same idempotency key was used with a different request hash",
+    "retryable": false
+  },
+  "assertions": [
+    "request_hash mismatch is detected by business idempotency guard",
+    "business service does not create a second freeze"
+  ]
+}

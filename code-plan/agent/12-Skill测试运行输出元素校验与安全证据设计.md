@@ -5,7 +5,8 @@ owner：Go Eino 智能体微服务架构工程师
 更新时间：2026-06-27
 适用范围：Skill 发布前测试运行、测试样例、输出元素校验、测试隔离、安全证据和测试结果回传
 相关代码路径：`services/agent/internal/runtime/skilltest/**`、`services/agent/internal/runtime/skill/**`、`services/agent/internal/runtime/safety/**`
-相关契约：`docs/product/prd/05-SkillBuilder与审核PRD.md`、`docs/product/prd/10-内容安全治理PRD.md`、`api/thrift/business_agent_service.thrift`
+相关设计契约：`docs/product/prd/05-SkillBuilder与审核PRD.md`、`docs/product/prd/10-内容安全治理PRD.md`、`code-plan/agent/07-RPC客户端业务能力调用与DTO映射设计.md`、`code-plan/business/08-Skill目录版本审核发布回滚与通知设计.md`
+后续实现落点：`api/thrift/business_agent_service.thrift`
 
 ## 文档目标
 
@@ -42,27 +43,80 @@ owner：Go Eino 智能体微服务架构工程师
 
 | 函数 | 入参 | 出参 |
 | --- | --- | --- |
-| `RunSkillTestCase` | `skill_id`、`skill_version`、`test_case_id`、`test_input`、`auth_context`、`request_meta` | `test_run_id`、`status`、`output_summary`、`validation_result`。 |
+| `LoadReviewCandidateSkillSpec` | `skill_id`、`version_id`、`test_case_id`、`test_run_id`、`auth_context`、`request_meta` | `skill_spec_json`、`input_schema_json`、`output_schema_json`、`tool_refs[]`、`memory_policy_json`、`confirmation_policy_json`、`test_input_json`、`expected_elements_json`。 |
+| `RunSkillTestCase` | `skill_id`、`version_id`、`test_run_id`、`test_case_id`、`test_input_json`、`auth_context`、`request_meta` | `status`、`actual_elements[]`、`output_summary`、`validation_result`。 |
 | `EvaluateSkillTestSafety` | `test_case_id`、`assembled_prompt_digest`、`scene=skill_test` | `safety_evidence`、`blocked_reason`。 |
-| `ValidateSkillOutputElements` | `skill_output_schema`、`actual_elements[]`、`asset_element_types[]` | `missing_required[]`、`invalid_types[]`、`renderable`。 |
-| `BuildSkillTestReport` | `test_run_id`、`tool_calls[]`、`validation_result`、`safety_evidence` | `test_report`。 |
-| `SubmitSkillTestResult` | `skill_id`、`version`、`test_report`、`idempotency_key` | `saved`、`business_status`。 |
+| `ValidateSkillOutputElements` | `skill_output_schema`、`actual_elements[]`、`asset_element_types[]`、`usage_stage=test|draft|final` | `missing_required[]`、`invalid_types[]`、`stage_violations[]`、`unrenderable_hints[]`、`renderable`。 |
+| `BuildSkillTestResult` | `skill_id`、`version_id`、`test_run_id`、`test_case_id`、`actual_elements[]`、`validation_result`、`safety_evidence`、`error` | `actual_elements_json`、`safety_evidence_json`、`status`、`error_code`、`error_summary`、`agent_trace_id`。 |
+| `SaveSkillTestResult` | `auth_context`、`request_meta`、`skill_id`、`version_id`、`test_run_id`、`test_case_id`、`status`、`actual_elements_json`、`safety_evidence_json`、`error_code`、`error_summary`、`agent_trace_id` | `test_run_id`、`status`、`saved`。 |
 
 ## Skill Test Runtime 架构
 
 ```text
 SkillTestApplication
-  -> SkillCatalog RPC 读取待测试 spec
+  -> SkillCatalogService.GetReviewCandidateSkillSpec 读取待测试 spec
   -> 校验 test_cases 数量 >= 3
   -> 为每个 case 创建独立 test_run
   -> EvaluateSkillTestSafety
   -> 使用 Eino Graph 执行测试流程
   -> ValidateSkillOutputElements
-  -> BuildSkillTestReport
-  -> SubmitSkillTestResult
+  -> BuildSkillTestResult
+  -> SkillCatalogService.SaveSkillTestResult
 ```
 
 测试运行使用 `services/agent/internal/runtime/skilltest`，不进入正式 TurnLoop 的积分冻结和资产 commit 流程。Eino 使用 `Graph` 复用正式 Skill 执行节点，使用 `Callback` 捕获 tool call、模型输出和安全事件。
+
+## 业务流程图
+
+```mermaid
+flowchart TD
+    A["管理端/用户端点击测试 Skill"] --> B["业务服务创建 skill_test_run=running"]
+    B --> C["前端调用 Agent SkillTest API"]
+    C --> D["LoadReviewCandidateSkillSpec"]
+    D --> E{"测试样例数量和 spec 合法"}
+    E -- "否" --> F["SaveSkillTestResult(status=rejected)"]
+    E -- "是" --> G["EvaluateSkillTestSafety"]
+    G --> H{"安全结果"}
+    H -- "blocked" --> I["BuildSkillTestResult(status=blocked)"]
+    H -- "failed/timeout" --> J["BuildSkillTestResult(status=failed 或 timeout)"]
+    H -- "passed" --> K["Eino Graph sandbox 执行 Skill"]
+    K --> L["ValidateSkillOutputElements"]
+    L --> M{"输出元素合法"}
+    M -- "否" --> N["BuildSkillTestResult(status=failed)"]
+    M -- "是" --> O["BuildSkillTestResult(status=passed)"]
+    I --> P["SaveSkillTestResult 幂等回写业务"]
+    J --> P
+    N --> P
+    O --> P
+```
+
+## 代码逻辑图
+
+```mermaid
+sequenceDiagram
+    participant API as SkillTestHTTPHandler
+    participant App as SkillTestApplication
+    participant RPC as BusinessGateway
+    participant Safety as SafetyEvaluator
+    participant Graph as EinoSkillTestGraph
+    participant Validator as OutputElementValidator
+    participant Repo as AgentRepository
+    API->>App: RunSkillTestCase(command)
+    App->>RPC: GetReviewCandidateSkillSpec(skill_id, version_id, test_run_id)
+    RPC-->>App: spec/input/output_schema/tool_refs/memory_policy
+    App->>Safety: EvaluateSkillTestSafety(scene=skill_test)
+    Safety-->>App: SafetyEvidenceDTO
+    alt safety passed
+        App->>Graph: ExecuteSandbox(spec, input)
+        Graph-->>App: actual_elements / error
+        App->>Validator: ValidateSkillOutputElements(output_schema, actual_elements)
+        Validator-->>App: validation_result
+    end
+    App->>Repo: Save test artifact summary and safety evidence
+    App->>RPC: SaveSkillTestResult(status, actual_elements_json, safety_evidence_json)
+    RPC-->>App: saved=true
+    App-->>API: SkillTestResultDTO
+```
 
 ## 测试状态机
 
@@ -92,30 +146,35 @@ type SkillOutputValidationResult struct {
     Passed            bool
     MissingRequired   []string
     InvalidTypes      []string
+    StageViolations   []string
     UnrenderableHints []string
     ElementCount      int
 }
 
-// SkillTestReport 是 Agent 回传业务服务的测试报告。
-type SkillTestReport struct {
+// SkillTestResultDTO 是 Agent 回传业务服务的测试结果。
+type SkillTestResultDTO struct {
+    SkillID            string
+    VersionID          string
     TestRunID          string
     TestCaseID         string
     Status             string
-    OutputSummary      string
+    ActualElementsJSON string
+    SafetyEvidenceJSON string
+    ErrorCode          string
+    ErrorSummary       string
+    AgentTraceID       string
     ValidationResult   SkillOutputValidationResult
-    SafetyEvidenceID   string
-    ToolCallSummaries  []ToolCallSummaryDTO
-    TraceID            string
 }
 ```
 
 ## 输出元素校验算法
 
-1. 从业务返回的 `skill_spec.output_schema` 读取必填元素、允许元素类型和 render hint。
-2. 调 `PlatformDictionaryService.ListAssetElementTypes(page_size=50)` 获取合法元素类型。
-3. 遍历 `actual_elements[]`，按 `element_type`、`required`、`render_hint`、`metadata_schema` 校验。
-4. 输出 `missing_required[]`、`invalid_types[]`、`unrenderable_hints[]`。
-5. 任一必填缺失或非法类型存在时，测试 case 标记 `failed`。
+1. 从业务返回的 `output_schema_json` 读取必填元素、允许元素类型和 render hint。
+2. 调 `PlatformDictionaryService.ListAssetElementTypes(auth_context, request_meta, page_size=50)` 获取合法元素类型。
+3. 遍历 `actual_elements[]`，按 `element_type`、`required`、`render_hint`、`schema_json`、`usage_stage` 校验。
+4. 当测试输出用于过程态校验时要求 `draft_enabled=true`；当测试声明最终资产输出时要求 `final_enabled=true`。
+5. 输出 `missing_required[]`、`invalid_types[]`、`stage_violations[]`、`unrenderable_hints[]`。
+6. 任一必填缺失、非法类型、阶段不允许或不可渲染必填元素存在时，测试 case 标记 `failed`。
 
 ## 安全证据字段
 
@@ -133,13 +192,23 @@ Skill 测试安全证据必须包含：
 - `source_run_id=test_run_id`
 - `trace_id`
 
+`safety_evidence_json` 的必填规则：
+
+| 测试结果状态 | 是否必须回传安全证据 | 说明 |
+| --- | --- | --- |
+| `passed` | 是 | `result=passed`，且输出元素校验通过。 |
+| `blocked` | 是 | `result=blocked`，不得执行 Skill Graph。 |
+| `failed` | 是 | 已组装测试 prompt 的失败必须回传 `result=failed` 或最近一次安全评估证据；未组装 prompt 的 spec 校验失败可为空。 |
+| `timeout` | 是 | 安全评估或测试执行超时均要回传可关联 trace 的证据或失败摘要。 |
+| `rejected` | 否 | 仅限样例数量不足、spec 不存在、权限失败等未进入安全评估的情况。 |
+
 ## 【业务开发】需要提供的能力与参数
 
 | 能力 | 请求参数 | 响应参数 |
 | --- | --- | --- |
-| 读取待测试 Skill 规格 | `auth_context`、`skill_id`、`version`、`request_meta` | `skill_spec`、`output_schema`、`tool_refs[]`、`test_cases[]`、`status`。 |
-| 保存 Skill 测试结果 | `auth_context`、`skill_id`、`version`、`test_case_results[]`、`output_validation`、`safety_evidence_refs[]`、`idempotency_key` | `saved`、`skill_test_status`、`failed_reasons[]`。 |
-| 查询资产元素类型 | `auth_context`、`page_size=50`、`schema_version` | `element_types[]`、`schema_version`。 |
+| 读取待测试 Skill 规格 | `auth_context`、`request_meta`、`skill_id`、`version_id`、`test_case_id`、`test_run_id` | `skill_id`、`version_id`、`skill_spec_json`、`input_schema_json`、`output_schema_json`、`tool_refs[]`、`memory_policy_json`、`confirmation_policy_json`、`test_input_json`、`expected_elements_json`。 |
+| 保存 Skill 测试结果 | `auth_context`、`request_meta`、`skill_id`、`version_id`、`test_run_id`、`test_case_id`、`status`、`actual_elements_json`、`error_code`、`error_summary`、`safety_evidence_json`、`agent_trace_id` | `test_run_id`、`status`、`saved`。 |
+| 查询资产元素类型 | `auth_context`、`request_meta`、`page_size=50`、`schema_version` | `element_types[]`，每项含 `element_type`、`schema_hint`、`draft_enabled`、`final_enabled`、`editable`、`referable`、`render_hint`、`schema_version`。 |
 | Tool 测试策略 | `tool_refs[]`、`auth_context`、`test_mode=true` | `allowed`、`test_double_required`、`timeout_ms`、`risk_level`。 |
 
 ## Tool 隔离测试 / preview 策略
@@ -159,7 +228,8 @@ Skill 测试安全证据必须包含：
 | 安全阻断 | 状态 `blocked`，报告含 `safety_evidence_id`。 |
 | 输出缺必填元素 | 状态 `failed`，`missing_required[]` 非空。 |
 | 非法元素类型 | 状态 `failed`，`invalid_types[]` 非空。 |
-| 全部通过 | 每个 case `passed`，业务侧 `skill_test_status=passed`。 |
+| 阶段不匹配 | 过程态元素 `draft_enabled=false` 或最终元素 `final_enabled=false` 时状态 `failed`，`stage_violations[]` 非空。 |
+| 全部通过 | 每个 case 调用 `SaveSkillTestResult` 后返回 `saved=true` 且 `status=passed`。 |
 | 重复回传 | 相同幂等键返回同一保存结果。 |
 
-日志字段：`skill_id`、`version`、`test_run_id`、`test_case_id`、`status`、`validation_passed`、`tool_call_count`、`trace_id`。
+日志字段：`skill_id`、`version_id`、`test_run_id`、`test_case_id`、`status`、`validation_passed`、`tool_call_count`、`agent_trace_id`、`trace_id`。

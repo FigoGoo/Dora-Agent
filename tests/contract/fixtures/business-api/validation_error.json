@@ -1,0 +1,32 @@
+{
+  "case_id": "business_api_validation_error",
+  "method": "POST",
+  "path": "/api/assets/upload-intents",
+  "request_headers": {
+    "Authorization": "Bearer user_session_token",
+    "Idempotency-Key": "idem_upload_validation_001"
+  },
+  "request_body": {
+    "filename": "",
+    "content_type": "image/png",
+    "size_bytes": 0,
+    "request_hash": "sha256:upload-validation-error-request"
+  },
+  "response_status": 422,
+  "response_body": {
+    "code": "INVALID_ARGUMENT",
+    "message": "filename and size_bytes are required",
+    "data": null,
+    "error": {
+      "code": "INVALID_ARGUMENT",
+      "message": "filename and size_bytes are required",
+      "retryable": false,
+      "field": "filename"
+    },
+    "trace_id": "trace_api_validation_error_001"
+  },
+  "assertions": [
+    "field validation is explicit and non-retryable",
+    "business API does not accept generic request bodies"
+  ]
+}

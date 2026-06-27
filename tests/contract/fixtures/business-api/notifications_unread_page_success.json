@@ -21,7 +21,8 @@
         }
       ],
       "page_size": 10,
-      "next_cursor": null
+      "next_page_token": null,
+      "has_more": false
     },
     "trace_id": "trace_api_notifications_001"
   },

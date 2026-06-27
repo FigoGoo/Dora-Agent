@@ -80,7 +80,7 @@ type AgentRun struct {
 | --- | --- |
 | 数据边界 | 只保存 Agent Runtime 数据和业务引用 ID，不保存业务事实。 |
 | 审计字段 | 每张表包含 `created_at`、`updated_at`；需要软删除的表包含 `deleted_at`。 |
-| 外键约束 | SQL 不添加 `FOREIGN KEY` 和 `REFERENCES`，跨表一致性由 Repository、状态机和测试保证。 |
+| 外键约束 | SQL 不添加数据库级外键或引用约束关键字，跨表一致性由 Repository、状态机和测试保证。 |
 | 幂等 | 创建 session/run、interrupt 处理、事件写入、资产提交引用都必须有幂等键或唯一约束。 |
 | 分页 | 列表查询默认 10 条，上限由 API 或 Repository 常量限制。 |
 | 批量 | 资产引用、事件补偿、任务查询必须支持批量读取，避免循环逐条查库。 |
@@ -137,7 +137,7 @@ type AgentRun struct {
 
 - `db/migrations/iterations/<date>_agent_runtime/agent/001_create_agent_runtime.up.sql`
 - `db/migrations/iterations/<date>_agent_runtime/agent/001_create_agent_runtime.down.sql`
-- SQL 必须通过检查：无 `FOREIGN KEY`、无 `REFERENCES`、列表查询索引覆盖默认分页路径。
+- SQL 必须通过检查：无数据库级外键或引用约束关键字，列表查询索引覆盖默认分页路径。
 
 ## 业务开发对齐点
 

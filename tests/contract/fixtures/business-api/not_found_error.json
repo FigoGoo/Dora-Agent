@@ -1,0 +1,20 @@
+{
+  "case_id": "business_api_not_found_error",
+  "method": "GET",
+  "path": "/api/projects/prj_missing",
+  "response_status": 404,
+  "response_body": {
+    "code": "not_found",
+    "message": "resource not found",
+    "trace_id": "trace_http_404",
+    "data": null,
+    "error": {
+      "code": "PROJECT_NOT_FOUND",
+      "message": "project not found",
+      "retryable": false
+    }
+  },
+  "assertions": [
+    "404 response uses stable business error code and null data"
+  ]
+}

@@ -7,13 +7,19 @@
     "Idempotency-Key": "idem_redeem_mismatch_001"
   },
   "request_body": {
-    "redeem_code": "SEED-ENTERPRISE-ONLY"
+    "redeem_code": "SEED-ENTERPRISE-ONLY",
+    "request_hash": "sha256:redeem-code-target-mismatch-request"
   },
-  "response_status": 409,
+  "response_status": 403,
   "response_body": {
-    "code": "REDEEM_TARGET_MISMATCH",
+    "code": "REDEEM_CODE_TARGET_MISMATCH",
     "message": "redeem code cannot be used by current account",
     "data": null,
+    "error": {
+      "code": "REDEEM_CODE_TARGET_MISMATCH",
+      "message": "redeem code cannot be used by current account",
+      "retryable": false
+    },
     "trace_id": "trace_api_redeem_mismatch_001"
   },
   "assertions": [

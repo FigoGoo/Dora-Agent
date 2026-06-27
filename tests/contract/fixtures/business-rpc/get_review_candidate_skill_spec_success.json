@@ -29,11 +29,13 @@
       "remove_background"
     ],
     "memory_policy_json": "{\"enabled\":true}",
+    "confirmation_policy_json": "{\"requires_confirmation\":\"when_tool_requires_or_credit_cost\"}",
     "test_input_json": "{\"prompt\":\"make a product storyboard\"}",
     "expected_elements_json": "[{\"element_type\":\"image.primary\"}]"
   },
   "assertions": [
     "business service returns test input and expected elements for sandbox execution",
-    "memory_policy_json defaults to enabled=true when version input omits it"
+    "memory_policy_json defaults to enabled=true when version input omits it",
+    "confirmation_policy_json is returned for Skill test runtime"
   ]
 }

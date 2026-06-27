@@ -95,7 +95,7 @@ type PreemptInput struct {
 | 函数 | 入参 | 出参 | 主要职责 |
 | --- | --- | --- | --- |
 | `StartTurn(ctx, input)` | `TurnInput` | `RunSnapshot`、`error` | 创建或恢复 run 上下文，写入用户消息，进入 Eino Graph。 |
-| `ResumeTurn(ctx, input)` | `ResumeInput` | `RunSnapshot`、`error` | 校验 interrupt 状态、项目权限和幂等键，恢复冻结、生成或业务写入步骤。 |
+| `ResumeTurn(ctx, input)` | `ResumeInput` | `RunSnapshot`、`error` | 校验 interrupt 状态、项目权限和幂等键，恢复冻结、生成或业务写入步骤；`additional_input` 必须追加用户消息并重新安全评估。 |
 | `CancelRun(ctx, input)` | `PreemptInput` | `CancelResult`、`error` | 停止新 Tool，取消可取消任务，释放未结算冻结积分，输出取消事件。 |
 | `HandleLongTaskCallback(ctx, taskID, patch)` | `TaskProgressPatch` | `TaskSnapshot`、`error` | 处理异步任务进度、部分完成和终态转换。 |
 | `BuildRunSnapshot(ctx, runID)` | `run_id` | `RunSnapshot` | 为补偿失败、恢复页面和只读查看构造快照。 |
@@ -131,7 +131,27 @@ StartTurn
 | `credit_confirmation` | 积分预估完成后 | `confirm` 冻结积分并生成；`reject` 结束 run | 释放上下文，不冻结积分。 |
 | `risk_confirmation` | 高风险 Tool 或业务写入前 | `confirm` 执行；`reject` 跳过或失败 | 标记 interrupt expired，run failed。 |
 | `business_write` | 需要 preview / confirm 的业务写入前 | `confirm` 调业务 RPC；`reject` 不写入 | 不调用写 RPC。 |
-| `additional_input` | 缺少必要参数或控件输入 | 补充 `UserInputDTO` 后继续路由 | 标记 run waiting_expired。 |
+| `additional_input` | 缺少必要参数或控件输入 | 补充 `UserInputDTO` 后追加消息、发布 `resume.accepted`、重新 `EvaluateSafety(scene=generation,target_type=prompt)`，通过后继续路由 | 标记 run `failed`，输出 `agent.run.failed`，不预估、不冻结。 |
+
+## ResumeTurn 详细逻辑
+
+```text
+ResumeTurn
+  -> 按 idempotency_key 校验重复恢复
+  -> 读取 interrupt 并校验 status=waiting、未过期、归属当前 run
+  -> CheckProjectAccess(continue_creation)
+  -> action=reject: 写 confirmation.rejected，run cancelled
+  -> action=confirm: 写 confirmation.accepted，校验 payload digest，进入冻结或业务写入
+  -> action=additional_input:
+       追加 agent_messages(user)
+       写 resume.accepted
+       写 safety.prompt.evaluating
+       EvaluateSafety(scene=generation,target_type=prompt,target_ref_id=run_id)
+       安全通过: 写 safety.prompt.evaluated，继续 Route Skill / Tool / Model
+       安全阻断或失败: 写 safety.prompt.blocked，run failed
+```
+
+`additional_input` 产生的新文本不得复用旧 `SafetyEvidenceDTO`。安全证据摘要必须覆盖追加输入和重新组装后的生成提示词；安全阻断、评估失败或评估超时时均不得调用 `EstimateGenerationCredits`、`EstimateToolCredits`、`FreezeCredits` 或任何 Tool。
 
 ## 长任务状态更新
 
@@ -156,11 +176,12 @@ StartTurn
 | Tool 失败 | 可重试按策略重试；不可重试释放冻结 | `tool.call.failed`、`credits.released` |
 | 部分完成 | 完成部分进入 asset commit，未完成部分释放 | `generation.partial.completed` |
 | 资产保存失败 | 调 `ReleaseFrozenCredits` | `asset.save.failed`、`credits.released` |
+| 追加输入安全阻断 | 不继续路由，不预估、不冻结、不生成 | `resume.accepted`、`safety.prompt.blocked`、`agent.run.failed` |
 | 项目归档 | 停新 Tool，释放未结算冻结积分 | `project.archived.blocked`、`agent.run.cancelled` |
 
 ## 测试场景
 
-TurnLoop 测试必须覆盖：正常生成、确认拒绝、确认重复提交、追加输入、安全阻断、项目创建后归档、resume 前权限失效、Tool 超时、用户取消、部分完成、资产保存失败释放积分、SSE 断线后 snapshot 恢复。所有测试都需要断言 run、task、interrupt、event 四类状态同时闭合。
+TurnLoop 测试必须覆盖：正常生成、确认接受、确认拒绝、确认重复提交、追加输入安全通过、追加输入安全阻断、项目创建后归档、resume 前权限失效、Tool 超时、用户取消、部分完成、资产保存失败释放积分、SSE 断线后 snapshot 恢复。所有测试都需要断言 run、task、interrupt、event 四类状态同时闭合。
 
 ## 业务开发对齐点
 

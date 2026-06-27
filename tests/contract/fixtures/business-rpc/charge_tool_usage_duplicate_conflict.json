@@ -2,6 +2,14 @@
   "case_id": "business_rpc_charge_tool_usage_duplicate_conflict",
   "service": "CreditService",
   "method": "ChargeToolUsageCredits",
+  "request_hash": "sha256:charge-tool-duplicate-conflict-request",
+  "audit_expectation": {
+    "action": "credit.charge_tool_usage",
+    "actor_user_id": "usr_1001",
+    "resource_id": "frz_generation_tool_001",
+    "trace_id": "trace_charge_tool_dup_001",
+    "result": "failed"
+  },
   "request": {
     "auth_context": {
       "actor_user_id": "usr_1001",

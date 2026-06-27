@@ -17,7 +17,7 @@ owner：Go Eino 智能体微服务架构工程师
 
 ## 选型结论
 
-生产级实现只有一个统一 Agent Runtime。开放式理解和路由使用 Eino Agent；确定性主链路使用 Graph 和 Workflow；业务能力和模型调用统一封装为 Tool；Skill 作为可配置能力规格；Retriever 读取 Skill、历史摘要、资产引用和字典；Memory 仅启用 session summary；Callback 统一生产内部事件和观测数据；Interrupt/Resume 处理确认；TurnLoop 负责多轮状态推进。
+生产级实现只有一个统一 Agent Runtime。开放式理解和路由使用 Eino Agent；确定性主链路使用 Graph 和 Workflow；业务能力和模型调用统一封装为 Tool；Skill 作为可配置能力规格；Retriever 读取 Skill、历史摘要、资产引用和字典；Memory 启用 session summary，并在 Skill `memory_policy` 允许且用户/空间授权有效时启用授权偏好摘要；Callback 统一生产内部事件和观测数据；Interrupt/Resume 处理确认；TurnLoop 负责多轮状态推进。
 
 ## 依赖版本和官方 API 边界
 
@@ -84,13 +84,59 @@ func ExecuteWorkflowStep(ctx context.Context, step WorkflowStep, state RunState)
 func EmitRuntimeCallback(ctx context.Context, event RuntimeCallbackEvent) error
 ```
 
+## 业务流程图
+
+```mermaid
+flowchart TD
+    A["前端创建 run"] --> B["ResolveContextNode"]
+    B --> C["LoadSkillToolModelNode"]
+    C --> D["IntentRouteNode 使用 Eino Agent 路由"]
+    D --> E["BuildPlanNode 构造执行计划"]
+    E --> F["SafetyNode 生成 SafetyEvidenceDTO"]
+    F --> G{"安全结果"}
+    G -- "blocked/failed" --> H["终止 run 并发送安全事件"]
+    G -- "passed" --> I["EstimateNode 预估积分"]
+    I --> J["ConfirmationNode Interrupt 等待确认"]
+    J --> K["FreezeNode 冻结积分"]
+    K --> L["GenerationNode 执行 Tool/模型"]
+    L --> M["CommitAssetNode 调业务保存和扣费"]
+    M --> N["FinalizeNode 保存 snapshot 和 Memory 摘要"]
+```
+
+## 代码逻辑图
+
+```mermaid
+sequenceDiagram
+    participant API as AgentHTTPHandler
+    participant App as RunApplication
+    participant Graph as EinoGraphRunner
+    participant RPC as BusinessGateway
+    participant Repo as AgentRepository
+    participant Event as EventPublisher
+    API->>App: CreateRun(command)
+    App->>RPC: CheckProjectAccess(continue_creation)
+    App->>Repo: Create agent_runs(pending)
+    App->>Graph: Run(ctx, RunInput)
+    Graph->>RPC: ListRoutableSkills / GetPublishedSkillSpec
+    Graph->>Graph: RouteIntent / BuildPlan / Safety
+    Graph->>RPC: EstimateGenerationCredits
+    Graph->>Repo: CreateInterrupt(waiting_confirmation)
+    Graph->>Event: confirmation.required
+    API->>App: AcceptInterrupt(confirm)
+    App->>RPC: FreezeCredits
+    App->>Graph: ResumeWithData
+    Graph->>RPC: CommitGeneratedAssetAndCharge
+    Graph->>Repo: SaveRunSnapshot / UpsertSessionMemory
+    Graph->>Event: agent.run.completed
+```
+
 ## 不使用能力
 
 | 能力 | 生产级结论 | 原因 |
 | --- | --- | --- |
 | Multi-Agent | 不使用 | 产品要求一个统一 Agent，角色 owner 只是职责边界。 |
 | 用户自定义 Tool | 不使用 | 生产级实现只允许平台开放 Tool。 |
-| 长期用户 Memory | 不启用 | 需要授权、撤销和隐私策略，生产级实现仅启用 session summary。 |
+| 未授权长期用户 Memory | 不使用 | Memory 只能写脱敏摘要；`user_preference`、`space_preference` 必须同时满足 Skill `memory_policy` 和 Agent 侧授权状态。 |
 | 任意 HTTP Tool | 不使用 | 不满足平台 Tool 白名单和风险管控。 |
 
 ## Callback 输出

@@ -2,6 +2,14 @@
   "case_id": "business_rpc_charge_tool_usage_success",
   "service": "CreditService",
   "method": "ChargeToolUsageCredits",
+  "request_hash": "sha256:charge-tool-success-request",
+  "audit_expectation": {
+    "action": "credit.charge_tool_usage",
+    "actor_user_id": "usr_1001",
+    "resource_id": "frz_tool_001",
+    "trace_id": "trace_charge_tool_001",
+    "result": "succeeded"
+  },
   "request": {
     "auth_context": {
       "actor_user_id": "usr_1001",

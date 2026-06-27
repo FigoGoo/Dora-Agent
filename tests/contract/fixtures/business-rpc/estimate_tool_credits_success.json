@@ -24,14 +24,30 @@
           "host_count": "2"
         }
       }
-    ]
+    ],
+    "safety_evidence": {
+      "safety_evidence_id": "safe_est_tool_001",
+      "scene": "tool_execution",
+      "result": "passed",
+      "target_type": "tool_input",
+      "target_ref_id": "tool_call_1001",
+      "evaluated_object_digest": "sha256:tool-input-digest",
+      "policy_version": "safety-policy-2026-06",
+      "evidence_version": "1",
+      "evaluated_at": "2026-06-27T12:00:00Z",
+      "expires_at": "2026-06-27T12:30:00Z",
+      "source_session_id": "sess_1001",
+      "source_run_id": "run_1001",
+      "trace_id": "trace_est_tool_001"
+    }
   },
   "response": {
     "estimate_id": "est_tool_001",
     "estimate_points": 9,
     "available_points": 5000,
     "expires_soon_points": 200,
-    "account_type": "personal",
+    "credit_account_scope": "personal",
+    "credit_account_id": "ca_personal_1001",
     "line_items": [
       {
         "estimate_item_id": "est_item_tool_call_001",
@@ -50,6 +66,7 @@
   },
   "assertions": [
     "EstimateToolCredits is a read RPC and has no idempotency_key",
+    "request.safety_evidence is required before estimating Tool credits",
     "response.line_items[0].estimate_item_id is required for ChargeToolUsageCredits"
   ]
 }

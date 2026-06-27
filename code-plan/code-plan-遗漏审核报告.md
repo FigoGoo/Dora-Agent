@@ -1,5 +1,12 @@
 # code-plan 逻辑遗漏审核报告
 
+状态：deprecated  
+owner：主控 Codex 汇总维护  
+更新时间：2026-06-27  
+替代事实源：`code-plan/README.md`、`code-plan/agent/**`、`code-plan/business/**`、`code-plan/tests/**`、`docs/product/**`  
+
+> 本报告是历史静态审核材料，不再作为正式开发阻断门禁。报告中已被吸收或已改写的项，以当前 `code-plan/README.md`、`code-plan/agent/**`、`code-plan/business/**`、`code-plan/tests/**` 和 `docs/product/**` 为准；后续开发、评审和验收不得直接按本报告旧状态判定未完成。
+
 > 审核对象：`codex/follow-up-development` 分支 `code-plan/`（agent 15 份 + business 17 份实现设计文档）
 > 基准源（同分支）：`docs/product/prd/**`、`docs/product/**`、`docs/architecture/**`、`docs/standards/**`、`docs/contracts/**`
 > 方法：6 路并行审核，每域跨 agent+business 两侧，对照产品 PRD / 架构 / 规范 / 契约 + 承重墙/接缝不变量 + 跨服务接缝一致性

@@ -2,6 +2,14 @@
   "case_id": "business_rpc_commit_generated_asset_and_charge_success",
   "service": "AssetCreditCommitService",
   "method": "CommitGeneratedAssetAndCharge",
+  "request_hash": "sha256:commit-generated-asset-success-request",
+  "audit_expectation": {
+    "action": "asset.commit_generated_asset_and_charge",
+    "actor_user_id": "usr_1001",
+    "resource_id": "run_1001",
+    "trace_id": "trace_commit_asset_001",
+    "result": "succeeded"
+  },
   "request": {
     "auth_context": {
       "actor_user_id": "usr_1001",
@@ -25,10 +33,18 @@
         "resource_type": "image",
         "element_type": "image.primary",
         "artifact_summary": {
-          "width": "1024",
-          "height": "1024"
+          "filename": "generated-image.png",
+          "content_type": "image/png"
         },
         "content_uri_digest": "sha256:artifact-uri-digest",
+        "storage_object_ref": {
+          "object_key": "generated/sp_personal_1001/prj_active_1001/run_1001/art_1001.png",
+          "bucket": "dora-public",
+          "content_type": "image/png",
+          "size_bytes": 204800,
+          "checksum": "sha256:artifact-binary-digest",
+          "etag": "\"etag-art-1001\""
+        },
         "estimate_item_id": "est_item_model_001",
         "tool_name": "image_generate",
         "tool_type": "model_generation",
@@ -41,31 +57,37 @@
     "final_elements": [
       {
         "element_type": "image.primary",
-        "asset_id": "ast_generated_1001"
+        "element_payload_json": "{\"title\":\"Generated image\",\"asset_id\":\"ast_generated_1001\",\"artifact_id\":\"art_1001\",\"component\":\"image_preview\"}",
+        "display_order": 1,
+        "source_tool_call_id": "tool_call_image_generate_001"
       }
     ],
     "safety_evidence": {
       "safety_evidence_id": "safe_1001",
-      "scene": "asset_commit",
-      "result": "pass",
-      "target_type": "artifact",
-      "target_ref_id": "art_1001",
-      "evaluated_object_digest": "sha256:artifact-content",
+      "scene": "generation",
+      "result": "passed",
+      "target_type": "prompt",
+      "target_ref_id": "run_1001",
+      "evaluated_object_digest": "sha256:generation-prompt-digest",
       "policy_version": "safety-policy-2026-06",
       "evidence_version": "1",
       "evaluated_at": "2026-06-27T12:00:00Z",
+      "expires_at": "2026-06-27T12:30:00Z",
       "source_session_id": "sess_1001",
       "source_run_id": "run_1001",
-      "source_artifact_id": "art_1001",
       "trace_id": "trace_commit_asset_001"
     }
   },
   "response": {
     "asset_refs": [
       {
-        "artifact_id": "art_1001",
         "asset_id": "ast_generated_1001",
-        "resource_type": "image"
+        "source_artifact_id": "art_1001",
+        "resource_type": "image",
+        "asset_type": "generated",
+        "status": "available",
+        "preview_url": "https://cdn.doraigc.com/generated/ast_generated_1001.png",
+        "elements_summary_json": "{\"count\":1,\"primary_element_type\":\"image.primary\"}"
       }
     ],
     "charged_points": 24,
@@ -83,7 +105,8 @@
     ]
   },
   "assertions": [
-    "request uses artifacts[] and final_elements[] from Thrift",
+    "request uses business-issued storage_object_ref and code-plan typed final_elements[] from Thrift",
+    "safety_evidence uses scene=generation, target_type=prompt and result=passed",
     "estimate_id is optional but included for line-item settlement",
     "asset save and credit charge are one business transaction"
   ]

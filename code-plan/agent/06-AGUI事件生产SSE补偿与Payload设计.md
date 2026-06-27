@@ -5,7 +5,8 @@ owner：Go Eino 智能体微服务架构工程师
 更新时间：2026-06-27
 适用范围：内部事件、AG-UI 事件、SSE、event store、事件补偿、snapshot、前端消费边界
 相关代码路径：`services/agent/internal/events/**`
-相关契约：`api/agui/agent-workbench-events.schema.json`、`docs/standards/AG-UI事件规范.md`
+相关设计契约：`docs/standards/AG-UI事件规范.md`
+后续实现落点：`api/agui/agent-workbench-events.schema.json`
 
 ## 文档目标
 
@@ -25,6 +26,7 @@ owner：Go Eino 智能体微服务架构工程师
 - `safety.prompt.*`
 - `credits.*`
 - `confirmation.*`
+- `resume.*`
 - `tool.call.*`
 - `generation.*`
 - `asset.save.*`
@@ -37,22 +39,40 @@ owner：Go Eino 智能体微服务架构工程师
 | 事件 | payload 必填字段 |
 | --- | --- |
 | `agent.run.started` | `run_status`、`project_id`、`session_id`、`started_at`。 |
+| `agent.run.completed` | `run_status=completed`、`completed_at`、`final_message_id`、`last_event_sequence`、`snapshot_version`。 |
+| `agent.run.cancelled` | `run_status=cancelled`、`cancel_reason`、`cancelled_at`、`released_points`、`last_event_sequence`。 |
+| `agent.thinking.started` | `thinking_id`、`display_mode=typewriter`、`started_at`。 |
+| `agent.thinking.delta` | `thinking_id`、`text_delta`、`delta_index`。 |
+| `agent.thinking.completed` | `thinking_id`、`completed_at`、`summary_digest`。 |
 | `agent.message.delta` | `message_id`、`role`、`text_delta`、`content_type`。 |
+| `agent.message.completed` | `message_id`、`role`、`content_type`、`final_text_digest`、`token_usage_summary`。 |
 | `agent.skill.selected` | `skill_id`、`skill_name`、`skill_scope`、`skill_version`、`matched_reason`。 |
+| `agent.skill.missing` | `fallback_mode=text_model`、`matched_tags[]`、`user_message`。 |
+| `platform.tags.updated` | `tags[]`，每项含 `tag_id`、`tag_type`、`label`、`source`、`confidence`。 |
 | `chat.controls.requested` | `controls[]`，每项含 `control_id`、`type`、`label`、`options`、`required`、`validation`。 |
 | `chat.controls.locked` | `locked_fields[]`、`locked_reason`、`confirmation_id`。 |
 | `safety.prompt.evaluating` | `scene`、`target_type`、`target_ref_id`、`checked_target`。 |
 | `safety.prompt.evaluated` | `safety_status=passed`、`safety_evidence_id`、`policy_version`、`expires_at`。 |
 | `safety.prompt.blocked` | `safety_status=blocked/failed`、`user_message`、`retryable`、`support_trace_id`。 |
-| `credits.estimated` | `estimate_points`、`available_points`、`expires_soon_points`、`account_type`、`pricing_snapshot_id`。 |
+| `safety.prompt.failed` | `safety_status=failed`、`error_code`、`user_message`、`retryable`、`support_trace_id`。 |
+| `credits.estimated` | `estimate_points`、`available_points`、`expires_soon_points`、`credit_account_scope`、`credit_account_id`、`pricing_snapshot_id`。 |
 | `confirmation.required` | `confirmation_id`、`interrupt_id`、`title`、`summary`、`risks[]`、`points`、`expires_at`、`actions[]`。 |
+| `confirmation.accepted` | `confirmation_id`、`interrupt_id`、`action=confirm`、`accepted_at`、`payload_digest`、`next_step`。 |
+| `confirmation.rejected` | `confirmation_id`、`interrupt_id`、`action=reject`、`rejected_at`、`reason_code`、`run_status`。 |
+| `resume.accepted` | `interrupt_id`、`resume_action`、`accepted_at`、`message_id` 可选、`requires_safety_evaluation`、`next_step`。 |
 | `credits.frozen` | `freeze_id`、`frozen_points`、`expires_at`。 |
 | `tool.call.started` | `tool_call_id`、`tool_name`、`tool_type`、`risk_level`、`timeout_ms`。 |
+| `tool.call.progress` | `tool_call_id`、`status`、`progress`、`current_step`、`partial_summary`。 |
+| `tool.call.completed` | `tool_call_id`、`status=completed`、`result_summary`、`artifact_refs[]`、`charged_estimate_item_ids[]`。 |
+| `tool.call.failed` | `tool_call_id`、`error_code`、`user_message`、`retryable`、`support_trace_id`。 |
 | `generation.progress` | `task_id`、`resource_type`、`status`、`progress`、`partial_completed`。 |
 | `generation.artifact.completed` | `artifact_id`、`resource_type`、`name`、`metadata_summary`、`elements_summary`。 |
+| `asset.save.started` | `artifact_id`、`resource_type`、`project_id`、`freeze_id`、`estimate_id`。 |
 | `asset.save.completed` | `asset_id`、`artifact_id`、`resource_type`、`save_status`、`elements[]`、`downloadable`。 |
 | `asset.save.failed` | `artifact_id`、`error_code`、`user_message`、`released_points`、`retryable`。 |
+| `workspace.assets.updated` | `mode`、`assets[]`、`asset_count`、`last_asset_id`、`version`。 |
 | `workspace.blackboard.updated` | `mode`、`elements[]`、`storyline[]`、`active_node_id`、`version`。 |
+| `process.snapshot.saved` | `snapshot_id`、`snapshot_version`、`last_event_sequence`、`messages_count`、`assets_count`、`blackboard_version`。 |
 | `project.archived.blocked` | `project_status=archived`、`creative_allowed=false`、`read_only_reason`、`allowed_actions[]`、`user_message`。 |
 | `agent.run.failed` | `error_type`、`error_code`、`user_message`、`retryable`、`support_trace_id`。 |
 
@@ -66,6 +86,27 @@ owner：Go Eino 智能体微服务架构工程师
 - unknown event 必须被前端忽略并记录 debug，不能让页面崩溃。
 - snapshot schema 必须包含 `session`、`run`、`messages[]`、`tasks[]`、`assets[]`、`blackboard`、`last_event_sequence`、`readonly_reason`。
 
+## 事件命名兼容策略
+
+本项目生产契约使用 `agent.run.*`、`agent.message.*`、`confirmation.*`、`resume.*` 作为 canonical `type`。`docs/standards/AG-UI事件规范.md` 中较短的标准事件名只作为兼容 alias，Agent 新实现只生产 canonical `type`；前端 reducer 和回放测试需要兼容读取 alias，便于后续协议迁移。
+
+| 标准 alias | canonical `type` | 说明 |
+| --- | --- | --- |
+| `agent.started` | `agent.run.started` | run 开始。 |
+| `message.delta` | `agent.message.delta` | 文本增量。 |
+| `message.completed` | `agent.message.completed` | 消息完成。 |
+| `interrupt.required` | `confirmation.required` | 需要人工确认。 |
+| `resume.accepted` | `resume.accepted` | 补充输入恢复保持同名；确认恢复使用 `confirmation.accepted`。 |
+| `agent.completed` | `agent.run.completed` | run 完成。 |
+| `agent.failed` | `agent.run.failed` | run 失败。 |
+
+兼容规则：
+
+- SSE `type` 字段必须填 canonical 事件名。
+- 补偿 API 不把 canonical 事件重复展开为 alias，避免前端重复消费。
+- 前端 reducer 接收 alias 时先映射为 canonical，再进入同一状态转移函数。
+- unknown event 仍按未知事件处理，不允许把未登记的新事件静默映射到近似类型。
+
 ## 前端 reducer 测试数据
 
 AG-UI reducer 测试 fixture 必须为以下场景提供最小事件序列：
@@ -74,6 +115,7 @@ AG-UI reducer 测试 fixture 必须为以下场景提供最小事件序列：
 - 安全阻断。
 - 积分不足。
 - 确认后生成成功并扣费。
+- 补充输入恢复成功并重新安全评估。
 - 生成部分完成后取消。
 - 资产保存失败并释放积分。
 - 项目运行中归档。
@@ -110,7 +152,7 @@ AG-UI reducer 测试 fixture 必须为以下场景提供最小事件序列：
 
 ## AG-UI Schema 文件计划
 
-正式 schema 落点：`api/agui/agent-workbench-events.schema.json`，测试 fixture 落点：`tests/agent/agui/fixtures/*.json`。
+正式 schema 落点：`api/agui/agent-workbench-events.schema.json`，测试 fixture 落点：`tests/agent/agui/fixtures/*.json`。Schema 顶层校验单个事件对象；fixture 文件使用事件数组保存完整场景，测试 runner 必须逐条取数组元素校验 schema，并额外校验同一 `run_id` 内 `sequence` 连续递增。
 
 ```json
 {
@@ -141,10 +183,11 @@ AG-UI reducer 测试 fixture 必须为以下场景提供最小事件序列：
 
 | 文件 | 覆盖 |
 | --- | --- |
-| `normal_generation_success.json` | 安全通过、积分确认、冻结、生成、保存、扣费、完成。 |
+| `normal_generation_success.json` | thinking 打字机、平台标签、模型/参数控件、确认后控件锁定、安全通过、积分确认、冻结、生成、保存、扣费、workspace 更新、完成。 |
 | `safety_blocked.json` | 安全阻断后不预估、不冻结。 |
 | `credit_insufficient.json` | 积分不足终止。 |
 | `confirmation_rejected.json` | 用户拒绝确认。 |
+| `additional_input_resume_safety.json` | 补充输入触发 `resume.accepted`、重新安全评估、通过后继续路由。 |
 | `asset_save_failed_release.json` | 资产保存失败并释放冻结。 |
 | `project_archived_running.json` | 运行中归档阻断。 |
 | `sse_replay_gap.json` | sequence 缺口和补偿。 |

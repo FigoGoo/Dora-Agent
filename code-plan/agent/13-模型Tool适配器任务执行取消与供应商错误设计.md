@@ -33,6 +33,7 @@ owner：Go Eino 智能体微服务架构工程师
 | `CancelGenerationTask` | `task_id`、`external_task_ref`、`cancel_reason`、`idempotency_key` | `cancel_status`、`completed_artifacts[]`。 |
 | `NormalizeProviderError` | `provider`、`raw_error_code`、`raw_error_message_digest` | `error_type`、`error_code`、`retryable`、`user_message`。 |
 | `BuildArtifactsFromTaskResult` | `task_result`、`skill_output_schema` | `artifacts[]`、`process_elements[]`、`missing_required[]`。 |
+| `PersistProviderArtifactsToTOS` | `run_id`、`project_id`、`provider_artifacts[]`、`idempotency_key` | `artifacts[]`，含 `storage_object_ref`、`checksum`、`size_bytes`。 |
 
 ## Model Tool Adapter 架构
 
@@ -69,6 +70,7 @@ type ModelSnapshotDTO struct {
     PricingSnapshotID string
     TimeoutMS         int
     RetryPolicy       RetryPolicyDTO
+    RuntimeParams     map[string]string
 }
 ```
 
@@ -131,6 +133,39 @@ CancelRun
 
 如果供应商不支持取消，Agent 停止本地轮询并将迟到供应商回调标记为 ignored；已经保存扣费的资产不回滚。
 
+## 生成产物持久化到 TOS
+
+供应商完成后返回的 URL、base64、临时文件句柄或 provider artifact ref 只是临时输入，不能作为业务资产事实。Agent 必须在调用 `CommitGeneratedAssetAndCharge` 前完成以下闭环：
+
+```text
+PollGenerationTask completed
+  -> ExtractProviderArtifact
+  -> StreamOrDecodeProviderArtifact
+  -> ValidateArtifactFile(MIME/size/checksum/resource_type)
+  -> BusinessGateway.PrepareGeneratedAssetObjects
+  -> UploadArtifactToTOS(upload_url, upload_headers)
+  -> HeadObjectOrUploadResult 校验 etag/checksum
+  -> Build CommitArtifactDTO(storage_object_ref)
+  -> CommitGeneratedAssetAndCharge
+```
+
+函数设计：
+
+| 函数 | 入参 | 出参 | 说明 |
+| --- | --- | --- | --- |
+| `ExtractProviderArtifacts` | `PollGenerationTaskResult` | `ProviderArtifact[]` | 只提取必要的临时引用和展示摘要，不记录完整供应商响应。 |
+| `StreamOrDecodeProviderArtifact` | `ProviderArtifact`、`max_size_bytes`、`context.Context` | `io.ReadCloser`、`content_type`、`size_bytes` | 支持 provider URL、base64 和 SDK 文件流；受 context 取消控制。 |
+| `ValidateArtifactFile` | `resource_type`、`content_type`、`size_bytes`、`checksum` | `ValidationResult` | 不符合业务 MIME/大小限制时不上传、不扣费。 |
+| `PrepareGeneratedAssetObjects` | `project_id`、`session_id`、`run_id`、`artifacts[]` | `upload_slots[]` | 通过业务 RPC 获取 object key 和短期上传授权。 |
+| `UploadArtifactToTOS` | `upload_slot`、`artifact_stream`、`checksum` | `GeneratedStorageObjectRef` | 使用业务签发的单对象上传 URL，不接触 TOS AK/SK。 |
+
+错误和补偿：
+
+- `PrepareGeneratedAssetObjects` 返回 `PROJECT_ARCHIVED` 时，停止上传，调用 `ReleaseFrozenCredits`，发送 `project.archived.blocked`。
+- 供应商文件下载失败或 checksum 不一致时，对该 artifact 标记 `failed`，未完成部分释放冻结；其他已上传成功 artifact 可按部分完成进入 commit。
+- 上传授权过期时重新调用 `PrepareGeneratedAssetObjects` 必须使用同一幂等键；业务返回同一 object key 或明确 `IDEMPOTENCY_CONFLICT`。
+- Agent 日志只记录 `artifact_id`、`object_key_digest`、`content_type`、`size_bytes`、`checksum_digest`、`trace_id`，不得记录完整 URL、签名 header 或供应商原始响应。
+
 ## 【业务开发】需要提供的能力与参数
 
 | 能力 | 请求参数 | 响应参数 |
@@ -138,6 +173,7 @@ CancelRun
 | 模型运行配置读取 | `auth_context`、`model_id`、`resource_type`、`pricing_snapshot_id` | `model_snapshot`、`provider_ref`、`public_display_name`、`timeout_policy`；不返回 API Key 明文。 |
 | Tool 执行策略 | `tool_name`、`tool_type=model_generation`、`auth_context` | `timeout_ms`、`retry_policy`、`cancel_policy`、`risk_level`。 |
 | 资产保存与扣费 | `artifacts[]`、`final_elements[]`、`freeze_id`、`safety_evidence`、`idempotency_key` | `asset_refs[]`、`charged_points`、`released_points`。 |
+| 生成产物对象准备 | `project_id`、`session_id`、`run_id`、`artifacts[]`、`idempotency_key` | `upload_slots[]`，每个 artifact 对应一个业务生成 object key 和短期上传授权。 |
 | 供应商配置错误展示 | 模型或供应商不可用时业务错误 | `error_code`、`user_message`、`retryable=false`、`trace_id`。 |
 
 ## 日志、trace 和测试矩阵
@@ -154,3 +190,5 @@ CancelRun
 | 供应商鉴权错误 | `PROVIDER_CONFIG_MISSING` 或 `provider_auth_error`，不重试。 |
 | 限流 | 按 retry policy 退避，超过次数失败。 |
 | 参数非法 | 不冻结或释放冻结，用户可修改参数重试。 |
+| 供应商产物落 TOS | provider URL/base64/SDK 流均能转换为 `storage_object_ref`；object key 由业务签发，日志不出现签名 URL。 |
+| TOS 上传失败 | 不调用 commit；已冻结积分按失败或部分完成释放。 |

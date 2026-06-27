@@ -2,6 +2,14 @@
   "case_id": "business_rpc_freeze_credits_success",
   "service": "CreditService",
   "method": "FreezeCredits",
+  "request_hash": "sha256:freeze-credits-success-request",
+  "audit_expectation": {
+    "action": "credit.freeze",
+    "actor_user_id": "usr_1001",
+    "resource_id": "est_tool_001",
+    "trace_id": "trace_freeze_001",
+    "result": "succeeded"
+  },
   "request": {
     "auth_context": {
       "actor_user_id": "usr_1001",

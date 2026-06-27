@@ -22,14 +22,22 @@
       {
         "element_type": "image.primary",
         "display_name": "Primary Image",
+        "category": "media",
         "schema_version": "2026-06-27",
-        "status": "active"
+        "schema_hint_json": "{\"type\":\"object\",\"required\":[\"asset_id\"]}",
+        "render_hint_json": "{\"component\":\"image_preview\"}",
+        "active": true,
+        "sort_order": 10
       },
       {
         "element_type": "text.caption",
         "display_name": "Caption",
+        "category": "text",
         "schema_version": "2026-06-27",
-        "status": "active"
+        "schema_hint_json": "{\"type\":\"object\",\"required\":[\"text\"]}",
+        "render_hint_json": "{\"component\":\"text_block\"}",
+        "active": true,
+        "sort_order": 20
       }
     ]
   },
