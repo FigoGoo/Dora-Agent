@@ -4378,15 +4378,13 @@ components:
     NotificationNavigationHintDTO:
       type: object
       required:
-      - target_type
-      - target_id
+      - target_route
+      - target_resource_id
       additionalProperties: false
       properties:
-        target_type:
+        target_route:
           type: string
-        target_id:
-          type: string
-        path:
+        target_resource_id:
           type: string
     UnreadCountDTO:
       type: object
@@ -4401,17 +4399,19 @@ components:
       required:
       - notification_id
       - allowed
-      - target_type
-      - target_id
       additionalProperties: false
       properties:
         notification_id:
           type: string
         allowed:
           type: boolean
+        target_route:
+          type: string
+        target_resource_id:
+          type: string
         target_type:
           type: string
-        target_id:
+        denied_reason:
           type: string
     AdminDashboardDTO:
       type: object

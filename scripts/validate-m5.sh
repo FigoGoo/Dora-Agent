@@ -101,7 +101,8 @@ schema_requirements = {
     "ConfirmTakeDownPublicWorkRequest": {"preview_token", "reason", "notify_author"},
     "NotificationDTO": {"type", "title", "summary", "navigation_hint", "read_at", "created_at", "related_resource_type", "related_resource_id"},
     "NotificationListDTO": {"items", "limit", "offset", "total"},
-    "NotificationNavigationHintDTO": {"target_type", "target_id", "path"},
+    "NotificationNavigationHintDTO": {"target_route", "target_resource_id"},
+    "NotificationNavigationDTO": {"notification_id", "allowed", "target_route", "target_resource_id", "target_type", "denied_reason"},
 }
 for schema_name, fields in schema_requirements.items():
     schema = schemas.get(schema_name)
@@ -120,6 +121,12 @@ for schema_name in ["PreviewShareWorkRequest", "ConfirmShareWorkRequest", "Previ
 notification_props = set(schemas["NotificationDTO"].get("properties", {}))
 if "status" in notification_props:
     fail("OpenAPI NotificationDTO still exposes stale status field")
+navigation_props = set(schemas["NotificationNavigationDTO"].get("properties", {}))
+if "target_id" in navigation_props:
+    fail("OpenAPI NotificationNavigationDTO still exposes stale target_id field")
+hint_props = set(schemas["NotificationNavigationHintDTO"].get("properties", {}))
+if {"target_id", "path"} & hint_props:
+    fail("OpenAPI NotificationNavigationHintDTO still exposes stale target_id/path fields")
 notification_list_props = set(schemas["NotificationListDTO"].get("properties", {}))
 if {"page_size", "has_more", "next_page_token"} & notification_list_props:
     fail("OpenAPI NotificationListDTO still exposes stale page_size/has_more/next_page_token fields")
@@ -230,6 +237,7 @@ required_fixture_cases = {
     "business_api_m5_admin_public_work_takedown_preview_success",
     "business_api_m5_admin_public_work_takedown_confirm_success",
     "business_api_m5_notification_read_success",
+    "business_api_m5_notification_navigation_success",
     "business_api_m5_public_work_timeout_error",
     "business_api_m5_public_work_version_compat_success",
 }
@@ -271,12 +279,24 @@ if "status" in notification_fixture:
 for field in ["title", "related_resource_type", "related_resource_id", "navigation_hint", "read_at", "created_at"]:
     if field not in notification_fixture:
         fail(f"notification fixture missing {field}")
+hint = notification_fixture["navigation_hint"]
+if {"target_id", "path"} & set(hint):
+    fail("notification fixture still exposes stale navigation hint target_id/path fields")
+for field in ["target_route", "target_resource_id"]:
+    if field not in hint:
+        fail(f"notification fixture navigation_hint missing {field}")
 notification_page = fixture_by_id["business_api_notifications_unread_page_success"]["response_body"]["data"]
 if {"page_size", "has_more", "next_page_token"} & set(notification_page):
     fail("notification page fixture still exposes stale pagination fields")
 for field in ["items", "limit", "offset", "total"]:
     if field not in notification_page:
         fail(f"notification page fixture missing {field}")
+notification_nav = fixture_by_id["business_api_m5_notification_navigation_success"]["response_body"]["data"]
+if "target_id" in notification_nav:
+    fail("notification navigation fixture still exposes stale target_id")
+for field in ["notification_id", "allowed", "target_route", "target_resource_id"]:
+    if field not in notification_nav:
+        fail(f"notification navigation fixture missing {field}")
 
 agent_text = "\n".join(path.read_text() for path in Path("services/agent").rglob("*.go"))
 for forbidden in [

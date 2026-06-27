@@ -155,6 +155,29 @@ func TestTakeDownDoesNotRollbackWhenNotificationFailsAndRecordsCompensation(t *t
 	if codeOf(err) != bizerrors.CodeStateConflict {
 		t.Fatalf("expected taken_down direct share conflict, got %v", err)
 	}
+	_, err = app.UpdateWork(t.Context(), UpdateWorkInput{
+		Auth: auth, Meta: workMeta("trace-empty-takedown-edit", "idem-empty-takedown-edit"), WorkID: created.Work.WorkID,
+	})
+	if codeOf(err) != bizerrors.CodeStateConflict {
+		t.Fatalf("expected empty update to keep taken_down work blocked, got %v", err)
+	}
+	sameTitle := "Moderated work"
+	_, err = app.UpdateWork(t.Context(), UpdateWorkInput{
+		Auth: auth, Meta: workMeta("trace-same-takedown-edit", "idem-same-takedown-edit"), WorkID: created.Work.WorkID, Title: &sameTitle,
+	})
+	if codeOf(err) != bizerrors.CodeStateConflict {
+		t.Fatalf("expected same-value update to keep taken_down work blocked, got %v", err)
+	}
+	editedTitle := "Moderated work edited"
+	edited, err := app.UpdateWork(t.Context(), UpdateWorkInput{
+		Auth: auth, Meta: workMeta("trace-real-takedown-edit", "idem-real-takedown-edit"), WorkID: created.Work.WorkID, Title: &editedTitle,
+	})
+	if err != nil {
+		t.Fatalf("real edit after takedown should reset private: %v", err)
+	}
+	if edited.Work.ShareStatus != StatusPrivate || edited.ShareSummary["share_status"] != StatusPrivate {
+		t.Fatalf("expected real edit to reset taken_down work to private, got %#v", edited)
+	}
 }
 
 func TestEnterpriseRemovedMemberCannotManageWorks(t *testing.T) {

@@ -107,6 +107,16 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 	if !found {
 		t.Fatalf("expected work takedown notification: %#v", notifications)
 	}
-	requestJSON(t, router, http.MethodGet, "/api/notifications/"+notificationID+"/navigation", userToken, "", nil)
+	navigation := requestJSON(t, router, http.MethodGet, "/api/notifications/"+notificationID+"/navigation", userToken, "", nil)
+	navData := navigation["data"].(map[string]any)
+	if got := navData["target_resource_id"]; got != workID {
+		t.Fatalf("expected navigation target_resource_id %q, got %#v", workID, navData)
+	}
+	if got := navData["target_route"]; got != "/works/"+workID {
+		t.Fatalf("expected navigation target_route for work, got %#v", navData)
+	}
+	if _, stale := navData["target_id"]; stale {
+		t.Fatalf("navigation response exposed stale target_id: %#v", navData)
+	}
 	requestJSON(t, router, http.MethodPost, "/api/notifications/"+notificationID+"/read", userToken, "idem-http-ntf-read", map[string]any{"request_hash": "hash-http-ntf-read"})
 }

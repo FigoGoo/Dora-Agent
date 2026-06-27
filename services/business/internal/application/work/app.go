@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -358,7 +359,10 @@ func (a *App) UpdateWork(ctx context.Context, in UpdateWorkInput) (WorkDetailDTO
 	if err := validateAuth(in.Auth); err != nil {
 		return WorkDetailDTO{}, err
 	}
-	hash := requestHash(in.Meta, in.Auth, map[string]any{"work_id": in.WorkID, "title": in.Title, "assets": in.AssetIDs, "cover": in.CoverAssetID, "base_updated_at": in.BaseUpdatedAt})
+	hash := requestHash(in.Meta, in.Auth, map[string]any{
+		"work_id": in.WorkID, "title": in.Title, "description": in.Description, "assets": in.AssetIDs,
+		"cover": in.CoverAssetID, "category": in.Category, "tags": in.Tags, "base_updated_at": in.BaseUpdatedAt,
+	})
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
 		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "work.update", IdempotencyKey: in.Meta.IdempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
@@ -387,7 +391,15 @@ func (a *App) UpdateWork(ctx context.Context, in UpdateWorkInput) (WorkDetailDTO
 		}
 		now := a.now()
 		updates := map[string]any{"updated_at": now}
+		assetIDs := normalizeIDs(in.AssetIDs)
+		hasChanges, err := a.hasWorkPatchChangesTx(tx, work, in, assetIDs)
+		if err != nil {
+			return err
+		}
 		if work.ShareStatus == StatusTakenDown {
+			if !hasChanges {
+				return bizerrors.New(bizerrors.CodeStateConflict, "taken_down work must be edited before resetting to private")
+			}
 			updates["share_status"] = StatusPrivate
 			updates["private_reset_at"] = now
 			updates["current_snapshot_id"] = nil
@@ -416,7 +428,6 @@ func (a *App) UpdateWork(ctx context.Context, in UpdateWorkInput) (WorkDetailDTO
 			updates["tags"] = mustJSON(tags)
 			work.TagsJSON = mustJSON(tags)
 		}
-		assetIDs := normalizeIDs(in.AssetIDs)
 		coverID := value(work.CoverAssetID)
 		if in.CoverAssetID != nil {
 			coverID = strings.TrimSpace(*in.CoverAssetID)
@@ -1173,6 +1184,36 @@ func (a *App) listWorkAssetsTx(tx *gorm.DB, workID string) ([]WorkAssetDTO, erro
 		out = append(out, WorkAssetDTO{AssetID: row.AssetID, Role: row.Role, DisplayOrder: row.DisplayOrder})
 	}
 	return out, nil
+}
+
+func (a *App) hasWorkPatchChangesTx(tx *gorm.DB, work businesscore.Work, in UpdateWorkInput, assetIDs []string) (bool, error) {
+	if in.Title != nil && strings.TrimSpace(*in.Title) != work.Title {
+		return true, nil
+	}
+	if in.Description != nil && strings.TrimSpace(*in.Description) != value(work.Description) {
+		return true, nil
+	}
+	if in.Category != nil && strings.TrimSpace(*in.Category) != value(work.Category) {
+		return true, nil
+	}
+	if in.Tags != nil && !slices.Equal(normalizeTags(in.Tags), stringSlice(work.TagsJSON)) {
+		return true, nil
+	}
+	if in.CoverAssetID != nil && strings.TrimSpace(*in.CoverAssetID) != value(work.CoverAssetID) {
+		return true, nil
+	}
+	if len(assetIDs) == 0 {
+		return false, nil
+	}
+	current, err := a.listWorkAssetsTx(tx, work.ID)
+	if err != nil {
+		return false, err
+	}
+	currentIDs := make([]string, 0, len(current))
+	for _, item := range current {
+		currentIDs = append(currentIDs, item.AssetID)
+	}
+	return !slices.Equal(assetIDs, currentIDs), nil
 }
 
 func (a *App) getActiveSnapshot(ctx context.Context, publicWorkID string) (businesscore.WorkPublicSnapshot, error) {

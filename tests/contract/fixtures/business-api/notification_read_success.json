@@ -22,9 +22,8 @@
       "related_resource_type": "skill_version",
       "related_resource_id": "skv_seed_storyboard_100",
       "navigation_hint": {
-        "target_type": "skill_version",
-        "target_id": "skv_seed_storyboard_100",
-        "path": "/skills/skv_seed_storyboard_100"
+        "target_route": "/skills/sk_seed_storyboard",
+        "target_resource_id": "sk_seed_storyboard"
       },
       "read_at": "2026-06-27T00:05:00Z",
       "created_at": "2026-06-27T00:00:00Z"
