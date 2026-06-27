@@ -13,21 +13,21 @@ import (
 	"github.com/cloudwego/kitex/server"
 )
 
-func RegisterAll(svr server.Server, handler *UnimplementedHandler) error {
-	registrars := []func(server.Server, *UnimplementedHandler) error{
-		func(s server.Server, h *UnimplementedHandler) error { return accountspaceservice.RegisterService(s, h) },
-		func(s server.Server, h *UnimplementedHandler) error { return projectservice.RegisterService(s, h) },
-		func(s server.Server, h *UnimplementedHandler) error { return assetservice.RegisterService(s, h) },
-		func(s server.Server, h *UnimplementedHandler) error { return creditservice.RegisterService(s, h) },
-		func(s server.Server, h *UnimplementedHandler) error {
+func RegisterAll(svr server.Server, handler *Handler) error {
+	registrars := []func(server.Server, *Handler) error{
+		func(s server.Server, h *Handler) error { return accountspaceservice.RegisterService(s, h) },
+		func(s server.Server, h *Handler) error { return projectservice.RegisterService(s, h) },
+		func(s server.Server, h *Handler) error { return assetservice.RegisterService(s, h) },
+		func(s server.Server, h *Handler) error { return creditservice.RegisterService(s, h) },
+		func(s server.Server, h *Handler) error {
 			return assetcreditcommitservice.RegisterService(s, h)
 		},
-		func(s server.Server, h *UnimplementedHandler) error { return skillcatalogservice.RegisterService(s, h) },
-		func(s server.Server, h *UnimplementedHandler) error {
+		func(s server.Server, h *Handler) error { return skillcatalogservice.RegisterService(s, h) },
+		func(s server.Server, h *Handler) error {
 			return toolcapabilityservice.RegisterService(s, h)
 		},
-		func(s server.Server, h *UnimplementedHandler) error { return modelconfigservice.RegisterService(s, h) },
-		func(s server.Server, h *UnimplementedHandler) error {
+		func(s server.Server, h *Handler) error { return modelconfigservice.RegisterService(s, h) },
+		func(s server.Server, h *Handler) error {
 			return platformdictionaryservice.RegisterService(s, h)
 		},
 	}

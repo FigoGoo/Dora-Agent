@@ -1,0 +1,115 @@
+package http
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/FigoGoo/Dora-Agent/internal/testdb"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/application/workbench"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
+)
+
+func TestM2AgentSessionRunProjectGate(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_agent_m2")
+	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/20260627_agent_runtime/agent")
+	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
+
+	repo := repository.New(db.DB)
+	app := workbench.New(repo, workbench.StaticGateway{
+		Space:  workbench.SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
+		Access: workbench.ProjectAccessDTO{Allowed: true, ProjectStatus: "active", CreativeAllowed: true, AllowedActions: []string{"view", "continue_creation"}},
+	}, "local-dev")
+	router := NewRouter(RouterOptions{App: app})
+
+	sessionResp := agentJSON(t, router, http.MethodPost, "/api/agent/sessions", "idem-agent-session", map[string]any{"project_id": "prj_active_1001", "initial_title": "M2"})
+	sessionID := sessionResp["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("session response missing session_id: %#v", sessionResp)
+	}
+
+	runResp := agentJSON(t, router, http.MethodPost, "/api/agent/runs", "idem-agent-run", map[string]any{
+		"session_id": sessionID,
+		"project_id": "prj_active_1001",
+		"user_input": map[string]any{"client_message_id": "cm_1", "content_type": "text", "text": "hello"},
+	})
+	runID := runResp["run_id"].(string)
+	if runResp["status"] != "pending" {
+		t.Fatalf("expected pending run, got %#v", runResp)
+	}
+
+	conflict := httptest.NewRecorder()
+	req := agentRequest(http.MethodPost, "/api/agent/runs", "idem-agent-run-2", map[string]any{
+		"session_id": sessionID,
+		"project_id": "prj_active_1001",
+		"user_input": map[string]any{"client_message_id": "cm_2", "content_type": "text", "text": "again"},
+	})
+	router.ServeHTTP(conflict, req)
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("expected active run conflict, status=%d body=%s", conflict.Code, conflict.Body.String())
+	}
+
+	cancelled := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+runID+"/cancel", "idem-cancel", map[string]any{"cancel_reason": "user_cancel"})
+	if cancelled["status"] != "cancelled" {
+		t.Fatalf("cancel response = %#v", cancelled)
+	}
+	replay := agentJSON(t, router, http.MethodGet, "/api/agent/runs/"+runID+"/events?after_sequence=0", "", nil)
+	if len(replay["events"].([]any)) == 0 {
+		t.Fatalf("expected replay events: %#v", replay)
+	}
+
+	archivedApp := workbench.New(repo, workbench.StaticGateway{
+		Space:  workbench.SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
+		Access: workbench.ProjectAccessDTO{Allowed: true, ProjectStatus: "archived", CreativeAllowed: false, AllowedActions: []string{"view"}},
+	}, "local-dev")
+	archivedRouter := NewRouter(RouterOptions{App: archivedApp})
+	snapshot := agentJSON(t, archivedRouter, http.MethodGet, "/api/agent/runs/"+runID+"/snapshot", "", nil)
+	if snapshot["readonly_reason"] != "project_archived" {
+		t.Fatalf("expected archived readonly snapshot, got %#v", snapshot)
+	}
+}
+
+func TestM2AgentAuthRequired(t *testing.T) {
+	router := NewRouter(RouterOptions{App: workbench.New(repository.New(nil), workbench.StaticGateway{}, "local-dev")})
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/sessions", bytes.NewBufferString(`{"project_id":"p"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for missing auth context, got %d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func agentJSON(t *testing.T, router http.Handler, method, path, idem string, body any) map[string]any {
+	t.Helper()
+	req := agentRequest(method, path, idem, body)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%s %s status=%d body=%s", method, path, rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
+	}
+	return out
+}
+
+func agentRequest(method, path, idem string, body any) *http.Request {
+	var buf bytes.Buffer
+	if body != nil {
+		_ = json.NewEncoder(&buf).Encode(body)
+	}
+	req := httptest.NewRequest(method, path, &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Trace-Id", "trace-agent-m2")
+	req.Header.Set("X-Actor-User-Id", "usr_1001")
+	req.Header.Set("X-Space-Id", "sp_personal_1001")
+	req.Header.Set("X-Login-Identity-Type", "personal")
+	if idem != "" {
+		req.Header.Set("Idempotency-Key", idem)
+	}
+	return req
+}

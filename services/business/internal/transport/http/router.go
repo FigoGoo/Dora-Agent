@@ -6,6 +6,9 @@ import (
 	nethttp "net/http"
 	"time"
 
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/logger"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
 	"github.com/gin-gonic/gin"
@@ -14,8 +17,11 @@ import (
 type ReadyChecker func(context.Context) error
 
 type RouterOptions struct {
-	Logger *slog.Logger
-	Ready  ReadyChecker
+	Logger       *slog.Logger
+	Ready        ReadyChecker
+	AccountSpace *accountspace.App
+	Admin        *admin.App
+	Project      *project.App
 }
 
 func NewRouter(opts RouterOptions) *gin.Engine {
@@ -45,6 +51,8 @@ func NewRouter(opts RouterOptions) *gin.Engine {
 		}
 		c.JSON(nethttp.StatusOK, gin.H{"status": "ready", "service": "business"})
 	})
+
+	registerM2Routes(router, opts)
 
 	return router
 }

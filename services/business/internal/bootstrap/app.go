@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,8 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/config"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/idempotency"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/logger"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/auditlog"
 	businesshttp "github.com/FigoGoo/Dora-Agent/services/business/internal/transport/http"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/transport/rpc"
 	"github.com/cloudwego/kitex/pkg/rpcinfo"
@@ -24,6 +31,9 @@ type App struct {
 	Config     config.BusinessConfig
 	Logger     *slog.Logger
 	DB         *gorm.DB
+	Account    *accountspace.App
+	Admin      *admin.App
+	Project    *project.App
 	Kitex      server.Server
 	HTTPServer *http.Server
 }
@@ -34,7 +44,22 @@ func New(cfg config.BusinessConfig) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open business database: %w", err)
 	}
-	kitexServer, err := NewKitexServer(cfg, rpc.NewUnimplementedHandler())
+	repo := businesscore.New(db)
+	guard := idempotency.NewGuard(db, 24*time.Hour, 30*time.Second)
+	auditWriter := auditlog.NewGormWriter(db)
+	accountApp := accountspace.New(repo, guard, auditWriter)
+	adminApp := admin.New(repo, guard, auditWriter)
+	projectApp := project.New(repo, guard, auditWriter)
+	if _, err := adminApp.BootstrapInitialAdmin(contextBackground(), admin.BootstrapInput{
+		Account:             cfg.AdminBootstrapAccount,
+		PasswordHash:        cfg.AdminBootstrapPasswordHash,
+		CredentialSecretRef: cfg.AdminBootstrapSecretRef,
+		TraceID:             "business-bootstrap",
+	}); err != nil {
+		return nil, fmt.Errorf("bootstrap initial admin: %w", err)
+	}
+
+	kitexServer, err := NewKitexServer(cfg, rpc.NewHandler(accountApp, projectApp))
 	if err != nil {
 		return nil, err
 	}
@@ -46,8 +71,11 @@ func New(cfg config.BusinessConfig) (*App, error) {
 			return nil, fmt.Errorf("get business sql database: %w", err)
 		}
 		router := businesshttp.NewRouter(businesshttp.RouterOptions{
-			Logger: log,
-			Ready:  sqlDB.PingContext,
+			Logger:       log,
+			Ready:        sqlDB.PingContext,
+			AccountSpace: accountApp,
+			Admin:        adminApp,
+			Project:      projectApp,
 		})
 		httpServer = &http.Server{
 			Addr:              cfg.HTTPAddr,
@@ -60,12 +88,15 @@ func New(cfg config.BusinessConfig) (*App, error) {
 		Config:     cfg,
 		Logger:     log,
 		DB:         db,
+		Account:    accountApp,
+		Admin:      adminApp,
+		Project:    projectApp,
 		Kitex:      kitexServer,
 		HTTPServer: httpServer,
 	}, nil
 }
 
-func NewKitexServer(cfg config.BusinessConfig, handler *rpc.UnimplementedHandler) (server.Server, error) {
+func NewKitexServer(cfg config.BusinessConfig, handler *rpc.Handler) (server.Server, error) {
 	addr, err := net.ResolveTCPAddr("tcp", cfg.KitexAddr)
 	if err != nil {
 		return nil, fmt.Errorf("resolve business kitex addr: %w", err)
@@ -99,4 +130,8 @@ func NewKitexServer(cfg config.BusinessConfig, handler *rpc.UnimplementedHandler
 		return nil, fmt.Errorf("register business kitex services: %w", err)
 	}
 	return svr, nil
+}
+
+func contextBackground() context.Context {
+	return context.Background()
 }

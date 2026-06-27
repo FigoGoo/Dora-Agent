@@ -8,13 +8,16 @@ import (
 type Code string
 
 const (
-	CodeInvalidArgument  Code = "INVALID_ARGUMENT"
-	CodeUnauthenticated  Code = "UNAUTHENTICATED"
-	CodePermissionDenied Code = "PERMISSION_DENIED"
-	CodeResourceNotFound Code = "RESOURCE_NOT_FOUND"
-	CodeStateConflict    Code = "STATE_CONFLICT"
-	CodeInternal         Code = "INTERNAL_ERROR"
-	CodeNotImplemented   Code = "NOT_IMPLEMENTED"
+	CodeInvalidArgument     Code = "INVALID_ARGUMENT"
+	CodeUnauthenticated     Code = "UNAUTHENTICATED"
+	CodePermissionDenied    Code = "PERMISSION_DENIED"
+	CodeResourceNotFound    Code = "RESOURCE_NOT_FOUND"
+	CodeProjectNotFound     Code = "PROJECT_NOT_FOUND"
+	CodeProjectArchived     Code = "PROJECT_ARCHIVED"
+	CodeStateConflict       Code = "STATE_CONFLICT"
+	CodeIdempotencyConflict Code = "IDEMPOTENCY_CONFLICT"
+	CodeInternal            Code = "INTERNAL_ERROR"
+	CodeNotImplemented      Code = "NOT_IMPLEMENTED"
 )
 
 type AgentError struct {
@@ -54,9 +57,9 @@ func (e *AgentError) HTTPStatus() int {
 		return http.StatusUnauthorized
 	case CodePermissionDenied:
 		return http.StatusForbidden
-	case CodeResourceNotFound:
+	case CodeResourceNotFound, CodeProjectNotFound:
 		return http.StatusNotFound
-	case CodeStateConflict:
+	case CodeStateConflict, CodeIdempotencyConflict, CodeProjectArchived:
 		return http.StatusConflict
 	case CodeNotImplemented:
 		return http.StatusNotImplemented

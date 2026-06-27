@@ -55,7 +55,7 @@
         "project archived_readonly_error contract is stable"
       ],
       "error": {
-        "code": "PROJECT_ARCHIVED_READONLY",
+        "code": "PROJECT_ARCHIVED",
         "message": "archived project is read only",
         "retryable": false
       }
@@ -76,14 +76,14 @@
           "trace_id": "trace_project_cross_space_permission_denied",
           "source": "agent_service"
         },
-        "project_id": "prj_other_space",
+        "project_id": "prj_other_space_1002",
         "access_purpose": "VIEW"
       },
       "assertions": [
         "project cross_space_permission_denied contract is stable"
       ],
       "error": {
-        "code": "PROJECT_PERMISSION_DENIED",
+        "code": "CROSS_SPACE_DENIED",
         "message": "cross space access denied",
         "retryable": false
       }

@@ -6,7 +6,7 @@
 INSERT INTO platform_admins (
   id, admin_account, password_hash, display_name, role, status, must_rotate_password
 ) VALUES (
-  'adm_root', 'admin@dora.local', '$argon2id$v=19$m=65536,t=3,p=4$seed$bootstrap', 'Dora Root Admin', 'super_admin', 'active', true
+  'adm_root', 'admin@dora.local', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS1sb2NhbC1zYWx0MQ$4jdN85WOR//36CwDBXmQQli7Mu8sYwHd+AM3HYmjPXI', 'Dora Root Admin', 'super_admin', 'active', true
 ) ON CONFLICT (admin_account) DO NOTHING;
 
 INSERT INTO platform_admin_bootstraps (
@@ -16,11 +16,11 @@ INSERT INTO platform_admin_bootstraps (
 ) ON CONFLICT (bootstrap_account) DO NOTHING;
 
 INSERT INTO business_users (
-  id, account_no, email, phone, display_name, status, default_space_id, registered_source
+  id, account_no, email, phone, email_hash, phone_hash, password_hash, display_name, status, default_space_id, registered_source
 ) VALUES
-  ('usr_1001', 'U1001', 'user1001@dora.local', '+10000000001', 'Seed User', 'active', 'sp_personal_1001', 'seed'),
-  ('usr_1002', 'U1002', 'user1002@dora.local', '+10000000002', 'Other Space User', 'active', 'sp_personal_1002', 'seed'),
-  ('usr_admin_actor', 'UADMIN', 'admin.actor@dora.local', '+10000000999', 'Admin Actor User', 'active', 'sp_personal_admin_actor', 'seed')
+  ('usr_1001', 'U1001', 'user1001@dora.local', '+10000000001', 'd354a6b859c939fdfde08f22baee6ebc7d7c5c6538398c905d2abddc43bad1ee', '1fb1f420856780a29719b994c8764b81770d79f97e2e1861ba938a7a5a15dfb9', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS11c2VyLXNhbHQwMQ$AfDQPdlOJ78pkBwqpH3UA0UMVwTpuKPCZTx+PvpD6Xw', 'Seed User', 'active', 'sp_personal_1001', 'seed'),
+  ('usr_1002', 'U1002', 'user1002@dora.local', '+10000000002', 'c3a48846c3d4d3f2c72fa5a79c1bfd5d75647e43a93084625aa793a7bcca5a14', 'd9d0a321f73cff7a953a6e48ec25c035e515c54181193d5729dd995733af8467', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS11c2VyLXNhbHQwMQ$AfDQPdlOJ78pkBwqpH3UA0UMVwTpuKPCZTx+PvpD6Xw', 'Other Space User', 'active', 'sp_personal_1002', 'seed'),
+  ('usr_admin_actor', 'UADMIN', 'admin.actor@dora.local', '+10000000999', '7b83f95f80ac466d0a4a969b3512096188ded5a287ed0c91cfecbf2a863b35ae', 'b7322332e5b9388014568a94f1730c771d9720ca4d8f88deb37c739d1ed2ea6a', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS11c2VyLXNhbHQwMQ$AfDQPdlOJ78pkBwqpH3UA0UMVwTpuKPCZTx+PvpD6Xw', 'Admin Actor User', 'active', 'sp_personal_admin_actor', 'seed')
 ON CONFLICT (account_no) DO NOTHING;
 
 INSERT INTO business_spaces (

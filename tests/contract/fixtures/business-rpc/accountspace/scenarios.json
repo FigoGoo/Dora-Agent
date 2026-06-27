@@ -21,7 +21,7 @@
         "accountspace unauthenticated_error contract is stable"
       ],
       "error": {
-        "code": "AUTH_UNAUTHENTICATED",
+        "code": "UNAUTHENTICATED",
         "message": "login required",
         "retryable": false
       }
@@ -34,8 +34,10 @@
       "request": {
         "auth_context": {
           "actor_user_id": "usr_1001",
-          "login_identity_type": "PERSONAL",
-          "space_id": "sp_personal_1001"
+          "login_identity_type": "ENTERPRISE_MEMBER",
+          "space_id": "sp_enterprise_1001",
+          "enterprise_id": "ent_1001",
+          "enterprise_role": "owner"
         },
         "request_meta": {
           "request_id": "req_accountspace_personal_space_success",
@@ -77,12 +79,12 @@
         "accountspace enterprise_owner_success contract is stable"
       ],
       "response": {
-        "space_id": "sp_ent_owner",
+        "space_id": "sp_enterprise_1001",
         "space_type": "enterprise",
-        "enterprise_id": "ent_1",
+        "enterprise_id": "ent_1001",
         "enterprise_role": "owner",
         "credit_account_scope": "enterprise",
-        "credit_account_id": "ca_ent_1",
+        "credit_account_id": "ca_enterprise_1001",
         "skill_scope_keys": [
           "enterprise_runtime"
         ]
@@ -96,8 +98,10 @@
       "request": {
         "auth_context": {
           "actor_user_id": "usr_1001",
-          "login_identity_type": "PERSONAL",
-          "space_id": "sp_personal_1001"
+          "login_identity_type": "ENTERPRISE_MEMBER",
+          "space_id": "sp_enterprise_1001",
+          "enterprise_id": "ent_1001",
+          "enterprise_role": "member"
         },
         "request_meta": {
           "request_id": "req_accountspace_enterprise_member_success",
@@ -109,12 +113,12 @@
         "accountspace enterprise_member_success contract is stable"
       ],
       "response": {
-        "space_id": "sp_ent_member",
+        "space_id": "sp_enterprise_1001",
         "space_type": "enterprise",
-        "enterprise_id": "ent_1",
+        "enterprise_id": "ent_1001",
         "enterprise_role": "member",
         "credit_account_scope": "enterprise",
-        "credit_account_id": "ca_ent_1",
+        "credit_account_id": "ca_enterprise_1001",
         "skill_scope_keys": [
           "enterprise_runtime"
         ]
@@ -128,8 +132,10 @@
       "request": {
         "auth_context": {
           "actor_user_id": "usr_1001",
-          "login_identity_type": "PERSONAL",
-          "space_id": "sp_personal_1001"
+          "login_identity_type": "ENTERPRISE_MEMBER",
+          "space_id": "sp_enterprise_removed",
+          "enterprise_id": "ent_removed",
+          "enterprise_role": "member"
         },
         "request_meta": {
           "request_id": "req_accountspace_member_removed_error",
@@ -141,7 +147,7 @@
         "accountspace member_removed_error contract is stable"
       ],
       "error": {
-        "code": "ENTERPRISE_MEMBER_REMOVED",
+        "code": "PERMISSION_DENIED",
         "message": "member has been removed",
         "retryable": false
       }
@@ -167,7 +173,7 @@
         "accountspace disabled_user_error contract is stable"
       ],
       "error": {
-        "code": "USER_DISABLED",
+        "code": "PERMISSION_DENIED",
         "message": "user disabled",
         "retryable": false
       }

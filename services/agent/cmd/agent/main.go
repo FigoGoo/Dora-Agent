@@ -11,7 +11,10 @@ import (
 	"time"
 
 	agenthttp "github.com/FigoGoo/Dora-Agent/services/agent/internal/api/http"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/application/workbench"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/config"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
+	agentrpc "github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/rpc"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/observability"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -36,12 +39,19 @@ func main() {
 		os.Exit(1)
 	}
 	defer sqlDB.Close()
+	gateway, err := agentrpc.NewBusinessGateway(cfg)
+	if err != nil {
+		logger.Error("create business rpc gateway", "error", err)
+		os.Exit(1)
+	}
+	app := workbench.New(repository.New(db), gateway, cfg.DefaultConfigVersion)
 
 	router := agenthttp.NewRouter(agenthttp.RouterOptions{
 		Logger: logger,
 		Ready: func(ctx context.Context) error {
 			return sqlDB.PingContext(ctx)
 		},
+		App: app,
 	})
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

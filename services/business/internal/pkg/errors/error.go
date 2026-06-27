@@ -11,9 +11,13 @@ const (
 	CodeInvalidArgument     Code = "INVALID_ARGUMENT"
 	CodeUnauthenticated     Code = "UNAUTHENTICATED"
 	CodePermissionDenied    Code = "PERMISSION_DENIED"
+	CodeCrossSpaceDenied    Code = "CROSS_SPACE_DENIED"
 	CodeResourceNotFound    Code = "RESOURCE_NOT_FOUND"
+	CodeProjectNotFound     Code = "PROJECT_NOT_FOUND"
+	CodeProjectArchived     Code = "PROJECT_ARCHIVED"
 	CodeStateConflict       Code = "STATE_CONFLICT"
 	CodeIdempotencyConflict Code = "IDEMPOTENCY_CONFLICT"
+	CodeProcessing          Code = "IDEMPOTENCY_PROCESSING"
 	CodeInternal            Code = "INTERNAL_ERROR"
 	CodeNotImplemented      Code = "NOT_IMPLEMENTED"
 )
@@ -64,9 +68,11 @@ func (e *BusinessError) HTTPStatus() int {
 		return http.StatusUnauthorized
 	case CodePermissionDenied:
 		return http.StatusForbidden
-	case CodeResourceNotFound:
+	case CodeCrossSpaceDenied:
+		return http.StatusForbidden
+	case CodeResourceNotFound, CodeProjectNotFound:
 		return http.StatusNotFound
-	case CodeStateConflict, CodeIdempotencyConflict:
+	case CodeStateConflict, CodeIdempotencyConflict, CodeProcessing, CodeProjectArchived:
 		return http.StatusConflict
 	case CodeNotImplemented:
 		return http.StatusNotImplemented

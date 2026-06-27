@@ -80,6 +80,20 @@ func (r *Repository) CreateRun(ctx context.Context, run *model.Run) error {
 	return r.db.WithContext(ctx).Create(run).Error
 }
 
+func (r *Repository) CountActiveRuns(ctx context.Context, sessionID string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&model.Run{}).
+		Where("session_id = ? AND status IN ? AND deleted_at IS NULL", sessionID, []string{
+			state.RunStatusPending,
+			state.RunStatusRunning,
+			state.RunStatusWaitingConfirmation,
+			state.RunStatusResuming,
+		}).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *Repository) GetRun(ctx context.Context, id string) (*model.Run, error) {
 	var run model.Run
 	if err := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id).First(&run).Error; err != nil {
@@ -94,6 +108,23 @@ func (r *Repository) GetRunByIdempotencyKey(ctx context.Context, key string) (*m
 		return nil, err
 	}
 	return &run, nil
+}
+
+func (r *Repository) CreateMessage(ctx context.Context, message *model.Message) error {
+	normalizeMessage(message)
+	return r.db.WithContext(ctx).Create(message).Error
+}
+
+func (r *Repository) ListMessages(ctx context.Context, sessionID string, limit, offset int) ([]model.Message, error) {
+	limit = normalizeLimit(limit, 10, 100)
+	var messages []model.Message
+	err := r.db.WithContext(ctx).
+		Where("session_id = ? AND deleted_at IS NULL", sessionID).
+		Order("sequence ASC").
+		Limit(limit).
+		Offset(offset).
+		Find(&messages).Error
+	return messages, err
 }
 
 func (r *Repository) UpdateRunStatus(ctx context.Context, id, toStatus, errorCode, errorMessage string) error {
@@ -263,6 +294,28 @@ func normalizeSession(session *model.Session) {
 	}
 	if len(session.SnapshotSummary) == 0 {
 		session.SnapshotSummary = jsonObject()
+	}
+}
+
+func normalizeMessage(message *model.Message) {
+	now := time.Now().UTC()
+	if message.CreatedAt.IsZero() {
+		message.CreatedAt = now
+	}
+	if message.UpdatedAt.IsZero() {
+		message.UpdatedAt = now
+	}
+	if message.ContentType == "" {
+		message.ContentType = "text"
+	}
+	if message.SafetyStatus == "" {
+		message.SafetyStatus = "not_evaluated"
+	}
+	if len(message.ContentSummary) == 0 {
+		message.ContentSummary = jsonObject()
+	}
+	if len(message.Metadata) == 0 {
+		message.Metadata = jsonObject()
 	}
 }
 

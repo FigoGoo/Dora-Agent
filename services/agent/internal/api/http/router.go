@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/apperror"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/application/workbench"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/observability"
 	"github.com/gin-gonic/gin"
 )
@@ -16,6 +17,7 @@ type ReadyChecker func(context.Context) error
 type RouterOptions struct {
 	Logger *slog.Logger
 	Ready  ReadyChecker
+	App    *workbench.App
 }
 
 func NewRouter(opts RouterOptions) *gin.Engine {
@@ -44,6 +46,7 @@ func NewRouter(opts RouterOptions) *gin.Engine {
 		}
 		c.JSON(nethttp.StatusOK, gin.H{"status": "ready", "service": "agent"})
 	})
+	registerWorkbenchRoutes(router, opts.App)
 
 	return router
 }

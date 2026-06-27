@@ -1,0 +1,166 @@
+package http
+
+import (
+	nethttp "net/http"
+	"strconv"
+	"strings"
+
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/apperror"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/application/workbench"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/observability"
+	"github.com/gin-gonic/gin"
+)
+
+func registerWorkbenchRoutes(router *gin.Engine, app *workbench.App) {
+	h := workbenchHandler{app: app}
+	router.POST("/api/agent/sessions", h.authRequired(), h.createSession)
+	router.GET("/api/agent/sessions/:session_id", h.authRequired(), h.getSession)
+	router.GET("/api/agent/sessions/:session_id/messages", h.authRequired(), h.listMessages)
+	router.POST("/api/agent/runs", h.authRequired(), h.createRun)
+	router.GET("/api/agent/runs/:run_id", h.authRequired(), h.getRun)
+	router.GET("/api/agent/runs/:run_id/events", h.authRequired(), h.replayEvents)
+	router.POST("/api/agent/runs/:run_id/cancel", h.authRequired(), h.cancelRun)
+	router.GET("/api/agent/runs/:run_id/snapshot", h.authRequired(), h.getRunSnapshot)
+}
+
+type workbenchHandler struct {
+	app *workbench.App
+}
+
+func (h workbenchHandler) createSession(c *gin.Context) {
+	var req workbench.CreateSessionRequest
+	if !bind(c, &req) {
+		return
+	}
+	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	out, err := h.app.CreateSession(c.Request.Context(), auth(c), req, traceID(c))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) getSession(c *gin.Context) {
+	out, err := h.app.GetSession(c.Request.Context(), auth(c), c.Param("session_id"), traceID(c))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) listMessages(c *gin.Context) {
+	out, err := h.app.ListMessages(c.Request.Context(), auth(c), c.Param("session_id"), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) createRun(c *gin.Context) {
+	var req workbench.CreateRunRequest
+	if !bind(c, &req) {
+		return
+	}
+	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	out, err := h.app.CreateRun(c.Request.Context(), auth(c), req, traceID(c))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) getRun(c *gin.Context) {
+	out, err := h.app.GetRun(c.Request.Context(), auth(c), c.Param("run_id"))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) replayEvents(c *gin.Context) {
+	after := int64(intQuery(c, "after_sequence", 0))
+	if lastEventID := c.GetHeader("Last-Event-ID"); lastEventID != "" {
+		if parsed, err := strconv.ParseInt(lastEventID, 10, 64); err == nil {
+			after = parsed
+		}
+	}
+	out, err := h.app.ReplayEvents(c.Request.Context(), auth(c), c.Param("run_id"), after, intQuery(c, "limit", 10))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) cancelRun(c *gin.Context) {
+	var req struct {
+		CancelReason   string `json:"cancel_reason"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	out, err := h.app.CancelRun(c.Request.Context(), auth(c), c.Param("run_id"), req.CancelReason, idempotencyKey(c, req.IdempotencyKey), traceID(c))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) getRunSnapshot(c *gin.Context) {
+	out, err := h.app.BuildRunSnapshot(c.Request.Context(), auth(c), c.Param("run_id"), traceID(c))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) authRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if h.app == nil {
+			_ = c.Error(apperror.New(apperror.CodeNotImplemented, "agent workbench application is not configured"))
+			c.Abort()
+			return
+		}
+		auth := workbench.AuthContextDTO{
+			ActorUserID:       c.GetHeader("X-Actor-User-Id"),
+			LoginIdentityType: c.GetHeader("X-Login-Identity-Type"),
+			SpaceID:           c.GetHeader("X-Space-Id"),
+			EnterpriseID:      c.GetHeader("X-Enterprise-Id"),
+			EnterpriseRole:    c.GetHeader("X-Enterprise-Role"),
+		}
+		if auth.LoginIdentityType == "" {
+			auth.LoginIdentityType = "personal"
+		}
+		if auth.ActorUserID == "" {
+			_ = c.Error(apperror.New(apperror.CodeUnauthenticated, "X-Actor-User-Id is required"))
+			c.Abort()
+			return
+		}
+		if auth.SpaceID == "" {
+			_ = c.Error(apperror.New(apperror.CodeUnauthenticated, "X-Space-Id is required"))
+			c.Abort()
+			return
+		}
+		c.Set("auth", auth)
+		c.Next()
+	}
+}
+
+func bind(c *gin.Context, out any) bool {
+	if err := c.ShouldBindJSON(out); err != nil {
+		_ = c.Error(apperror.New(apperror.CodeInvalidArgument, "invalid json request"))
+		return false
+	}
+	return true
+}
+
+func respond(c *gin.Context, data any, err error) {
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	c.JSON(nethttp.StatusOK, data)
+}
+
+func auth(c *gin.Context) workbench.AuthContextDTO {
+	value, _ := c.Get("auth")
+	auth, _ := value.(workbench.AuthContextDTO)
+	return auth
+}
+
+func traceID(c *gin.Context) string {
+	return observability.TraceID(c.Request.Context())
+}
+
+func idempotencyKey(c *gin.Context, bodyValue string) string {
+	if header := c.GetHeader("Idempotency-Key"); header != "" {
+		return header
+	}
+	return strings.TrimSpace(bodyValue)
+}
+
+func intQuery(c *gin.Context, key string, fallback int) int {
+	value := c.Query(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}

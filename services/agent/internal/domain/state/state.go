@@ -33,7 +33,7 @@ const (
 func CanTransitionRun(from, to string) bool {
 	switch from {
 	case RunStatusPending:
-		return to == RunStatusRunning
+		return to == RunStatusRunning || to == RunStatusCancelled || to == RunStatusFailed
 	case RunStatusRunning:
 		return to == RunStatusWaitingConfirmation || to == RunStatusCompleted || to == RunStatusFailed || to == RunStatusCancelled
 	case RunStatusWaitingConfirmation:
