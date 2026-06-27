@@ -2,7 +2,7 @@
 
 ## 范围
 
-M6 覆盖非前端、非部署范围的服务级收口：RPC、HTTP、AG-UI、DB、fixture、测试报告和跨服务主链路门禁。事实源以 `code-plan/README.md`、`code-plan/tests/00-服务级测试计划与验收矩阵.md`、`code-plan/agent/14-测试验收场景与边界验证设计.md`、`code-plan/business/14-数据库迁移种子测试数据与验收场景设计.md`、`code-plan/business/15-业务AgentService-RPC服务端契约实现设计.md` 为准。
+M6 覆盖非前端、非部署范围的服务级收口：RPC、HTTP、AG-UI、DB、fixture、测试报告和跨服务主链路门禁。事实源以 `code-plan/README.md`、`code-plan/tests/00-服务级测试计划与验收矩阵.md`、`code-plan/agent/14-生产级闭眼开发门禁与任务切片验收设计.md`、`code-plan/business/14-SQL迁移本地配置测试矩阵与验收设计.md`、`code-plan/business/15-生产级闭眼开发门禁与Agent对齐验收设计.md` 为准。
 
 ## 执行环境
 
@@ -25,12 +25,15 @@ M6 覆盖非前端、非部署范围的服务级收口：RPC、HTTP、AG-UI、DB
 | `go test -count=1 ./...` | passed | M6 full Go tests 在总门禁中通过 |
 | `scripts/validate-m6.sh` | passed | 退出码 0，尾部输出 `M6 service acceptance baseline passed` |
 | `rg -n "FOREIGN KEY\|REFERENCES" db/migrations api code-plan services` | passed | M6 no database-level FK 扫描通过 |
+| `python3 tests/e2e/service/validate_m6_service_e2e.py` | passed | Agent service e2e 执行 `TestM6IndependentToolCharge*` 与 `TestM6SkillTestConsumesReviewCandidateRPC` |
 
 ## RPC
 
 RPC 账本已覆盖 18 个服务：`AccountSpaceService`、`EnterpriseService`、`AdminService`、`UserAdminService`、`ProjectService`、`ProjectAssetService`、`AssetService`、`CreditService`、`AssetCreditCommitService`、`SkillCatalogService`、`ToolCapabilityService`、`ModelConfigService`、`PlatformDictionaryService`、`WorkService`、`WorkShareService`、`FeaturedWorkAdminService`、`PublicContentService`、`NotificationService`。
 
 `scripts/validate-m6.sh` 会解析 Thrift 并要求方法集合与 M6 账本完全一致，同时校验 Kitex 生成目录、`RegisterAll` 注册、handler 方法和 `tests/contract/validate_fixtures.py` 的 per-method fixture 覆盖。
+
+Agent-facing RPC client 方法集合已纳入 M6 门禁：`ListAvailableGenerationModels`、`GetReviewCandidateSkillSpec`、`EstimateToolCredits`、`ChargeToolUsageCredits` 必须同时存在于 Agent 应用接口、真实 Kitex gateway、StaticGateway，并被 Agent 应用层消费。
 
 ## HTTP
 
@@ -44,10 +47,19 @@ AG-UI runtime 事件类型全部在 `api/agui/agent-workbench-events.schema.json
 
 DB 验收覆盖 Agent/Business migration up/down 成对、seed 可执行、无数据库级外键、业务库不出现 Agent runtime 表、Agent 库不出现业务事实表，关键事务回滚由 Go 集成测试覆盖。
 
+## 跨服务主链路
+
+`tests/e2e/service/validate_m6_service_e2e.py` 运行 Agent service-level 测试，使用 Agent repository、Testcontainers PostgreSQL 和等价 BusinessGateway mock 覆盖：
+
+- 模型列表 RPC 被 Agent 消费。
+- Skill 测试链路消费 `GetReviewCandidateSkillSpec -> ListAssetElementTypes -> SaveSkillTestResult`。
+- 独立 Tool 扣费链路消费 `EstimateToolCredits -> FreezeCredits -> ChargeToolUsageCredits`。
+- 独立 Tool charge 失败后调用 `ReleaseFrozenCredits` 并写入 `credits.released` / `tool.call.failed` 事件。
+
 ## 未执行项
 
 本轮 M6 门禁未记录到跳过命令。若后续环境缺少 Docker/Testcontainers 或 fake adapter，必须重新执行 `scripts/validate-m6.sh` 后再判定冻结点有效。
 
 ## 当前阻塞记录
 
-本轮验证未发现阻断项。历史执行中发现并修复了两处门禁误报：Kitex 转义方法 `SaveSkillTestResult_` 的识别、生产代码边界扫描误包含 `_test.go`；最终脚本已重新完整执行并通过。
+本次收口前的阻断项包括 Agent-facing RPC client 方法缺口、独立 Tool 扣费链路缺口、`tests/e2e/service/**` 缺失和报告事实源引用失效。上述问题已纳入 `scripts/validate-m6.sh` 硬门禁；最终结论必须以重新执行后的脚本输出为准。

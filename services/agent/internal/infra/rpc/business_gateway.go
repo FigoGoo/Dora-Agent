@@ -174,6 +174,24 @@ func (g *BusinessGateway) GetPublishedSkillSpec(ctx context.Context, auth workbe
 	}, nil
 }
 
+func (g *BusinessGateway) GetReviewCandidateSkillSpec(ctx context.Context, auth workbench.AuthContextDTO, skillID string, versionID string, testCaseID string, testRunID string, traceID string) (workbench.ReviewCandidateSkillSpecDTO, error) {
+	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	defer cancel()
+	resp, err := g.skill.GetReviewCandidateSkillSpec(callCtx, &businessagent.GetReviewCandidateSkillSpecRequest{
+		AuthContext: rpcAuth(auth), RequestMeta: rpcMeta(traceID), SkillId: skillID, VersionId: versionID,
+		TestCaseId: optionalString(testCaseID), TestRunId: optionalString(testRunID),
+	}, callopt.WithRPCTimeout(g.timeout))
+	if err != nil {
+		return workbench.ReviewCandidateSkillSpecDTO{}, err
+	}
+	return workbench.ReviewCandidateSkillSpecDTO{
+		SkillID: resp.SkillId, VersionID: resp.VersionId, SkillSpecJSON: resp.SkillSpecJson,
+		InputSchemaJSON: resp.InputSchemaJson, OutputSchemaJSON: resp.OutputSchemaJson, ToolRefs: resp.ToolRefs,
+		MemoryPolicyJSON: resp.MemoryPolicyJson, ConfirmationPolicyJSON: resp.ConfirmationPolicyJson,
+		TestInputJSON: value(resp.TestInputJson), ExpectedElementsJSON: value(resp.ExpectedElementsJson),
+	}, nil
+}
+
 func (g *BusinessGateway) CheckToolExecutionPolicy(ctx context.Context, auth workbench.AuthContextDTO, toolName string, toolType string, projectID string, riskContext map[string]string, traceID string) (workbench.ToolExecutionPolicyDTO, error) {
 	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
 	defer cancel()
@@ -187,6 +205,27 @@ func (g *BusinessGateway) CheckToolExecutionPolicy(ctx context.Context, auth wor
 		Allowed: resp.Allowed, RiskLevel: resp.RiskLevel, RequiresConfirmation: resp.RequiresConfirmation,
 		TimeoutMS: resp.TimeoutMs, RetryPolicy: resp.RetryPolicy, CancelPolicy: resp.CancelPolicy,
 	}, nil
+}
+
+func (g *BusinessGateway) ListAvailableGenerationModels(ctx context.Context, auth workbench.AuthContextDTO, resourceType string, limit int, cursor string, traceID string) ([]workbench.ModelSummaryDTO, string, error) {
+	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	defer cancel()
+	var pageSize *int32
+	if limit > 0 {
+		value := int32(limit)
+		pageSize = &value
+	}
+	resp, err := g.model.ListAvailableGenerationModels(callCtx, &businessagent.ListAvailableGenerationModelsRequest{
+		AuthContext: rpcAuth(auth), RequestMeta: rpcMeta(traceID), ResourceType: resourceType, PageSize: pageSize, Cursor: optionalString(cursor),
+	}, callopt.WithRPCTimeout(g.timeout))
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([]workbench.ModelSummaryDTO, 0, len(resp.Models))
+	for _, item := range resp.Models {
+		out = append(out, modelSummaryFromRPC(item))
+	}
+	return out, value(resp.NextCursor), nil
 }
 
 func (g *BusinessGateway) ResolveDefaultModel(ctx context.Context, auth workbench.AuthContextDTO, resourceType string, traceID string) (workbench.ModelSummaryDTO, error) {
@@ -297,6 +336,27 @@ func (g *BusinessGateway) EstimateGenerationCredits(ctx context.Context, auth wo
 	return estimateFromRPC(resp, req.PricingSnapshotID), nil
 }
 
+func (g *BusinessGateway) EstimateToolCredits(ctx context.Context, auth workbench.AuthContextDTO, req workbench.EstimateToolCreditsRequest, traceID string) (workbench.CreditEstimateDTO, error) {
+	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	defer cancel()
+	meta := rpcMeta(traceID)
+	meta.IdempotencyKey = optionalString(req.IdempotencyKey)
+	items := make([]*businessagent.ToolUsageEstimateItemInput, 0, len(req.ToolUsageItems))
+	for _, item := range req.ToolUsageItems {
+		items = append(items, &businessagent.ToolUsageEstimateItemInput{
+			ToolName: item.ToolName, ToolType: item.ToolType, BillingUnit: item.BillingUnit,
+			Quantity: item.Quantity, MetadataSummary: item.MetadataSummary,
+		})
+	}
+	resp, err := g.credit.EstimateToolCredits(callCtx, &businessagent.EstimateToolCreditsRequest{
+		AuthContext: rpcAuth(auth), RequestMeta: meta, ProjectId: req.ProjectID, ToolUsageItems: items, SafetyEvidence: req.SafetyEvidence,
+	}, callopt.WithRPCTimeout(g.timeout))
+	if err != nil {
+		return workbench.CreditEstimateDTO{}, err
+	}
+	return estimateToolFromRPC(resp), nil
+}
+
 func (g *BusinessGateway) FreezeCredits(ctx context.Context, auth workbench.AuthContextDTO, req workbench.FreezeCreditsRequest, traceID string) (workbench.FreezeCreditsDTO, error) {
 	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
 	defer cancel()
@@ -310,6 +370,39 @@ func (g *BusinessGateway) FreezeCredits(ctx context.Context, auth workbench.Auth
 		return workbench.FreezeCreditsDTO{}, err
 	}
 	return workbench.FreezeCreditsDTO{FreezeID: resp.FreezeId, FrozenPoints: resp.FrozenPoints, ExpiresAt: resp.ExpiresAt}, nil
+}
+
+func (g *BusinessGateway) ChargeToolUsageCredits(ctx context.Context, auth workbench.AuthContextDTO, req workbench.ChargeToolUsageCreditsRequest, traceID string) (workbench.ToolChargeDTO, error) {
+	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	defer cancel()
+	meta := rpcMeta(traceID)
+	meta.IdempotencyKey = optionalString(req.IdempotencyKey)
+	items := make([]*businessagent.ToolChargeItemInput, 0, len(req.ChargeItems))
+	for _, item := range req.ChargeItems {
+		items = append(items, &businessagent.ToolChargeItemInput{
+			EstimateItemId: item.EstimateItemID, ToolCallId: item.ToolCallID, ToolName: item.ToolName, ToolType: item.ToolType,
+			BillingUnit: item.BillingUnit, ActualQuantity: item.ActualQuantity, ExecutionStatus: item.ExecutionStatus,
+			MetadataSummary: item.MetadataSummary,
+		})
+	}
+	resp, err := g.credit.ChargeToolUsageCredits(callCtx, &businessagent.ChargeToolUsageCreditsRequest{
+		AuthContext: rpcAuth(auth), RequestMeta: meta, ProjectId: req.ProjectID, EstimateId: req.EstimateID, FreezeId: req.FreezeID,
+		SessionId: req.SessionID, RunId: req.RunID, ChargeItems: items,
+	}, callopt.WithRPCTimeout(g.timeout))
+	if err != nil {
+		return workbench.ToolChargeDTO{}, err
+	}
+	lines := make([]workbench.ChargedLineItemDTO, 0, len(resp.ChargedLineItems))
+	for _, item := range resp.ChargedLineItems {
+		lines = append(lines, workbench.ChargedLineItemDTO{
+			EstimateItemID: item.EstimateItemId, ChargedPoints: item.ChargedPoints, Status: item.Status,
+			AssetID: value(item.AssetId), ToolCallID: value(item.ToolCallId), ArtifactID: value(item.ArtifactId),
+		})
+	}
+	return workbench.ToolChargeDTO{
+		ToolChargeID: resp.ToolChargeId, ChargedPoints: resp.ChargedPoints, ReleasedPoints: resp.ReleasedPoints,
+		FreezeStatus: resp.FreezeStatus, LedgerEntryIDs: resp.LedgerEntryIds, ChargedLineItems: lines,
+	}, nil
 }
 
 func (g *BusinessGateway) ReleaseFrozenCredits(ctx context.Context, auth workbench.AuthContextDTO, req workbench.ReleaseFrozenCreditsRequest, traceID string) (workbench.ReleaseCreditsDTO, error) {
@@ -449,19 +542,34 @@ func estimateFromRPC(resp *businessagent.EstimateGenerationCreditsResponse, pric
 	if resp == nil {
 		return workbench.CreditEstimateDTO{}
 	}
-	items := make([]workbench.CreditEstimateLineItemDTO, 0, len(resp.LineItems))
-	for _, item := range resp.LineItems {
+	return workbench.CreditEstimateDTO{
+		EstimateID: resp.EstimateId, EstimatePoints: resp.EstimatePoints, AvailablePoints: resp.AvailablePoints,
+		ExpiresSoonPoints: resp.ExpiresSoonPoints, CreditAccountScope: resp.CreditAccountScope, CreditAccountID: resp.CreditAccountId,
+		PricingSnapshotID: pricingSnapshotID, LineItems: estimateLineItemsFromRPC(resp.LineItems), ExpiresAt: resp.ExpiresAt, Insufficient: resp.Insufficient,
+	}
+}
+
+func estimateToolFromRPC(resp *businessagent.EstimateToolCreditsResponse) workbench.CreditEstimateDTO {
+	if resp == nil {
+		return workbench.CreditEstimateDTO{}
+	}
+	return workbench.CreditEstimateDTO{
+		EstimateID: resp.EstimateId, EstimatePoints: resp.EstimatePoints, AvailablePoints: resp.AvailablePoints,
+		ExpiresSoonPoints: resp.ExpiresSoonPoints, CreditAccountScope: resp.CreditAccountScope, CreditAccountID: resp.CreditAccountId,
+		LineItems: estimateLineItemsFromRPC(resp.LineItems), ExpiresAt: resp.ExpiresAt, Insufficient: resp.Insufficient,
+	}
+}
+
+func estimateLineItemsFromRPC(lineItems []*businessagent.CreditEstimateLineItemDTO) []workbench.CreditEstimateLineItemDTO {
+	items := make([]workbench.CreditEstimateLineItemDTO, 0, len(lineItems))
+	for _, item := range lineItems {
 		items = append(items, workbench.CreditEstimateLineItemDTO{
 			EstimateItemID: item.EstimateItemId, ItemType: item.ItemType, ToolName: value(item.ToolName),
 			ToolType: value(item.ToolType), ModelID: value(item.ModelId), ResourceType: value(item.ResourceType),
 			BillingUnit: value(item.BillingUnit), EstimatePoints: item.EstimatePoints, Metadata: item.MetadataSummary,
 		})
 	}
-	return workbench.CreditEstimateDTO{
-		EstimateID: resp.EstimateId, EstimatePoints: resp.EstimatePoints, AvailablePoints: resp.AvailablePoints,
-		ExpiresSoonPoints: resp.ExpiresSoonPoints, CreditAccountScope: resp.CreditAccountScope, CreditAccountID: resp.CreditAccountId,
-		PricingSnapshotID: pricingSnapshotID, LineItems: items, ExpiresAt: resp.ExpiresAt, Insufficient: resp.Insufficient,
-	}
+	return items
 }
 
 func commitFromRPC(resp *businessagent.CommitGeneratedAssetAndChargeResponse) workbench.AssetCommitDTO {

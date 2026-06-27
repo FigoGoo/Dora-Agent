@@ -12,12 +12,16 @@ type StaticGateway struct {
 	Access        ProjectAccessDTO
 	Skills        []SkillSummaryDTO
 	SkillSpec     SkillSpecDTO
+	ReviewSpec    ReviewCandidateSkillSpecDTO
 	ToolPolicy    ToolExecutionPolicyDTO
+	Models        []ModelSummaryDTO
 	Model         ModelSummaryDTO
 	ModelSnapshot ModelRuntimeSnapshotDTO
 	ElementTypes  []AssetElementTypeDTO
 	Estimate      CreditEstimateDTO
+	ToolEstimate  CreditEstimateDTO
 	Freeze        FreezeCreditsDTO
+	ToolCharge    ToolChargeDTO
 	Release       ReleaseCreditsDTO
 	UploadSlots   []GeneratedUploadSlotDTO
 	Commit        AssetCommitDTO
@@ -107,6 +111,22 @@ func (g StaticGateway) GetPublishedSkillSpec(ctx context.Context, auth AuthConte
 	}, nil
 }
 
+func (g StaticGateway) GetReviewCandidateSkillSpec(ctx context.Context, auth AuthContextDTO, skillID string, versionID string, testCaseID string, testRunID string, traceID string) (ReviewCandidateSkillSpecDTO, error) {
+	if g.Err != nil {
+		return ReviewCandidateSkillSpecDTO{}, g.Err
+	}
+	if g.ReviewSpec.SkillID != "" {
+		return g.ReviewSpec, nil
+	}
+	return ReviewCandidateSkillSpecDTO{
+		SkillID: skillID, VersionID: versionID, SkillSpecJSON: `{"name":"review-static"}`,
+		InputSchemaJSON: `{"type":"object"}`, OutputSchemaJSON: `{"required":["structured_object"]}`,
+		ToolRefs: []string{"web_fetch:browser"}, MemoryPolicyJSON: `{"enabled":false}`,
+		ConfirmationPolicyJSON: `{"requires_confirmation":false}`, TestInputJSON: `{"prompt":"test"}`,
+		ExpectedElementsJSON: `["structured_object"]`,
+	}, nil
+}
+
 func (g StaticGateway) CheckToolExecutionPolicy(ctx context.Context, auth AuthContextDTO, toolName string, toolType string, projectID string, riskContext map[string]string, traceID string) (ToolExecutionPolicyDTO, error) {
 	if g.Err != nil {
 		return ToolExecutionPolicyDTO{}, g.Err
@@ -115,6 +135,20 @@ func (g StaticGateway) CheckToolExecutionPolicy(ctx context.Context, auth AuthCo
 		return g.ToolPolicy, nil
 	}
 	return ToolExecutionPolicyDTO{Allowed: true, RiskLevel: "low", RequiresConfirmation: false, TimeoutMS: 30000}, nil
+}
+
+func (g StaticGateway) ListAvailableGenerationModels(ctx context.Context, auth AuthContextDTO, resourceType string, limit int, cursor string, traceID string) ([]ModelSummaryDTO, string, error) {
+	if g.Err != nil {
+		return nil, "", g.Err
+	}
+	if g.Models != nil {
+		return g.Models, "", nil
+	}
+	model := g.Model
+	if model.ModelID == "" {
+		model = ModelSummaryDTO{ModelID: "mdl_static_image", DisplayName: "Static Image", IsDefault: true, PricingSnapshotID: "price_static_image", ResourceType: resourceType}
+	}
+	return []ModelSummaryDTO{model}, "", nil
 }
 
 func (g StaticGateway) ResolveDefaultModel(ctx context.Context, auth AuthContextDTO, resourceType string, traceID string) (ModelSummaryDTO, error) {
@@ -188,6 +222,30 @@ func (g StaticGateway) EstimateGenerationCredits(ctx context.Context, auth AuthC
 	}, nil
 }
 
+func (g StaticGateway) EstimateToolCredits(ctx context.Context, auth AuthContextDTO, req EstimateToolCreditsRequest, traceID string) (CreditEstimateDTO, error) {
+	if g.Err != nil {
+		return CreditEstimateDTO{}, g.Err
+	}
+	if g.ToolEstimate.EstimateID != "" {
+		return g.ToolEstimate, nil
+	}
+	toolName, toolType, billingUnit := "tool", "generic", "call"
+	if len(req.ToolUsageItems) > 0 {
+		toolName = req.ToolUsageItems[0].ToolName
+		toolType = req.ToolUsageItems[0].ToolType
+		billingUnit = req.ToolUsageItems[0].BillingUnit
+	}
+	return CreditEstimateDTO{
+		EstimateID: "est_tool_static", EstimatePoints: 3, AvailablePoints: 100, ExpiresSoonPoints: 0,
+		CreditAccountScope: creditAccountScope(auth), CreditAccountID: "credit_" + auth.SpaceID,
+		LineItems: []CreditEstimateLineItemDTO{{
+			EstimateItemID: "est_item_tool_static", ItemType: "tool_usage", ToolName: toolName, ToolType: toolType,
+			BillingUnit: billingUnit, EstimatePoints: 3,
+		}},
+		ExpiresAt: "2026-06-28T00:00:00Z",
+	}, nil
+}
+
 func (g StaticGateway) FreezeCredits(ctx context.Context, auth AuthContextDTO, req FreezeCreditsRequest, traceID string) (FreezeCreditsDTO, error) {
 	if g.Err != nil {
 		return FreezeCreditsDTO{}, g.Err
@@ -196,6 +254,23 @@ func (g StaticGateway) FreezeCredits(ctx context.Context, auth AuthContextDTO, r
 		return g.Freeze, nil
 	}
 	return FreezeCreditsDTO{FreezeID: "frz_static", FrozenPoints: req.Points, ExpiresAt: "2026-06-28T00:15:00Z"}, nil
+}
+
+func (g StaticGateway) ChargeToolUsageCredits(ctx context.Context, auth AuthContextDTO, req ChargeToolUsageCreditsRequest, traceID string) (ToolChargeDTO, error) {
+	if g.Err != nil {
+		return ToolChargeDTO{}, g.Err
+	}
+	if g.ToolCharge.ToolChargeID != "" {
+		return g.ToolCharge, nil
+	}
+	lines := make([]ChargedLineItemDTO, 0, len(req.ChargeItems))
+	for _, item := range req.ChargeItems {
+		lines = append(lines, ChargedLineItemDTO{EstimateItemID: item.EstimateItemID, ChargedPoints: 3, Status: "charged", ToolCallID: item.ToolCallID})
+	}
+	return ToolChargeDTO{
+		ToolChargeID: "toolchg_static", ChargedPoints: 3, ReleasedPoints: 0, FreezeStatus: "charged",
+		LedgerEntryIDs: []string{"cled_tool_static"}, ChargedLineItems: lines,
+	}, nil
 }
 
 func (g StaticGateway) ReleaseFrozenCredits(ctx context.Context, auth AuthContextDTO, req ReleaseFrozenCreditsRequest, traceID string) (ReleaseCreditsDTO, error) {

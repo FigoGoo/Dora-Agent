@@ -168,6 +168,22 @@ canonical_events = {
 }
 canonical_events.discard(None)
 agent_app = Path("services/agent/internal/application/workbench/app.go").read_text()
+agent_gateway = Path("services/agent/internal/infra/rpc/business_gateway.go").read_text()
+agent_static_gateway = Path("services/agent/internal/application/workbench/fake_gateway.go").read_text()
+agent_facing_methods = {
+    "ListAvailableGenerationModels",
+    "GetReviewCandidateSkillSpec",
+    "EstimateToolCredits",
+    "ChargeToolUsageCredits",
+}
+for method in sorted(agent_facing_methods):
+    if method not in agent_app:
+        fail(f"Agent application does not consume required RPC client method {method}")
+    if f"func (g *BusinessGateway) {method}(" not in agent_gateway:
+        fail(f"Agent concrete BusinessGateway missing method {method}")
+    if f"func (g StaticGateway) {method}(" not in agent_static_gateway:
+        fail(f"Agent StaticGateway missing method {method}")
+
 runtime_events = set(re.findall(r'appendRunEvent\([^\\n]+?\"([a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+)\"', agent_app))
 runtime_events |= set(re.findall(r'Type:\s*\"([a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+)\"', agent_app))
 unknown = runtime_events - canonical_events
@@ -247,6 +263,9 @@ report = Path("tests/reports/m6-service-acceptance-report.md")
 if not report.exists():
     fail("missing M6 service acceptance report")
 report_text = report.read_text()
+for ref in re.findall(r"`(code-plan/[^`]+?\\.md)`", report_text):
+    if not Path(ref).exists():
+        fail(f"M6 report references missing fact-source file: {ref}")
 for forbidden in ["阻塞问题：无", "未执行项：无", "smoke 通过", "mock-only"]:
     if forbidden in report_text:
         fail(f"M6 report contains over-optimistic phrase: {forbidden}")
@@ -262,6 +281,10 @@ python3 tests/agent/agui/validate_fixtures.py
 
 echo "== M6 contract fixtures =="
 python3 tests/contract/validate_fixtures.py
+
+echo "== M6 service e2e =="
+test -d tests/e2e/service
+python3 tests/e2e/service/validate_m6_service_e2e.py
 
 echo "== M6 no database-level FK =="
 if rg -n "FOREIGN KEY|REFERENCES" db/migrations api code-plan services; then

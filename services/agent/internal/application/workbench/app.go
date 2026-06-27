@@ -19,6 +19,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/modeltool"
 	runtimesafety "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/safety"
 	runtimeskill "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skill"
+	runtimeskilltest "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skilltest"
 	runtimetool "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/tool"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/turnloop"
 	"gorm.io/datatypes"
@@ -31,14 +32,18 @@ type BusinessGateway interface {
 	CheckProjectAccess(ctx context.Context, auth AuthContextDTO, projectID string, purpose businessagent.ProjectAccessPurpose, traceID string) (ProjectAccessDTO, error)
 	ListRoutableSkills(ctx context.Context, auth AuthContextDTO, scopeFilter string, limit int, cursor string, traceID string) ([]SkillSummaryDTO, string, error)
 	GetPublishedSkillSpec(ctx context.Context, auth AuthContextDTO, skillID string, version string, traceID string) (SkillSpecDTO, error)
+	GetReviewCandidateSkillSpec(ctx context.Context, auth AuthContextDTO, skillID string, versionID string, testCaseID string, testRunID string, traceID string) (ReviewCandidateSkillSpecDTO, error)
 	CheckToolExecutionPolicy(ctx context.Context, auth AuthContextDTO, toolName string, toolType string, projectID string, riskContext map[string]string, traceID string) (ToolExecutionPolicyDTO, error)
+	ListAvailableGenerationModels(ctx context.Context, auth AuthContextDTO, resourceType string, limit int, cursor string, traceID string) ([]ModelSummaryDTO, string, error)
 	ResolveDefaultModel(ctx context.Context, auth AuthContextDTO, resourceType string, traceID string) (ModelSummaryDTO, error)
 	ResolveGenerationModelSnapshot(ctx context.Context, auth AuthContextDTO, resourceType string, modelID string, pricingSnapshotID string, traceID string) (ModelRuntimeSnapshotDTO, error)
 	ListAssetElementTypes(ctx context.Context, auth AuthContextDTO, pageSize int, schemaVersion string, traceID string) ([]AssetElementTypeDTO, string, error)
 	SaveSkillTestResult(ctx context.Context, auth AuthContextDTO, req SkillTestResultRequest, traceID string) (SkillTestResultDTO, error)
 	BatchCheckAssetAccess(ctx context.Context, auth AuthContextDTO, req BatchCheckAssetAccessRequest, traceID string) ([]AssetAccessResultDTO, error)
 	EstimateGenerationCredits(ctx context.Context, auth AuthContextDTO, req EstimateGenerationCreditsRequest, traceID string) (CreditEstimateDTO, error)
+	EstimateToolCredits(ctx context.Context, auth AuthContextDTO, req EstimateToolCreditsRequest, traceID string) (CreditEstimateDTO, error)
 	FreezeCredits(ctx context.Context, auth AuthContextDTO, req FreezeCreditsRequest, traceID string) (FreezeCreditsDTO, error)
+	ChargeToolUsageCredits(ctx context.Context, auth AuthContextDTO, req ChargeToolUsageCreditsRequest, traceID string) (ToolChargeDTO, error)
 	ReleaseFrozenCredits(ctx context.Context, auth AuthContextDTO, req ReleaseFrozenCreditsRequest, traceID string) (ReleaseCreditsDTO, error)
 	PrepareGeneratedAssetObjects(ctx context.Context, auth AuthContextDTO, req PrepareGeneratedAssetObjectsRequest, traceID string) ([]GeneratedUploadSlotDTO, error)
 	CommitGeneratedAssetAndCharge(ctx context.Context, auth AuthContextDTO, req CommitGeneratedAssetAndChargeRequest, traceID string) (AssetCommitDTO, error)
@@ -91,6 +96,19 @@ type SkillSpecDTO struct {
 	MemoryPolicyJSON           string
 	ConfirmationPolicyJSON     string
 	ExecutionPolicySummaryJSON string
+}
+
+type ReviewCandidateSkillSpecDTO struct {
+	SkillID                string
+	VersionID              string
+	SkillSpecJSON          string
+	InputSchemaJSON        string
+	OutputSchemaJSON       string
+	ToolRefs               []string
+	MemoryPolicyJSON       string
+	ConfirmationPolicyJSON string
+	TestInputJSON          string
+	ExpectedElementsJSON   string
 }
 
 type ToolExecutionPolicyDTO struct {
@@ -154,6 +172,14 @@ type SkillTestResultRequest struct {
 	AgentTraceID       string
 }
 
+type SkillTestCaseRequest struct {
+	SkillID        string
+	VersionID      string
+	TestRunID      string
+	TestCaseID     string
+	IdempotencyKey string
+}
+
 type SkillTestResultDTO struct {
 	TestRunID string
 	Status    string
@@ -184,6 +210,13 @@ type EstimateGenerationCreditsRequest struct {
 	ToolUsageItems    []ToolUsageEstimateItemDTO
 	SafetyEvidence    *businessagent.SafetyEvidenceDTO
 	IdempotencyKey    string
+}
+
+type EstimateToolCreditsRequest struct {
+	ProjectID      string
+	ToolUsageItems []ToolUsageEstimateItemDTO
+	SafetyEvidence *businessagent.SafetyEvidenceDTO
+	IdempotencyKey string
 }
 
 type ToolUsageEstimateItemDTO struct {
@@ -245,6 +278,36 @@ type ReleaseFrozenCreditsRequest struct {
 type ReleaseCreditsDTO struct {
 	ReleasedPoints int64
 	ReleaseStatus  string
+}
+
+type ToolChargeItemDTO struct {
+	EstimateItemID  string
+	ToolCallID      string
+	ToolName        string
+	ToolType        string
+	BillingUnit     string
+	ActualQuantity  float64
+	ExecutionStatus string
+	MetadataSummary map[string]string
+}
+
+type ChargeToolUsageCreditsRequest struct {
+	ProjectID      string
+	EstimateID     string
+	FreezeID       string
+	SessionID      string
+	RunID          string
+	ChargeItems    []ToolChargeItemDTO
+	IdempotencyKey string
+}
+
+type ToolChargeDTO struct {
+	ToolChargeID     string
+	ChargedPoints    int64
+	ReleasedPoints   int64
+	FreezeStatus     string
+	LedgerEntryIDs   []string
+	ChargedLineItems []ChargedLineItemDTO
 }
 
 type GeneratedObjectInputDTO struct {
@@ -357,6 +420,8 @@ type App struct {
 	turnLoop         turnloop.TurnLoop
 }
 
+var errToolConfirmationRequired = errors.New("tool confirmation required")
+
 func New(repo *repository.Repository, gateway BusinessGateway, configVersion string) *App {
 	if configVersion == "" {
 		configVersion = "local-dev"
@@ -395,6 +460,60 @@ func (a *App) ResolveAuthContextFromToken(ctx context.Context, authorization str
 		auth.LoginIdentityType = "personal"
 	}
 	return auth, nil
+}
+
+func (a *App) RunSkillTestCase(ctx context.Context, auth AuthContextDTO, req SkillTestCaseRequest, traceID string) (SkillTestResultDTO, error) {
+	if a.gateway == nil {
+		return SkillTestResultDTO{}, apperror.New(apperror.CodeNotImplemented, "business gateway is not configured")
+	}
+	if req.SkillID == "" || req.VersionID == "" || req.TestRunID == "" || req.IdempotencyKey == "" {
+		return SkillTestResultDTO{}, apperror.New(apperror.CodeInvalidArgument, "skill_id, version_id, test_run_id and idempotency_key are required")
+	}
+	spec, err := a.gateway.GetReviewCandidateSkillSpec(ctx, auth, req.SkillID, req.VersionID, req.TestCaseID, req.TestRunID, traceID)
+	if err != nil {
+		return SkillTestResultDTO{}, mapBusinessError(err)
+	}
+	testInput := strings.TrimSpace(spec.TestInputJSON)
+	if testInput == "" {
+		testInput = spec.SkillSpecJSON
+	}
+	evidence := a.safetyEvaluator.Evaluate(ctx, "skill_test", "skill_test_prompt", req.TestCaseID, testInput)
+	safetyJSON := skillTestSafetyEvidenceJSON(evidence, req.TestRunID, traceID)
+	status := "passed"
+	actualElements := expectedElementsFromJSON(spec.ExpectedElementsJSON)
+	if len(actualElements) == 0 {
+		actualElements = []string{"structured_object"}
+	}
+	if evidence.Result == state.SafetyResultBlocked {
+		status = "blocked"
+	} else if evidence.Result == state.SafetyResultFailed {
+		status = "failed"
+	} else {
+		elementTypes, _, err := a.gateway.ListAssetElementTypes(ctx, auth, 50, "", traceID)
+		if err != nil {
+			return SkillTestResultDTO{}, mapBusinessError(err)
+		}
+		runner := runtimeskilltest.NewRunner()
+		result := runner.Run(runtimeskilltest.Input{
+			Cases: []runtimeskilltest.Case{
+				{CaseID: req.TestCaseID + "_1", ExpectedElements: actualElements},
+				{CaseID: req.TestCaseID + "_2", ExpectedElements: actualElements},
+				{CaseID: req.TestCaseID + "_3", ExpectedElements: actualElements},
+			},
+			SafetyResult:         evidence.Result,
+			ActualElements:       actualElements,
+			ActualElementDetails: skillTestActualElements(actualElements),
+			ElementTypes:         skillTestElementTypes(elementTypes),
+			Stage:                "draft",
+		})
+		status = result.Status
+	}
+	actualJSON := jsonObject(map[string]any{"elements": actualElements, "source": "agent_skill_test"})
+	return a.gateway.SaveSkillTestResult(ctx, auth, SkillTestResultRequest{
+		SkillID: req.SkillID, VersionID: req.VersionID, TestRunID: req.TestRunID, TestCaseID: req.TestCaseID,
+		IdempotencyKey: req.IdempotencyKey, Status: status, ActualElementsJSON: string(actualJSON),
+		SafetyEvidenceJSON: safetyJSON, AgentTraceID: traceID,
+	}, traceID)
 }
 
 type CreateSessionRequest struct {
@@ -854,6 +973,9 @@ func (a *App) AcceptInterrupt(ctx context.Context, auth AuthContextDTO, runID st
 	if err := a.runM4ConfirmedGeneration(ctx, auth, run.ID, interrupt, req.IdempotencyKey, traceID); err != nil {
 		return RunDTO{}, err
 	}
+	if err := a.runConfirmedIndependentToolCharge(ctx, auth, run.ID, interrupt, req.IdempotencyKey, traceID); err != nil {
+		return RunDTO{}, err
+	}
 	updated, err := a.repo.GetRun(ctx, run.ID)
 	if err != nil {
 		return RunDTO{}, err
@@ -1109,7 +1231,7 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 	defer func() {
 		_ = a.repo.DB().WithContext(ctx).Model(&model.Run{}).Where("id = ?", run.ID).Update("skill_selection", jsonObject(skillSelectionSnapshot))
 	}()
-	safetyEvidence, err := a.recordPromptSafetyEvaluation(ctx, run, "generation", "run", run.ID, prompt, traceID)
+	safetyEvidence, err := a.recordPromptSafetyEvaluation(ctx, run, "generation", "prompt", run.ID, prompt, traceID)
 	if err != nil {
 		return err
 	}
@@ -1146,7 +1268,10 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 				skillSelectionSnapshot["confirmation_policy"] = spec.ConfirmationPolicyJSON
 				skillSelectionSnapshot["tool_refs_digest"] = digestStrings(spec.ToolRefs)
 				skillSelectionSnapshot["tool_refs_count"] = len(spec.ToolRefs)
-				if err := a.recordToolPolicyEvents(ctx, auth, run, spec.ToolRefs, traceID); err != nil {
+				if err := a.recordToolPolicyEvents(ctx, auth, run, spec.ToolRefs, safetyEvidence, traceID); err != nil {
+					if errors.Is(err, errToolConfirmationRequired) {
+						return nil
+					}
 					return err
 				}
 				if skillRequiresConfirmation(spec.ConfirmationPolicyJSON) {
@@ -1158,6 +1283,13 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 		}
 	}
 	modelID := ""
+	if models, nextCursor, err := a.gateway.ListAvailableGenerationModels(ctx, auth, "image", 10, "", traceID); err == nil {
+		_ = a.appendGenerationProgress(ctx, run, traceID, "image", "model_catalog_loaded", 3, false, map[string]any{
+			"model_count": len(models), "next_cursor": nextCursor,
+		})
+	} else {
+		_ = a.appendGenerationProgress(ctx, run, traceID, "image", "model_catalog_failed", 0, false, map[string]any{"error": err.Error()})
+	}
 	modelSummary, err := a.gateway.ResolveDefaultModel(ctx, auth, "image", traceID)
 	if err != nil {
 		_ = a.appendGenerationProgress(ctx, run, traceID, "image", "model_default_failed", 0, false, map[string]any{"error": err.Error()})
@@ -1245,7 +1377,7 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 	return nil
 }
 
-func (a *App) recordToolPolicyEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, toolRefs []string, traceID string) error {
+func (a *App) recordToolPolicyEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, toolRefs []string, safety *model.SafetyEvaluation, traceID string) error {
 	for _, ref := range toolRefs {
 		toolName, toolType := parseToolRef(ref)
 		if toolName == "" || toolType == "" {
@@ -1276,18 +1408,56 @@ func (a *App) recordToolPolicyEvents(ctx context.Context, auth AuthContextDTO, r
 			return apperror.New(apperror.CodePermissionDenied, "required tool is disabled")
 		}
 		if decision.RequiresConfirmation {
-			if err := a.createToolConfirmationInterrupt(ctx, run, toolName, toolType, policy, traceID); err != nil {
+			if err := a.createToolConfirmationInterrupt(ctx, auth, run, toolCallID, toolName, toolType, policy, safety, traceID); err != nil {
 				return err
 			}
-			return nil
+			return errToolConfirmationRequired
+		}
+		if !isModelGenerationTool(toolName, toolType) {
+			if err := a.runIndependentToolCharge(ctx, auth, run, independentToolChargeInput{
+				ToolCallID: toolCallID, ToolName: toolName, ToolType: toolType, BillingUnit: defaultToolBillingUnit(toolType),
+				Quantity: 1, SafetyEvidence: safetyEvidenceToRPC(safety), IdempotencyBase: "tool_charge:" + run.ID + ":" + toolCallID,
+			}, traceID); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func (a *App) createToolConfirmationInterrupt(ctx context.Context, run *model.Run, toolName, toolType string, policy ToolExecutionPolicyDTO, traceID string) error {
+func (a *App) createToolConfirmationInterrupt(ctx context.Context, auth AuthContextDTO, run *model.Run, toolCallID, toolName, toolType string, policy ToolExecutionPolicyDTO, safety *model.SafetyEvaluation, traceID string) error {
+	if !isModelGenerationTool(toolName, toolType) {
+		estimate, err := a.estimateIndependentToolCredits(ctx, auth, run, toolName, toolType, defaultToolBillingUnit(toolType), 1, safetyEvidenceToRPC(safety), "tool_estimate:"+run.ID+":"+toolCallID, traceID)
+		if err != nil {
+			return err
+		}
+		if estimate.Insufficient {
+			_ = a.appendRunEvent(ctx, run, "credits.insufficient", traceID, map[string]any{
+				"estimate_points": estimate.EstimatePoints, "available_points": estimate.AvailablePoints,
+				"user_message": "积分不足，无法执行该工具", "retryable": true,
+				"credit_account_id": estimate.CreditAccountID, "estimate_id": estimate.EstimateID,
+			})
+			_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "CREDIT_INSUFFICIENT", "credit account has insufficient points")
+			return apperror.New(apperror.CodeStateConflict, "credit account has insufficient points")
+		}
+		return a.createConfirmationInterrupt(ctx, run, "risk_confirmation", "high risk tool requires confirmation", map[string]any{
+			"m4_flow":           "independent_tool_charge",
+			"tool_call_id":      toolCallID,
+			"tool_name":         toolName,
+			"tool_type":         toolType,
+			"billing_unit":      defaultToolBillingUnit(toolType),
+			"quantity":          float64(1),
+			"risk_level":        policy.RiskLevel,
+			"estimate_id":       estimate.EstimateID,
+			"estimate_points":   estimate.EstimatePoints,
+			"points":            estimate.EstimatePoints,
+			"credit_account_id": estimate.CreditAccountID,
+			"estimate":          estimate,
+			"safety_evidence":   safetyEvidenceToRPC(safety),
+		}, "工具调用确认", "高风险工具需要人工确认后继续", []string{policy.RiskLevel, toolName + ":" + toolType}, 15*time.Minute, traceID)
+	}
 	return a.createConfirmationInterrupt(ctx, run, "risk_confirmation", "high risk tool requires confirmation", map[string]any{
-		"tool_name": toolName, "tool_type": toolType, "risk_level": policy.RiskLevel,
+		"tool_call_id": toolCallID, "tool_name": toolName, "tool_type": toolType, "risk_level": policy.RiskLevel,
 	}, "工具调用确认", "高风险工具需要人工确认后继续", []string{policy.RiskLevel, toolName + ":" + toolType}, 15*time.Minute, traceID)
 }
 
@@ -1323,6 +1493,197 @@ func (a *App) createCreditConfirmationInterrupt(ctx context.Context, run *model.
 		"safety_evidence":     safetyEvidenceToRPC(safety),
 		"prompt_digest":       digestText(prompt),
 	}, "生成与扣费确认", "确认后将冻结积分，生成完成并保存资产后扣费", []string{"credit_freeze", "asset_commit", "project:" + run.ProjectID}, 15*time.Minute, traceID)
+}
+
+type independentToolChargeInput struct {
+	ToolCallID      string
+	ToolName        string
+	ToolType        string
+	BillingUnit     string
+	Quantity        float64
+	Estimate        CreditEstimateDTO
+	SafetyEvidence  *businessagent.SafetyEvidenceDTO
+	ConfirmationID  string
+	IdempotencyBase string
+}
+
+type toolChargeConfirmationPayload struct {
+	M4Flow          string                          `json:"m4_flow"`
+	ToolCallID      string                          `json:"tool_call_id"`
+	ToolName        string                          `json:"tool_name"`
+	ToolType        string                          `json:"tool_type"`
+	BillingUnit     string                          `json:"billing_unit"`
+	Quantity        float64                         `json:"quantity"`
+	EstimateID      string                          `json:"estimate_id"`
+	EstimatePoints  int64                           `json:"estimate_points"`
+	CreditAccountID string                          `json:"credit_account_id"`
+	Estimate        CreditEstimateDTO               `json:"estimate"`
+	SafetyEvidence  businessagent.SafetyEvidenceDTO `json:"safety_evidence"`
+}
+
+func (a *App) estimateIndependentToolCredits(ctx context.Context, auth AuthContextDTO, run *model.Run, toolName, toolType, billingUnit string, quantity float64, safety *businessagent.SafetyEvidenceDTO, idempotencyKey string, traceID string) (CreditEstimateDTO, error) {
+	estimate, err := a.gateway.EstimateToolCredits(ctx, auth, EstimateToolCreditsRequest{
+		ProjectID: run.ProjectID,
+		ToolUsageItems: []ToolUsageEstimateItemDTO{{
+			ToolName: toolName, ToolType: toolType, BillingUnit: billingUnit, Quantity: quantity,
+			MetadataSummary: map[string]string{"run_id": run.ID, "session_id": run.SessionID},
+		}},
+		SafetyEvidence: safety, IdempotencyKey: idempotencyKey,
+	}, traceID)
+	if err != nil {
+		_ = a.appendRunEvent(ctx, run, "tool.call.failed", traceID, map[string]any{
+			"tool_call_id": "", "error_code": "TOOL_CREDIT_ESTIMATE_FAILED", "user_message": "工具积分预估失败",
+			"retryable": true, "support_trace_id": traceID, "error": err.Error(),
+		})
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "TOOL_CREDIT_ESTIMATE_FAILED", "tool credit estimate failed")
+		return CreditEstimateDTO{}, mapBusinessError(err)
+	}
+	_ = a.appendRunEvent(ctx, run, "credits.estimated", traceID, map[string]any{
+		"estimate_id": estimate.EstimateID, "estimate_points": estimate.EstimatePoints, "available_points": estimate.AvailablePoints,
+		"expires_soon_points": estimate.ExpiresSoonPoints, "credit_account_scope": estimate.CreditAccountScope,
+		"credit_account_id": estimate.CreditAccountID, "pricing_snapshot_id": estimate.PricingSnapshotID,
+		"line_items": estimate.LineItems, "expires_at": estimate.ExpiresAt, "usage": "independent_tool",
+	})
+	return estimate, nil
+}
+
+func (a *App) runIndependentToolCharge(ctx context.Context, auth AuthContextDTO, run *model.Run, in independentToolChargeInput, traceID string) error {
+	estimate := in.Estimate
+	var err error
+	if estimate.EstimateID == "" {
+		estimate, err = a.estimateIndependentToolCredits(ctx, auth, run, in.ToolName, in.ToolType, in.BillingUnit, in.Quantity, in.SafetyEvidence, in.IdempotencyBase+":estimate", traceID)
+		if err != nil {
+			return err
+		}
+	}
+	if estimate.Insufficient {
+		_ = a.appendRunEvent(ctx, run, "credits.insufficient", traceID, map[string]any{
+			"estimate_points": estimate.EstimatePoints, "available_points": estimate.AvailablePoints,
+			"user_message": "积分不足，无法执行该工具", "retryable": true,
+			"credit_account_id": estimate.CreditAccountID, "estimate_id": estimate.EstimateID,
+		})
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "CREDIT_INSUFFICIENT", "credit account has insufficient points")
+		return apperror.New(apperror.CodeStateConflict, "credit account has insufficient points")
+	}
+	estimateItemID, err := estimateItemIDForTool(estimate, in.ToolName, in.ToolType)
+	if err != nil {
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "TOOL_ESTIMATE_ITEM_MISSING", err.Error())
+		return err
+	}
+	if estimate.EstimatePoints <= 0 {
+		_ = a.appendRunEvent(ctx, run, "tool.call.completed", traceID, map[string]any{
+			"tool_call_id": in.ToolCallID, "status": "completed", "result_summary": "tool completed without credit charge",
+			"artifact_refs": []any{}, "charged_estimate_item_ids": []string{},
+		})
+		return nil
+	}
+	freeze, err := a.gateway.FreezeCredits(ctx, auth, FreezeCreditsRequest{
+		EstimateID: estimate.EstimateID, Points: estimate.EstimatePoints, RunID: run.ID,
+		ConfirmationID: in.ConfirmationID, AccountID: estimate.CreditAccountID, IdempotencyKey: in.IdempotencyBase + ":freeze",
+	}, traceID)
+	if err != nil {
+		_ = a.appendRunEvent(ctx, run, "tool.call.failed", traceID, map[string]any{
+			"tool_call_id": in.ToolCallID, "error_code": "TOOL_CREDIT_FREEZE_FAILED", "user_message": "工具积分冻结失败",
+			"retryable": true, "support_trace_id": traceID,
+		})
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "TOOL_CREDIT_FREEZE_FAILED", "tool credit freeze failed")
+		return mapBusinessError(err)
+	}
+	_ = a.appendRunEvent(ctx, run, "credits.frozen", traceID, map[string]any{
+		"freeze_id": freeze.FreezeID, "frozen_points": freeze.FrozenPoints, "expires_at": freeze.ExpiresAt,
+		"estimate_id": estimate.EstimateID, "credit_account_id": estimate.CreditAccountID, "usage": "independent_tool",
+	})
+	charge, err := a.gateway.ChargeToolUsageCredits(ctx, auth, ChargeToolUsageCreditsRequest{
+		ProjectID: run.ProjectID, EstimateID: estimate.EstimateID, FreezeID: freeze.FreezeID,
+		SessionID: run.SessionID, RunID: run.ID, IdempotencyKey: in.IdempotencyBase + ":charge",
+		ChargeItems: []ToolChargeItemDTO{{
+			EstimateItemID: estimateItemID, ToolCallID: in.ToolCallID, ToolName: in.ToolName, ToolType: in.ToolType,
+			BillingUnit: in.BillingUnit, ActualQuantity: in.Quantity, ExecutionStatus: "success",
+			MetadataSummary: map[string]string{"run_id": run.ID, "session_id": run.SessionID},
+		}},
+	}, traceID)
+	if err != nil {
+		return a.failIndependentToolAfterFreeze(ctx, auth, run, freeze, in.ToolCallID, "tool_charge_failed", in.IdempotencyBase, traceID, err)
+	}
+	_ = a.appendRunEvent(ctx, run, "credits.charged", traceID, map[string]any{
+		"charged_points": charge.ChargedPoints, "released_points": charge.ReleasedPoints,
+		"tool_charge_id": charge.ToolChargeID, "freeze_status": charge.FreezeStatus,
+		"ledger_entry_ids": charge.LedgerEntryIDs, "charged_line_items": charge.ChargedLineItems,
+	})
+	if charge.ReleasedPoints > 0 {
+		_ = a.appendRunEvent(ctx, run, "credits.released", traceID, map[string]any{
+			"freeze_id": freeze.FreezeID, "released_points": charge.ReleasedPoints, "reason": "unused_after_tool_charge",
+		})
+	}
+	chargedIDs := make([]string, 0, len(charge.ChargedLineItems))
+	for _, item := range charge.ChargedLineItems {
+		if item.EstimateItemID != "" {
+			chargedIDs = append(chargedIDs, item.EstimateItemID)
+		}
+	}
+	_ = a.appendRunEvent(ctx, run, "tool.call.completed", traceID, map[string]any{
+		"tool_call_id": in.ToolCallID, "status": "completed", "result_summary": "tool completed and credits settled",
+		"artifact_refs": []any{}, "charged_estimate_item_ids": chargedIDs,
+	})
+	return nil
+}
+
+func (a *App) runConfirmedIndependentToolCharge(ctx context.Context, auth AuthContextDTO, runID string, interrupt *model.Interrupt, idempotencyKey string, traceID string) error {
+	payload, ok := parseToolChargeConfirmationPayload(interrupt)
+	if !ok {
+		return nil
+	}
+	run, err := a.repo.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if auth.SpaceID == "" {
+		auth.SpaceID = run.SpaceID
+	}
+	if auth.ActorUserID == "" {
+		auth.ActorUserID = run.UserID
+	}
+	access, err := a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
+	if err != nil {
+		return mapBusinessError(err)
+	}
+	if err := ensureCreativeProjectAccess(access); err != nil {
+		return err
+	}
+	return a.runIndependentToolCharge(ctx, auth, run, independentToolChargeInput{
+		ToolCallID: payload.ToolCallID, ToolName: payload.ToolName, ToolType: payload.ToolType,
+		BillingUnit: payload.BillingUnit, Quantity: payload.Quantity, Estimate: payload.Estimate,
+		SafetyEvidence: &payload.SafetyEvidence, ConfirmationID: interrupt.ID, IdempotencyBase: idempotencyKey + ":tool_charge",
+	}, traceID)
+}
+
+func parseToolChargeConfirmationPayload(interrupt *model.Interrupt) (toolChargeConfirmationPayload, bool) {
+	if interrupt == nil || len(interrupt.ConfirmationPayload) == 0 {
+		return toolChargeConfirmationPayload{}, false
+	}
+	var payload toolChargeConfirmationPayload
+	if err := json.Unmarshal(interrupt.ConfirmationPayload, &payload); err != nil {
+		return toolChargeConfirmationPayload{}, false
+	}
+	return payload, payload.M4Flow == "independent_tool_charge"
+}
+
+func (a *App) failIndependentToolAfterFreeze(ctx context.Context, auth AuthContextDTO, run *model.Run, freeze FreezeCreditsDTO, toolCallID, reason, idempotencyBase, traceID string, cause error) error {
+	released, releaseErr := a.gateway.ReleaseFrozenCredits(ctx, auth, ReleaseFrozenCreditsRequest{
+		FreezeID: freeze.FreezeID, ReleasePoints: freeze.FrozenPoints, Reason: reason, RunID: run.ID,
+		IdempotencyKey: idempotencyBase + ":release:" + reason,
+	}, traceID)
+	if releaseErr == nil {
+		_ = a.appendRunEvent(ctx, run, "credits.released", traceID, map[string]any{
+			"freeze_id": freeze.FreezeID, "released_points": released.ReleasedPoints, "reason": reason,
+		})
+	}
+	_ = a.appendRunEvent(ctx, run, "tool.call.failed", traceID, map[string]any{
+		"tool_call_id": toolCallID, "error_code": strings.ToUpper(reason), "user_message": "工具执行结算失败，已尝试释放冻结积分",
+		"retryable": true, "support_trace_id": traceID,
+	})
+	_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, strings.ToUpper(reason), cause.Error())
+	return mapBusinessError(cause)
 }
 
 type m4ConfirmationPayload struct {
@@ -1937,6 +2298,68 @@ func digestStrings(values []string) string {
 	return fmt.Sprintf("sha256:%x", sum[:])
 }
 
+func skillTestSafetyEvidenceJSON(evidence runtimesafety.Evidence, testRunID, traceID string) string {
+	expiresAt := evidence.EvaluatedAt.Add(24 * time.Hour).Format(time.RFC3339Nano)
+	payload := map[string]any{
+		"safety_evidence_id":      evidence.EvidenceID,
+		"scene":                   evidence.Scene,
+		"result":                  evidence.Result,
+		"target_type":             evidence.TargetType,
+		"target_ref_id":           evidence.TargetRefID,
+		"evaluated_object_digest": digestText(evidence.TargetRefID + ":" + evidence.Result),
+		"policy_version":          "local-m3",
+		"evidence_version":        "2026-06-27",
+		"evaluated_at":            evidence.EvaluatedAt.Format(time.RFC3339Nano),
+		"expires_at":              expiresAt,
+		"source_run_id":           testRunID,
+		"trace_id":                traceID,
+		"user_visible_reason":     evidence.Reason,
+	}
+	data, _ := json.Marshal(payload)
+	return string(data)
+}
+
+func expectedElementsFromJSON(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal([]byte(raw), &list); err == nil {
+		return list
+	}
+	var object struct {
+		Elements []string `json:"elements"`
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal([]byte(raw), &object); err != nil {
+		return nil
+	}
+	if len(object.Elements) > 0 {
+		return object.Elements
+	}
+	return object.Required
+}
+
+func skillTestActualElements(elements []string) []runtimeskilltest.ActualElement {
+	out := make([]runtimeskilltest.ActualElement, 0, len(elements))
+	for _, element := range elements {
+		out = append(out, runtimeskilltest.ActualElement{ElementType: element, UsageStage: "draft"})
+	}
+	return out
+}
+
+func skillTestElementTypes(items []AssetElementTypeDTO) []runtimeskilltest.ElementTypeSpec {
+	out := make([]runtimeskilltest.ElementTypeSpec, 0, len(items))
+	for _, item := range items {
+		out = append(out, runtimeskilltest.ElementTypeSpec{
+			ElementType: item.ElementType, UsageStage: item.UsageStage, DraftEnabled: item.DraftEnabled,
+			FinalEnabled: item.FinalEnabled, Editable: item.Editable, Referable: item.Referable,
+			RenderHint: item.RenderHint, SchemaJSON: item.SchemaHintJSON,
+		})
+	}
+	return out
+}
+
 func optionalString(value string) *string {
 	if strings.TrimSpace(value) == "" {
 		return nil
@@ -2067,4 +2490,34 @@ func parseToolRef(ref string) (string, string) {
 		return ref, ""
 	}
 	return parts[0], parts[1]
+}
+
+func isModelGenerationTool(toolName, toolType string) bool {
+	return toolType == "model_generation" || toolName == "model_generation"
+}
+
+func defaultToolBillingUnit(toolType string) string {
+	switch toolType {
+	case "image", "image_edit", "audio", "video":
+		return toolType
+	default:
+		return "call"
+	}
+}
+
+func estimateItemIDForTool(estimate CreditEstimateDTO, toolName, toolType string) (string, error) {
+	for _, item := range estimate.LineItems {
+		if item.EstimateItemID == "" {
+			continue
+		}
+		if item.ToolName == toolName && item.ToolType == toolType {
+			return item.EstimateItemID, nil
+		}
+	}
+	for _, item := range estimate.LineItems {
+		if item.EstimateItemID != "" && item.ItemType == "tool_usage" {
+			return item.EstimateItemID, nil
+		}
+	}
+	return "", apperror.New(apperror.CodeStateConflict, "tool estimate item is missing")
 }
