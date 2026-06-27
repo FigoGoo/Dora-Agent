@@ -2,9 +2,9 @@
 
 状态：active
 owner：产品体验设计师
-更新时间：2026-06-25
+更新时间：2026-06-27
 适用范围：Dora-Agent Web 用户端首页、Agent 创作入口、Skill 快捷入口、项目卡片、精选作品展示，以及后续用户端页面的日间/夜间主题基线
-相关代码路径：`docs/design/prototypes/flova-style-homepage.html`；用户端 `frontend/**`；管理端 `admin_frontend/**`
+相关代码路径：`docs/design/prototypes/flova-style-homepage.html`；用户端 `frontend/**`
 相关契约：暂无。前端实现时不得发明 API、RPC 或 AG-UI 字段。
 
 ## 关联文档
@@ -13,6 +13,7 @@ owner：产品体验设计师
 - [站点信息架构与导航](./01-站点信息架构与导航.md)
 - [统一 Agent 创作工作台体验设计](./02-统一Agent创作工作台体验设计.md)
 - [首页体验设计](./03-首页体验设计.md)
+- [管理端主题样式设计规范](./13-管理端主题样式设计规范.md)
 - [本地 HTML 原型](./prototypes/flova-style-homepage.html)
 
 ## 背景
@@ -30,7 +31,7 @@ Dora-Agent 是面向音乐、图片、视频和组合内容创作的 AIGC Agent 
 
 ## 非目标
 
-- 不定义平台后台管理端视觉规范。后台应保持高密度、表格化、可扫描。
+- 不定义平台后台管理端视觉规范。后台应遵循 [管理端主题样式设计规范](./13-管理端主题样式设计规范.md)，保持高密度、表格化、可扫描。
 - 不定义完整 Figma 变量交付格式。后续进入 Figma 设计系统时再导出。
 - 不定义 API 字段、AG-UI payload 或业务状态字段。
 - 不复制 Flova 品牌元素、Logo、素材和专有文案。
@@ -644,6 +645,6 @@ cubic-bezier(0.4, 0, 0.2, 1)
 
 - Figma 变量和组件库命名。
 - 日间主题完整视觉稿。
-- 平台后台独立视觉规范。
+- 管理端组件库变量和后台页面视觉稿。
 - Agent 创作工作台的 A2UI 组件视觉细则。
 - 移动窄屏是否仅做查看能力，还是支持完整创作。
