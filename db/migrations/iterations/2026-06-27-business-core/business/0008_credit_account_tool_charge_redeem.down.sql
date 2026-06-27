@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS redeem_code_redemptions;
+DROP TABLE IF EXISTS redeem_codes;
+DROP TABLE IF EXISTS redeem_code_batches;
+DROP TABLE IF EXISTS credit_tool_charge_items;
+DROP TABLE IF EXISTS credit_tool_charge_batches;
+DROP TABLE IF EXISTS credit_ledger_entries;
+DROP TABLE IF EXISTS credit_freezes;
+DROP TABLE IF EXISTS credit_estimate_items;
+DROP TABLE IF EXISTS credit_estimates;
+DROP TABLE IF EXISTS credit_batches;
+DROP TABLE IF EXISTS credit_accounts;

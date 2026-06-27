@@ -1,0 +1,456 @@
+openapi: 3.0.3
+info:
+  title: Dora Agent Workbench API
+  version: 0.1.0
+  description: Agent 工作台 HTTP/SSE API 契约。
+servers:
+  - url: /api/agent
+security:
+  - bearerAuth: []
+paths:
+  /sessions:
+    post:
+      operationId: createSession
+      summary: 创建 Agent 会话
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSessionResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /sessions/{session_id}:
+    get:
+      operationId: getSession
+      summary: 查询会话快照
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /sessions/{session_id}/messages:
+    get:
+      operationId: listMessages
+      summary: 分页查询会话消息
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListMessagesResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs:
+    post:
+      operationId: createRun
+      summary: 创建 Agent Run
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRunResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}:
+    get:
+      operationId: getRun
+      summary: 查询 Run 状态
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDTO'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/stream:
+    get:
+      operationId: openRunStream
+      summary: 打开 Run SSE 流
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/events:
+    get:
+      operationId: replayEvents
+      summary: 按 sequence 补偿事件
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - name: after_sequence
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 补偿成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventReplayResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/messages:
+    post:
+      operationId: appendUserInput
+      summary: 追加用户输入
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppendUserInputRequest'
+      responses:
+        '200':
+          description: 追加成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDTO'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/interrupts/{interrupt_id}/accept:
+    post:
+      operationId: acceptInterrupt
+      summary: 确认中断
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/InterruptID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmInterruptRequest'
+      responses:
+        '200':
+          description: 确认成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDTO'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/interrupts/{interrupt_id}/reject:
+    post:
+      operationId: rejectInterrupt
+      summary: 拒绝中断
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/InterruptID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectInterruptRequest'
+      responses:
+        '200':
+          description: 拒绝成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDTO'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/cancel:
+    post:
+      operationId: cancelRun
+      summary: 取消 Run
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRunRequest'
+      responses:
+        '200':
+          description: 取消成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDTO'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/snapshot:
+    get:
+      operationId: getRunSnapshot
+      summary: 查询 Run 快照
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotResponse'
+        default:
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    SessionID:
+      name: session_id
+      in: path
+      required: true
+      schema: { type: string }
+    RunID:
+      name: run_id
+      in: path
+      required: true
+      schema: { type: string }
+    InterruptID:
+      name: interrupt_id
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 160 }
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema: { type: integer, default: 10, maximum: 100 }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string }
+  responses:
+    Error:
+      description: 错误响应
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message, retryable, trace_id]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        retryable: { type: boolean }
+        trace_id: { type: string }
+        details: { type: object, additionalProperties: true }
+    CreateSessionRequest:
+      type: object
+      required: [project_id]
+      properties:
+        project_id: { type: string }
+        initial_title: { type: string, maxLength: 128 }
+    CreateSessionResponse:
+      type: object
+      required: [session_id, project_id, status, snapshot]
+      properties:
+        session_id: { type: string }
+        project_id: { type: string }
+        status: { type: string, enum: [active, archived, expired] }
+        snapshot: { $ref: '#/components/schemas/SnapshotResponse' }
+    CreateRunRequest:
+      type: object
+      required: [session_id, project_id, user_input]
+      properties:
+        session_id: { type: string }
+        project_id: { type: string }
+        user_input: { $ref: '#/components/schemas/UserInputDTO' }
+        model_selection: { $ref: '#/components/schemas/ModelSelectionDTO' }
+        referenced_assets:
+          type: array
+          items: { $ref: '#/components/schemas/AssetReferenceDTO' }
+        control_inputs:
+          type: array
+          items: { $ref: '#/components/schemas/ControlInputDTO' }
+    CreateRunResponse:
+      type: object
+      required: [run_id, session_id, project_id, status, stream_url, snapshot_version]
+      properties:
+        run_id: { type: string }
+        session_id: { type: string }
+        project_id: { type: string }
+        status: { type: string }
+        stream_url: { type: string }
+        snapshot_version: { type: string }
+    UserInputDTO:
+      type: object
+      required: [client_message_id, content_type, text]
+      properties:
+        client_message_id: { type: string, maxLength: 64 }
+        content_type: { type: string, enum: [text, multimodal_text] }
+        text: { type: string, maxLength: 8000 }
+        language: { type: string, default: zh-CN }
+        attachments:
+          type: array
+          items: { $ref: '#/components/schemas/InputAttachmentDTO' }
+    InputAttachmentDTO:
+      type: object
+      required: [attachment_id, attachment_type, source]
+      properties:
+        attachment_id: { type: string }
+        attachment_type: { type: string, enum: [asset, upload_intent, external_url] }
+        source: { type: string, enum: [project_asset, user_upload, public_reference] }
+        metadata_digest: { type: string }
+    AssetReferenceDTO:
+      type: object
+      required: [asset_id, project_id, purpose]
+      properties:
+        asset_id: { type: string }
+        project_id: { type: string }
+        source: { type: string, enum: [project_asset, blackboard, user_selected] }
+        purpose: { type: string, enum: [agent_input, view, reference] }
+        metadata_digest: { type: string }
+    ControlInputDTO:
+      type: object
+      required: [control_id, type, value]
+      properties:
+        control_id: { type: string }
+        type: { type: string, enum: [text, number, single_select, multi_select, asset_picker, toggle] }
+        value: {}
+        display_label: { type: string }
+        required: { type: boolean, default: false }
+        validation_digest: { type: string }
+    ModelSelectionDTO:
+      type: object
+      required: [resource_type, model_id, pricing_snapshot_id]
+      properties:
+        resource_type: { type: string, enum: [image, music, video, text] }
+        model_id: { type: string }
+        model_display_name: { type: string }
+        is_default: { type: boolean }
+        pricing_snapshot_id: { type: string }
+    ConfirmInterruptRequest:
+      type: object
+      required: [interrupt_id, run_id, action, confirmed_payload_digest]
+      properties:
+        interrupt_id: { type: string }
+        run_id: { type: string }
+        action: { type: string, enum: [confirm] }
+        confirmed_payload_digest: { type: string }
+    RejectInterruptRequest:
+      type: object
+      required: [interrupt_id, run_id, reason_code]
+      properties:
+        interrupt_id: { type: string }
+        run_id: { type: string }
+        reason_code: { type: string }
+    CancelRunRequest:
+      type: object
+      required: [run_id, cancel_reason]
+      properties:
+        run_id: { type: string }
+        cancel_reason: { type: string }
+    AppendUserInputRequest:
+      type: object
+      required: [user_input]
+      properties:
+        user_input: { $ref: '#/components/schemas/UserInputDTO' }
+    RunDTO:
+      type: object
+      required: [run_id, session_id, project_id, status]
+      properties:
+        run_id: { type: string }
+        session_id: { type: string }
+        project_id: { type: string }
+        status: { type: string }
+        error_code: { type: string }
+        error_message: { type: string }
+    ListMessagesResponse:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items: { type: object, additionalProperties: true }
+        next_cursor: { type: string }
+    EventReplayResponse:
+      type: object
+      required: [events, next_after_sequence, snapshot_required]
+      properties:
+        events:
+          type: array
+          items: { type: object, additionalProperties: true }
+        next_after_sequence: { type: integer, format: int64 }
+        snapshot_required: { type: boolean }
+    SnapshotResponse:
+      type: object
+      required: [session, run, messages, assets, blackboard, tasks, last_event_sequence]
+      properties:
+        session: { type: object, additionalProperties: true }
+        run: { type: object, additionalProperties: true }
+        messages:
+          type: array
+          items: { type: object, additionalProperties: true }
+        assets:
+          type: array
+          items: { type: object, additionalProperties: true }
+        blackboard: { type: object, additionalProperties: true }
+        tasks:
+          type: array
+          items: { type: object, additionalProperties: true }
+        last_event_sequence: { type: integer, format: int64 }
+        readonly_reason: { type: string, enum: ['', project_archived, permission_lost] }

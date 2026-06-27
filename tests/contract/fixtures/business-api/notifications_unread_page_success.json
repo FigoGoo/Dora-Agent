@@ -1,0 +1,32 @@
+{
+  "case_id": "business_api_notifications_unread_page_success",
+  "method": "GET",
+  "path": "/api/notifications?status=unread&page_size=10",
+  "request_headers": {
+    "Authorization": "Bearer user_session_token"
+  },
+  "response_status": 200,
+  "response_body": {
+    "code": "OK",
+    "message": "ok",
+    "data": {
+      "items": [
+        {
+          "notification_id": "ntf_skill_review_001",
+          "notification_type": "skill.review.approved",
+          "title": "Skill approved",
+          "status": "unread",
+          "jump_type": "skill_version",
+          "jump_target_id": "skv_seed_storyboard_100"
+        }
+      ],
+      "page_size": 10,
+      "next_cursor": null
+    },
+    "trace_id": "trace_api_notifications_001"
+  },
+  "assertions": [
+    "jump target permission is checked before frontend navigation",
+    "unread list uses paginated response shape"
+  ]
+}

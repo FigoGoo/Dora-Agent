@@ -1,0 +1,29 @@
+{
+  "case_id": "business_api_public_work_detail_share_url_success",
+  "method": "GET",
+  "path": "/api/public/works/share/seed-storyboard",
+  "response_status": 200,
+  "response_body": {
+    "code": "OK",
+    "message": "ok",
+    "data": {
+      "snapshot_id": "wps_seed_public",
+      "work_id": "wrk_seed_public",
+      "title": "Seed public storyboard",
+      "share_url": "http://localhost:3000/share/seed-storyboard",
+      "like_count": 1,
+      "assets": [
+        {
+          "asset_id": "ast_generated_1001",
+          "preview_url": "http://localhost:19080/api/assets/ast_generated_1001/preview",
+          "element_type": "image.primary"
+        }
+      ]
+    },
+    "trace_id": "trace_api_public_work_001"
+  },
+  "assertions": [
+    "share_url is directly copyable",
+    "object_uri and object_key_digest are not exposed"
+  ]
+}

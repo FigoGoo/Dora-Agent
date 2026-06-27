@@ -1,0 +1,787 @@
+openapi: 3.0.3
+info:
+  title: Dora Business API
+  version: 2026-06-27
+  description: HTTP contract for user, public, and admin business service APIs.
+servers:
+  - url: http://localhost:19080
+tags:
+  - name: Auth
+  - name: Account
+  - name: Enterprise
+  - name: Admin
+  - name: Model
+  - name: Tool
+  - name: Skill
+  - name: Credit
+  - name: Asset
+  - name: Work
+  - name: Public
+  - name: Notification
+paths:
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      operationId: registerPersonalAccount
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/account/current-space:
+    get:
+      tags: [Account]
+      operationId: getCurrentSpace
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/account/switch-identity:
+    post:
+      tags: [Account]
+      operationId: switchIdentity
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/enterprise/register:
+    post:
+      tags: [Enterprise]
+      operationId: createEnterprise
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/enterprise/summary:
+    get:
+      tags: [Enterprise]
+      operationId: getEnterpriseSummary
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/enterprise/members:
+    get:
+      tags: [Enterprise]
+      operationId: listEnterpriseMembers
+      parameters: [{ $ref: "#/components/parameters/PageSize" }, { $ref: "#/components/parameters/PageToken" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/enterprise/invites:
+    post:
+      tags: [Enterprise]
+      operationId: createEnterpriseInvite
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/enterprise/members/{member_id}/remove/preview:
+    post:
+      tags: [Enterprise]
+      operationId: previewRemoveEnterpriseMember
+      parameters: [{ $ref: "#/components/parameters/MemberId" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/enterprise/members/{member_id}/remove/confirm:
+    post:
+      tags: [Enterprise]
+      operationId: confirmRemoveEnterpriseMember
+      parameters: [{ $ref: "#/components/parameters/MemberId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/enterprise/owner-transfer/preview:
+    post:
+      tags: [Enterprise]
+      operationId: previewTransferOwner
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/enterprise/owner-transfer/confirm:
+    post:
+      tags: [Enterprise]
+      operationId: confirmTransferOwner
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/projects:
+    get:
+      tags: [Account]
+      operationId: listProjects
+      parameters: [{ $ref: "#/components/parameters/PageSize" }, { $ref: "#/components/parameters/PageToken" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+    post:
+      tags: [Account]
+      operationId: createProject
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/projects/{project_id}:
+    get:
+      tags: [Account]
+      operationId: getProject
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/projects/{project_id}/archive:
+    post:
+      tags: [Account]
+      operationId: archiveProject
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/projects/{project_id}/restore:
+    post:
+      tags: [Account]
+      operationId: restoreProject
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/projects/{project_id}/assets:
+    get:
+      tags: [Asset]
+      operationId: listProjectAssets
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }, { $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/projects/{project_id}/works:
+    get:
+      tags: [Work]
+      operationId: listProjectWorks
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }, { $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/models/generation:
+    get:
+      tags: [Model]
+      operationId: listGenerationModels
+      parameters: [{ name: resource_type, in: query, schema: { type: string } }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/tools/bindable:
+    get:
+      tags: [Tool]
+      operationId: listBindableTools
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/skills:
+    get:
+      tags: [Skill]
+      operationId: listSkills
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+    post:
+      tags: [Skill]
+      operationId: createSkillDraft
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/skills/{skill_id}:
+    get:
+      tags: [Skill]
+      operationId: getSkill
+      parameters: [{ $ref: "#/components/parameters/SkillId" }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+    patch:
+      tags: [Skill]
+      operationId: updateSkillDraft
+      parameters: [{ $ref: "#/components/parameters/SkillId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/skills/{skill_id}/test:
+    post:
+      tags: [Skill]
+      operationId: runSkillTest
+      parameters: [{ $ref: "#/components/parameters/SkillId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/skills/{skill_id}/submit-review:
+    post:
+      tags: [Skill]
+      operationId: submitSkillReview
+      parameters: [{ $ref: "#/components/parameters/SkillId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/skills/{skill_id}/rollback:
+    post:
+      tags: [Skill]
+      operationId: rollbackSkill
+      parameters: [{ $ref: "#/components/parameters/SkillId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/credits/summary:
+    get:
+      tags: [Credit]
+      operationId: getCreditSummary
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/credits/ledger:
+    get:
+      tags: [Credit]
+      operationId: listCreditLedger
+      parameters: [{ $ref: "#/components/parameters/PageSize" }, { $ref: "#/components/parameters/PageToken" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/credits/redeem:
+    post:
+      tags: [Credit]
+      operationId: redeemCode
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/enterprise/credits:
+    get:
+      tags: [Credit]
+      operationId: getEnterpriseCredits
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/enterprise/usage:
+    get:
+      tags: [Credit]
+      operationId: listEnterpriseUsage
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/assets:
+    get:
+      tags: [Asset]
+      operationId: listAssets
+      parameters: [{ $ref: "#/components/parameters/PageSize" }, { $ref: "#/components/parameters/PageToken" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/assets/{asset_id}:
+    get:
+      tags: [Asset]
+      operationId: getAsset
+      parameters: [{ $ref: "#/components/parameters/AssetId" }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/assets/upload-intents:
+    post:
+      tags: [Asset]
+      operationId: createUploadIntent
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/assets/upload-intents/{upload_intent_id}/confirm:
+    post:
+      tags: [Asset]
+      operationId: confirmUploadIntent
+      parameters: [{ $ref: "#/components/parameters/UploadIntentId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/assets/upload-intents/{upload_intent_id}/abort:
+    post:
+      tags: [Asset]
+      operationId: abortUploadIntent
+      parameters: [{ $ref: "#/components/parameters/UploadIntentId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/assets/{asset_id}/access:
+    get:
+      tags: [Asset]
+      operationId: getAssetAccess
+      parameters: [{ $ref: "#/components/parameters/AssetId" }, { name: access_type, in: query, schema: { type: string, enum: [preview, download] } }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/asset-element-types:
+    get:
+      tags: [Asset]
+      operationId: listAssetElementTypes
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/works:
+    get:
+      tags: [Work]
+      operationId: listWorks
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+    post:
+      tags: [Work]
+      operationId: createWork
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/works/{work_id}:
+    get:
+      tags: [Work]
+      operationId: getWork
+      parameters: [{ $ref: "#/components/parameters/WorkId" }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+    patch:
+      tags: [Work]
+      operationId: updateWork
+      parameters: [{ $ref: "#/components/parameters/WorkId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/works/{work_id}/share:
+    post:
+      tags: [Work]
+      operationId: shareWork
+      parameters: [{ $ref: "#/components/parameters/WorkId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/works/{work_id}/unshare:
+    post:
+      tags: [Work]
+      operationId: unshareWork
+      parameters: [{ $ref: "#/components/parameters/WorkId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/public/home:
+    get:
+      tags: [Public]
+      operationId: getPublicHome
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/public/works:
+    get:
+      tags: [Public]
+      operationId: listPublicWorks
+      parameters: [{ $ref: "#/components/parameters/PageSize" }, { name: category, in: query, schema: { type: string } }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/public/works/{public_work_id}:
+    get:
+      tags: [Public]
+      operationId: getPublicWork
+      parameters: [{ $ref: "#/components/parameters/PublicWorkId" }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/public/works/{public_work_id}/like:
+    post:
+      tags: [Public]
+      operationId: likePublicWork
+      parameters: [{ $ref: "#/components/parameters/PublicWorkId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/public/works/{public_work_id}/unlike:
+    post:
+      tags: [Public]
+      operationId: unlikePublicWork
+      parameters: [{ $ref: "#/components/parameters/PublicWorkId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/notifications:
+    get:
+      tags: [Notification]
+      operationId: listNotifications
+      parameters: [{ $ref: "#/components/parameters/PageSize" }, { $ref: "#/components/parameters/PageToken" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/notifications/unread-count:
+    get:
+      tags: [Notification]
+      operationId: getUnreadCount
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/notifications/{notification_id}/read:
+    post:
+      tags: [Notification]
+      operationId: markNotificationRead
+      parameters: [{ $ref: "#/components/parameters/NotificationId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/notifications/read-all:
+    post:
+      tags: [Notification]
+      operationId: markAllNotificationsRead
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/notifications/{notification_id}/navigation:
+    get:
+      tags: [Notification]
+      operationId: getNotificationNavigation
+      parameters: [{ $ref: "#/components/parameters/NotificationId" }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/auth/login:
+    post:
+      tags: [Admin]
+      operationId: adminLogin
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/auth/logout:
+    post:
+      tags: [Admin]
+      operationId: adminLogout
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/auth/rotate-password:
+    post:
+      tags: [Admin]
+      operationId: rotateAdminPassword
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/dashboard:
+    get:
+      tags: [Admin]
+      operationId: getAdminDashboard
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/admins:
+    get:
+      tags: [Admin]
+      operationId: listAdmins
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+    post:
+      tags: [Admin]
+      operationId: createAdmin
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/admins/{admin_id}/disable:
+    post:
+      tags: [Admin]
+      operationId: disableAdmin
+      parameters: [{ $ref: "#/components/parameters/AdminId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/users:
+    get:
+      tags: [Admin]
+      operationId: listAdminUsers
+      parameters: [{ $ref: "#/components/parameters/PageSize" }, { $ref: "#/components/parameters/PageToken" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/admin/users/{user_id}:
+    get:
+      tags: [Admin]
+      operationId: getAdminUser
+      parameters: [{ $ref: "#/components/parameters/UserId" }]
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/users/{user_id}/status/preview:
+    post:
+      tags: [Admin]
+      operationId: previewUserStatus
+      parameters: [{ $ref: "#/components/parameters/UserId" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/users/{user_id}/status/confirm:
+    post:
+      tags: [Admin]
+      operationId: confirmUserStatus
+      parameters: [{ $ref: "#/components/parameters/UserId" }, { $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/AdminReason" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/audit-logs:
+    get:
+      tags: [Admin]
+      operationId: listAuditLogs
+      parameters: [{ $ref: "#/components/parameters/PageSize" }, { $ref: "#/components/parameters/PageToken" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/admin/models/providers:
+    get:
+      tags: [Model]
+      operationId: listModelProviders
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+    post:
+      tags: [Model]
+      operationId: upsertModelProvider
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/models/providers/{provider_id}:
+    patch:
+      tags: [Model]
+      operationId: patchModelProvider
+      parameters: [{ name: provider_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/models/providers/{provider_id}/connectivity-test:
+    post:
+      tags: [Model]
+      operationId: testModelProviderConnectivity
+      parameters: [{ name: provider_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/models:
+    get:
+      tags: [Model]
+      operationId: listAdminModels
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+    post:
+      tags: [Model]
+      operationId: upsertModel
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/models/{model_id}:
+    patch:
+      tags: [Model]
+      operationId: patchModel
+      parameters: [{ name: model_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/models/default:
+    post:
+      tags: [Model]
+      operationId: setDefaultModel
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/models/{model_id}/status:
+    post:
+      tags: [Model]
+      operationId: setModelStatus
+      parameters: [{ name: model_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/tools:
+    get:
+      tags: [Tool]
+      operationId: listAdminTools
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/admin/tools/{tool_key}/impact-preview:
+    post:
+      tags: [Tool]
+      operationId: previewToolImpact
+      parameters: [{ $ref: "#/components/parameters/ToolKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/tools/{tool_key}/policy:
+    patch:
+      tags: [Tool]
+      operationId: updateToolPolicy
+      parameters: [{ $ref: "#/components/parameters/ToolKey" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/tools/{tool_key}/pricing-policy:
+    patch:
+      tags: [Tool]
+      operationId: updateToolPricingPolicy
+      parameters: [{ $ref: "#/components/parameters/ToolKey" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/tools/{tool_key}/status:
+    post:
+      tags: [Tool]
+      operationId: setToolStatus
+      parameters: [{ $ref: "#/components/parameters/ToolKey" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/tools/{tool_key}/whitelist:
+    put:
+      tags: [Tool]
+      operationId: replaceToolWhitelist
+      parameters: [{ $ref: "#/components/parameters/ToolKey" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/skills/system:
+    get:
+      tags: [Skill]
+      operationId: listSystemSkills
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+    post:
+      tags: [Skill]
+      operationId: createSystemSkill
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/skills/system/{skill_id}/test:
+    post:
+      tags: [Skill]
+      operationId: runSystemSkillTest
+      parameters: [{ $ref: "#/components/parameters/SkillId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/skills/system/{skill_id}/publish:
+    post:
+      tags: [Skill]
+      operationId: publishSystemSkill
+      parameters: [{ $ref: "#/components/parameters/SkillId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/skills/system/{skill_id}/deprecate:
+    post:
+      tags: [Skill]
+      operationId: deprecateSystemSkill
+      parameters: [{ $ref: "#/components/parameters/SkillId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/skills/reviews:
+    get:
+      tags: [Skill]
+      operationId: listSkillReviews
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/admin/skills/reviews/{review_id}/confirm:
+    post:
+      tags: [Skill]
+      operationId: confirmSkillReview
+      parameters: [{ name: review_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/credits/grants/targets:
+    get:
+      tags: [Credit]
+      operationId: searchCreditTargets
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/admin/credits/grants:
+    post:
+      tags: [Credit]
+      operationId: adminGrantCredits
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/AdminReason" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/credits/codes:
+    get:
+      tags: [Credit]
+      operationId: listRedeemCodes
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+    post:
+      tags: [Credit]
+      operationId: createRedeemCodes
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/credits/codes/{batch_id}/disable:
+    post:
+      tags: [Credit]
+      operationId: disableRedeemCodeBatch
+      parameters: [{ name: batch_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/credits/codes/{batch_id}/export:
+    post:
+      tags: [Credit]
+      operationId: exportRedeemCodes
+      parameters: [{ name: batch_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/asset-element-types:
+    get:
+      tags: [Asset]
+      operationId: adminListAssetElementTypes
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+  /api/admin/works/public:
+    get:
+      tags: [Work]
+      operationId: listAdminPublicWorks
+      parameters: [{ $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/PageResponse" } }
+  /api/admin/works/public/{public_work_id}/take-down:
+    post:
+      tags: [Work]
+      operationId: takeDownPublicWork
+      parameters: [{ $ref: "#/components/parameters/PublicWorkId" }, { $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/AdminReason" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonBody" }
+      responses: { "200": { $ref: "#/components/responses/ApiResponse" } }
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 128 }
+    AdminReason:
+      name: X-Admin-Reason
+      in: header
+      required: true
+      schema: { type: string, maxLength: 512 }
+    PageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, default: 10, maximum: 50 }
+    PageToken:
+      name: page_token
+      in: query
+      schema: { type: string }
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema: { type: string }
+    SkillId:
+      name: skill_id
+      in: path
+      required: true
+      schema: { type: string }
+    AssetId:
+      name: asset_id
+      in: path
+      required: true
+      schema: { type: string }
+    UploadIntentId:
+      name: upload_intent_id
+      in: path
+      required: true
+      schema: { type: string }
+    WorkId:
+      name: work_id
+      in: path
+      required: true
+      schema: { type: string }
+    PublicWorkId:
+      name: public_work_id
+      in: path
+      required: true
+      schema: { type: string }
+    NotificationId:
+      name: notification_id
+      in: path
+      required: true
+      schema: { type: string }
+    MemberId:
+      name: member_id
+      in: path
+      required: true
+      schema: { type: string }
+    AdminId:
+      name: admin_id
+      in: path
+      required: true
+      schema: { type: string }
+    UserId:
+      name: user_id
+      in: path
+      required: true
+      schema: { type: string }
+    ToolKey:
+      name: tool_key
+      in: path
+      required: true
+      schema: { type: string }
+  requestBodies:
+    JsonBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  responses:
+    ApiResponse:
+      description: Standard API response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiResponse"
+    PageResponse:
+      description: Standard paginated API response.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ApiResponse"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PageResult"
+  schemas:
+    ApiResponse:
+      type: object
+      required: [success, trace_id]
+      properties:
+        success: { type: boolean }
+        data:
+          type: object
+          additionalProperties: true
+        error:
+          $ref: "#/components/schemas/ApiError"
+        trace_id: { type: string }
+    ApiError:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        retryable: { type: boolean }
+        detail:
+          type: object
+          additionalProperties: true
+    PageResult:
+      type: object
+      required: [items, page_size, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        page: { type: integer }
+        page_size: { type: integer, default: 10, maximum: 50 }
+        total: { type: integer, format: int64 }
+        next_page_token: { type: string }
+        has_more: { type: boolean }

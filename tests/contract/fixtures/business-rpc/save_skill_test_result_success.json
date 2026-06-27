@@ -1,0 +1,36 @@
+{
+  "case_id": "business_rpc_save_skill_test_result_success",
+  "service": "SkillCatalogService",
+  "method": "SaveSkillTestResult",
+  "request": {
+    "auth_context": {
+      "actor_user_id": "usr_admin_actor",
+      "login_identity_type": "ADMIN",
+      "admin_id": "adm_root"
+    },
+    "request_meta": {
+      "request_id": "req_save_skill_result_001",
+      "trace_id": "trace_save_skill_result_001",
+      "idempotency_key": "idem_save_skill_result_001",
+      "source": "agent_service"
+    },
+    "skill_id": "sk_seed_storyboard",
+    "version_id": "skv_seed_storyboard_100",
+    "test_run_id": "skrun_storyboard_001",
+    "test_case_id": "skcase_storyboard_basic",
+    "status": "passed",
+    "actual_elements_json": "[{\"element_type\":\"image.primary\",\"count\":1}]",
+    "safety_evidence_json": "{\"result\":\"pass\",\"policy_version\":\"safety-policy-2026-06\"}",
+    "agent_trace_id": "agent_trace_skill_test_001"
+  },
+  "response": {
+    "test_run_id": "skrun_storyboard_001",
+    "status": "passed",
+    "saved": true
+  },
+  "assertions": [
+    "Skill test result is persisted by business service",
+    "Agent returns actual_elements_json and safety_evidence_json",
+    "no mock execution mode is accepted in production contract fixtures"
+  ]
+}

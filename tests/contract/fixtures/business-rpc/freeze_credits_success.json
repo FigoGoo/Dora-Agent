@@ -1,0 +1,33 @@
+{
+  "case_id": "business_rpc_freeze_credits_success",
+  "service": "CreditService",
+  "method": "FreezeCredits",
+  "request": {
+    "auth_context": {
+      "actor_user_id": "usr_1001",
+      "login_identity_type": "PERSONAL",
+      "space_id": "sp_personal_1001"
+    },
+    "request_meta": {
+      "request_id": "req_freeze_001",
+      "trace_id": "trace_freeze_001",
+      "idempotency_key": "idem_freeze_est_tool_001",
+      "source": "agent_service"
+    },
+    "estimate_id": "est_tool_001",
+    "points": 9,
+    "run_id": "run_1001",
+    "confirmation_id": "confirm_1001",
+    "account_id": "ca_personal_1001"
+  },
+  "response": {
+    "freeze_id": "frz_tool_001",
+    "frozen_points": 9,
+    "expires_at": "2026-06-27T12:20:00Z"
+  },
+  "assertions": [
+    "request.estimate_id, request.points and request.run_id remain required",
+    "confirmation_id and account_id are compatible optional fields",
+    "idempotency_key is required for write retry"
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "$id": "https://dora.local/schemas/agui/agent-workbench-events.schema.json",
+  "title": "Dora Agent Workbench AG-UI Event",
+  "type": "object",
+  "required": [
+    "event_id",
+    "type",
+    "session_id",
+    "run_id",
+    "project_id",
+    "space_id",
+    "actor_user_id",
+    "sequence",
+    "timestamp",
+    "component",
+    "trace_id",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "pattern": "^evt_[A-Za-z0-9_\\-]+$"
+    },
+    "type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$"
+    },
+    "session_id": { "type": "string" },
+    "run_id": { "type": "string" },
+    "project_id": { "type": "string" },
+    "space_id": { "type": "string" },
+    "actor_user_id": { "type": "string" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "component": { "type": "string" },
+    "trace_id": { "type": "string" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "ErrorPayload": {
+      "type": "object",
+      "required": ["error_code", "user_message", "retryable", "support_trace_id"],
+      "properties": {
+        "error_type": { "type": "string" },
+        "error_code": { "type": "string" },
+        "user_message": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "support_trace_id": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "ConfirmationPayload": {
+      "type": "object",
+      "required": ["confirmation_id", "interrupt_id", "title", "summary", "expires_at", "actions"],
+      "properties": {
+        "confirmation_id": { "type": "string" },
+        "interrupt_id": { "type": "string" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "risks": { "type": "array", "items": { "type": "string" } },
+        "points": { "type": "integer" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "actions": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "SafetyEvaluatedPayload": {
+      "type": "object",
+      "required": ["safety_status", "safety_evidence_id", "policy_version", "expires_at"],
+      "properties": {
+        "safety_status": { "const": "passed" },
+        "safety_evidence_id": { "type": "string" },
+        "policy_version": { "type": "string" },
+        "expires_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": true
+    },
+    "CreditsEstimatedPayload": {
+      "type": "object",
+      "required": ["estimate_points", "available_points", "account_type", "pricing_snapshot_id"],
+      "properties": {
+        "estimate_points": { "type": "integer" },
+        "available_points": { "type": "integer" },
+        "expires_soon_points": { "type": "integer" },
+        "account_type": { "type": "string" },
+        "pricing_snapshot_id": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "ProjectArchivedPayload": {
+      "type": "object",
+      "required": ["project_status", "creative_allowed", "read_only_reason", "allowed_actions", "user_message"],
+      "properties": {
+        "project_status": { "const": "archived" },
+        "creative_allowed": { "const": false },
+        "read_only_reason": { "const": "project_archived" },
+        "allowed_actions": { "type": "array", "items": { "type": "string" } },
+        "user_message": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "GenerationProgressPayload": {
+      "type": "object",
+      "required": ["task_id", "resource_type", "status", "progress"],
+      "properties": {
+        "task_id": { "type": "string" },
+        "resource_type": { "type": "string" },
+        "status": { "type": "string" },
+        "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "partial_completed": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "AssetSaveCompletedPayload": {
+      "type": "object",
+      "required": ["asset_id", "artifact_id", "resource_type", "save_status", "elements", "downloadable"],
+      "properties": {
+        "asset_id": { "type": "string" },
+        "artifact_id": { "type": "string" },
+        "resource_type": { "type": "string" },
+        "save_status": { "type": "string" },
+        "elements": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+        "downloadable": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

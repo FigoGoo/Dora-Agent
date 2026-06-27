@@ -1,0 +1,39 @@
+{
+  "case_id": "business_rpc_list_asset_element_types_success",
+  "service": "PlatformDictionaryService",
+  "method": "ListAssetElementTypes",
+  "request": {
+    "auth_context": {
+      "actor_user_id": "usr_1001",
+      "login_identity_type": "PERSONAL",
+      "space_id": "sp_personal_1001"
+    },
+    "request_meta": {
+      "request_id": "req_element_types_001",
+      "trace_id": "trace_element_types_001",
+      "source": "agent_service"
+    },
+    "page_size": 10,
+    "schema_version": "2026-06-27"
+  },
+  "response": {
+    "schema_version": "2026-06-27",
+    "element_types": [
+      {
+        "element_type": "image.primary",
+        "display_name": "Primary Image",
+        "schema_version": "2026-06-27",
+        "status": "active"
+      },
+      {
+        "element_type": "text.caption",
+        "display_name": "Caption",
+        "schema_version": "2026-06-27",
+        "status": "active"
+      }
+    ]
+  },
+  "assertions": [
+    "Agent consumes element types through RPC rather than hardcoding them"
+  ]
+}

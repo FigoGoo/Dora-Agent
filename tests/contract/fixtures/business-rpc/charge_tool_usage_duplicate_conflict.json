@@ -1,0 +1,43 @@
+{
+  "case_id": "business_rpc_charge_tool_usage_duplicate_conflict",
+  "service": "CreditService",
+  "method": "ChargeToolUsageCredits",
+  "request": {
+    "auth_context": {
+      "actor_user_id": "usr_1001",
+      "login_identity_type": "PERSONAL",
+      "space_id": "sp_personal_1001"
+    },
+    "request_meta": {
+      "request_id": "req_charge_tool_dup_001",
+      "trace_id": "trace_charge_tool_dup_001",
+      "idempotency_key": "idem_charge_tool_conflict",
+      "source": "agent_service"
+    },
+    "project_id": "prj_active_1001",
+    "estimate_id": "est_generation_tool_001",
+    "freeze_id": "frz_generation_tool_001",
+    "session_id": "sess_1001",
+    "run_id": "run_1001",
+    "charge_items": [
+      {
+        "estimate_item_id": "est_item_model_001",
+        "tool_call_id": "tool_call_duplicate_001",
+        "tool_name": "image_generate",
+        "tool_type": "model_generation",
+        "billing_unit": "asset",
+        "actual_quantity": 1,
+        "execution_status": "success"
+      }
+    ]
+  },
+  "error": {
+    "code": "STATE_CONFLICT",
+    "message": "estimate item already settled by CommitGeneratedAssetAndCharge",
+    "retryable": false
+  },
+  "assertions": [
+    "model_generation estimate items cannot be settled again through ChargeToolUsageCredits",
+    "business service owns duplicate settlement protection"
+  ]
+}

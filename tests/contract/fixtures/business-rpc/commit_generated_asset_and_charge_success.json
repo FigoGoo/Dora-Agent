@@ -1,0 +1,90 @@
+{
+  "case_id": "business_rpc_commit_generated_asset_and_charge_success",
+  "service": "AssetCreditCommitService",
+  "method": "CommitGeneratedAssetAndCharge",
+  "request": {
+    "auth_context": {
+      "actor_user_id": "usr_1001",
+      "login_identity_type": "PERSONAL",
+      "space_id": "sp_personal_1001"
+    },
+    "request_meta": {
+      "request_id": "req_commit_asset_001",
+      "trace_id": "trace_commit_asset_001",
+      "idempotency_key": "idem_commit_asset_001",
+      "source": "agent_service"
+    },
+    "project_id": "prj_active_1001",
+    "session_id": "sess_1001",
+    "run_id": "run_1001",
+    "freeze_id": "frz_generation_tool_001",
+    "estimate_id": "est_generation_tool_001",
+    "artifacts": [
+      {
+        "artifact_id": "art_1001",
+        "resource_type": "image",
+        "element_type": "image.primary",
+        "artifact_summary": {
+          "width": "1024",
+          "height": "1024"
+        },
+        "content_uri_digest": "sha256:artifact-uri-digest",
+        "estimate_item_id": "est_item_model_001",
+        "tool_name": "image_generate",
+        "tool_type": "model_generation",
+        "charge_quantity": 1,
+        "metadata_summary": {
+          "model": "seed-image"
+        }
+      }
+    ],
+    "final_elements": [
+      {
+        "element_type": "image.primary",
+        "asset_id": "ast_generated_1001"
+      }
+    ],
+    "safety_evidence": {
+      "safety_evidence_id": "safe_1001",
+      "scene": "asset_commit",
+      "result": "pass",
+      "target_type": "artifact",
+      "target_ref_id": "art_1001",
+      "evaluated_object_digest": "sha256:artifact-content",
+      "policy_version": "safety-policy-2026-06",
+      "evidence_version": "1",
+      "evaluated_at": "2026-06-27T12:00:00Z",
+      "source_session_id": "sess_1001",
+      "source_run_id": "run_1001",
+      "source_artifact_id": "art_1001",
+      "trace_id": "trace_commit_asset_001"
+    }
+  },
+  "response": {
+    "asset_refs": [
+      {
+        "artifact_id": "art_1001",
+        "asset_id": "ast_generated_1001",
+        "resource_type": "image"
+      }
+    ],
+    "charged_points": 24,
+    "released_points": 12,
+    "commit_status": "committed",
+    "ledger_ref": "ledger_asset_commit_1001",
+    "charged_line_items": [
+      {
+        "estimate_item_id": "est_item_model_001",
+        "charged_points": 24,
+        "status": "charged",
+        "asset_id": "ast_generated_1001",
+        "artifact_id": "art_1001"
+      }
+    ]
+  },
+  "assertions": [
+    "request uses artifacts[] and final_elements[] from Thrift",
+    "estimate_id is optional but included for line-item settlement",
+    "asset save and credit charge are one business transaction"
+  ]
+}
