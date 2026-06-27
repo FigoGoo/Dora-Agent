@@ -29,6 +29,16 @@ owner：Go Eino 智能体微服务架构工程师
 - ContentSafetyConfigService
 - Audit 或 trace 相关能力
 
+## 里程碑实现拆分
+
+Agent 07 是完整 RPC client 设计事实源，不代表所有 RPC 都在 M2 实现。按根 `code-plan/README.md` 的全局里程碑拆分如下：
+
+| 全局阶段 | Agent 07 实现范围 | 说明 |
+| --- | --- | --- |
+| M2 身份项目能力 | `AccountSpaceService.ResolveCurrentSpaceContext`、`ProjectService.CheckProjectAccess` 的 `view` 与 `continue_creation` 用法 | 用于 session/run 创建、追加输入、interrupt accept/reject、cancel 前权限确认和 snapshot 只读判断；Agent 必须同时检查 RPC error 与正常响应中的 `allowed`、`creative_allowed`。 |
+| M3 配置能力 | `SkillCatalogService`、`ToolCapabilityService`、`ModelConfigService`、`PlatformDictionaryService.ListAssetElementTypes` | 用于 Published Skill 路由、Tool 策略、模型选择和元素类型字典；M2 不把这些 RPC 标记为完成。 |
+| M4 积分资产闭环 | `CreditService`、`AssetService`、`AssetCreditCommitService`、`ProjectService.CheckProjectAccess` 的 `attach_asset`、`commit_asset`、`create_work` 用法 | 用于预估、冻结、扣费、释放、上传槽、资产保存和创作结果提交；M2 不把这些 RPC 标记为完成。 |
+
 ## 方法级设计必须覆盖
 
 | RPC 方法 | 调用时机 | 请求参数 | 响应参数 | 超时 / 重试 / 幂等 | 错误映射 |

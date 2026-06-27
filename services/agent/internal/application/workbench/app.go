@@ -240,8 +240,8 @@ func (a *App) CreateSession(ctx context.Context, auth AuthContextDTO, req Create
 	if err != nil {
 		return CreateSessionResponse{}, mapBusinessError(err)
 	}
-	if !access.Allowed || !access.CreativeAllowed {
-		return CreateSessionResponse{}, apperror.New(apperror.CodeProjectArchived, "project is not writable")
+	if err := ensureCreativeProjectAccess(access); err != nil {
+		return CreateSessionResponse{}, err
 	}
 	title := strings.TrimSpace(req.InitialTitle)
 	if title == "" {
@@ -319,8 +319,8 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	if err != nil {
 		return CreateRunResponse{}, mapBusinessError(err)
 	}
-	if !access.Allowed || !access.CreativeAllowed {
-		return CreateRunResponse{}, apperror.New(apperror.CodeProjectArchived, "project is not writable")
+	if err := ensureCreativeProjectAccess(access); err != nil {
+		return CreateRunResponse{}, err
 	}
 	runID := securityID("run_")
 	run := &model.Run{
@@ -379,8 +379,12 @@ func (a *App) AppendUserInput(ctx context.Context, auth AuthContextDTO, runID st
 	if run.Status == state.RunStatusCompleted || run.Status == state.RunStatusFailed || run.Status == state.RunStatusCancelled {
 		return RunDTO{}, apperror.New(apperror.CodeStateConflict, "run is not resumable")
 	}
-	if _, err := a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID); err != nil {
+	access, err := a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
+	if err != nil {
 		return RunDTO{}, mapBusinessError(err)
+	}
+	if err := ensureCreativeProjectAccess(access); err != nil {
+		return RunDTO{}, err
 	}
 	sequence, err := a.repo.NextMessageSequence(ctx, session.ID)
 	if err != nil {
@@ -617,8 +621,14 @@ func (a *App) requireInterrupt(ctx context.Context, auth AuthContextDTO, runID s
 	if _, err := a.requireSession(ctx, auth, run.SessionID); err != nil {
 		return nil, nil, err
 	}
-	if _, err := a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, purpose, traceID); err != nil {
+	access, err := a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, purpose, traceID)
+	if err != nil {
 		return nil, nil, mapBusinessError(err)
+	}
+	if purpose == businessagent.ProjectAccessPurpose_CONTINUE_CREATION {
+		if err := ensureCreativeProjectAccess(access); err != nil {
+			return nil, nil, err
+		}
 	}
 	interrupt, err := a.repo.GetInterrupt(ctx, run.ID, interruptID)
 	if err != nil {
@@ -642,6 +652,27 @@ func (a *App) appendRunEvent(ctx context.Context, run *model.Run, eventType stri
 		Payload: jsonObject(payload), PayloadSchemaVersion: "2026-06-27", Visibility: "user", TraceID: traceID,
 	}
 	return a.repo.AppendEvent(ctx, event)
+}
+
+func ensureCreativeProjectAccess(access ProjectAccessDTO) error {
+	if !access.Allowed {
+		message := strings.TrimSpace(access.UserMessage)
+		if message == "" {
+			message = "project access denied"
+		}
+		return apperror.New(apperror.CodePermissionDenied, message)
+	}
+	if !access.CreativeAllowed {
+		message := strings.TrimSpace(access.UserMessage)
+		if message == "" {
+			message = "project is not writable"
+		}
+		if access.ProjectStatus == "archived" {
+			return apperror.New(apperror.CodeProjectArchived, message)
+		}
+		return apperror.New(apperror.CodeStateConflict, message)
+	}
+	return nil
 }
 
 func sessionDTO(session model.Session) SessionDTO {

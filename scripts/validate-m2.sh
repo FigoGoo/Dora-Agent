@@ -107,6 +107,7 @@ for needle in [
     "AppendUserInput",
     "AcceptInterrupt",
     "RejectInterrupt",
+    "ensureCreativeProjectAccess",
 ]:
     if needle not in agent_app:
         fail(f"agent session/run project gate missing: {needle}")
@@ -180,7 +181,10 @@ required = [
     "scripts/validate-m1.sh",
     "go test -count=1 ./...",
     "scripts/validate-m2.sh",
-    "未执行项：无",
+    "未执行项：无（M2 范围内）",
+    "AccountSpaceService.ResolveCurrentSpaceContext",
+    "ProjectService.CheckProjectAccess",
+    "Skill、Tool、模型、积分和资产 RPC 不属于 M2",
 ]
 for needle in required:
     if needle not in text:

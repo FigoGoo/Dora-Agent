@@ -116,6 +116,57 @@ func TestM2AgentInterruptRoutes(t *testing.T) {
 	}
 }
 
+func TestM2AgentDeniedAccessBodyBlocksResumeActions(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_agent_m2_denied")
+	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/20260627_agent_runtime/agent")
+	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
+
+	repo := repository.New(db.DB)
+	allowedRouter := NewRouter(RouterOptions{App: workbench.New(repo, workbench.StaticGateway{
+		Space:  workbench.SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
+		Access: workbench.ProjectAccessDTO{Allowed: true, ProjectStatus: "active", CreativeAllowed: true, AllowedActions: []string{"view", "continue_creation"}},
+	}, "local-dev")})
+
+	sessionResp := agentJSON(t, allowedRouter, http.MethodPost, "/api/agent/sessions", "idem-denied-session", map[string]any{"project_id": "prj_active_1001", "initial_title": "denied"})
+	sessionID := sessionResp["session_id"].(string)
+	runResp := agentJSON(t, allowedRouter, http.MethodPost, "/api/agent/runs", "idem-denied-run", map[string]any{
+		"session_id": sessionID,
+		"project_id": "prj_active_1001",
+		"user_input": map[string]any{"client_message_id": "cm_denied", "content_type": "text", "text": "hello"},
+	})
+	runID := runResp["run_id"].(string)
+
+	archivedRouter := NewRouter(RouterOptions{App: workbench.New(repo, workbench.StaticGateway{
+		Space:  workbench.SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
+		Access: workbench.ProjectAccessDTO{Allowed: true, ProjectStatus: "archived", CreativeAllowed: false, AllowedActions: []string{"view"}, UserMessage: "project archived"},
+	}, "local-dev")})
+	appendResp := agentRaw(t, archivedRouter, http.MethodPost, "/api/agent/runs/"+runID+"/messages", "idem-denied-append", map[string]any{
+		"user_input": map[string]any{"client_message_id": "cm_after_archive", "content_type": "text", "text": "after archive"},
+	})
+	if appendResp.Code != http.StatusConflict || appendResp.ErrorCode() != "PROJECT_ARCHIVED" {
+		t.Fatalf("expected PROJECT_ARCHIVED append block, status=%d body=%#v", appendResp.Code, appendResp.Body)
+	}
+
+	interruptRunID := createWaitingInterruptRun(t, allowedRouter, repo, "denied-accept", "intr_denied_accept_1001")
+	deniedRouter := NewRouter(RouterOptions{App: workbench.New(repo, workbench.StaticGateway{
+		Space:  workbench.SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
+		Access: workbench.ProjectAccessDTO{Allowed: false, ProjectStatus: "active", CreativeAllowed: true, UserMessage: "project permission denied"},
+	}, "local-dev")})
+	acceptResp := agentRaw(t, deniedRouter, http.MethodPost, "/api/agent/runs/"+interruptRunID+"/interrupts/intr_denied_accept_1001/accept", "idem-denied-accept", map[string]any{
+		"run_id": interruptRunID, "interrupt_id": "intr_denied_accept_1001", "action": "confirm", "confirmed_payload_digest": "sha256:payload",
+	})
+	if acceptResp.Code != http.StatusForbidden || acceptResp.ErrorCode() != "PERMISSION_DENIED" {
+		t.Fatalf("expected PERMISSION_DENIED interrupt block, status=%d body=%#v", acceptResp.Code, acceptResp.Body)
+	}
+	run, err := repo.GetRun(t.Context(), interruptRunID)
+	if err != nil {
+		t.Fatalf("get denied run: %v", err)
+	}
+	if run.Status != state.RunStatusWaitingConfirmation {
+		t.Fatalf("denied interrupt accept changed run status: %s", run.Status)
+	}
+}
+
 func TestM2AgentAuthRequired(t *testing.T) {
 	router := NewRouter(RouterOptions{App: workbench.New(repository.New(nil), workbench.StaticGateway{}, "local-dev")})
 	resp := httptest.NewRecorder()
@@ -129,17 +180,37 @@ func TestM2AgentAuthRequired(t *testing.T) {
 
 func agentJSON(t *testing.T, router http.Handler, method, path, idem string, body any) map[string]any {
 	t.Helper()
+	resp := agentRaw(t, router, method, path, idem, body)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("%s %s status=%d body=%#v", method, path, resp.Code, resp.Body)
+	}
+	return resp.Body
+}
+
+type agentRawResponse struct {
+	Code int
+	Body map[string]any
+}
+
+func (r agentRawResponse) ErrorCode() string {
+	if errBody, ok := r.Body["error"].(map[string]any); ok {
+		if value, ok := errBody["code"].(string); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+func agentRaw(t *testing.T, router http.Handler, method, path, idem string, body any) agentRawResponse {
+	t.Helper()
 	req := agentRequest(method, path, idem, body)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("%s %s status=%d body=%s", method, path, rec.Code, rec.Body.String())
-	}
 	var out map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
 	}
-	return out
+	return agentRawResponse{Code: rec.Code, Body: out}
 }
 
 func agentRequest(method, path, idem string, body any) *http.Request {
