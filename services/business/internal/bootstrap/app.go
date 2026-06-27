@@ -95,7 +95,7 @@ func New(cfg config.BusinessConfig) (*App, error) {
 		return nil, fmt.Errorf("bootstrap initial admin: %w", err)
 	}
 
-	kitexServer, err := NewKitexServer(cfg, rpc.NewHandler(accountApp, projectApp, modelApp, toolApp, skillApp, dictionaryApp, creditApp, assetApp, commitApp))
+	kitexServer, err := NewKitexServer(cfg, rpc.NewHandler(accountApp, projectApp, adminApp, modelApp, toolApp, skillApp, dictionaryApp, creditApp, assetApp, commitApp, workApp, notificationApp))
 	if err != nil {
 		return nil, err
 	}

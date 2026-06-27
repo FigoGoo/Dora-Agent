@@ -19,7 +19,33 @@ func TestNewKitexServerWithNoneRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new kitex server: %v", err)
 	}
-	if got := len(svr.GetServiceInfos()); got != 9 {
-		t.Fatalf("expected 9 services, got %d", got)
+	registered := svr.GetServiceInfos()
+	expected := []string{
+		"AccountSpaceService",
+		"EnterpriseService",
+		"AdminService",
+		"UserAdminService",
+		"ProjectService",
+		"ProjectAssetService",
+		"AssetService",
+		"CreditService",
+		"AssetCreditCommitService",
+		"SkillCatalogService",
+		"ToolCapabilityService",
+		"ModelConfigService",
+		"PlatformDictionaryService",
+		"WorkService",
+		"WorkShareService",
+		"FeaturedWorkAdminService",
+		"PublicContentService",
+		"NotificationService",
+	}
+	if got := len(registered); got != len(expected) {
+		t.Fatalf("expected %d services, got %d", len(expected), got)
+	}
+	for _, serviceName := range expected {
+		if _, ok := registered[serviceName]; !ok {
+			t.Fatalf("expected registered service %s", serviceName)
+		}
 	}
 }

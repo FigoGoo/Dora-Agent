@@ -13,6 +13,20 @@ import (
 var errInvalidMessageType = errors.New("invalid message type for service method handler")
 
 var serviceMethods = map[string]kitex.MethodInfo{
+	"CreateUploadIntent": kitex.NewMethodInfo(
+		createUploadIntentHandler,
+		newAssetServiceCreateUploadIntentArgs,
+		newAssetServiceCreateUploadIntentResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"ConfirmUploadedAsset": kitex.NewMethodInfo(
+		confirmUploadedAssetHandler,
+		newAssetServiceConfirmUploadedAssetArgs,
+		newAssetServiceConfirmUploadedAssetResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 	"BatchCheckAssetAccess": kitex.NewMethodInfo(
 		batchCheckAssetAccessHandler,
 		newAssetServiceBatchCheckAssetAccessArgs,
@@ -93,6 +107,42 @@ func newServiceInfo(hasStreaming bool, keepStreamingMethods bool, keepNonStreami
 	return svcInfo
 }
 
+func createUploadIntentHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*businessagent.AssetServiceCreateUploadIntentArgs)
+	realResult := result.(*businessagent.AssetServiceCreateUploadIntentResult)
+	success, err := handler.(businessagent.AssetService).CreateUploadIntent(ctx, realArg.Req)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newAssetServiceCreateUploadIntentArgs() interface{} {
+	return businessagent.NewAssetServiceCreateUploadIntentArgs()
+}
+
+func newAssetServiceCreateUploadIntentResult() interface{} {
+	return businessagent.NewAssetServiceCreateUploadIntentResult()
+}
+
+func confirmUploadedAssetHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*businessagent.AssetServiceConfirmUploadedAssetArgs)
+	realResult := result.(*businessagent.AssetServiceConfirmUploadedAssetResult)
+	success, err := handler.(businessagent.AssetService).ConfirmUploadedAsset(ctx, realArg.Req)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newAssetServiceConfirmUploadedAssetArgs() interface{} {
+	return businessagent.NewAssetServiceConfirmUploadedAssetArgs()
+}
+
+func newAssetServiceConfirmUploadedAssetResult() interface{} {
+	return businessagent.NewAssetServiceConfirmUploadedAssetResult()
+}
+
 func batchCheckAssetAccessHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
 	realArg := arg.(*businessagent.AssetServiceBatchCheckAssetAccessArgs)
 	realResult := result.(*businessagent.AssetServiceBatchCheckAssetAccessResult)
@@ -137,6 +187,26 @@ func newServiceClient(c client.Client) *kClient {
 	return &kClient{
 		c: c,
 	}
+}
+
+func (p *kClient) CreateUploadIntent(ctx context.Context, req *businessagent.CreateUploadIntentRequest) (r *businessagent.UploadIntentDTO, err error) {
+	var _args businessagent.AssetServiceCreateUploadIntentArgs
+	_args.Req = req
+	var _result businessagent.AssetServiceCreateUploadIntentResult
+	if err = p.c.Call(ctx, "CreateUploadIntent", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) ConfirmUploadedAsset(ctx context.Context, req *businessagent.ConfirmUploadedAssetRequest) (r *businessagent.AssetDetailDTO, err error) {
+	var _args businessagent.AssetServiceConfirmUploadedAssetArgs
+	_args.Req = req
+	var _result businessagent.AssetServiceConfirmUploadedAssetResult
+	if err = p.c.Call(ctx, "ConfirmUploadedAsset", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
 }
 
 func (p *kClient) BatchCheckAssetAccess(ctx context.Context, req *businessagent.BatchCheckAssetAccessRequest) (r *businessagent.BatchCheckAssetAccessResponse, err error) {

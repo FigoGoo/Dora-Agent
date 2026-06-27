@@ -6,19 +6,23 @@ import (
 
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/asset"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetcommit"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetdict"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/credit"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/modelconfig"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/notification"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/skillcatalog"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/toolpolicy"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/work"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
 )
 
 type Handler struct {
 	Account    *accountspace.App
+	Admin      *admin.App
 	Project    *project.App
 	Model      *modelconfig.App
 	Tool       *toolpolicy.App
@@ -27,6 +31,8 @@ type Handler struct {
 	Credit     *credit.App
 	Asset      *asset.App
 	Commit     *assetcommit.App
+	Work       *work.App
+	Notify     *notification.App
 }
 
 func NewUnimplementedHandler() *Handler {
@@ -39,6 +45,8 @@ func NewHandler(accountApp *accountspace.App, projectApp *project.App, optionalA
 		switch typed := app.(type) {
 		case *modelconfig.App:
 			h.Model = typed
+		case *admin.App:
+			h.Admin = typed
 		case *toolpolicy.App:
 			h.Tool = typed
 		case *skillcatalog.App:
@@ -51,6 +59,10 @@ func NewHandler(accountApp *accountspace.App, projectApp *project.App, optionalA
 			h.Asset = typed
 		case *assetcommit.App:
 			h.Commit = typed
+		case *work.App:
+			h.Work = typed
+		case *notification.App:
+			h.Notify = typed
 		}
 	}
 	return h

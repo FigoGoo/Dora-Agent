@@ -5463,6 +5463,4268 @@ var fieldIDToName_SaveSkillTestResultResponse = map[int16]string{
 	3: "saved",
 }
 
+type EnterpriseSummaryDTO struct {
+	EnterpriseId    string  `thrift:"enterprise_id,1,required" frugal:"1,required,string" json:"enterprise_id"`
+	SpaceId         string  `thrift:"space_id,2,required" frugal:"2,required,string" json:"space_id"`
+	Name            string  `thrift:"name,3,required" frugal:"3,required,string" json:"name"`
+	OwnerUserId     string  `thrift:"owner_user_id,4,required" frugal:"4,required,string" json:"owner_user_id"`
+	CurrentUserRole *string `thrift:"current_user_role,5,optional" frugal:"5,optional,string" json:"current_user_role,omitempty"`
+	Status          string  `thrift:"status,6,required" frugal:"6,required,string" json:"status"`
+	MemberCount     int64   `thrift:"member_count,7,required" frugal:"7,required,i64" json:"member_count"`
+}
+
+func NewEnterpriseSummaryDTO() *EnterpriseSummaryDTO {
+	return &EnterpriseSummaryDTO{}
+}
+
+func (p *EnterpriseSummaryDTO) InitDefault() {
+}
+
+func (p *EnterpriseSummaryDTO) GetEnterpriseId() (v string) {
+	return p.EnterpriseId
+}
+
+func (p *EnterpriseSummaryDTO) GetSpaceId() (v string) {
+	return p.SpaceId
+}
+
+func (p *EnterpriseSummaryDTO) GetName() (v string) {
+	return p.Name
+}
+
+func (p *EnterpriseSummaryDTO) GetOwnerUserId() (v string) {
+	return p.OwnerUserId
+}
+
+var EnterpriseSummaryDTO_CurrentUserRole_DEFAULT string
+
+func (p *EnterpriseSummaryDTO) GetCurrentUserRole() (v string) {
+	if !p.IsSetCurrentUserRole() {
+		return EnterpriseSummaryDTO_CurrentUserRole_DEFAULT
+	}
+	return *p.CurrentUserRole
+}
+
+func (p *EnterpriseSummaryDTO) GetStatus() (v string) {
+	return p.Status
+}
+
+func (p *EnterpriseSummaryDTO) GetMemberCount() (v int64) {
+	return p.MemberCount
+}
+func (p *EnterpriseSummaryDTO) SetEnterpriseId(val string) {
+	p.EnterpriseId = val
+}
+func (p *EnterpriseSummaryDTO) SetSpaceId(val string) {
+	p.SpaceId = val
+}
+func (p *EnterpriseSummaryDTO) SetName(val string) {
+	p.Name = val
+}
+func (p *EnterpriseSummaryDTO) SetOwnerUserId(val string) {
+	p.OwnerUserId = val
+}
+func (p *EnterpriseSummaryDTO) SetCurrentUserRole(val *string) {
+	p.CurrentUserRole = val
+}
+func (p *EnterpriseSummaryDTO) SetStatus(val string) {
+	p.Status = val
+}
+func (p *EnterpriseSummaryDTO) SetMemberCount(val int64) {
+	p.MemberCount = val
+}
+
+func (p *EnterpriseSummaryDTO) IsSetCurrentUserRole() bool {
+	return p.CurrentUserRole != nil
+}
+
+func (p *EnterpriseSummaryDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("EnterpriseSummaryDTO(%+v)", *p)
+}
+
+var fieldIDToName_EnterpriseSummaryDTO = map[int16]string{
+	1: "enterprise_id",
+	2: "space_id",
+	3: "name",
+	4: "owner_user_id",
+	5: "current_user_role",
+	6: "status",
+	7: "member_count",
+}
+
+type PreviewTransferOwnerRequest struct {
+	AuthContext    *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta    *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	TargetMemberId string       `thrift:"target_member_id,3,required" frugal:"3,required,string" json:"target_member_id"`
+	Reason         string       `thrift:"reason,4,required" frugal:"4,required,string" json:"reason"`
+}
+
+func NewPreviewTransferOwnerRequest() *PreviewTransferOwnerRequest {
+	return &PreviewTransferOwnerRequest{}
+}
+
+func (p *PreviewTransferOwnerRequest) InitDefault() {
+}
+
+var PreviewTransferOwnerRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *PreviewTransferOwnerRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return PreviewTransferOwnerRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var PreviewTransferOwnerRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *PreviewTransferOwnerRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return PreviewTransferOwnerRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *PreviewTransferOwnerRequest) GetTargetMemberId() (v string) {
+	return p.TargetMemberId
+}
+
+func (p *PreviewTransferOwnerRequest) GetReason() (v string) {
+	return p.Reason
+}
+func (p *PreviewTransferOwnerRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *PreviewTransferOwnerRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *PreviewTransferOwnerRequest) SetTargetMemberId(val string) {
+	p.TargetMemberId = val
+}
+func (p *PreviewTransferOwnerRequest) SetReason(val string) {
+	p.Reason = val
+}
+
+func (p *PreviewTransferOwnerRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *PreviewTransferOwnerRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *PreviewTransferOwnerRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PreviewTransferOwnerRequest(%+v)", *p)
+}
+
+var fieldIDToName_PreviewTransferOwnerRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "target_member_id",
+	4: "reason",
+}
+
+type TransferOwnerPreviewDTO struct {
+	PreviewToken string   `thrift:"preview_token,1,required" frugal:"1,required,string" json:"preview_token"`
+	ImpactItems  []string `thrift:"impact_items,2,required" frugal:"2,required,list<string>" json:"impact_items"`
+	ExpiresAt    string   `thrift:"expires_at,3,required" frugal:"3,required,string" json:"expires_at"`
+}
+
+func NewTransferOwnerPreviewDTO() *TransferOwnerPreviewDTO {
+	return &TransferOwnerPreviewDTO{}
+}
+
+func (p *TransferOwnerPreviewDTO) InitDefault() {
+}
+
+func (p *TransferOwnerPreviewDTO) GetPreviewToken() (v string) {
+	return p.PreviewToken
+}
+
+func (p *TransferOwnerPreviewDTO) GetImpactItems() (v []string) {
+	return p.ImpactItems
+}
+
+func (p *TransferOwnerPreviewDTO) GetExpiresAt() (v string) {
+	return p.ExpiresAt
+}
+func (p *TransferOwnerPreviewDTO) SetPreviewToken(val string) {
+	p.PreviewToken = val
+}
+func (p *TransferOwnerPreviewDTO) SetImpactItems(val []string) {
+	p.ImpactItems = val
+}
+func (p *TransferOwnerPreviewDTO) SetExpiresAt(val string) {
+	p.ExpiresAt = val
+}
+
+func (p *TransferOwnerPreviewDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("TransferOwnerPreviewDTO(%+v)", *p)
+}
+
+var fieldIDToName_TransferOwnerPreviewDTO = map[int16]string{
+	1: "preview_token",
+	2: "impact_items",
+	3: "expires_at",
+}
+
+type ConfirmTransferOwnerRequest struct {
+	AuthContext    *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta    *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	TargetMemberId string       `thrift:"target_member_id,3,required" frugal:"3,required,string" json:"target_member_id"`
+	Reason         string       `thrift:"reason,4,required" frugal:"4,required,string" json:"reason"`
+	PreviewToken   string       `thrift:"preview_token,5,required" frugal:"5,required,string" json:"preview_token"`
+}
+
+func NewConfirmTransferOwnerRequest() *ConfirmTransferOwnerRequest {
+	return &ConfirmTransferOwnerRequest{}
+}
+
+func (p *ConfirmTransferOwnerRequest) InitDefault() {
+}
+
+var ConfirmTransferOwnerRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *ConfirmTransferOwnerRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return ConfirmTransferOwnerRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var ConfirmTransferOwnerRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *ConfirmTransferOwnerRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return ConfirmTransferOwnerRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *ConfirmTransferOwnerRequest) GetTargetMemberId() (v string) {
+	return p.TargetMemberId
+}
+
+func (p *ConfirmTransferOwnerRequest) GetReason() (v string) {
+	return p.Reason
+}
+
+func (p *ConfirmTransferOwnerRequest) GetPreviewToken() (v string) {
+	return p.PreviewToken
+}
+func (p *ConfirmTransferOwnerRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *ConfirmTransferOwnerRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *ConfirmTransferOwnerRequest) SetTargetMemberId(val string) {
+	p.TargetMemberId = val
+}
+func (p *ConfirmTransferOwnerRequest) SetReason(val string) {
+	p.Reason = val
+}
+func (p *ConfirmTransferOwnerRequest) SetPreviewToken(val string) {
+	p.PreviewToken = val
+}
+
+func (p *ConfirmTransferOwnerRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *ConfirmTransferOwnerRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *ConfirmTransferOwnerRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ConfirmTransferOwnerRequest(%+v)", *p)
+}
+
+var fieldIDToName_ConfirmTransferOwnerRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "target_member_id",
+	4: "reason",
+	5: "preview_token",
+}
+
+type PlatformAdminDTO struct {
+	AdminId            string `thrift:"admin_id,1,required" frugal:"1,required,string" json:"admin_id"`
+	Account            string `thrift:"account,2,required" frugal:"2,required,string" json:"account"`
+	Status             string `thrift:"status,3,required" frugal:"3,required,string" json:"status"`
+	MustRotatePassword bool   `thrift:"must_rotate_password,4,required" frugal:"4,required,bool" json:"must_rotate_password"`
+	CreatedAt          string `thrift:"created_at,5,required" frugal:"5,required,string" json:"created_at"`
+}
+
+func NewPlatformAdminDTO() *PlatformAdminDTO {
+	return &PlatformAdminDTO{}
+}
+
+func (p *PlatformAdminDTO) InitDefault() {
+}
+
+func (p *PlatformAdminDTO) GetAdminId() (v string) {
+	return p.AdminId
+}
+
+func (p *PlatformAdminDTO) GetAccount() (v string) {
+	return p.Account
+}
+
+func (p *PlatformAdminDTO) GetStatus() (v string) {
+	return p.Status
+}
+
+func (p *PlatformAdminDTO) GetMustRotatePassword() (v bool) {
+	return p.MustRotatePassword
+}
+
+func (p *PlatformAdminDTO) GetCreatedAt() (v string) {
+	return p.CreatedAt
+}
+func (p *PlatformAdminDTO) SetAdminId(val string) {
+	p.AdminId = val
+}
+func (p *PlatformAdminDTO) SetAccount(val string) {
+	p.Account = val
+}
+func (p *PlatformAdminDTO) SetStatus(val string) {
+	p.Status = val
+}
+func (p *PlatformAdminDTO) SetMustRotatePassword(val bool) {
+	p.MustRotatePassword = val
+}
+func (p *PlatformAdminDTO) SetCreatedAt(val string) {
+	p.CreatedAt = val
+}
+
+func (p *PlatformAdminDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PlatformAdminDTO(%+v)", *p)
+}
+
+var fieldIDToName_PlatformAdminDTO = map[int16]string{
+	1: "admin_id",
+	2: "account",
+	3: "status",
+	4: "must_rotate_password",
+	5: "created_at",
+}
+
+type CreateAdminRequest struct {
+	AuthContext     *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta     *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	Account         string       `thrift:"account,3,required" frugal:"3,required,string" json:"account"`
+	InitialPassword string       `thrift:"initial_password,4,required" frugal:"4,required,string" json:"initial_password"`
+	Reason          string       `thrift:"reason,5,required" frugal:"5,required,string" json:"reason"`
+}
+
+func NewCreateAdminRequest() *CreateAdminRequest {
+	return &CreateAdminRequest{}
+}
+
+func (p *CreateAdminRequest) InitDefault() {
+}
+
+var CreateAdminRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *CreateAdminRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return CreateAdminRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var CreateAdminRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *CreateAdminRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return CreateAdminRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *CreateAdminRequest) GetAccount() (v string) {
+	return p.Account
+}
+
+func (p *CreateAdminRequest) GetInitialPassword() (v string) {
+	return p.InitialPassword
+}
+
+func (p *CreateAdminRequest) GetReason() (v string) {
+	return p.Reason
+}
+func (p *CreateAdminRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *CreateAdminRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *CreateAdminRequest) SetAccount(val string) {
+	p.Account = val
+}
+func (p *CreateAdminRequest) SetInitialPassword(val string) {
+	p.InitialPassword = val
+}
+func (p *CreateAdminRequest) SetReason(val string) {
+	p.Reason = val
+}
+
+func (p *CreateAdminRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *CreateAdminRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *CreateAdminRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CreateAdminRequest(%+v)", *p)
+}
+
+var fieldIDToName_CreateAdminRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "account",
+	4: "initial_password",
+	5: "reason",
+}
+
+type DisableAdminRequest struct {
+	AuthContext *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	AdminId     string       `thrift:"admin_id,3,required" frugal:"3,required,string" json:"admin_id"`
+	Reason      string       `thrift:"reason,4,required" frugal:"4,required,string" json:"reason"`
+}
+
+func NewDisableAdminRequest() *DisableAdminRequest {
+	return &DisableAdminRequest{}
+}
+
+func (p *DisableAdminRequest) InitDefault() {
+}
+
+var DisableAdminRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *DisableAdminRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return DisableAdminRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var DisableAdminRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *DisableAdminRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return DisableAdminRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *DisableAdminRequest) GetAdminId() (v string) {
+	return p.AdminId
+}
+
+func (p *DisableAdminRequest) GetReason() (v string) {
+	return p.Reason
+}
+func (p *DisableAdminRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *DisableAdminRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *DisableAdminRequest) SetAdminId(val string) {
+	p.AdminId = val
+}
+func (p *DisableAdminRequest) SetReason(val string) {
+	p.Reason = val
+}
+
+func (p *DisableAdminRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *DisableAdminRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *DisableAdminRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("DisableAdminRequest(%+v)", *p)
+}
+
+var fieldIDToName_DisableAdminRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "admin_id",
+	4: "reason",
+}
+
+type PreviewSetUserStatusRequest struct {
+	AuthContext  *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta  *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	TargetUserId string       `thrift:"target_user_id,3,required" frugal:"3,required,string" json:"target_user_id"`
+	TargetStatus string       `thrift:"target_status,4,required" frugal:"4,required,string" json:"target_status"`
+	Reason       string       `thrift:"reason,5,required" frugal:"5,required,string" json:"reason"`
+}
+
+func NewPreviewSetUserStatusRequest() *PreviewSetUserStatusRequest {
+	return &PreviewSetUserStatusRequest{}
+}
+
+func (p *PreviewSetUserStatusRequest) InitDefault() {
+}
+
+var PreviewSetUserStatusRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *PreviewSetUserStatusRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return PreviewSetUserStatusRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var PreviewSetUserStatusRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *PreviewSetUserStatusRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return PreviewSetUserStatusRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *PreviewSetUserStatusRequest) GetTargetUserId() (v string) {
+	return p.TargetUserId
+}
+
+func (p *PreviewSetUserStatusRequest) GetTargetStatus() (v string) {
+	return p.TargetStatus
+}
+
+func (p *PreviewSetUserStatusRequest) GetReason() (v string) {
+	return p.Reason
+}
+func (p *PreviewSetUserStatusRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *PreviewSetUserStatusRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *PreviewSetUserStatusRequest) SetTargetUserId(val string) {
+	p.TargetUserId = val
+}
+func (p *PreviewSetUserStatusRequest) SetTargetStatus(val string) {
+	p.TargetStatus = val
+}
+func (p *PreviewSetUserStatusRequest) SetReason(val string) {
+	p.Reason = val
+}
+
+func (p *PreviewSetUserStatusRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *PreviewSetUserStatusRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *PreviewSetUserStatusRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PreviewSetUserStatusRequest(%+v)", *p)
+}
+
+var fieldIDToName_PreviewSetUserStatusRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "target_user_id",
+	4: "target_status",
+	5: "reason",
+}
+
+type UserStatusPreviewDTO struct {
+	PreviewToken             string   `thrift:"preview_token,1,required" frugal:"1,required,string" json:"preview_token"`
+	CurrentStatus            string   `thrift:"current_status,2,required" frugal:"2,required,string" json:"current_status"`
+	TargetStatus             string   `thrift:"target_status,3,required" frugal:"3,required,string" json:"target_status"`
+	ImpactSummary            []string `thrift:"impact_summary,4,required" frugal:"4,required,list<string>" json:"impact_summary"`
+	PublicContentRetained    bool     `thrift:"public_content_retained,5,required" frugal:"5,required,bool" json:"public_content_retained"`
+	PrivateContentNotExposed bool     `thrift:"private_content_not_exposed,6,required" frugal:"6,required,bool" json:"private_content_not_exposed"`
+	ExpiresAt                string   `thrift:"expires_at,7,required" frugal:"7,required,string" json:"expires_at"`
+}
+
+func NewUserStatusPreviewDTO() *UserStatusPreviewDTO {
+	return &UserStatusPreviewDTO{}
+}
+
+func (p *UserStatusPreviewDTO) InitDefault() {
+}
+
+func (p *UserStatusPreviewDTO) GetPreviewToken() (v string) {
+	return p.PreviewToken
+}
+
+func (p *UserStatusPreviewDTO) GetCurrentStatus() (v string) {
+	return p.CurrentStatus
+}
+
+func (p *UserStatusPreviewDTO) GetTargetStatus() (v string) {
+	return p.TargetStatus
+}
+
+func (p *UserStatusPreviewDTO) GetImpactSummary() (v []string) {
+	return p.ImpactSummary
+}
+
+func (p *UserStatusPreviewDTO) GetPublicContentRetained() (v bool) {
+	return p.PublicContentRetained
+}
+
+func (p *UserStatusPreviewDTO) GetPrivateContentNotExposed() (v bool) {
+	return p.PrivateContentNotExposed
+}
+
+func (p *UserStatusPreviewDTO) GetExpiresAt() (v string) {
+	return p.ExpiresAt
+}
+func (p *UserStatusPreviewDTO) SetPreviewToken(val string) {
+	p.PreviewToken = val
+}
+func (p *UserStatusPreviewDTO) SetCurrentStatus(val string) {
+	p.CurrentStatus = val
+}
+func (p *UserStatusPreviewDTO) SetTargetStatus(val string) {
+	p.TargetStatus = val
+}
+func (p *UserStatusPreviewDTO) SetImpactSummary(val []string) {
+	p.ImpactSummary = val
+}
+func (p *UserStatusPreviewDTO) SetPublicContentRetained(val bool) {
+	p.PublicContentRetained = val
+}
+func (p *UserStatusPreviewDTO) SetPrivateContentNotExposed(val bool) {
+	p.PrivateContentNotExposed = val
+}
+func (p *UserStatusPreviewDTO) SetExpiresAt(val string) {
+	p.ExpiresAt = val
+}
+
+func (p *UserStatusPreviewDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UserStatusPreviewDTO(%+v)", *p)
+}
+
+var fieldIDToName_UserStatusPreviewDTO = map[int16]string{
+	1: "preview_token",
+	2: "current_status",
+	3: "target_status",
+	4: "impact_summary",
+	5: "public_content_retained",
+	6: "private_content_not_exposed",
+	7: "expires_at",
+}
+
+type ConfirmSetUserStatusRequest struct {
+	AuthContext  *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta  *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	TargetUserId string       `thrift:"target_user_id,3,required" frugal:"3,required,string" json:"target_user_id"`
+	TargetStatus string       `thrift:"target_status,4,required" frugal:"4,required,string" json:"target_status"`
+	Reason       string       `thrift:"reason,5,required" frugal:"5,required,string" json:"reason"`
+	PreviewToken string       `thrift:"preview_token,6,required" frugal:"6,required,string" json:"preview_token"`
+}
+
+func NewConfirmSetUserStatusRequest() *ConfirmSetUserStatusRequest {
+	return &ConfirmSetUserStatusRequest{}
+}
+
+func (p *ConfirmSetUserStatusRequest) InitDefault() {
+}
+
+var ConfirmSetUserStatusRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *ConfirmSetUserStatusRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return ConfirmSetUserStatusRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var ConfirmSetUserStatusRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *ConfirmSetUserStatusRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return ConfirmSetUserStatusRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *ConfirmSetUserStatusRequest) GetTargetUserId() (v string) {
+	return p.TargetUserId
+}
+
+func (p *ConfirmSetUserStatusRequest) GetTargetStatus() (v string) {
+	return p.TargetStatus
+}
+
+func (p *ConfirmSetUserStatusRequest) GetReason() (v string) {
+	return p.Reason
+}
+
+func (p *ConfirmSetUserStatusRequest) GetPreviewToken() (v string) {
+	return p.PreviewToken
+}
+func (p *ConfirmSetUserStatusRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *ConfirmSetUserStatusRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *ConfirmSetUserStatusRequest) SetTargetUserId(val string) {
+	p.TargetUserId = val
+}
+func (p *ConfirmSetUserStatusRequest) SetTargetStatus(val string) {
+	p.TargetStatus = val
+}
+func (p *ConfirmSetUserStatusRequest) SetReason(val string) {
+	p.Reason = val
+}
+func (p *ConfirmSetUserStatusRequest) SetPreviewToken(val string) {
+	p.PreviewToken = val
+}
+
+func (p *ConfirmSetUserStatusRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *ConfirmSetUserStatusRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *ConfirmSetUserStatusRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ConfirmSetUserStatusRequest(%+v)", *p)
+}
+
+var fieldIDToName_ConfirmSetUserStatusRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "target_user_id",
+	4: "target_status",
+	5: "reason",
+	6: "preview_token",
+}
+
+type AdminUserSummaryDTO struct {
+	UserId          string  `thrift:"user_id,1,required" frugal:"1,required,string" json:"user_id"`
+	Status          string  `thrift:"status,2,required" frugal:"2,required,string" json:"status"`
+	PublicNickname  string  `thrift:"public_nickname,3,required" frugal:"3,required,string" json:"public_nickname"`
+	EmailMasked     *string `thrift:"email_masked,4,optional" frugal:"4,optional,string" json:"email_masked,omitempty"`
+	PhoneMasked     *string `thrift:"phone_masked,5,optional" frugal:"5,optional,string" json:"phone_masked,omitempty"`
+	PersonalSpaceId *string `thrift:"personal_space_id,6,optional" frugal:"6,optional,string" json:"personal_space_id,omitempty"`
+	RegisteredAt    string  `thrift:"registered_at,7,required" frugal:"7,required,string" json:"registered_at"`
+	LastLoginAt     *string `thrift:"last_login_at,8,optional" frugal:"8,optional,string" json:"last_login_at,omitempty"`
+}
+
+func NewAdminUserSummaryDTO() *AdminUserSummaryDTO {
+	return &AdminUserSummaryDTO{}
+}
+
+func (p *AdminUserSummaryDTO) InitDefault() {
+}
+
+func (p *AdminUserSummaryDTO) GetUserId() (v string) {
+	return p.UserId
+}
+
+func (p *AdminUserSummaryDTO) GetStatus() (v string) {
+	return p.Status
+}
+
+func (p *AdminUserSummaryDTO) GetPublicNickname() (v string) {
+	return p.PublicNickname
+}
+
+var AdminUserSummaryDTO_EmailMasked_DEFAULT string
+
+func (p *AdminUserSummaryDTO) GetEmailMasked() (v string) {
+	if !p.IsSetEmailMasked() {
+		return AdminUserSummaryDTO_EmailMasked_DEFAULT
+	}
+	return *p.EmailMasked
+}
+
+var AdminUserSummaryDTO_PhoneMasked_DEFAULT string
+
+func (p *AdminUserSummaryDTO) GetPhoneMasked() (v string) {
+	if !p.IsSetPhoneMasked() {
+		return AdminUserSummaryDTO_PhoneMasked_DEFAULT
+	}
+	return *p.PhoneMasked
+}
+
+var AdminUserSummaryDTO_PersonalSpaceId_DEFAULT string
+
+func (p *AdminUserSummaryDTO) GetPersonalSpaceId() (v string) {
+	if !p.IsSetPersonalSpaceId() {
+		return AdminUserSummaryDTO_PersonalSpaceId_DEFAULT
+	}
+	return *p.PersonalSpaceId
+}
+
+func (p *AdminUserSummaryDTO) GetRegisteredAt() (v string) {
+	return p.RegisteredAt
+}
+
+var AdminUserSummaryDTO_LastLoginAt_DEFAULT string
+
+func (p *AdminUserSummaryDTO) GetLastLoginAt() (v string) {
+	if !p.IsSetLastLoginAt() {
+		return AdminUserSummaryDTO_LastLoginAt_DEFAULT
+	}
+	return *p.LastLoginAt
+}
+func (p *AdminUserSummaryDTO) SetUserId(val string) {
+	p.UserId = val
+}
+func (p *AdminUserSummaryDTO) SetStatus(val string) {
+	p.Status = val
+}
+func (p *AdminUserSummaryDTO) SetPublicNickname(val string) {
+	p.PublicNickname = val
+}
+func (p *AdminUserSummaryDTO) SetEmailMasked(val *string) {
+	p.EmailMasked = val
+}
+func (p *AdminUserSummaryDTO) SetPhoneMasked(val *string) {
+	p.PhoneMasked = val
+}
+func (p *AdminUserSummaryDTO) SetPersonalSpaceId(val *string) {
+	p.PersonalSpaceId = val
+}
+func (p *AdminUserSummaryDTO) SetRegisteredAt(val string) {
+	p.RegisteredAt = val
+}
+func (p *AdminUserSummaryDTO) SetLastLoginAt(val *string) {
+	p.LastLoginAt = val
+}
+
+func (p *AdminUserSummaryDTO) IsSetEmailMasked() bool {
+	return p.EmailMasked != nil
+}
+
+func (p *AdminUserSummaryDTO) IsSetPhoneMasked() bool {
+	return p.PhoneMasked != nil
+}
+
+func (p *AdminUserSummaryDTO) IsSetPersonalSpaceId() bool {
+	return p.PersonalSpaceId != nil
+}
+
+func (p *AdminUserSummaryDTO) IsSetLastLoginAt() bool {
+	return p.LastLoginAt != nil
+}
+
+func (p *AdminUserSummaryDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AdminUserSummaryDTO(%+v)", *p)
+}
+
+var fieldIDToName_AdminUserSummaryDTO = map[int16]string{
+	1: "user_id",
+	2: "status",
+	3: "public_nickname",
+	4: "email_masked",
+	5: "phone_masked",
+	6: "personal_space_id",
+	7: "registered_at",
+	8: "last_login_at",
+}
+
+type CreateProjectRequest struct {
+	AuthContext         *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta         *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	Title               string       `thrift:"title,3,required" frugal:"3,required,string" json:"title"`
+	InitialPromptDigest *string      `thrift:"initial_prompt_digest,4,optional" frugal:"4,optional,string" json:"initial_prompt_digest,omitempty"`
+	Source              *string      `thrift:"source,5,optional" frugal:"5,optional,string" json:"source,omitempty"`
+	SpaceId             *string      `thrift:"space_id,6,optional" frugal:"6,optional,string" json:"space_id,omitempty"`
+}
+
+func NewCreateProjectRequest() *CreateProjectRequest {
+	return &CreateProjectRequest{}
+}
+
+func (p *CreateProjectRequest) InitDefault() {
+}
+
+var CreateProjectRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *CreateProjectRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return CreateProjectRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var CreateProjectRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *CreateProjectRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return CreateProjectRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *CreateProjectRequest) GetTitle() (v string) {
+	return p.Title
+}
+
+var CreateProjectRequest_InitialPromptDigest_DEFAULT string
+
+func (p *CreateProjectRequest) GetInitialPromptDigest() (v string) {
+	if !p.IsSetInitialPromptDigest() {
+		return CreateProjectRequest_InitialPromptDigest_DEFAULT
+	}
+	return *p.InitialPromptDigest
+}
+
+var CreateProjectRequest_Source_DEFAULT string
+
+func (p *CreateProjectRequest) GetSource() (v string) {
+	if !p.IsSetSource() {
+		return CreateProjectRequest_Source_DEFAULT
+	}
+	return *p.Source
+}
+
+var CreateProjectRequest_SpaceId_DEFAULT string
+
+func (p *CreateProjectRequest) GetSpaceId() (v string) {
+	if !p.IsSetSpaceId() {
+		return CreateProjectRequest_SpaceId_DEFAULT
+	}
+	return *p.SpaceId
+}
+func (p *CreateProjectRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *CreateProjectRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *CreateProjectRequest) SetTitle(val string) {
+	p.Title = val
+}
+func (p *CreateProjectRequest) SetInitialPromptDigest(val *string) {
+	p.InitialPromptDigest = val
+}
+func (p *CreateProjectRequest) SetSource(val *string) {
+	p.Source = val
+}
+func (p *CreateProjectRequest) SetSpaceId(val *string) {
+	p.SpaceId = val
+}
+
+func (p *CreateProjectRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *CreateProjectRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *CreateProjectRequest) IsSetInitialPromptDigest() bool {
+	return p.InitialPromptDigest != nil
+}
+
+func (p *CreateProjectRequest) IsSetSource() bool {
+	return p.Source != nil
+}
+
+func (p *CreateProjectRequest) IsSetSpaceId() bool {
+	return p.SpaceId != nil
+}
+
+func (p *CreateProjectRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CreateProjectRequest(%+v)", *p)
+}
+
+var fieldIDToName_CreateProjectRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "title",
+	4: "initial_prompt_digest",
+	5: "source",
+	6: "space_id",
+}
+
+type ProjectDetailDTO struct {
+	ProjectId            string   `thrift:"project_id,1,required" frugal:"1,required,string" json:"project_id"`
+	Title                string   `thrift:"title,2,required" frugal:"2,required,string" json:"title"`
+	Description          *string  `thrift:"description,3,optional" frugal:"3,optional,string" json:"description,omitempty"`
+	CoverAssetId         *string  `thrift:"cover_asset_id,4,optional" frugal:"4,optional,string" json:"cover_asset_id,omitempty"`
+	Status               string   `thrift:"status,5,required" frugal:"5,required,string" json:"status"`
+	CreativeAllowed      bool     `thrift:"creative_allowed,6,required" frugal:"6,required,bool" json:"creative_allowed"`
+	AllowedActions       []string `thrift:"allowed_actions,7,required" frugal:"7,required,list<string>" json:"allowed_actions"`
+	AgentSessionQueryRef *string  `thrift:"agent_session_query_ref,8,optional" frugal:"8,optional,string" json:"agent_session_query_ref,omitempty"`
+	UpdatedAt            string   `thrift:"updated_at,9,required" frugal:"9,required,string" json:"updated_at"`
+}
+
+func NewProjectDetailDTO() *ProjectDetailDTO {
+	return &ProjectDetailDTO{}
+}
+
+func (p *ProjectDetailDTO) InitDefault() {
+}
+
+func (p *ProjectDetailDTO) GetProjectId() (v string) {
+	return p.ProjectId
+}
+
+func (p *ProjectDetailDTO) GetTitle() (v string) {
+	return p.Title
+}
+
+var ProjectDetailDTO_Description_DEFAULT string
+
+func (p *ProjectDetailDTO) GetDescription() (v string) {
+	if !p.IsSetDescription() {
+		return ProjectDetailDTO_Description_DEFAULT
+	}
+	return *p.Description
+}
+
+var ProjectDetailDTO_CoverAssetId_DEFAULT string
+
+func (p *ProjectDetailDTO) GetCoverAssetId() (v string) {
+	if !p.IsSetCoverAssetId() {
+		return ProjectDetailDTO_CoverAssetId_DEFAULT
+	}
+	return *p.CoverAssetId
+}
+
+func (p *ProjectDetailDTO) GetStatus() (v string) {
+	return p.Status
+}
+
+func (p *ProjectDetailDTO) GetCreativeAllowed() (v bool) {
+	return p.CreativeAllowed
+}
+
+func (p *ProjectDetailDTO) GetAllowedActions() (v []string) {
+	return p.AllowedActions
+}
+
+var ProjectDetailDTO_AgentSessionQueryRef_DEFAULT string
+
+func (p *ProjectDetailDTO) GetAgentSessionQueryRef() (v string) {
+	if !p.IsSetAgentSessionQueryRef() {
+		return ProjectDetailDTO_AgentSessionQueryRef_DEFAULT
+	}
+	return *p.AgentSessionQueryRef
+}
+
+func (p *ProjectDetailDTO) GetUpdatedAt() (v string) {
+	return p.UpdatedAt
+}
+func (p *ProjectDetailDTO) SetProjectId(val string) {
+	p.ProjectId = val
+}
+func (p *ProjectDetailDTO) SetTitle(val string) {
+	p.Title = val
+}
+func (p *ProjectDetailDTO) SetDescription(val *string) {
+	p.Description = val
+}
+func (p *ProjectDetailDTO) SetCoverAssetId(val *string) {
+	p.CoverAssetId = val
+}
+func (p *ProjectDetailDTO) SetStatus(val string) {
+	p.Status = val
+}
+func (p *ProjectDetailDTO) SetCreativeAllowed(val bool) {
+	p.CreativeAllowed = val
+}
+func (p *ProjectDetailDTO) SetAllowedActions(val []string) {
+	p.AllowedActions = val
+}
+func (p *ProjectDetailDTO) SetAgentSessionQueryRef(val *string) {
+	p.AgentSessionQueryRef = val
+}
+func (p *ProjectDetailDTO) SetUpdatedAt(val string) {
+	p.UpdatedAt = val
+}
+
+func (p *ProjectDetailDTO) IsSetDescription() bool {
+	return p.Description != nil
+}
+
+func (p *ProjectDetailDTO) IsSetCoverAssetId() bool {
+	return p.CoverAssetId != nil
+}
+
+func (p *ProjectDetailDTO) IsSetAgentSessionQueryRef() bool {
+	return p.AgentSessionQueryRef != nil
+}
+
+func (p *ProjectDetailDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ProjectDetailDTO(%+v)", *p)
+}
+
+var fieldIDToName_ProjectDetailDTO = map[int16]string{
+	1: "project_id",
+	2: "title",
+	3: "description",
+	4: "cover_asset_id",
+	5: "status",
+	6: "creative_allowed",
+	7: "allowed_actions",
+	8: "agent_session_query_ref",
+	9: "updated_at",
+}
+
+type UpdateProjectTitleRequest struct {
+	AuthContext   *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta   *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	ProjectId     string       `thrift:"project_id,3,required" frugal:"3,required,string" json:"project_id"`
+	Title         string       `thrift:"title,4,required" frugal:"4,required,string" json:"title"`
+	BaseUpdatedAt *string      `thrift:"base_updated_at,5,optional" frugal:"5,optional,string" json:"base_updated_at,omitempty"`
+}
+
+func NewUpdateProjectTitleRequest() *UpdateProjectTitleRequest {
+	return &UpdateProjectTitleRequest{}
+}
+
+func (p *UpdateProjectTitleRequest) InitDefault() {
+}
+
+var UpdateProjectTitleRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *UpdateProjectTitleRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return UpdateProjectTitleRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var UpdateProjectTitleRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *UpdateProjectTitleRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return UpdateProjectTitleRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *UpdateProjectTitleRequest) GetProjectId() (v string) {
+	return p.ProjectId
+}
+
+func (p *UpdateProjectTitleRequest) GetTitle() (v string) {
+	return p.Title
+}
+
+var UpdateProjectTitleRequest_BaseUpdatedAt_DEFAULT string
+
+func (p *UpdateProjectTitleRequest) GetBaseUpdatedAt() (v string) {
+	if !p.IsSetBaseUpdatedAt() {
+		return UpdateProjectTitleRequest_BaseUpdatedAt_DEFAULT
+	}
+	return *p.BaseUpdatedAt
+}
+func (p *UpdateProjectTitleRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *UpdateProjectTitleRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *UpdateProjectTitleRequest) SetProjectId(val string) {
+	p.ProjectId = val
+}
+func (p *UpdateProjectTitleRequest) SetTitle(val string) {
+	p.Title = val
+}
+func (p *UpdateProjectTitleRequest) SetBaseUpdatedAt(val *string) {
+	p.BaseUpdatedAt = val
+}
+
+func (p *UpdateProjectTitleRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *UpdateProjectTitleRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *UpdateProjectTitleRequest) IsSetBaseUpdatedAt() bool {
+	return p.BaseUpdatedAt != nil
+}
+
+func (p *UpdateProjectTitleRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UpdateProjectTitleRequest(%+v)", *p)
+}
+
+var fieldIDToName_UpdateProjectTitleRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "project_id",
+	4: "title",
+	5: "base_updated_at",
+}
+
+type AttachAssetToProjectRequest struct {
+	AuthContext      *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta      *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	ProjectId        string       `thrift:"project_id,3,required" frugal:"3,required,string" json:"project_id"`
+	AssetId          string       `thrift:"asset_id,4,required" frugal:"4,required,string" json:"asset_id"`
+	AssetRole        *string      `thrift:"asset_role,5,optional" frugal:"5,optional,string" json:"asset_role,omitempty"`
+	SourceSessionId  *string      `thrift:"source_session_id,6,optional" frugal:"6,optional,string" json:"source_session_id,omitempty"`
+	SourceRunId      *string      `thrift:"source_run_id,7,optional" frugal:"7,optional,string" json:"source_run_id,omitempty"`
+	SourceArtifactId *string      `thrift:"source_artifact_id,8,optional" frugal:"8,optional,string" json:"source_artifact_id,omitempty"`
+	SourceType       *string      `thrift:"source_type,9,optional" frugal:"9,optional,string" json:"source_type,omitempty"`
+	DisplayOrder     *int32       `thrift:"display_order,10,optional" frugal:"10,optional,i32" json:"display_order,omitempty"`
+}
+
+func NewAttachAssetToProjectRequest() *AttachAssetToProjectRequest {
+	return &AttachAssetToProjectRequest{}
+}
+
+func (p *AttachAssetToProjectRequest) InitDefault() {
+}
+
+var AttachAssetToProjectRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *AttachAssetToProjectRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return AttachAssetToProjectRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var AttachAssetToProjectRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *AttachAssetToProjectRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return AttachAssetToProjectRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *AttachAssetToProjectRequest) GetProjectId() (v string) {
+	return p.ProjectId
+}
+
+func (p *AttachAssetToProjectRequest) GetAssetId() (v string) {
+	return p.AssetId
+}
+
+var AttachAssetToProjectRequest_AssetRole_DEFAULT string
+
+func (p *AttachAssetToProjectRequest) GetAssetRole() (v string) {
+	if !p.IsSetAssetRole() {
+		return AttachAssetToProjectRequest_AssetRole_DEFAULT
+	}
+	return *p.AssetRole
+}
+
+var AttachAssetToProjectRequest_SourceSessionId_DEFAULT string
+
+func (p *AttachAssetToProjectRequest) GetSourceSessionId() (v string) {
+	if !p.IsSetSourceSessionId() {
+		return AttachAssetToProjectRequest_SourceSessionId_DEFAULT
+	}
+	return *p.SourceSessionId
+}
+
+var AttachAssetToProjectRequest_SourceRunId_DEFAULT string
+
+func (p *AttachAssetToProjectRequest) GetSourceRunId() (v string) {
+	if !p.IsSetSourceRunId() {
+		return AttachAssetToProjectRequest_SourceRunId_DEFAULT
+	}
+	return *p.SourceRunId
+}
+
+var AttachAssetToProjectRequest_SourceArtifactId_DEFAULT string
+
+func (p *AttachAssetToProjectRequest) GetSourceArtifactId() (v string) {
+	if !p.IsSetSourceArtifactId() {
+		return AttachAssetToProjectRequest_SourceArtifactId_DEFAULT
+	}
+	return *p.SourceArtifactId
+}
+
+var AttachAssetToProjectRequest_SourceType_DEFAULT string
+
+func (p *AttachAssetToProjectRequest) GetSourceType() (v string) {
+	if !p.IsSetSourceType() {
+		return AttachAssetToProjectRequest_SourceType_DEFAULT
+	}
+	return *p.SourceType
+}
+
+var AttachAssetToProjectRequest_DisplayOrder_DEFAULT int32
+
+func (p *AttachAssetToProjectRequest) GetDisplayOrder() (v int32) {
+	if !p.IsSetDisplayOrder() {
+		return AttachAssetToProjectRequest_DisplayOrder_DEFAULT
+	}
+	return *p.DisplayOrder
+}
+func (p *AttachAssetToProjectRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *AttachAssetToProjectRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *AttachAssetToProjectRequest) SetProjectId(val string) {
+	p.ProjectId = val
+}
+func (p *AttachAssetToProjectRequest) SetAssetId(val string) {
+	p.AssetId = val
+}
+func (p *AttachAssetToProjectRequest) SetAssetRole(val *string) {
+	p.AssetRole = val
+}
+func (p *AttachAssetToProjectRequest) SetSourceSessionId(val *string) {
+	p.SourceSessionId = val
+}
+func (p *AttachAssetToProjectRequest) SetSourceRunId(val *string) {
+	p.SourceRunId = val
+}
+func (p *AttachAssetToProjectRequest) SetSourceArtifactId(val *string) {
+	p.SourceArtifactId = val
+}
+func (p *AttachAssetToProjectRequest) SetSourceType(val *string) {
+	p.SourceType = val
+}
+func (p *AttachAssetToProjectRequest) SetDisplayOrder(val *int32) {
+	p.DisplayOrder = val
+}
+
+func (p *AttachAssetToProjectRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *AttachAssetToProjectRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *AttachAssetToProjectRequest) IsSetAssetRole() bool {
+	return p.AssetRole != nil
+}
+
+func (p *AttachAssetToProjectRequest) IsSetSourceSessionId() bool {
+	return p.SourceSessionId != nil
+}
+
+func (p *AttachAssetToProjectRequest) IsSetSourceRunId() bool {
+	return p.SourceRunId != nil
+}
+
+func (p *AttachAssetToProjectRequest) IsSetSourceArtifactId() bool {
+	return p.SourceArtifactId != nil
+}
+
+func (p *AttachAssetToProjectRequest) IsSetSourceType() bool {
+	return p.SourceType != nil
+}
+
+func (p *AttachAssetToProjectRequest) IsSetDisplayOrder() bool {
+	return p.DisplayOrder != nil
+}
+
+func (p *AttachAssetToProjectRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AttachAssetToProjectRequest(%+v)", *p)
+}
+
+var fieldIDToName_AttachAssetToProjectRequest = map[int16]string{
+	1:  "auth_context",
+	2:  "request_meta",
+	3:  "project_id",
+	4:  "asset_id",
+	5:  "asset_role",
+	6:  "source_session_id",
+	7:  "source_run_id",
+	8:  "source_artifact_id",
+	9:  "source_type",
+	10: "display_order",
+}
+
+type ProjectAssetDTO struct {
+	AssetId         string  `thrift:"asset_id,1,required" frugal:"1,required,string" json:"asset_id"`
+	SourceType      string  `thrift:"source_type,2,required" frugal:"2,required,string" json:"source_type"`
+	SourceSessionId *string `thrift:"source_session_id,3,optional" frugal:"3,optional,string" json:"source_session_id,omitempty"`
+	SourceRunId     *string `thrift:"source_run_id,4,optional" frugal:"4,optional,string" json:"source_run_id,omitempty"`
+	CreatedAt       string  `thrift:"created_at,5,required" frugal:"5,required,string" json:"created_at"`
+}
+
+func NewProjectAssetDTO() *ProjectAssetDTO {
+	return &ProjectAssetDTO{}
+}
+
+func (p *ProjectAssetDTO) InitDefault() {
+}
+
+func (p *ProjectAssetDTO) GetAssetId() (v string) {
+	return p.AssetId
+}
+
+func (p *ProjectAssetDTO) GetSourceType() (v string) {
+	return p.SourceType
+}
+
+var ProjectAssetDTO_SourceSessionId_DEFAULT string
+
+func (p *ProjectAssetDTO) GetSourceSessionId() (v string) {
+	if !p.IsSetSourceSessionId() {
+		return ProjectAssetDTO_SourceSessionId_DEFAULT
+	}
+	return *p.SourceSessionId
+}
+
+var ProjectAssetDTO_SourceRunId_DEFAULT string
+
+func (p *ProjectAssetDTO) GetSourceRunId() (v string) {
+	if !p.IsSetSourceRunId() {
+		return ProjectAssetDTO_SourceRunId_DEFAULT
+	}
+	return *p.SourceRunId
+}
+
+func (p *ProjectAssetDTO) GetCreatedAt() (v string) {
+	return p.CreatedAt
+}
+func (p *ProjectAssetDTO) SetAssetId(val string) {
+	p.AssetId = val
+}
+func (p *ProjectAssetDTO) SetSourceType(val string) {
+	p.SourceType = val
+}
+func (p *ProjectAssetDTO) SetSourceSessionId(val *string) {
+	p.SourceSessionId = val
+}
+func (p *ProjectAssetDTO) SetSourceRunId(val *string) {
+	p.SourceRunId = val
+}
+func (p *ProjectAssetDTO) SetCreatedAt(val string) {
+	p.CreatedAt = val
+}
+
+func (p *ProjectAssetDTO) IsSetSourceSessionId() bool {
+	return p.SourceSessionId != nil
+}
+
+func (p *ProjectAssetDTO) IsSetSourceRunId() bool {
+	return p.SourceRunId != nil
+}
+
+func (p *ProjectAssetDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ProjectAssetDTO(%+v)", *p)
+}
+
+var fieldIDToName_ProjectAssetDTO = map[int16]string{
+	1: "asset_id",
+	2: "source_type",
+	3: "source_session_id",
+	4: "source_run_id",
+	5: "created_at",
+}
+
+type CreateUploadIntentRequest struct {
+	AuthContext    *AuthContext       `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta    *RequestMeta       `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	ProjectId      string             `thrift:"project_id,3,required" frugal:"3,required,string" json:"project_id"`
+	AssetType      string             `thrift:"asset_type,4,required" frugal:"4,required,string" json:"asset_type"`
+	Filename       string             `thrift:"filename,5,required" frugal:"5,required,string" json:"filename"`
+	ContentType    string             `thrift:"content_type,6,required" frugal:"6,required,string" json:"content_type"`
+	SizeBytes      int64              `thrift:"size_bytes,7,required" frugal:"7,required,i64" json:"size_bytes"`
+	Checksum       *string            `thrift:"checksum,8,optional" frugal:"8,optional,string" json:"checksum,omitempty"`
+	MetadataText   *string            `thrift:"metadata_text,9,optional" frugal:"9,optional,string" json:"metadata_text,omitempty"`
+	SafetyEvidence *SafetyEvidenceDTO `thrift:"safety_evidence,10,required" frugal:"10,required,SafetyEvidenceDTO" json:"safety_evidence"`
+}
+
+func NewCreateUploadIntentRequest() *CreateUploadIntentRequest {
+	return &CreateUploadIntentRequest{}
+}
+
+func (p *CreateUploadIntentRequest) InitDefault() {
+}
+
+var CreateUploadIntentRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *CreateUploadIntentRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return CreateUploadIntentRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var CreateUploadIntentRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *CreateUploadIntentRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return CreateUploadIntentRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *CreateUploadIntentRequest) GetProjectId() (v string) {
+	return p.ProjectId
+}
+
+func (p *CreateUploadIntentRequest) GetAssetType() (v string) {
+	return p.AssetType
+}
+
+func (p *CreateUploadIntentRequest) GetFilename() (v string) {
+	return p.Filename
+}
+
+func (p *CreateUploadIntentRequest) GetContentType() (v string) {
+	return p.ContentType
+}
+
+func (p *CreateUploadIntentRequest) GetSizeBytes() (v int64) {
+	return p.SizeBytes
+}
+
+var CreateUploadIntentRequest_Checksum_DEFAULT string
+
+func (p *CreateUploadIntentRequest) GetChecksum() (v string) {
+	if !p.IsSetChecksum() {
+		return CreateUploadIntentRequest_Checksum_DEFAULT
+	}
+	return *p.Checksum
+}
+
+var CreateUploadIntentRequest_MetadataText_DEFAULT string
+
+func (p *CreateUploadIntentRequest) GetMetadataText() (v string) {
+	if !p.IsSetMetadataText() {
+		return CreateUploadIntentRequest_MetadataText_DEFAULT
+	}
+	return *p.MetadataText
+}
+
+var CreateUploadIntentRequest_SafetyEvidence_DEFAULT *SafetyEvidenceDTO
+
+func (p *CreateUploadIntentRequest) GetSafetyEvidence() (v *SafetyEvidenceDTO) {
+	if !p.IsSetSafetyEvidence() {
+		return CreateUploadIntentRequest_SafetyEvidence_DEFAULT
+	}
+	return p.SafetyEvidence
+}
+func (p *CreateUploadIntentRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *CreateUploadIntentRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *CreateUploadIntentRequest) SetProjectId(val string) {
+	p.ProjectId = val
+}
+func (p *CreateUploadIntentRequest) SetAssetType(val string) {
+	p.AssetType = val
+}
+func (p *CreateUploadIntentRequest) SetFilename(val string) {
+	p.Filename = val
+}
+func (p *CreateUploadIntentRequest) SetContentType(val string) {
+	p.ContentType = val
+}
+func (p *CreateUploadIntentRequest) SetSizeBytes(val int64) {
+	p.SizeBytes = val
+}
+func (p *CreateUploadIntentRequest) SetChecksum(val *string) {
+	p.Checksum = val
+}
+func (p *CreateUploadIntentRequest) SetMetadataText(val *string) {
+	p.MetadataText = val
+}
+func (p *CreateUploadIntentRequest) SetSafetyEvidence(val *SafetyEvidenceDTO) {
+	p.SafetyEvidence = val
+}
+
+func (p *CreateUploadIntentRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *CreateUploadIntentRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *CreateUploadIntentRequest) IsSetChecksum() bool {
+	return p.Checksum != nil
+}
+
+func (p *CreateUploadIntentRequest) IsSetMetadataText() bool {
+	return p.MetadataText != nil
+}
+
+func (p *CreateUploadIntentRequest) IsSetSafetyEvidence() bool {
+	return p.SafetyEvidence != nil
+}
+
+func (p *CreateUploadIntentRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CreateUploadIntentRequest(%+v)", *p)
+}
+
+var fieldIDToName_CreateUploadIntentRequest = map[int16]string{
+	1:  "auth_context",
+	2:  "request_meta",
+	3:  "project_id",
+	4:  "asset_type",
+	5:  "filename",
+	6:  "content_type",
+	7:  "size_bytes",
+	8:  "checksum",
+	9:  "metadata_text",
+	10: "safety_evidence",
+}
+
+type UploadIntentDTO struct {
+	UploadIntentId string            `thrift:"upload_intent_id,1,required" frugal:"1,required,string" json:"upload_intent_id"`
+	AssetId        string            `thrift:"asset_id,2,required" frugal:"2,required,string" json:"asset_id"`
+	Bucket         string            `thrift:"bucket,3,required" frugal:"3,required,string" json:"bucket"`
+	ObjectKey      string            `thrift:"object_key,4,required" frugal:"4,required,string" json:"object_key"`
+	UploadUrl      string            `thrift:"upload_url,5,required" frugal:"5,required,string" json:"upload_url"`
+	UploadHeaders  map[string]string `thrift:"upload_headers,6,required" frugal:"6,required,map<string:string>" json:"upload_headers"`
+	ExpiresAt      string            `thrift:"expires_at,7,required" frugal:"7,required,string" json:"expires_at"`
+	MaxSizeBytes   int64             `thrift:"max_size_bytes,8,required" frugal:"8,required,i64" json:"max_size_bytes"`
+	ContentType    string            `thrift:"content_type,9,required" frugal:"9,required,string" json:"content_type"`
+}
+
+func NewUploadIntentDTO() *UploadIntentDTO {
+	return &UploadIntentDTO{}
+}
+
+func (p *UploadIntentDTO) InitDefault() {
+}
+
+func (p *UploadIntentDTO) GetUploadIntentId() (v string) {
+	return p.UploadIntentId
+}
+
+func (p *UploadIntentDTO) GetAssetId() (v string) {
+	return p.AssetId
+}
+
+func (p *UploadIntentDTO) GetBucket() (v string) {
+	return p.Bucket
+}
+
+func (p *UploadIntentDTO) GetObjectKey() (v string) {
+	return p.ObjectKey
+}
+
+func (p *UploadIntentDTO) GetUploadUrl() (v string) {
+	return p.UploadUrl
+}
+
+func (p *UploadIntentDTO) GetUploadHeaders() (v map[string]string) {
+	return p.UploadHeaders
+}
+
+func (p *UploadIntentDTO) GetExpiresAt() (v string) {
+	return p.ExpiresAt
+}
+
+func (p *UploadIntentDTO) GetMaxSizeBytes() (v int64) {
+	return p.MaxSizeBytes
+}
+
+func (p *UploadIntentDTO) GetContentType() (v string) {
+	return p.ContentType
+}
+func (p *UploadIntentDTO) SetUploadIntentId(val string) {
+	p.UploadIntentId = val
+}
+func (p *UploadIntentDTO) SetAssetId(val string) {
+	p.AssetId = val
+}
+func (p *UploadIntentDTO) SetBucket(val string) {
+	p.Bucket = val
+}
+func (p *UploadIntentDTO) SetObjectKey(val string) {
+	p.ObjectKey = val
+}
+func (p *UploadIntentDTO) SetUploadUrl(val string) {
+	p.UploadUrl = val
+}
+func (p *UploadIntentDTO) SetUploadHeaders(val map[string]string) {
+	p.UploadHeaders = val
+}
+func (p *UploadIntentDTO) SetExpiresAt(val string) {
+	p.ExpiresAt = val
+}
+func (p *UploadIntentDTO) SetMaxSizeBytes(val int64) {
+	p.MaxSizeBytes = val
+}
+func (p *UploadIntentDTO) SetContentType(val string) {
+	p.ContentType = val
+}
+
+func (p *UploadIntentDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UploadIntentDTO(%+v)", *p)
+}
+
+var fieldIDToName_UploadIntentDTO = map[int16]string{
+	1: "upload_intent_id",
+	2: "asset_id",
+	3: "bucket",
+	4: "object_key",
+	5: "upload_url",
+	6: "upload_headers",
+	7: "expires_at",
+	8: "max_size_bytes",
+	9: "content_type",
+}
+
+type ConfirmUploadedAssetRequest struct {
+	AuthContext    *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta    *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	UploadIntentId string       `thrift:"upload_intent_id,3,required" frugal:"3,required,string" json:"upload_intent_id"`
+	Etag           string       `thrift:"etag,4,required" frugal:"4,required,string" json:"etag"`
+	SizeBytes      int64        `thrift:"size_bytes,5,required" frugal:"5,required,i64" json:"size_bytes"`
+	ContentType    string       `thrift:"content_type,6,required" frugal:"6,required,string" json:"content_type"`
+	Checksum       string       `thrift:"checksum,7,required" frugal:"7,required,string" json:"checksum"`
+}
+
+func NewConfirmUploadedAssetRequest() *ConfirmUploadedAssetRequest {
+	return &ConfirmUploadedAssetRequest{}
+}
+
+func (p *ConfirmUploadedAssetRequest) InitDefault() {
+}
+
+var ConfirmUploadedAssetRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *ConfirmUploadedAssetRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return ConfirmUploadedAssetRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var ConfirmUploadedAssetRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *ConfirmUploadedAssetRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return ConfirmUploadedAssetRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *ConfirmUploadedAssetRequest) GetUploadIntentId() (v string) {
+	return p.UploadIntentId
+}
+
+func (p *ConfirmUploadedAssetRequest) GetEtag() (v string) {
+	return p.Etag
+}
+
+func (p *ConfirmUploadedAssetRequest) GetSizeBytes() (v int64) {
+	return p.SizeBytes
+}
+
+func (p *ConfirmUploadedAssetRequest) GetContentType() (v string) {
+	return p.ContentType
+}
+
+func (p *ConfirmUploadedAssetRequest) GetChecksum() (v string) {
+	return p.Checksum
+}
+func (p *ConfirmUploadedAssetRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *ConfirmUploadedAssetRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *ConfirmUploadedAssetRequest) SetUploadIntentId(val string) {
+	p.UploadIntentId = val
+}
+func (p *ConfirmUploadedAssetRequest) SetEtag(val string) {
+	p.Etag = val
+}
+func (p *ConfirmUploadedAssetRequest) SetSizeBytes(val int64) {
+	p.SizeBytes = val
+}
+func (p *ConfirmUploadedAssetRequest) SetContentType(val string) {
+	p.ContentType = val
+}
+func (p *ConfirmUploadedAssetRequest) SetChecksum(val string) {
+	p.Checksum = val
+}
+
+func (p *ConfirmUploadedAssetRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *ConfirmUploadedAssetRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *ConfirmUploadedAssetRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ConfirmUploadedAssetRequest(%+v)", *p)
+}
+
+var fieldIDToName_ConfirmUploadedAssetRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "upload_intent_id",
+	4: "etag",
+	5: "size_bytes",
+	6: "content_type",
+	7: "checksum",
+}
+
+type AssetDetailDTO struct {
+	AssetId       string   `thrift:"asset_id,1,required" frugal:"1,required,string" json:"asset_id"`
+	AssetType     string   `thrift:"asset_type,2,required" frugal:"2,required,string" json:"asset_type"`
+	Status        string   `thrift:"status,3,required" frugal:"3,required,string" json:"status"`
+	ProjectId     *string  `thrift:"project_id,4,optional" frugal:"4,optional,string" json:"project_id,omitempty"`
+	PreviewUrl    *string  `thrift:"preview_url,5,optional" frugal:"5,optional,string" json:"preview_url,omitempty"`
+	AccessActions []string `thrift:"access_actions,6,required" frugal:"6,required,list<string>" json:"access_actions"`
+}
+
+func NewAssetDetailDTO() *AssetDetailDTO {
+	return &AssetDetailDTO{}
+}
+
+func (p *AssetDetailDTO) InitDefault() {
+}
+
+func (p *AssetDetailDTO) GetAssetId() (v string) {
+	return p.AssetId
+}
+
+func (p *AssetDetailDTO) GetAssetType() (v string) {
+	return p.AssetType
+}
+
+func (p *AssetDetailDTO) GetStatus() (v string) {
+	return p.Status
+}
+
+var AssetDetailDTO_ProjectId_DEFAULT string
+
+func (p *AssetDetailDTO) GetProjectId() (v string) {
+	if !p.IsSetProjectId() {
+		return AssetDetailDTO_ProjectId_DEFAULT
+	}
+	return *p.ProjectId
+}
+
+var AssetDetailDTO_PreviewUrl_DEFAULT string
+
+func (p *AssetDetailDTO) GetPreviewUrl() (v string) {
+	if !p.IsSetPreviewUrl() {
+		return AssetDetailDTO_PreviewUrl_DEFAULT
+	}
+	return *p.PreviewUrl
+}
+
+func (p *AssetDetailDTO) GetAccessActions() (v []string) {
+	return p.AccessActions
+}
+func (p *AssetDetailDTO) SetAssetId(val string) {
+	p.AssetId = val
+}
+func (p *AssetDetailDTO) SetAssetType(val string) {
+	p.AssetType = val
+}
+func (p *AssetDetailDTO) SetStatus(val string) {
+	p.Status = val
+}
+func (p *AssetDetailDTO) SetProjectId(val *string) {
+	p.ProjectId = val
+}
+func (p *AssetDetailDTO) SetPreviewUrl(val *string) {
+	p.PreviewUrl = val
+}
+func (p *AssetDetailDTO) SetAccessActions(val []string) {
+	p.AccessActions = val
+}
+
+func (p *AssetDetailDTO) IsSetProjectId() bool {
+	return p.ProjectId != nil
+}
+
+func (p *AssetDetailDTO) IsSetPreviewUrl() bool {
+	return p.PreviewUrl != nil
+}
+
+func (p *AssetDetailDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AssetDetailDTO(%+v)", *p)
+}
+
+var fieldIDToName_AssetDetailDTO = map[int16]string{
+	1: "asset_id",
+	2: "asset_type",
+	3: "status",
+	4: "project_id",
+	5: "preview_url",
+	6: "access_actions",
+}
+
+type CreateWorkRequest struct {
+	AuthContext  *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta  *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	ProjectId    string       `thrift:"project_id,3,required" frugal:"3,required,string" json:"project_id"`
+	Title        string       `thrift:"title,4,required" frugal:"4,required,string" json:"title"`
+	Description  *string      `thrift:"description,5,optional" frugal:"5,optional,string" json:"description,omitempty"`
+	AssetIds     []string     `thrift:"asset_ids,6,required" frugal:"6,required,list<string>" json:"asset_ids"`
+	CoverAssetId *string      `thrift:"cover_asset_id,7,optional" frugal:"7,optional,string" json:"cover_asset_id,omitempty"`
+	Category     *string      `thrift:"category,8,optional" frugal:"8,optional,string" json:"category,omitempty"`
+	Tags         []string     `thrift:"tags,9,optional" frugal:"9,optional,list<string>" json:"tags,omitempty"`
+}
+
+func NewCreateWorkRequest() *CreateWorkRequest {
+	return &CreateWorkRequest{}
+}
+
+func (p *CreateWorkRequest) InitDefault() {
+}
+
+var CreateWorkRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *CreateWorkRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return CreateWorkRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var CreateWorkRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *CreateWorkRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return CreateWorkRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *CreateWorkRequest) GetProjectId() (v string) {
+	return p.ProjectId
+}
+
+func (p *CreateWorkRequest) GetTitle() (v string) {
+	return p.Title
+}
+
+var CreateWorkRequest_Description_DEFAULT string
+
+func (p *CreateWorkRequest) GetDescription() (v string) {
+	if !p.IsSetDescription() {
+		return CreateWorkRequest_Description_DEFAULT
+	}
+	return *p.Description
+}
+
+func (p *CreateWorkRequest) GetAssetIds() (v []string) {
+	return p.AssetIds
+}
+
+var CreateWorkRequest_CoverAssetId_DEFAULT string
+
+func (p *CreateWorkRequest) GetCoverAssetId() (v string) {
+	if !p.IsSetCoverAssetId() {
+		return CreateWorkRequest_CoverAssetId_DEFAULT
+	}
+	return *p.CoverAssetId
+}
+
+var CreateWorkRequest_Category_DEFAULT string
+
+func (p *CreateWorkRequest) GetCategory() (v string) {
+	if !p.IsSetCategory() {
+		return CreateWorkRequest_Category_DEFAULT
+	}
+	return *p.Category
+}
+
+var CreateWorkRequest_Tags_DEFAULT []string
+
+func (p *CreateWorkRequest) GetTags() (v []string) {
+	if !p.IsSetTags() {
+		return CreateWorkRequest_Tags_DEFAULT
+	}
+	return p.Tags
+}
+func (p *CreateWorkRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *CreateWorkRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *CreateWorkRequest) SetProjectId(val string) {
+	p.ProjectId = val
+}
+func (p *CreateWorkRequest) SetTitle(val string) {
+	p.Title = val
+}
+func (p *CreateWorkRequest) SetDescription(val *string) {
+	p.Description = val
+}
+func (p *CreateWorkRequest) SetAssetIds(val []string) {
+	p.AssetIds = val
+}
+func (p *CreateWorkRequest) SetCoverAssetId(val *string) {
+	p.CoverAssetId = val
+}
+func (p *CreateWorkRequest) SetCategory(val *string) {
+	p.Category = val
+}
+func (p *CreateWorkRequest) SetTags(val []string) {
+	p.Tags = val
+}
+
+func (p *CreateWorkRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *CreateWorkRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *CreateWorkRequest) IsSetDescription() bool {
+	return p.Description != nil
+}
+
+func (p *CreateWorkRequest) IsSetCoverAssetId() bool {
+	return p.CoverAssetId != nil
+}
+
+func (p *CreateWorkRequest) IsSetCategory() bool {
+	return p.Category != nil
+}
+
+func (p *CreateWorkRequest) IsSetTags() bool {
+	return p.Tags != nil
+}
+
+func (p *CreateWorkRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CreateWorkRequest(%+v)", *p)
+}
+
+var fieldIDToName_CreateWorkRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "project_id",
+	4: "title",
+	5: "description",
+	6: "asset_ids",
+	7: "cover_asset_id",
+	8: "category",
+	9: "tags",
+}
+
+type WorkDetailDTO struct {
+	WorkId         string   `thrift:"work_id,1,required" frugal:"1,required,string" json:"work_id"`
+	ProjectId      string   `thrift:"project_id,2,required" frugal:"2,required,string" json:"project_id"`
+	Title          string   `thrift:"title,3,required" frugal:"3,required,string" json:"title"`
+	Description    *string  `thrift:"description,4,optional" frugal:"4,optional,string" json:"description,omitempty"`
+	ShareStatus    string   `thrift:"share_status,5,required" frugal:"5,required,string" json:"share_status"`
+	CoverAssetId   *string  `thrift:"cover_asset_id,6,optional" frugal:"6,optional,string" json:"cover_asset_id,omitempty"`
+	Category       *string  `thrift:"category,7,optional" frugal:"7,optional,string" json:"category,omitempty"`
+	Tags           []string `thrift:"tags,8,required" frugal:"8,required,list<string>" json:"tags"`
+	AssetIds       []string `thrift:"asset_ids,9,required" frugal:"9,required,list<string>" json:"asset_ids"`
+	AllowedActions []string `thrift:"allowed_actions,10,required" frugal:"10,required,list<string>" json:"allowed_actions"`
+	UpdatedAt      string   `thrift:"updated_at,11,required" frugal:"11,required,string" json:"updated_at"`
+}
+
+func NewWorkDetailDTO() *WorkDetailDTO {
+	return &WorkDetailDTO{}
+}
+
+func (p *WorkDetailDTO) InitDefault() {
+}
+
+func (p *WorkDetailDTO) GetWorkId() (v string) {
+	return p.WorkId
+}
+
+func (p *WorkDetailDTO) GetProjectId() (v string) {
+	return p.ProjectId
+}
+
+func (p *WorkDetailDTO) GetTitle() (v string) {
+	return p.Title
+}
+
+var WorkDetailDTO_Description_DEFAULT string
+
+func (p *WorkDetailDTO) GetDescription() (v string) {
+	if !p.IsSetDescription() {
+		return WorkDetailDTO_Description_DEFAULT
+	}
+	return *p.Description
+}
+
+func (p *WorkDetailDTO) GetShareStatus() (v string) {
+	return p.ShareStatus
+}
+
+var WorkDetailDTO_CoverAssetId_DEFAULT string
+
+func (p *WorkDetailDTO) GetCoverAssetId() (v string) {
+	if !p.IsSetCoverAssetId() {
+		return WorkDetailDTO_CoverAssetId_DEFAULT
+	}
+	return *p.CoverAssetId
+}
+
+var WorkDetailDTO_Category_DEFAULT string
+
+func (p *WorkDetailDTO) GetCategory() (v string) {
+	if !p.IsSetCategory() {
+		return WorkDetailDTO_Category_DEFAULT
+	}
+	return *p.Category
+}
+
+func (p *WorkDetailDTO) GetTags() (v []string) {
+	return p.Tags
+}
+
+func (p *WorkDetailDTO) GetAssetIds() (v []string) {
+	return p.AssetIds
+}
+
+func (p *WorkDetailDTO) GetAllowedActions() (v []string) {
+	return p.AllowedActions
+}
+
+func (p *WorkDetailDTO) GetUpdatedAt() (v string) {
+	return p.UpdatedAt
+}
+func (p *WorkDetailDTO) SetWorkId(val string) {
+	p.WorkId = val
+}
+func (p *WorkDetailDTO) SetProjectId(val string) {
+	p.ProjectId = val
+}
+func (p *WorkDetailDTO) SetTitle(val string) {
+	p.Title = val
+}
+func (p *WorkDetailDTO) SetDescription(val *string) {
+	p.Description = val
+}
+func (p *WorkDetailDTO) SetShareStatus(val string) {
+	p.ShareStatus = val
+}
+func (p *WorkDetailDTO) SetCoverAssetId(val *string) {
+	p.CoverAssetId = val
+}
+func (p *WorkDetailDTO) SetCategory(val *string) {
+	p.Category = val
+}
+func (p *WorkDetailDTO) SetTags(val []string) {
+	p.Tags = val
+}
+func (p *WorkDetailDTO) SetAssetIds(val []string) {
+	p.AssetIds = val
+}
+func (p *WorkDetailDTO) SetAllowedActions(val []string) {
+	p.AllowedActions = val
+}
+func (p *WorkDetailDTO) SetUpdatedAt(val string) {
+	p.UpdatedAt = val
+}
+
+func (p *WorkDetailDTO) IsSetDescription() bool {
+	return p.Description != nil
+}
+
+func (p *WorkDetailDTO) IsSetCoverAssetId() bool {
+	return p.CoverAssetId != nil
+}
+
+func (p *WorkDetailDTO) IsSetCategory() bool {
+	return p.Category != nil
+}
+
+func (p *WorkDetailDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkDetailDTO(%+v)", *p)
+}
+
+var fieldIDToName_WorkDetailDTO = map[int16]string{
+	1:  "work_id",
+	2:  "project_id",
+	3:  "title",
+	4:  "description",
+	5:  "share_status",
+	6:  "cover_asset_id",
+	7:  "category",
+	8:  "tags",
+	9:  "asset_ids",
+	10: "allowed_actions",
+	11: "updated_at",
+}
+
+type PreviewShareWorkRequest struct {
+	AuthContext       *AuthContext       `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta       *RequestMeta       `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	WorkId            string             `thrift:"work_id,3,required" frugal:"3,required,string" json:"work_id"`
+	PublicTitle       string             `thrift:"public_title,4,required" frugal:"4,required,string" json:"public_title"`
+	PublicDescription *string            `thrift:"public_description,5,optional" frugal:"5,optional,string" json:"public_description,omitempty"`
+	Tags              []string           `thrift:"tags,6,optional" frugal:"6,optional,list<string>" json:"tags,omitempty"`
+	SafetyEvidence    *SafetyEvidenceDTO `thrift:"safety_evidence,7,required" frugal:"7,required,SafetyEvidenceDTO" json:"safety_evidence"`
+}
+
+func NewPreviewShareWorkRequest() *PreviewShareWorkRequest {
+	return &PreviewShareWorkRequest{}
+}
+
+func (p *PreviewShareWorkRequest) InitDefault() {
+}
+
+var PreviewShareWorkRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *PreviewShareWorkRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return PreviewShareWorkRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var PreviewShareWorkRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *PreviewShareWorkRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return PreviewShareWorkRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *PreviewShareWorkRequest) GetWorkId() (v string) {
+	return p.WorkId
+}
+
+func (p *PreviewShareWorkRequest) GetPublicTitle() (v string) {
+	return p.PublicTitle
+}
+
+var PreviewShareWorkRequest_PublicDescription_DEFAULT string
+
+func (p *PreviewShareWorkRequest) GetPublicDescription() (v string) {
+	if !p.IsSetPublicDescription() {
+		return PreviewShareWorkRequest_PublicDescription_DEFAULT
+	}
+	return *p.PublicDescription
+}
+
+var PreviewShareWorkRequest_Tags_DEFAULT []string
+
+func (p *PreviewShareWorkRequest) GetTags() (v []string) {
+	if !p.IsSetTags() {
+		return PreviewShareWorkRequest_Tags_DEFAULT
+	}
+	return p.Tags
+}
+
+var PreviewShareWorkRequest_SafetyEvidence_DEFAULT *SafetyEvidenceDTO
+
+func (p *PreviewShareWorkRequest) GetSafetyEvidence() (v *SafetyEvidenceDTO) {
+	if !p.IsSetSafetyEvidence() {
+		return PreviewShareWorkRequest_SafetyEvidence_DEFAULT
+	}
+	return p.SafetyEvidence
+}
+func (p *PreviewShareWorkRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *PreviewShareWorkRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *PreviewShareWorkRequest) SetWorkId(val string) {
+	p.WorkId = val
+}
+func (p *PreviewShareWorkRequest) SetPublicTitle(val string) {
+	p.PublicTitle = val
+}
+func (p *PreviewShareWorkRequest) SetPublicDescription(val *string) {
+	p.PublicDescription = val
+}
+func (p *PreviewShareWorkRequest) SetTags(val []string) {
+	p.Tags = val
+}
+func (p *PreviewShareWorkRequest) SetSafetyEvidence(val *SafetyEvidenceDTO) {
+	p.SafetyEvidence = val
+}
+
+func (p *PreviewShareWorkRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *PreviewShareWorkRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *PreviewShareWorkRequest) IsSetPublicDescription() bool {
+	return p.PublicDescription != nil
+}
+
+func (p *PreviewShareWorkRequest) IsSetTags() bool {
+	return p.Tags != nil
+}
+
+func (p *PreviewShareWorkRequest) IsSetSafetyEvidence() bool {
+	return p.SafetyEvidence != nil
+}
+
+func (p *PreviewShareWorkRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PreviewShareWorkRequest(%+v)", *p)
+}
+
+var fieldIDToName_PreviewShareWorkRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "work_id",
+	4: "public_title",
+	5: "public_description",
+	6: "tags",
+	7: "safety_evidence",
+}
+
+type ShareWorkPreviewDTO struct {
+	PreviewToken            string   `thrift:"preview_token,1,required" frugal:"1,required,string" json:"preview_token"`
+	WorkId                  string   `thrift:"work_id,2,required" frugal:"2,required,string" json:"work_id"`
+	PublicTitle             string   `thrift:"public_title,3,required" frugal:"3,required,string" json:"public_title"`
+	PublicDescriptionDigest string   `thrift:"public_description_digest,4,required" frugal:"4,required,string" json:"public_description_digest"`
+	Tags                    []string `thrift:"tags,5,required" frugal:"5,required,list<string>" json:"tags"`
+	PrivacyRedactionSummary []string `thrift:"privacy_redaction_summary,6,required" frugal:"6,required,list<string>" json:"privacy_redaction_summary"`
+	PublicMediaSummary      []string `thrift:"public_media_summary,7,required" frugal:"7,required,list<string>" json:"public_media_summary"`
+	ExpiresAt               string   `thrift:"expires_at,8,required" frugal:"8,required,string" json:"expires_at"`
+}
+
+func NewShareWorkPreviewDTO() *ShareWorkPreviewDTO {
+	return &ShareWorkPreviewDTO{}
+}
+
+func (p *ShareWorkPreviewDTO) InitDefault() {
+}
+
+func (p *ShareWorkPreviewDTO) GetPreviewToken() (v string) {
+	return p.PreviewToken
+}
+
+func (p *ShareWorkPreviewDTO) GetWorkId() (v string) {
+	return p.WorkId
+}
+
+func (p *ShareWorkPreviewDTO) GetPublicTitle() (v string) {
+	return p.PublicTitle
+}
+
+func (p *ShareWorkPreviewDTO) GetPublicDescriptionDigest() (v string) {
+	return p.PublicDescriptionDigest
+}
+
+func (p *ShareWorkPreviewDTO) GetTags() (v []string) {
+	return p.Tags
+}
+
+func (p *ShareWorkPreviewDTO) GetPrivacyRedactionSummary() (v []string) {
+	return p.PrivacyRedactionSummary
+}
+
+func (p *ShareWorkPreviewDTO) GetPublicMediaSummary() (v []string) {
+	return p.PublicMediaSummary
+}
+
+func (p *ShareWorkPreviewDTO) GetExpiresAt() (v string) {
+	return p.ExpiresAt
+}
+func (p *ShareWorkPreviewDTO) SetPreviewToken(val string) {
+	p.PreviewToken = val
+}
+func (p *ShareWorkPreviewDTO) SetWorkId(val string) {
+	p.WorkId = val
+}
+func (p *ShareWorkPreviewDTO) SetPublicTitle(val string) {
+	p.PublicTitle = val
+}
+func (p *ShareWorkPreviewDTO) SetPublicDescriptionDigest(val string) {
+	p.PublicDescriptionDigest = val
+}
+func (p *ShareWorkPreviewDTO) SetTags(val []string) {
+	p.Tags = val
+}
+func (p *ShareWorkPreviewDTO) SetPrivacyRedactionSummary(val []string) {
+	p.PrivacyRedactionSummary = val
+}
+func (p *ShareWorkPreviewDTO) SetPublicMediaSummary(val []string) {
+	p.PublicMediaSummary = val
+}
+func (p *ShareWorkPreviewDTO) SetExpiresAt(val string) {
+	p.ExpiresAt = val
+}
+
+func (p *ShareWorkPreviewDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ShareWorkPreviewDTO(%+v)", *p)
+}
+
+var fieldIDToName_ShareWorkPreviewDTO = map[int16]string{
+	1: "preview_token",
+	2: "work_id",
+	3: "public_title",
+	4: "public_description_digest",
+	5: "tags",
+	6: "privacy_redaction_summary",
+	7: "public_media_summary",
+	8: "expires_at",
+}
+
+type ConfirmShareWorkRequest struct {
+	AuthContext  *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta  *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	WorkId       string       `thrift:"work_id,3,required" frugal:"3,required,string" json:"work_id"`
+	PreviewToken string       `thrift:"preview_token,4,required" frugal:"4,required,string" json:"preview_token"`
+}
+
+func NewConfirmShareWorkRequest() *ConfirmShareWorkRequest {
+	return &ConfirmShareWorkRequest{}
+}
+
+func (p *ConfirmShareWorkRequest) InitDefault() {
+}
+
+var ConfirmShareWorkRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *ConfirmShareWorkRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return ConfirmShareWorkRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var ConfirmShareWorkRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *ConfirmShareWorkRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return ConfirmShareWorkRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *ConfirmShareWorkRequest) GetWorkId() (v string) {
+	return p.WorkId
+}
+
+func (p *ConfirmShareWorkRequest) GetPreviewToken() (v string) {
+	return p.PreviewToken
+}
+func (p *ConfirmShareWorkRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *ConfirmShareWorkRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *ConfirmShareWorkRequest) SetWorkId(val string) {
+	p.WorkId = val
+}
+func (p *ConfirmShareWorkRequest) SetPreviewToken(val string) {
+	p.PreviewToken = val
+}
+
+func (p *ConfirmShareWorkRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *ConfirmShareWorkRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *ConfirmShareWorkRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ConfirmShareWorkRequest(%+v)", *p)
+}
+
+var fieldIDToName_ConfirmShareWorkRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "work_id",
+	4: "preview_token",
+}
+
+type WorkShareResultDTO struct {
+	WorkId       string `thrift:"work_id,1,required" frugal:"1,required,string" json:"work_id"`
+	PublicWorkId string `thrift:"public_work_id,2,required" frugal:"2,required,string" json:"public_work_id"`
+	ShareUrl     string `thrift:"share_url,3,required" frugal:"3,required,string" json:"share_url"`
+	ShareStatus  string `thrift:"share_status,4,required" frugal:"4,required,string" json:"share_status"`
+	SnapshotId   string `thrift:"snapshot_id,5,required" frugal:"5,required,string" json:"snapshot_id"`
+}
+
+func NewWorkShareResultDTO() *WorkShareResultDTO {
+	return &WorkShareResultDTO{}
+}
+
+func (p *WorkShareResultDTO) InitDefault() {
+}
+
+func (p *WorkShareResultDTO) GetWorkId() (v string) {
+	return p.WorkId
+}
+
+func (p *WorkShareResultDTO) GetPublicWorkId() (v string) {
+	return p.PublicWorkId
+}
+
+func (p *WorkShareResultDTO) GetShareUrl() (v string) {
+	return p.ShareUrl
+}
+
+func (p *WorkShareResultDTO) GetShareStatus() (v string) {
+	return p.ShareStatus
+}
+
+func (p *WorkShareResultDTO) GetSnapshotId() (v string) {
+	return p.SnapshotId
+}
+func (p *WorkShareResultDTO) SetWorkId(val string) {
+	p.WorkId = val
+}
+func (p *WorkShareResultDTO) SetPublicWorkId(val string) {
+	p.PublicWorkId = val
+}
+func (p *WorkShareResultDTO) SetShareUrl(val string) {
+	p.ShareUrl = val
+}
+func (p *WorkShareResultDTO) SetShareStatus(val string) {
+	p.ShareStatus = val
+}
+func (p *WorkShareResultDTO) SetSnapshotId(val string) {
+	p.SnapshotId = val
+}
+
+func (p *WorkShareResultDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkShareResultDTO(%+v)", *p)
+}
+
+var fieldIDToName_WorkShareResultDTO = map[int16]string{
+	1: "work_id",
+	2: "public_work_id",
+	3: "share_url",
+	4: "share_status",
+	5: "snapshot_id",
+}
+
+type PreviewTakeDownPublicWorkRequest struct {
+	AuthContext  *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta  *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	PublicWorkId string       `thrift:"public_work_id,3,required" frugal:"3,required,string" json:"public_work_id"`
+	Reason       string       `thrift:"reason,4,required" frugal:"4,required,string" json:"reason"`
+	NotifyAuthor bool         `thrift:"notify_author,5,required" frugal:"5,required,bool" json:"notify_author"`
+}
+
+func NewPreviewTakeDownPublicWorkRequest() *PreviewTakeDownPublicWorkRequest {
+	return &PreviewTakeDownPublicWorkRequest{}
+}
+
+func (p *PreviewTakeDownPublicWorkRequest) InitDefault() {
+}
+
+var PreviewTakeDownPublicWorkRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *PreviewTakeDownPublicWorkRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return PreviewTakeDownPublicWorkRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var PreviewTakeDownPublicWorkRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *PreviewTakeDownPublicWorkRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return PreviewTakeDownPublicWorkRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *PreviewTakeDownPublicWorkRequest) GetPublicWorkId() (v string) {
+	return p.PublicWorkId
+}
+
+func (p *PreviewTakeDownPublicWorkRequest) GetReason() (v string) {
+	return p.Reason
+}
+
+func (p *PreviewTakeDownPublicWorkRequest) GetNotifyAuthor() (v bool) {
+	return p.NotifyAuthor
+}
+func (p *PreviewTakeDownPublicWorkRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *PreviewTakeDownPublicWorkRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *PreviewTakeDownPublicWorkRequest) SetPublicWorkId(val string) {
+	p.PublicWorkId = val
+}
+func (p *PreviewTakeDownPublicWorkRequest) SetReason(val string) {
+	p.Reason = val
+}
+func (p *PreviewTakeDownPublicWorkRequest) SetNotifyAuthor(val bool) {
+	p.NotifyAuthor = val
+}
+
+func (p *PreviewTakeDownPublicWorkRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *PreviewTakeDownPublicWorkRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *PreviewTakeDownPublicWorkRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PreviewTakeDownPublicWorkRequest(%+v)", *p)
+}
+
+var fieldIDToName_PreviewTakeDownPublicWorkRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "public_work_id",
+	4: "reason",
+	5: "notify_author",
+}
+
+type TakeDownPublicWorkPreviewDTO struct {
+	PreviewToken                 string   `thrift:"preview_token,1,required" frugal:"1,required,string" json:"preview_token"`
+	PublicWorkId                 string   `thrift:"public_work_id,2,required" frugal:"2,required,string" json:"public_work_id"`
+	WorkId                       string   `thrift:"work_id,3,required" frugal:"3,required,string" json:"work_id"`
+	CurrentStatus                string   `thrift:"current_status,4,required" frugal:"4,required,string" json:"current_status"`
+	ImpactItems                  []string `thrift:"impact_items,5,required" frugal:"5,required,list<string>" json:"impact_items"`
+	PublicLinkWillBeInaccessible bool     `thrift:"public_link_will_be_inaccessible,6,required" frugal:"6,required,bool" json:"public_link_will_be_inaccessible"`
+	SourceAssetRetained          bool     `thrift:"source_asset_retained,7,required" frugal:"7,required,bool" json:"source_asset_retained"`
+	NotifyAuthor                 bool     `thrift:"notify_author,8,required" frugal:"8,required,bool" json:"notify_author"`
+	ExpiresAt                    string   `thrift:"expires_at,9,required" frugal:"9,required,string" json:"expires_at"`
+}
+
+func NewTakeDownPublicWorkPreviewDTO() *TakeDownPublicWorkPreviewDTO {
+	return &TakeDownPublicWorkPreviewDTO{}
+}
+
+func (p *TakeDownPublicWorkPreviewDTO) InitDefault() {
+}
+
+func (p *TakeDownPublicWorkPreviewDTO) GetPreviewToken() (v string) {
+	return p.PreviewToken
+}
+
+func (p *TakeDownPublicWorkPreviewDTO) GetPublicWorkId() (v string) {
+	return p.PublicWorkId
+}
+
+func (p *TakeDownPublicWorkPreviewDTO) GetWorkId() (v string) {
+	return p.WorkId
+}
+
+func (p *TakeDownPublicWorkPreviewDTO) GetCurrentStatus() (v string) {
+	return p.CurrentStatus
+}
+
+func (p *TakeDownPublicWorkPreviewDTO) GetImpactItems() (v []string) {
+	return p.ImpactItems
+}
+
+func (p *TakeDownPublicWorkPreviewDTO) GetPublicLinkWillBeInaccessible() (v bool) {
+	return p.PublicLinkWillBeInaccessible
+}
+
+func (p *TakeDownPublicWorkPreviewDTO) GetSourceAssetRetained() (v bool) {
+	return p.SourceAssetRetained
+}
+
+func (p *TakeDownPublicWorkPreviewDTO) GetNotifyAuthor() (v bool) {
+	return p.NotifyAuthor
+}
+
+func (p *TakeDownPublicWorkPreviewDTO) GetExpiresAt() (v string) {
+	return p.ExpiresAt
+}
+func (p *TakeDownPublicWorkPreviewDTO) SetPreviewToken(val string) {
+	p.PreviewToken = val
+}
+func (p *TakeDownPublicWorkPreviewDTO) SetPublicWorkId(val string) {
+	p.PublicWorkId = val
+}
+func (p *TakeDownPublicWorkPreviewDTO) SetWorkId(val string) {
+	p.WorkId = val
+}
+func (p *TakeDownPublicWorkPreviewDTO) SetCurrentStatus(val string) {
+	p.CurrentStatus = val
+}
+func (p *TakeDownPublicWorkPreviewDTO) SetImpactItems(val []string) {
+	p.ImpactItems = val
+}
+func (p *TakeDownPublicWorkPreviewDTO) SetPublicLinkWillBeInaccessible(val bool) {
+	p.PublicLinkWillBeInaccessible = val
+}
+func (p *TakeDownPublicWorkPreviewDTO) SetSourceAssetRetained(val bool) {
+	p.SourceAssetRetained = val
+}
+func (p *TakeDownPublicWorkPreviewDTO) SetNotifyAuthor(val bool) {
+	p.NotifyAuthor = val
+}
+func (p *TakeDownPublicWorkPreviewDTO) SetExpiresAt(val string) {
+	p.ExpiresAt = val
+}
+
+func (p *TakeDownPublicWorkPreviewDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("TakeDownPublicWorkPreviewDTO(%+v)", *p)
+}
+
+var fieldIDToName_TakeDownPublicWorkPreviewDTO = map[int16]string{
+	1: "preview_token",
+	2: "public_work_id",
+	3: "work_id",
+	4: "current_status",
+	5: "impact_items",
+	6: "public_link_will_be_inaccessible",
+	7: "source_asset_retained",
+	8: "notify_author",
+	9: "expires_at",
+}
+
+type ConfirmTakeDownPublicWorkRequest struct {
+	AuthContext  *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta  *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	PublicWorkId string       `thrift:"public_work_id,3,required" frugal:"3,required,string" json:"public_work_id"`
+	PreviewToken string       `thrift:"preview_token,4,required" frugal:"4,required,string" json:"preview_token"`
+	Reason       string       `thrift:"reason,5,required" frugal:"5,required,string" json:"reason"`
+	NotifyAuthor bool         `thrift:"notify_author,6,required" frugal:"6,required,bool" json:"notify_author"`
+}
+
+func NewConfirmTakeDownPublicWorkRequest() *ConfirmTakeDownPublicWorkRequest {
+	return &ConfirmTakeDownPublicWorkRequest{}
+}
+
+func (p *ConfirmTakeDownPublicWorkRequest) InitDefault() {
+}
+
+var ConfirmTakeDownPublicWorkRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *ConfirmTakeDownPublicWorkRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return ConfirmTakeDownPublicWorkRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var ConfirmTakeDownPublicWorkRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *ConfirmTakeDownPublicWorkRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return ConfirmTakeDownPublicWorkRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *ConfirmTakeDownPublicWorkRequest) GetPublicWorkId() (v string) {
+	return p.PublicWorkId
+}
+
+func (p *ConfirmTakeDownPublicWorkRequest) GetPreviewToken() (v string) {
+	return p.PreviewToken
+}
+
+func (p *ConfirmTakeDownPublicWorkRequest) GetReason() (v string) {
+	return p.Reason
+}
+
+func (p *ConfirmTakeDownPublicWorkRequest) GetNotifyAuthor() (v bool) {
+	return p.NotifyAuthor
+}
+func (p *ConfirmTakeDownPublicWorkRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *ConfirmTakeDownPublicWorkRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *ConfirmTakeDownPublicWorkRequest) SetPublicWorkId(val string) {
+	p.PublicWorkId = val
+}
+func (p *ConfirmTakeDownPublicWorkRequest) SetPreviewToken(val string) {
+	p.PreviewToken = val
+}
+func (p *ConfirmTakeDownPublicWorkRequest) SetReason(val string) {
+	p.Reason = val
+}
+func (p *ConfirmTakeDownPublicWorkRequest) SetNotifyAuthor(val bool) {
+	p.NotifyAuthor = val
+}
+
+func (p *ConfirmTakeDownPublicWorkRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *ConfirmTakeDownPublicWorkRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *ConfirmTakeDownPublicWorkRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ConfirmTakeDownPublicWorkRequest(%+v)", *p)
+}
+
+var fieldIDToName_ConfirmTakeDownPublicWorkRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "public_work_id",
+	4: "preview_token",
+	5: "reason",
+	6: "notify_author",
+}
+
+type AdminPublicWorkDTO struct {
+	PublicWorkId       string            `thrift:"public_work_id,1,required" frugal:"1,required,string" json:"public_work_id"`
+	WorkId             string            `thrift:"work_id,2,required" frugal:"2,required,string" json:"work_id"`
+	Title              string            `thrift:"title,3,required" frugal:"3,required,string" json:"title"`
+	AuthorSummary      map[string]string `thrift:"author_summary,4,optional" frugal:"4,optional,map<string:string>" json:"author_summary,omitempty"`
+	Status             string            `thrift:"status,5,required" frugal:"5,required,string" json:"status"`
+	PublishedAt        string            `thrift:"published_at,6,required" frugal:"6,required,string" json:"published_at"`
+	TakenDownAt        *string           `thrift:"taken_down_at,7,optional" frugal:"7,optional,string" json:"taken_down_at,omitempty"`
+	NotificationStatus *string           `thrift:"notification_status,8,optional" frugal:"8,optional,string" json:"notification_status,omitempty"`
+}
+
+func NewAdminPublicWorkDTO() *AdminPublicWorkDTO {
+	return &AdminPublicWorkDTO{}
+}
+
+func (p *AdminPublicWorkDTO) InitDefault() {
+}
+
+func (p *AdminPublicWorkDTO) GetPublicWorkId() (v string) {
+	return p.PublicWorkId
+}
+
+func (p *AdminPublicWorkDTO) GetWorkId() (v string) {
+	return p.WorkId
+}
+
+func (p *AdminPublicWorkDTO) GetTitle() (v string) {
+	return p.Title
+}
+
+var AdminPublicWorkDTO_AuthorSummary_DEFAULT map[string]string
+
+func (p *AdminPublicWorkDTO) GetAuthorSummary() (v map[string]string) {
+	if !p.IsSetAuthorSummary() {
+		return AdminPublicWorkDTO_AuthorSummary_DEFAULT
+	}
+	return p.AuthorSummary
+}
+
+func (p *AdminPublicWorkDTO) GetStatus() (v string) {
+	return p.Status
+}
+
+func (p *AdminPublicWorkDTO) GetPublishedAt() (v string) {
+	return p.PublishedAt
+}
+
+var AdminPublicWorkDTO_TakenDownAt_DEFAULT string
+
+func (p *AdminPublicWorkDTO) GetTakenDownAt() (v string) {
+	if !p.IsSetTakenDownAt() {
+		return AdminPublicWorkDTO_TakenDownAt_DEFAULT
+	}
+	return *p.TakenDownAt
+}
+
+var AdminPublicWorkDTO_NotificationStatus_DEFAULT string
+
+func (p *AdminPublicWorkDTO) GetNotificationStatus() (v string) {
+	if !p.IsSetNotificationStatus() {
+		return AdminPublicWorkDTO_NotificationStatus_DEFAULT
+	}
+	return *p.NotificationStatus
+}
+func (p *AdminPublicWorkDTO) SetPublicWorkId(val string) {
+	p.PublicWorkId = val
+}
+func (p *AdminPublicWorkDTO) SetWorkId(val string) {
+	p.WorkId = val
+}
+func (p *AdminPublicWorkDTO) SetTitle(val string) {
+	p.Title = val
+}
+func (p *AdminPublicWorkDTO) SetAuthorSummary(val map[string]string) {
+	p.AuthorSummary = val
+}
+func (p *AdminPublicWorkDTO) SetStatus(val string) {
+	p.Status = val
+}
+func (p *AdminPublicWorkDTO) SetPublishedAt(val string) {
+	p.PublishedAt = val
+}
+func (p *AdminPublicWorkDTO) SetTakenDownAt(val *string) {
+	p.TakenDownAt = val
+}
+func (p *AdminPublicWorkDTO) SetNotificationStatus(val *string) {
+	p.NotificationStatus = val
+}
+
+func (p *AdminPublicWorkDTO) IsSetAuthorSummary() bool {
+	return p.AuthorSummary != nil
+}
+
+func (p *AdminPublicWorkDTO) IsSetTakenDownAt() bool {
+	return p.TakenDownAt != nil
+}
+
+func (p *AdminPublicWorkDTO) IsSetNotificationStatus() bool {
+	return p.NotificationStatus != nil
+}
+
+func (p *AdminPublicWorkDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AdminPublicWorkDTO(%+v)", *p)
+}
+
+var fieldIDToName_AdminPublicWorkDTO = map[int16]string{
+	1: "public_work_id",
+	2: "work_id",
+	3: "title",
+	4: "author_summary",
+	5: "status",
+	6: "published_at",
+	7: "taken_down_at",
+	8: "notification_status",
+}
+
+type ListPublicWorksRequest struct {
+	Category     *string `thrift:"category,1,optional" frugal:"1,optional,string" json:"category,omitempty"`
+	Tag          *string `thrift:"tag,2,optional" frugal:"2,optional,string" json:"tag,omitempty"`
+	ResourceType *string `thrift:"resource_type,3,optional" frugal:"3,optional,string" json:"resource_type,omitempty"`
+	SortBy       *string `thrift:"sort_by,4,optional" frugal:"4,optional,string" json:"sort_by,omitempty"`
+	PageSize     *int32  `thrift:"page_size,5,optional" frugal:"5,optional,i32" json:"page_size,omitempty"`
+	Offset       *int32  `thrift:"offset,6,optional" frugal:"6,optional,i32" json:"offset,omitempty"`
+}
+
+func NewListPublicWorksRequest() *ListPublicWorksRequest {
+	return &ListPublicWorksRequest{}
+}
+
+func (p *ListPublicWorksRequest) InitDefault() {
+}
+
+var ListPublicWorksRequest_Category_DEFAULT string
+
+func (p *ListPublicWorksRequest) GetCategory() (v string) {
+	if !p.IsSetCategory() {
+		return ListPublicWorksRequest_Category_DEFAULT
+	}
+	return *p.Category
+}
+
+var ListPublicWorksRequest_Tag_DEFAULT string
+
+func (p *ListPublicWorksRequest) GetTag() (v string) {
+	if !p.IsSetTag() {
+		return ListPublicWorksRequest_Tag_DEFAULT
+	}
+	return *p.Tag
+}
+
+var ListPublicWorksRequest_ResourceType_DEFAULT string
+
+func (p *ListPublicWorksRequest) GetResourceType() (v string) {
+	if !p.IsSetResourceType() {
+		return ListPublicWorksRequest_ResourceType_DEFAULT
+	}
+	return *p.ResourceType
+}
+
+var ListPublicWorksRequest_SortBy_DEFAULT string
+
+func (p *ListPublicWorksRequest) GetSortBy() (v string) {
+	if !p.IsSetSortBy() {
+		return ListPublicWorksRequest_SortBy_DEFAULT
+	}
+	return *p.SortBy
+}
+
+var ListPublicWorksRequest_PageSize_DEFAULT int32
+
+func (p *ListPublicWorksRequest) GetPageSize() (v int32) {
+	if !p.IsSetPageSize() {
+		return ListPublicWorksRequest_PageSize_DEFAULT
+	}
+	return *p.PageSize
+}
+
+var ListPublicWorksRequest_Offset_DEFAULT int32
+
+func (p *ListPublicWorksRequest) GetOffset() (v int32) {
+	if !p.IsSetOffset() {
+		return ListPublicWorksRequest_Offset_DEFAULT
+	}
+	return *p.Offset
+}
+func (p *ListPublicWorksRequest) SetCategory(val *string) {
+	p.Category = val
+}
+func (p *ListPublicWorksRequest) SetTag(val *string) {
+	p.Tag = val
+}
+func (p *ListPublicWorksRequest) SetResourceType(val *string) {
+	p.ResourceType = val
+}
+func (p *ListPublicWorksRequest) SetSortBy(val *string) {
+	p.SortBy = val
+}
+func (p *ListPublicWorksRequest) SetPageSize(val *int32) {
+	p.PageSize = val
+}
+func (p *ListPublicWorksRequest) SetOffset(val *int32) {
+	p.Offset = val
+}
+
+func (p *ListPublicWorksRequest) IsSetCategory() bool {
+	return p.Category != nil
+}
+
+func (p *ListPublicWorksRequest) IsSetTag() bool {
+	return p.Tag != nil
+}
+
+func (p *ListPublicWorksRequest) IsSetResourceType() bool {
+	return p.ResourceType != nil
+}
+
+func (p *ListPublicWorksRequest) IsSetSortBy() bool {
+	return p.SortBy != nil
+}
+
+func (p *ListPublicWorksRequest) IsSetPageSize() bool {
+	return p.PageSize != nil
+}
+
+func (p *ListPublicWorksRequest) IsSetOffset() bool {
+	return p.Offset != nil
+}
+
+func (p *ListPublicWorksRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListPublicWorksRequest(%+v)", *p)
+}
+
+var fieldIDToName_ListPublicWorksRequest = map[int16]string{
+	1: "category",
+	2: "tag",
+	3: "resource_type",
+	4: "sort_by",
+	5: "page_size",
+	6: "offset",
+}
+
+type PublicWorkCardDTO struct {
+	PublicWorkId string   `thrift:"public_work_id,1,required" frugal:"1,required,string" json:"public_work_id"`
+	Title        string   `thrift:"title,2,required" frugal:"2,required,string" json:"title"`
+	CoverUrl     *string  `thrift:"cover_url,3,optional" frugal:"3,optional,string" json:"cover_url,omitempty"`
+	ShareUrl     string   `thrift:"share_url,4,required" frugal:"4,required,string" json:"share_url"`
+	Category     *string  `thrift:"category,5,optional" frugal:"5,optional,string" json:"category,omitempty"`
+	Tags         []string `thrift:"tags,6,required" frugal:"6,required,list<string>" json:"tags"`
+	ResourceType *string  `thrift:"resource_type,7,optional" frugal:"7,optional,string" json:"resource_type,omitempty"`
+	LikeCount    int64    `thrift:"like_count,8,required" frugal:"8,required,i64" json:"like_count"`
+	PublishedAt  string   `thrift:"published_at,9,required" frugal:"9,required,string" json:"published_at"`
+}
+
+func NewPublicWorkCardDTO() *PublicWorkCardDTO {
+	return &PublicWorkCardDTO{}
+}
+
+func (p *PublicWorkCardDTO) InitDefault() {
+}
+
+func (p *PublicWorkCardDTO) GetPublicWorkId() (v string) {
+	return p.PublicWorkId
+}
+
+func (p *PublicWorkCardDTO) GetTitle() (v string) {
+	return p.Title
+}
+
+var PublicWorkCardDTO_CoverUrl_DEFAULT string
+
+func (p *PublicWorkCardDTO) GetCoverUrl() (v string) {
+	if !p.IsSetCoverUrl() {
+		return PublicWorkCardDTO_CoverUrl_DEFAULT
+	}
+	return *p.CoverUrl
+}
+
+func (p *PublicWorkCardDTO) GetShareUrl() (v string) {
+	return p.ShareUrl
+}
+
+var PublicWorkCardDTO_Category_DEFAULT string
+
+func (p *PublicWorkCardDTO) GetCategory() (v string) {
+	if !p.IsSetCategory() {
+		return PublicWorkCardDTO_Category_DEFAULT
+	}
+	return *p.Category
+}
+
+func (p *PublicWorkCardDTO) GetTags() (v []string) {
+	return p.Tags
+}
+
+var PublicWorkCardDTO_ResourceType_DEFAULT string
+
+func (p *PublicWorkCardDTO) GetResourceType() (v string) {
+	if !p.IsSetResourceType() {
+		return PublicWorkCardDTO_ResourceType_DEFAULT
+	}
+	return *p.ResourceType
+}
+
+func (p *PublicWorkCardDTO) GetLikeCount() (v int64) {
+	return p.LikeCount
+}
+
+func (p *PublicWorkCardDTO) GetPublishedAt() (v string) {
+	return p.PublishedAt
+}
+func (p *PublicWorkCardDTO) SetPublicWorkId(val string) {
+	p.PublicWorkId = val
+}
+func (p *PublicWorkCardDTO) SetTitle(val string) {
+	p.Title = val
+}
+func (p *PublicWorkCardDTO) SetCoverUrl(val *string) {
+	p.CoverUrl = val
+}
+func (p *PublicWorkCardDTO) SetShareUrl(val string) {
+	p.ShareUrl = val
+}
+func (p *PublicWorkCardDTO) SetCategory(val *string) {
+	p.Category = val
+}
+func (p *PublicWorkCardDTO) SetTags(val []string) {
+	p.Tags = val
+}
+func (p *PublicWorkCardDTO) SetResourceType(val *string) {
+	p.ResourceType = val
+}
+func (p *PublicWorkCardDTO) SetLikeCount(val int64) {
+	p.LikeCount = val
+}
+func (p *PublicWorkCardDTO) SetPublishedAt(val string) {
+	p.PublishedAt = val
+}
+
+func (p *PublicWorkCardDTO) IsSetCoverUrl() bool {
+	return p.CoverUrl != nil
+}
+
+func (p *PublicWorkCardDTO) IsSetCategory() bool {
+	return p.Category != nil
+}
+
+func (p *PublicWorkCardDTO) IsSetResourceType() bool {
+	return p.ResourceType != nil
+}
+
+func (p *PublicWorkCardDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PublicWorkCardDTO(%+v)", *p)
+}
+
+var fieldIDToName_PublicWorkCardDTO = map[int16]string{
+	1: "public_work_id",
+	2: "title",
+	3: "cover_url",
+	4: "share_url",
+	5: "category",
+	6: "tags",
+	7: "resource_type",
+	8: "like_count",
+	9: "published_at",
+}
+
+type ListPublicWorksResponse struct {
+	Items  []*PublicWorkCardDTO `thrift:"items,1,required" frugal:"1,required,list<PublicWorkCardDTO>" json:"items"`
+	Limit  int32                `thrift:"limit,2,required" frugal:"2,required,i32" json:"limit"`
+	Offset int32                `thrift:"offset,3,required" frugal:"3,required,i32" json:"offset"`
+	Total  int64                `thrift:"total,4,required" frugal:"4,required,i64" json:"total"`
+}
+
+func NewListPublicWorksResponse() *ListPublicWorksResponse {
+	return &ListPublicWorksResponse{}
+}
+
+func (p *ListPublicWorksResponse) InitDefault() {
+}
+
+func (p *ListPublicWorksResponse) GetItems() (v []*PublicWorkCardDTO) {
+	return p.Items
+}
+
+func (p *ListPublicWorksResponse) GetLimit() (v int32) {
+	return p.Limit
+}
+
+func (p *ListPublicWorksResponse) GetOffset() (v int32) {
+	return p.Offset
+}
+
+func (p *ListPublicWorksResponse) GetTotal() (v int64) {
+	return p.Total
+}
+func (p *ListPublicWorksResponse) SetItems(val []*PublicWorkCardDTO) {
+	p.Items = val
+}
+func (p *ListPublicWorksResponse) SetLimit(val int32) {
+	p.Limit = val
+}
+func (p *ListPublicWorksResponse) SetOffset(val int32) {
+	p.Offset = val
+}
+func (p *ListPublicWorksResponse) SetTotal(val int64) {
+	p.Total = val
+}
+
+func (p *ListPublicWorksResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListPublicWorksResponse(%+v)", *p)
+}
+
+var fieldIDToName_ListPublicWorksResponse = map[int16]string{
+	1: "items",
+	2: "limit",
+	3: "offset",
+	4: "total",
+}
+
+type GetPublicWorkRequest struct {
+	PublicWorkId string       `thrift:"public_work_id,1,required" frugal:"1,required,string" json:"public_work_id"`
+	AuthContext  *AuthContext `thrift:"auth_context,2,optional" frugal:"2,optional,AuthContext" json:"auth_context,omitempty"`
+	RequestMeta  *RequestMeta `thrift:"request_meta,3,required" frugal:"3,required,RequestMeta" json:"request_meta"`
+}
+
+func NewGetPublicWorkRequest() *GetPublicWorkRequest {
+	return &GetPublicWorkRequest{}
+}
+
+func (p *GetPublicWorkRequest) InitDefault() {
+}
+
+func (p *GetPublicWorkRequest) GetPublicWorkId() (v string) {
+	return p.PublicWorkId
+}
+
+var GetPublicWorkRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *GetPublicWorkRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return GetPublicWorkRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var GetPublicWorkRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *GetPublicWorkRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return GetPublicWorkRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+func (p *GetPublicWorkRequest) SetPublicWorkId(val string) {
+	p.PublicWorkId = val
+}
+func (p *GetPublicWorkRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *GetPublicWorkRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+
+func (p *GetPublicWorkRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *GetPublicWorkRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *GetPublicWorkRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("GetPublicWorkRequest(%+v)", *p)
+}
+
+var fieldIDToName_GetPublicWorkRequest = map[int16]string{
+	1: "public_work_id",
+	2: "auth_context",
+	3: "request_meta",
+}
+
+type PublicWorkDetailDTO struct {
+	PublicWorkId       string              `thrift:"public_work_id,1,required" frugal:"1,required,string" json:"public_work_id"`
+	Title              string              `thrift:"title,2,required" frugal:"2,required,string" json:"title"`
+	Description        *string             `thrift:"description,3,optional" frugal:"3,optional,string" json:"description,omitempty"`
+	ShareUrl           string              `thrift:"share_url,4,required" frugal:"4,required,string" json:"share_url"`
+	PublicMediaRefs    []map[string]string `thrift:"public_media_refs,5,required" frugal:"5,required,list<map<string:string>>" json:"public_media_refs"`
+	AuthorDisplayName  string              `thrift:"author_display_name,6,required" frugal:"6,required,string" json:"author_display_name"`
+	Category           *string             `thrift:"category,7,optional" frugal:"7,optional,string" json:"category,omitempty"`
+	Tags               []string            `thrift:"tags,8,required" frugal:"8,required,list<string>" json:"tags"`
+	LikeCount          int64               `thrift:"like_count,9,required" frugal:"9,required,i64" json:"like_count"`
+	LikedByCurrentUser bool                `thrift:"liked_by_current_user,10,required" frugal:"10,required,bool" json:"liked_by_current_user"`
+}
+
+func NewPublicWorkDetailDTO() *PublicWorkDetailDTO {
+	return &PublicWorkDetailDTO{}
+}
+
+func (p *PublicWorkDetailDTO) InitDefault() {
+}
+
+func (p *PublicWorkDetailDTO) GetPublicWorkId() (v string) {
+	return p.PublicWorkId
+}
+
+func (p *PublicWorkDetailDTO) GetTitle() (v string) {
+	return p.Title
+}
+
+var PublicWorkDetailDTO_Description_DEFAULT string
+
+func (p *PublicWorkDetailDTO) GetDescription() (v string) {
+	if !p.IsSetDescription() {
+		return PublicWorkDetailDTO_Description_DEFAULT
+	}
+	return *p.Description
+}
+
+func (p *PublicWorkDetailDTO) GetShareUrl() (v string) {
+	return p.ShareUrl
+}
+
+func (p *PublicWorkDetailDTO) GetPublicMediaRefs() (v []map[string]string) {
+	return p.PublicMediaRefs
+}
+
+func (p *PublicWorkDetailDTO) GetAuthorDisplayName() (v string) {
+	return p.AuthorDisplayName
+}
+
+var PublicWorkDetailDTO_Category_DEFAULT string
+
+func (p *PublicWorkDetailDTO) GetCategory() (v string) {
+	if !p.IsSetCategory() {
+		return PublicWorkDetailDTO_Category_DEFAULT
+	}
+	return *p.Category
+}
+
+func (p *PublicWorkDetailDTO) GetTags() (v []string) {
+	return p.Tags
+}
+
+func (p *PublicWorkDetailDTO) GetLikeCount() (v int64) {
+	return p.LikeCount
+}
+
+func (p *PublicWorkDetailDTO) GetLikedByCurrentUser() (v bool) {
+	return p.LikedByCurrentUser
+}
+func (p *PublicWorkDetailDTO) SetPublicWorkId(val string) {
+	p.PublicWorkId = val
+}
+func (p *PublicWorkDetailDTO) SetTitle(val string) {
+	p.Title = val
+}
+func (p *PublicWorkDetailDTO) SetDescription(val *string) {
+	p.Description = val
+}
+func (p *PublicWorkDetailDTO) SetShareUrl(val string) {
+	p.ShareUrl = val
+}
+func (p *PublicWorkDetailDTO) SetPublicMediaRefs(val []map[string]string) {
+	p.PublicMediaRefs = val
+}
+func (p *PublicWorkDetailDTO) SetAuthorDisplayName(val string) {
+	p.AuthorDisplayName = val
+}
+func (p *PublicWorkDetailDTO) SetCategory(val *string) {
+	p.Category = val
+}
+func (p *PublicWorkDetailDTO) SetTags(val []string) {
+	p.Tags = val
+}
+func (p *PublicWorkDetailDTO) SetLikeCount(val int64) {
+	p.LikeCount = val
+}
+func (p *PublicWorkDetailDTO) SetLikedByCurrentUser(val bool) {
+	p.LikedByCurrentUser = val
+}
+
+func (p *PublicWorkDetailDTO) IsSetDescription() bool {
+	return p.Description != nil
+}
+
+func (p *PublicWorkDetailDTO) IsSetCategory() bool {
+	return p.Category != nil
+}
+
+func (p *PublicWorkDetailDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PublicWorkDetailDTO(%+v)", *p)
+}
+
+var fieldIDToName_PublicWorkDetailDTO = map[int16]string{
+	1:  "public_work_id",
+	2:  "title",
+	3:  "description",
+	4:  "share_url",
+	5:  "public_media_refs",
+	6:  "author_display_name",
+	7:  "category",
+	8:  "tags",
+	9:  "like_count",
+	10: "liked_by_current_user",
+}
+
+type CreateNotificationRequest struct {
+	AuthContext           *AuthContext      `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta           *RequestMeta      `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	RecipientUserId       string            `thrift:"recipient_user_id,3,required" frugal:"3,required,string" json:"recipient_user_id"`
+	RecipientSpaceId      *string           `thrift:"recipient_space_id,4,optional" frugal:"4,optional,string" json:"recipient_space_id,omitempty"`
+	RecipientEnterpriseId *string           `thrift:"recipient_enterprise_id,5,optional" frugal:"5,optional,string" json:"recipient_enterprise_id,omitempty"`
+	Type                  string            `thrift:"type,6,required" frugal:"6,required,string" json:"type"`
+	Title                 string            `thrift:"title,7,required" frugal:"7,required,string" json:"title"`
+	Summary               string            `thrift:"summary,8,required" frugal:"8,required,string" json:"summary"`
+	Body                  *string           `thrift:"body,9,optional" frugal:"9,optional,string" json:"body,omitempty"`
+	NavigationHint        map[string]string `thrift:"navigation_hint,10,required" frugal:"10,required,map<string:string>" json:"navigation_hint"`
+	RelatedResourceType   *string           `thrift:"related_resource_type,11,optional" frugal:"11,optional,string" json:"related_resource_type,omitempty"`
+	RelatedResourceId     *string           `thrift:"related_resource_id,12,optional" frugal:"12,optional,string" json:"related_resource_id,omitempty"`
+}
+
+func NewCreateNotificationRequest() *CreateNotificationRequest {
+	return &CreateNotificationRequest{}
+}
+
+func (p *CreateNotificationRequest) InitDefault() {
+}
+
+var CreateNotificationRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *CreateNotificationRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return CreateNotificationRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var CreateNotificationRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *CreateNotificationRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return CreateNotificationRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *CreateNotificationRequest) GetRecipientUserId() (v string) {
+	return p.RecipientUserId
+}
+
+var CreateNotificationRequest_RecipientSpaceId_DEFAULT string
+
+func (p *CreateNotificationRequest) GetRecipientSpaceId() (v string) {
+	if !p.IsSetRecipientSpaceId() {
+		return CreateNotificationRequest_RecipientSpaceId_DEFAULT
+	}
+	return *p.RecipientSpaceId
+}
+
+var CreateNotificationRequest_RecipientEnterpriseId_DEFAULT string
+
+func (p *CreateNotificationRequest) GetRecipientEnterpriseId() (v string) {
+	if !p.IsSetRecipientEnterpriseId() {
+		return CreateNotificationRequest_RecipientEnterpriseId_DEFAULT
+	}
+	return *p.RecipientEnterpriseId
+}
+
+func (p *CreateNotificationRequest) GetType() (v string) {
+	return p.Type
+}
+
+func (p *CreateNotificationRequest) GetTitle() (v string) {
+	return p.Title
+}
+
+func (p *CreateNotificationRequest) GetSummary() (v string) {
+	return p.Summary
+}
+
+var CreateNotificationRequest_Body_DEFAULT string
+
+func (p *CreateNotificationRequest) GetBody() (v string) {
+	if !p.IsSetBody() {
+		return CreateNotificationRequest_Body_DEFAULT
+	}
+	return *p.Body
+}
+
+func (p *CreateNotificationRequest) GetNavigationHint() (v map[string]string) {
+	return p.NavigationHint
+}
+
+var CreateNotificationRequest_RelatedResourceType_DEFAULT string
+
+func (p *CreateNotificationRequest) GetRelatedResourceType() (v string) {
+	if !p.IsSetRelatedResourceType() {
+		return CreateNotificationRequest_RelatedResourceType_DEFAULT
+	}
+	return *p.RelatedResourceType
+}
+
+var CreateNotificationRequest_RelatedResourceId_DEFAULT string
+
+func (p *CreateNotificationRequest) GetRelatedResourceId() (v string) {
+	if !p.IsSetRelatedResourceId() {
+		return CreateNotificationRequest_RelatedResourceId_DEFAULT
+	}
+	return *p.RelatedResourceId
+}
+func (p *CreateNotificationRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *CreateNotificationRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *CreateNotificationRequest) SetRecipientUserId(val string) {
+	p.RecipientUserId = val
+}
+func (p *CreateNotificationRequest) SetRecipientSpaceId(val *string) {
+	p.RecipientSpaceId = val
+}
+func (p *CreateNotificationRequest) SetRecipientEnterpriseId(val *string) {
+	p.RecipientEnterpriseId = val
+}
+func (p *CreateNotificationRequest) SetType(val string) {
+	p.Type = val
+}
+func (p *CreateNotificationRequest) SetTitle(val string) {
+	p.Title = val
+}
+func (p *CreateNotificationRequest) SetSummary(val string) {
+	p.Summary = val
+}
+func (p *CreateNotificationRequest) SetBody(val *string) {
+	p.Body = val
+}
+func (p *CreateNotificationRequest) SetNavigationHint(val map[string]string) {
+	p.NavigationHint = val
+}
+func (p *CreateNotificationRequest) SetRelatedResourceType(val *string) {
+	p.RelatedResourceType = val
+}
+func (p *CreateNotificationRequest) SetRelatedResourceId(val *string) {
+	p.RelatedResourceId = val
+}
+
+func (p *CreateNotificationRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *CreateNotificationRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *CreateNotificationRequest) IsSetRecipientSpaceId() bool {
+	return p.RecipientSpaceId != nil
+}
+
+func (p *CreateNotificationRequest) IsSetRecipientEnterpriseId() bool {
+	return p.RecipientEnterpriseId != nil
+}
+
+func (p *CreateNotificationRequest) IsSetBody() bool {
+	return p.Body != nil
+}
+
+func (p *CreateNotificationRequest) IsSetRelatedResourceType() bool {
+	return p.RelatedResourceType != nil
+}
+
+func (p *CreateNotificationRequest) IsSetRelatedResourceId() bool {
+	return p.RelatedResourceId != nil
+}
+
+func (p *CreateNotificationRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CreateNotificationRequest(%+v)", *p)
+}
+
+var fieldIDToName_CreateNotificationRequest = map[int16]string{
+	1:  "auth_context",
+	2:  "request_meta",
+	3:  "recipient_user_id",
+	4:  "recipient_space_id",
+	5:  "recipient_enterprise_id",
+	6:  "type",
+	7:  "title",
+	8:  "summary",
+	9:  "body",
+	10: "navigation_hint",
+	11: "related_resource_type",
+	12: "related_resource_id",
+}
+
+type NotificationDTO struct {
+	NotificationId      string            `thrift:"notification_id,1,required" frugal:"1,required,string" json:"notification_id"`
+	Type                string            `thrift:"type,2,required" frugal:"2,required,string" json:"type"`
+	Title               string            `thrift:"title,3,required" frugal:"3,required,string" json:"title"`
+	Summary             string            `thrift:"summary,4,required" frugal:"4,required,string" json:"summary"`
+	Body                *string           `thrift:"body,5,optional" frugal:"5,optional,string" json:"body,omitempty"`
+	NavigationHint      map[string]string `thrift:"navigation_hint,6,required" frugal:"6,required,map<string:string>" json:"navigation_hint"`
+	ReadAt              *string           `thrift:"read_at,7,optional" frugal:"7,optional,string" json:"read_at,omitempty"`
+	CreatedAt           string            `thrift:"created_at,8,required" frugal:"8,required,string" json:"created_at"`
+	RelatedResourceType *string           `thrift:"related_resource_type,9,optional" frugal:"9,optional,string" json:"related_resource_type,omitempty"`
+	RelatedResourceId   *string           `thrift:"related_resource_id,10,optional" frugal:"10,optional,string" json:"related_resource_id,omitempty"`
+}
+
+func NewNotificationDTO() *NotificationDTO {
+	return &NotificationDTO{}
+}
+
+func (p *NotificationDTO) InitDefault() {
+}
+
+func (p *NotificationDTO) GetNotificationId() (v string) {
+	return p.NotificationId
+}
+
+func (p *NotificationDTO) GetType() (v string) {
+	return p.Type
+}
+
+func (p *NotificationDTO) GetTitle() (v string) {
+	return p.Title
+}
+
+func (p *NotificationDTO) GetSummary() (v string) {
+	return p.Summary
+}
+
+var NotificationDTO_Body_DEFAULT string
+
+func (p *NotificationDTO) GetBody() (v string) {
+	if !p.IsSetBody() {
+		return NotificationDTO_Body_DEFAULT
+	}
+	return *p.Body
+}
+
+func (p *NotificationDTO) GetNavigationHint() (v map[string]string) {
+	return p.NavigationHint
+}
+
+var NotificationDTO_ReadAt_DEFAULT string
+
+func (p *NotificationDTO) GetReadAt() (v string) {
+	if !p.IsSetReadAt() {
+		return NotificationDTO_ReadAt_DEFAULT
+	}
+	return *p.ReadAt
+}
+
+func (p *NotificationDTO) GetCreatedAt() (v string) {
+	return p.CreatedAt
+}
+
+var NotificationDTO_RelatedResourceType_DEFAULT string
+
+func (p *NotificationDTO) GetRelatedResourceType() (v string) {
+	if !p.IsSetRelatedResourceType() {
+		return NotificationDTO_RelatedResourceType_DEFAULT
+	}
+	return *p.RelatedResourceType
+}
+
+var NotificationDTO_RelatedResourceId_DEFAULT string
+
+func (p *NotificationDTO) GetRelatedResourceId() (v string) {
+	if !p.IsSetRelatedResourceId() {
+		return NotificationDTO_RelatedResourceId_DEFAULT
+	}
+	return *p.RelatedResourceId
+}
+func (p *NotificationDTO) SetNotificationId(val string) {
+	p.NotificationId = val
+}
+func (p *NotificationDTO) SetType(val string) {
+	p.Type = val
+}
+func (p *NotificationDTO) SetTitle(val string) {
+	p.Title = val
+}
+func (p *NotificationDTO) SetSummary(val string) {
+	p.Summary = val
+}
+func (p *NotificationDTO) SetBody(val *string) {
+	p.Body = val
+}
+func (p *NotificationDTO) SetNavigationHint(val map[string]string) {
+	p.NavigationHint = val
+}
+func (p *NotificationDTO) SetReadAt(val *string) {
+	p.ReadAt = val
+}
+func (p *NotificationDTO) SetCreatedAt(val string) {
+	p.CreatedAt = val
+}
+func (p *NotificationDTO) SetRelatedResourceType(val *string) {
+	p.RelatedResourceType = val
+}
+func (p *NotificationDTO) SetRelatedResourceId(val *string) {
+	p.RelatedResourceId = val
+}
+
+func (p *NotificationDTO) IsSetBody() bool {
+	return p.Body != nil
+}
+
+func (p *NotificationDTO) IsSetReadAt() bool {
+	return p.ReadAt != nil
+}
+
+func (p *NotificationDTO) IsSetRelatedResourceType() bool {
+	return p.RelatedResourceType != nil
+}
+
+func (p *NotificationDTO) IsSetRelatedResourceId() bool {
+	return p.RelatedResourceId != nil
+}
+
+func (p *NotificationDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationDTO(%+v)", *p)
+}
+
+var fieldIDToName_NotificationDTO = map[int16]string{
+	1:  "notification_id",
+	2:  "type",
+	3:  "title",
+	4:  "summary",
+	5:  "body",
+	6:  "navigation_hint",
+	7:  "read_at",
+	8:  "created_at",
+	9:  "related_resource_type",
+	10: "related_resource_id",
+}
+
+type ListNotificationsRequest struct {
+	AuthContext *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	Type        *string      `thrift:"type,3,optional" frugal:"3,optional,string" json:"type,omitempty"`
+	ReadState   *string      `thrift:"read_state,4,optional" frugal:"4,optional,string" json:"read_state,omitempty"`
+	PageSize    *int32       `thrift:"page_size,5,optional" frugal:"5,optional,i32" json:"page_size,omitempty"`
+	Offset      *int32       `thrift:"offset,6,optional" frugal:"6,optional,i32" json:"offset,omitempty"`
+}
+
+func NewListNotificationsRequest() *ListNotificationsRequest {
+	return &ListNotificationsRequest{}
+}
+
+func (p *ListNotificationsRequest) InitDefault() {
+}
+
+var ListNotificationsRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *ListNotificationsRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return ListNotificationsRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var ListNotificationsRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *ListNotificationsRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return ListNotificationsRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+var ListNotificationsRequest_Type_DEFAULT string
+
+func (p *ListNotificationsRequest) GetType() (v string) {
+	if !p.IsSetType() {
+		return ListNotificationsRequest_Type_DEFAULT
+	}
+	return *p.Type
+}
+
+var ListNotificationsRequest_ReadState_DEFAULT string
+
+func (p *ListNotificationsRequest) GetReadState() (v string) {
+	if !p.IsSetReadState() {
+		return ListNotificationsRequest_ReadState_DEFAULT
+	}
+	return *p.ReadState
+}
+
+var ListNotificationsRequest_PageSize_DEFAULT int32
+
+func (p *ListNotificationsRequest) GetPageSize() (v int32) {
+	if !p.IsSetPageSize() {
+		return ListNotificationsRequest_PageSize_DEFAULT
+	}
+	return *p.PageSize
+}
+
+var ListNotificationsRequest_Offset_DEFAULT int32
+
+func (p *ListNotificationsRequest) GetOffset() (v int32) {
+	if !p.IsSetOffset() {
+		return ListNotificationsRequest_Offset_DEFAULT
+	}
+	return *p.Offset
+}
+func (p *ListNotificationsRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *ListNotificationsRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *ListNotificationsRequest) SetType(val *string) {
+	p.Type = val
+}
+func (p *ListNotificationsRequest) SetReadState(val *string) {
+	p.ReadState = val
+}
+func (p *ListNotificationsRequest) SetPageSize(val *int32) {
+	p.PageSize = val
+}
+func (p *ListNotificationsRequest) SetOffset(val *int32) {
+	p.Offset = val
+}
+
+func (p *ListNotificationsRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *ListNotificationsRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *ListNotificationsRequest) IsSetType() bool {
+	return p.Type != nil
+}
+
+func (p *ListNotificationsRequest) IsSetReadState() bool {
+	return p.ReadState != nil
+}
+
+func (p *ListNotificationsRequest) IsSetPageSize() bool {
+	return p.PageSize != nil
+}
+
+func (p *ListNotificationsRequest) IsSetOffset() bool {
+	return p.Offset != nil
+}
+
+func (p *ListNotificationsRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListNotificationsRequest(%+v)", *p)
+}
+
+var fieldIDToName_ListNotificationsRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "type",
+	4: "read_state",
+	5: "page_size",
+	6: "offset",
+}
+
+type ListNotificationsResponse struct {
+	Items  []*NotificationDTO `thrift:"items,1,required" frugal:"1,required,list<NotificationDTO>" json:"items"`
+	Limit  int32              `thrift:"limit,2,required" frugal:"2,required,i32" json:"limit"`
+	Offset int32              `thrift:"offset,3,required" frugal:"3,required,i32" json:"offset"`
+	Total  int64              `thrift:"total,4,required" frugal:"4,required,i64" json:"total"`
+}
+
+func NewListNotificationsResponse() *ListNotificationsResponse {
+	return &ListNotificationsResponse{}
+}
+
+func (p *ListNotificationsResponse) InitDefault() {
+}
+
+func (p *ListNotificationsResponse) GetItems() (v []*NotificationDTO) {
+	return p.Items
+}
+
+func (p *ListNotificationsResponse) GetLimit() (v int32) {
+	return p.Limit
+}
+
+func (p *ListNotificationsResponse) GetOffset() (v int32) {
+	return p.Offset
+}
+
+func (p *ListNotificationsResponse) GetTotal() (v int64) {
+	return p.Total
+}
+func (p *ListNotificationsResponse) SetItems(val []*NotificationDTO) {
+	p.Items = val
+}
+func (p *ListNotificationsResponse) SetLimit(val int32) {
+	p.Limit = val
+}
+func (p *ListNotificationsResponse) SetOffset(val int32) {
+	p.Offset = val
+}
+func (p *ListNotificationsResponse) SetTotal(val int64) {
+	p.Total = val
+}
+
+func (p *ListNotificationsResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListNotificationsResponse(%+v)", *p)
+}
+
+var fieldIDToName_ListNotificationsResponse = map[int16]string{
+	1: "items",
+	2: "limit",
+	3: "offset",
+	4: "total",
+}
+
+type GetUnreadCountRequest struct {
+	AuthContext *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+}
+
+func NewGetUnreadCountRequest() *GetUnreadCountRequest {
+	return &GetUnreadCountRequest{}
+}
+
+func (p *GetUnreadCountRequest) InitDefault() {
+}
+
+var GetUnreadCountRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *GetUnreadCountRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return GetUnreadCountRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var GetUnreadCountRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *GetUnreadCountRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return GetUnreadCountRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+func (p *GetUnreadCountRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *GetUnreadCountRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+
+func (p *GetUnreadCountRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *GetUnreadCountRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *GetUnreadCountRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("GetUnreadCountRequest(%+v)", *p)
+}
+
+var fieldIDToName_GetUnreadCountRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+}
+
+type UnreadCountDTO struct {
+	UnreadCount int64 `thrift:"unread_count,1,required" frugal:"1,required,i64" json:"unread_count"`
+}
+
+func NewUnreadCountDTO() *UnreadCountDTO {
+	return &UnreadCountDTO{}
+}
+
+func (p *UnreadCountDTO) InitDefault() {
+}
+
+func (p *UnreadCountDTO) GetUnreadCount() (v int64) {
+	return p.UnreadCount
+}
+func (p *UnreadCountDTO) SetUnreadCount(val int64) {
+	p.UnreadCount = val
+}
+
+func (p *UnreadCountDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UnreadCountDTO(%+v)", *p)
+}
+
+var fieldIDToName_UnreadCountDTO = map[int16]string{
+	1: "unread_count",
+}
+
+type MarkNotificationReadRequest struct {
+	AuthContext    *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta    *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	NotificationId string       `thrift:"notification_id,3,required" frugal:"3,required,string" json:"notification_id"`
+}
+
+func NewMarkNotificationReadRequest() *MarkNotificationReadRequest {
+	return &MarkNotificationReadRequest{}
+}
+
+func (p *MarkNotificationReadRequest) InitDefault() {
+}
+
+var MarkNotificationReadRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *MarkNotificationReadRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return MarkNotificationReadRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var MarkNotificationReadRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *MarkNotificationReadRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return MarkNotificationReadRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+func (p *MarkNotificationReadRequest) GetNotificationId() (v string) {
+	return p.NotificationId
+}
+func (p *MarkNotificationReadRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *MarkNotificationReadRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *MarkNotificationReadRequest) SetNotificationId(val string) {
+	p.NotificationId = val
+}
+
+func (p *MarkNotificationReadRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *MarkNotificationReadRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *MarkNotificationReadRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("MarkNotificationReadRequest(%+v)", *p)
+}
+
+var fieldIDToName_MarkNotificationReadRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "notification_id",
+}
+
+type MarkAllNotificationsReadRequest struct {
+	AuthContext *AuthContext `thrift:"auth_context,1,required" frugal:"1,required,AuthContext" json:"auth_context"`
+	RequestMeta *RequestMeta `thrift:"request_meta,2,required" frugal:"2,required,RequestMeta" json:"request_meta"`
+	Type        *string      `thrift:"type,3,optional" frugal:"3,optional,string" json:"type,omitempty"`
+}
+
+func NewMarkAllNotificationsReadRequest() *MarkAllNotificationsReadRequest {
+	return &MarkAllNotificationsReadRequest{}
+}
+
+func (p *MarkAllNotificationsReadRequest) InitDefault() {
+}
+
+var MarkAllNotificationsReadRequest_AuthContext_DEFAULT *AuthContext
+
+func (p *MarkAllNotificationsReadRequest) GetAuthContext() (v *AuthContext) {
+	if !p.IsSetAuthContext() {
+		return MarkAllNotificationsReadRequest_AuthContext_DEFAULT
+	}
+	return p.AuthContext
+}
+
+var MarkAllNotificationsReadRequest_RequestMeta_DEFAULT *RequestMeta
+
+func (p *MarkAllNotificationsReadRequest) GetRequestMeta() (v *RequestMeta) {
+	if !p.IsSetRequestMeta() {
+		return MarkAllNotificationsReadRequest_RequestMeta_DEFAULT
+	}
+	return p.RequestMeta
+}
+
+var MarkAllNotificationsReadRequest_Type_DEFAULT string
+
+func (p *MarkAllNotificationsReadRequest) GetType() (v string) {
+	if !p.IsSetType() {
+		return MarkAllNotificationsReadRequest_Type_DEFAULT
+	}
+	return *p.Type
+}
+func (p *MarkAllNotificationsReadRequest) SetAuthContext(val *AuthContext) {
+	p.AuthContext = val
+}
+func (p *MarkAllNotificationsReadRequest) SetRequestMeta(val *RequestMeta) {
+	p.RequestMeta = val
+}
+func (p *MarkAllNotificationsReadRequest) SetType(val *string) {
+	p.Type = val
+}
+
+func (p *MarkAllNotificationsReadRequest) IsSetAuthContext() bool {
+	return p.AuthContext != nil
+}
+
+func (p *MarkAllNotificationsReadRequest) IsSetRequestMeta() bool {
+	return p.RequestMeta != nil
+}
+
+func (p *MarkAllNotificationsReadRequest) IsSetType() bool {
+	return p.Type != nil
+}
+
+func (p *MarkAllNotificationsReadRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("MarkAllNotificationsReadRequest(%+v)", *p)
+}
+
+var fieldIDToName_MarkAllNotificationsReadRequest = map[int16]string{
+	1: "auth_context",
+	2: "request_meta",
+	3: "type",
+}
+
 type AccountSpaceService interface {
 	ResolveCurrentSpaceContext(ctx context.Context, req *ResolveCurrentSpaceContextRequest) (r *ResolveCurrentSpaceContextResponse, err error)
 
@@ -5621,8 +9883,486 @@ var fieldIDToName_AccountSpaceServiceResolveAuthContextFromTokenResult = map[int
 	0: "success",
 }
 
+type EnterpriseService interface {
+	PreviewTransferOwner(ctx context.Context, req *PreviewTransferOwnerRequest) (r *TransferOwnerPreviewDTO, err error)
+
+	ConfirmTransferOwner(ctx context.Context, req *ConfirmTransferOwnerRequest) (r *EnterpriseSummaryDTO, err error)
+}
+
+type EnterpriseServicePreviewTransferOwnerArgs struct {
+	Req *PreviewTransferOwnerRequest `thrift:"req,1" frugal:"1,default,PreviewTransferOwnerRequest" json:"req"`
+}
+
+func NewEnterpriseServicePreviewTransferOwnerArgs() *EnterpriseServicePreviewTransferOwnerArgs {
+	return &EnterpriseServicePreviewTransferOwnerArgs{}
+}
+
+func (p *EnterpriseServicePreviewTransferOwnerArgs) InitDefault() {
+}
+
+var EnterpriseServicePreviewTransferOwnerArgs_Req_DEFAULT *PreviewTransferOwnerRequest
+
+func (p *EnterpriseServicePreviewTransferOwnerArgs) GetReq() (v *PreviewTransferOwnerRequest) {
+	if !p.IsSetReq() {
+		return EnterpriseServicePreviewTransferOwnerArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *EnterpriseServicePreviewTransferOwnerArgs) SetReq(val *PreviewTransferOwnerRequest) {
+	p.Req = val
+}
+
+func (p *EnterpriseServicePreviewTransferOwnerArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *EnterpriseServicePreviewTransferOwnerArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("EnterpriseServicePreviewTransferOwnerArgs(%+v)", *p)
+}
+
+var fieldIDToName_EnterpriseServicePreviewTransferOwnerArgs = map[int16]string{
+	1: "req",
+}
+
+type EnterpriseServicePreviewTransferOwnerResult struct {
+	Success *TransferOwnerPreviewDTO `thrift:"success,0,optional" frugal:"0,optional,TransferOwnerPreviewDTO" json:"success,omitempty"`
+}
+
+func NewEnterpriseServicePreviewTransferOwnerResult() *EnterpriseServicePreviewTransferOwnerResult {
+	return &EnterpriseServicePreviewTransferOwnerResult{}
+}
+
+func (p *EnterpriseServicePreviewTransferOwnerResult) InitDefault() {
+}
+
+var EnterpriseServicePreviewTransferOwnerResult_Success_DEFAULT *TransferOwnerPreviewDTO
+
+func (p *EnterpriseServicePreviewTransferOwnerResult) GetSuccess() (v *TransferOwnerPreviewDTO) {
+	if !p.IsSetSuccess() {
+		return EnterpriseServicePreviewTransferOwnerResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *EnterpriseServicePreviewTransferOwnerResult) SetSuccess(x interface{}) {
+	p.Success = x.(*TransferOwnerPreviewDTO)
+}
+
+func (p *EnterpriseServicePreviewTransferOwnerResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *EnterpriseServicePreviewTransferOwnerResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("EnterpriseServicePreviewTransferOwnerResult(%+v)", *p)
+}
+
+var fieldIDToName_EnterpriseServicePreviewTransferOwnerResult = map[int16]string{
+	0: "success",
+}
+
+type EnterpriseServiceConfirmTransferOwnerArgs struct {
+	Req *ConfirmTransferOwnerRequest `thrift:"req,1" frugal:"1,default,ConfirmTransferOwnerRequest" json:"req"`
+}
+
+func NewEnterpriseServiceConfirmTransferOwnerArgs() *EnterpriseServiceConfirmTransferOwnerArgs {
+	return &EnterpriseServiceConfirmTransferOwnerArgs{}
+}
+
+func (p *EnterpriseServiceConfirmTransferOwnerArgs) InitDefault() {
+}
+
+var EnterpriseServiceConfirmTransferOwnerArgs_Req_DEFAULT *ConfirmTransferOwnerRequest
+
+func (p *EnterpriseServiceConfirmTransferOwnerArgs) GetReq() (v *ConfirmTransferOwnerRequest) {
+	if !p.IsSetReq() {
+		return EnterpriseServiceConfirmTransferOwnerArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *EnterpriseServiceConfirmTransferOwnerArgs) SetReq(val *ConfirmTransferOwnerRequest) {
+	p.Req = val
+}
+
+func (p *EnterpriseServiceConfirmTransferOwnerArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *EnterpriseServiceConfirmTransferOwnerArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("EnterpriseServiceConfirmTransferOwnerArgs(%+v)", *p)
+}
+
+var fieldIDToName_EnterpriseServiceConfirmTransferOwnerArgs = map[int16]string{
+	1: "req",
+}
+
+type EnterpriseServiceConfirmTransferOwnerResult struct {
+	Success *EnterpriseSummaryDTO `thrift:"success,0,optional" frugal:"0,optional,EnterpriseSummaryDTO" json:"success,omitempty"`
+}
+
+func NewEnterpriseServiceConfirmTransferOwnerResult() *EnterpriseServiceConfirmTransferOwnerResult {
+	return &EnterpriseServiceConfirmTransferOwnerResult{}
+}
+
+func (p *EnterpriseServiceConfirmTransferOwnerResult) InitDefault() {
+}
+
+var EnterpriseServiceConfirmTransferOwnerResult_Success_DEFAULT *EnterpriseSummaryDTO
+
+func (p *EnterpriseServiceConfirmTransferOwnerResult) GetSuccess() (v *EnterpriseSummaryDTO) {
+	if !p.IsSetSuccess() {
+		return EnterpriseServiceConfirmTransferOwnerResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *EnterpriseServiceConfirmTransferOwnerResult) SetSuccess(x interface{}) {
+	p.Success = x.(*EnterpriseSummaryDTO)
+}
+
+func (p *EnterpriseServiceConfirmTransferOwnerResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *EnterpriseServiceConfirmTransferOwnerResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("EnterpriseServiceConfirmTransferOwnerResult(%+v)", *p)
+}
+
+var fieldIDToName_EnterpriseServiceConfirmTransferOwnerResult = map[int16]string{
+	0: "success",
+}
+
+type AdminService interface {
+	CreateAdmin(ctx context.Context, req *CreateAdminRequest) (r *PlatformAdminDTO, err error)
+
+	DisableAdmin(ctx context.Context, req *DisableAdminRequest) (r *PlatformAdminDTO, err error)
+}
+
+type AdminServiceCreateAdminArgs struct {
+	Req *CreateAdminRequest `thrift:"req,1" frugal:"1,default,CreateAdminRequest" json:"req"`
+}
+
+func NewAdminServiceCreateAdminArgs() *AdminServiceCreateAdminArgs {
+	return &AdminServiceCreateAdminArgs{}
+}
+
+func (p *AdminServiceCreateAdminArgs) InitDefault() {
+}
+
+var AdminServiceCreateAdminArgs_Req_DEFAULT *CreateAdminRequest
+
+func (p *AdminServiceCreateAdminArgs) GetReq() (v *CreateAdminRequest) {
+	if !p.IsSetReq() {
+		return AdminServiceCreateAdminArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *AdminServiceCreateAdminArgs) SetReq(val *CreateAdminRequest) {
+	p.Req = val
+}
+
+func (p *AdminServiceCreateAdminArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *AdminServiceCreateAdminArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AdminServiceCreateAdminArgs(%+v)", *p)
+}
+
+var fieldIDToName_AdminServiceCreateAdminArgs = map[int16]string{
+	1: "req",
+}
+
+type AdminServiceCreateAdminResult struct {
+	Success *PlatformAdminDTO `thrift:"success,0,optional" frugal:"0,optional,PlatformAdminDTO" json:"success,omitempty"`
+}
+
+func NewAdminServiceCreateAdminResult() *AdminServiceCreateAdminResult {
+	return &AdminServiceCreateAdminResult{}
+}
+
+func (p *AdminServiceCreateAdminResult) InitDefault() {
+}
+
+var AdminServiceCreateAdminResult_Success_DEFAULT *PlatformAdminDTO
+
+func (p *AdminServiceCreateAdminResult) GetSuccess() (v *PlatformAdminDTO) {
+	if !p.IsSetSuccess() {
+		return AdminServiceCreateAdminResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AdminServiceCreateAdminResult) SetSuccess(x interface{}) {
+	p.Success = x.(*PlatformAdminDTO)
+}
+
+func (p *AdminServiceCreateAdminResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AdminServiceCreateAdminResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AdminServiceCreateAdminResult(%+v)", *p)
+}
+
+var fieldIDToName_AdminServiceCreateAdminResult = map[int16]string{
+	0: "success",
+}
+
+type AdminServiceDisableAdminArgs struct {
+	Req *DisableAdminRequest `thrift:"req,1" frugal:"1,default,DisableAdminRequest" json:"req"`
+}
+
+func NewAdminServiceDisableAdminArgs() *AdminServiceDisableAdminArgs {
+	return &AdminServiceDisableAdminArgs{}
+}
+
+func (p *AdminServiceDisableAdminArgs) InitDefault() {
+}
+
+var AdminServiceDisableAdminArgs_Req_DEFAULT *DisableAdminRequest
+
+func (p *AdminServiceDisableAdminArgs) GetReq() (v *DisableAdminRequest) {
+	if !p.IsSetReq() {
+		return AdminServiceDisableAdminArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *AdminServiceDisableAdminArgs) SetReq(val *DisableAdminRequest) {
+	p.Req = val
+}
+
+func (p *AdminServiceDisableAdminArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *AdminServiceDisableAdminArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AdminServiceDisableAdminArgs(%+v)", *p)
+}
+
+var fieldIDToName_AdminServiceDisableAdminArgs = map[int16]string{
+	1: "req",
+}
+
+type AdminServiceDisableAdminResult struct {
+	Success *PlatformAdminDTO `thrift:"success,0,optional" frugal:"0,optional,PlatformAdminDTO" json:"success,omitempty"`
+}
+
+func NewAdminServiceDisableAdminResult() *AdminServiceDisableAdminResult {
+	return &AdminServiceDisableAdminResult{}
+}
+
+func (p *AdminServiceDisableAdminResult) InitDefault() {
+}
+
+var AdminServiceDisableAdminResult_Success_DEFAULT *PlatformAdminDTO
+
+func (p *AdminServiceDisableAdminResult) GetSuccess() (v *PlatformAdminDTO) {
+	if !p.IsSetSuccess() {
+		return AdminServiceDisableAdminResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AdminServiceDisableAdminResult) SetSuccess(x interface{}) {
+	p.Success = x.(*PlatformAdminDTO)
+}
+
+func (p *AdminServiceDisableAdminResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AdminServiceDisableAdminResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AdminServiceDisableAdminResult(%+v)", *p)
+}
+
+var fieldIDToName_AdminServiceDisableAdminResult = map[int16]string{
+	0: "success",
+}
+
+type UserAdminService interface {
+	PreviewSetUserStatus(ctx context.Context, req *PreviewSetUserStatusRequest) (r *UserStatusPreviewDTO, err error)
+
+	ConfirmSetUserStatus(ctx context.Context, req *ConfirmSetUserStatusRequest) (r *AdminUserSummaryDTO, err error)
+}
+
+type UserAdminServicePreviewSetUserStatusArgs struct {
+	Req *PreviewSetUserStatusRequest `thrift:"req,1" frugal:"1,default,PreviewSetUserStatusRequest" json:"req"`
+}
+
+func NewUserAdminServicePreviewSetUserStatusArgs() *UserAdminServicePreviewSetUserStatusArgs {
+	return &UserAdminServicePreviewSetUserStatusArgs{}
+}
+
+func (p *UserAdminServicePreviewSetUserStatusArgs) InitDefault() {
+}
+
+var UserAdminServicePreviewSetUserStatusArgs_Req_DEFAULT *PreviewSetUserStatusRequest
+
+func (p *UserAdminServicePreviewSetUserStatusArgs) GetReq() (v *PreviewSetUserStatusRequest) {
+	if !p.IsSetReq() {
+		return UserAdminServicePreviewSetUserStatusArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *UserAdminServicePreviewSetUserStatusArgs) SetReq(val *PreviewSetUserStatusRequest) {
+	p.Req = val
+}
+
+func (p *UserAdminServicePreviewSetUserStatusArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *UserAdminServicePreviewSetUserStatusArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UserAdminServicePreviewSetUserStatusArgs(%+v)", *p)
+}
+
+var fieldIDToName_UserAdminServicePreviewSetUserStatusArgs = map[int16]string{
+	1: "req",
+}
+
+type UserAdminServicePreviewSetUserStatusResult struct {
+	Success *UserStatusPreviewDTO `thrift:"success,0,optional" frugal:"0,optional,UserStatusPreviewDTO" json:"success,omitempty"`
+}
+
+func NewUserAdminServicePreviewSetUserStatusResult() *UserAdminServicePreviewSetUserStatusResult {
+	return &UserAdminServicePreviewSetUserStatusResult{}
+}
+
+func (p *UserAdminServicePreviewSetUserStatusResult) InitDefault() {
+}
+
+var UserAdminServicePreviewSetUserStatusResult_Success_DEFAULT *UserStatusPreviewDTO
+
+func (p *UserAdminServicePreviewSetUserStatusResult) GetSuccess() (v *UserStatusPreviewDTO) {
+	if !p.IsSetSuccess() {
+		return UserAdminServicePreviewSetUserStatusResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *UserAdminServicePreviewSetUserStatusResult) SetSuccess(x interface{}) {
+	p.Success = x.(*UserStatusPreviewDTO)
+}
+
+func (p *UserAdminServicePreviewSetUserStatusResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *UserAdminServicePreviewSetUserStatusResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UserAdminServicePreviewSetUserStatusResult(%+v)", *p)
+}
+
+var fieldIDToName_UserAdminServicePreviewSetUserStatusResult = map[int16]string{
+	0: "success",
+}
+
+type UserAdminServiceConfirmSetUserStatusArgs struct {
+	Req *ConfirmSetUserStatusRequest `thrift:"req,1" frugal:"1,default,ConfirmSetUserStatusRequest" json:"req"`
+}
+
+func NewUserAdminServiceConfirmSetUserStatusArgs() *UserAdminServiceConfirmSetUserStatusArgs {
+	return &UserAdminServiceConfirmSetUserStatusArgs{}
+}
+
+func (p *UserAdminServiceConfirmSetUserStatusArgs) InitDefault() {
+}
+
+var UserAdminServiceConfirmSetUserStatusArgs_Req_DEFAULT *ConfirmSetUserStatusRequest
+
+func (p *UserAdminServiceConfirmSetUserStatusArgs) GetReq() (v *ConfirmSetUserStatusRequest) {
+	if !p.IsSetReq() {
+		return UserAdminServiceConfirmSetUserStatusArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *UserAdminServiceConfirmSetUserStatusArgs) SetReq(val *ConfirmSetUserStatusRequest) {
+	p.Req = val
+}
+
+func (p *UserAdminServiceConfirmSetUserStatusArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *UserAdminServiceConfirmSetUserStatusArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UserAdminServiceConfirmSetUserStatusArgs(%+v)", *p)
+}
+
+var fieldIDToName_UserAdminServiceConfirmSetUserStatusArgs = map[int16]string{
+	1: "req",
+}
+
+type UserAdminServiceConfirmSetUserStatusResult struct {
+	Success *AdminUserSummaryDTO `thrift:"success,0,optional" frugal:"0,optional,AdminUserSummaryDTO" json:"success,omitempty"`
+}
+
+func NewUserAdminServiceConfirmSetUserStatusResult() *UserAdminServiceConfirmSetUserStatusResult {
+	return &UserAdminServiceConfirmSetUserStatusResult{}
+}
+
+func (p *UserAdminServiceConfirmSetUserStatusResult) InitDefault() {
+}
+
+var UserAdminServiceConfirmSetUserStatusResult_Success_DEFAULT *AdminUserSummaryDTO
+
+func (p *UserAdminServiceConfirmSetUserStatusResult) GetSuccess() (v *AdminUserSummaryDTO) {
+	if !p.IsSetSuccess() {
+		return UserAdminServiceConfirmSetUserStatusResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *UserAdminServiceConfirmSetUserStatusResult) SetSuccess(x interface{}) {
+	p.Success = x.(*AdminUserSummaryDTO)
+}
+
+func (p *UserAdminServiceConfirmSetUserStatusResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *UserAdminServiceConfirmSetUserStatusResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UserAdminServiceConfirmSetUserStatusResult(%+v)", *p)
+}
+
+var fieldIDToName_UserAdminServiceConfirmSetUserStatusResult = map[int16]string{
+	0: "success",
+}
+
 type ProjectService interface {
 	CheckProjectAccess(ctx context.Context, req *CheckProjectAccessRequest) (r *ProjectAccessResponse, err error)
+
+	CreateProject(ctx context.Context, req *CreateProjectRequest) (r *ProjectDetailDTO, err error)
+
+	UpdateProjectTitle(ctx context.Context, req *UpdateProjectTitleRequest) (r *ProjectDetailDTO, err error)
 }
 
 type ProjectServiceCheckProjectAccessArgs struct {
@@ -5701,10 +10441,398 @@ var fieldIDToName_ProjectServiceCheckProjectAccessResult = map[int16]string{
 	0: "success",
 }
 
+type ProjectServiceCreateProjectArgs struct {
+	Req *CreateProjectRequest `thrift:"req,1" frugal:"1,default,CreateProjectRequest" json:"req"`
+}
+
+func NewProjectServiceCreateProjectArgs() *ProjectServiceCreateProjectArgs {
+	return &ProjectServiceCreateProjectArgs{}
+}
+
+func (p *ProjectServiceCreateProjectArgs) InitDefault() {
+}
+
+var ProjectServiceCreateProjectArgs_Req_DEFAULT *CreateProjectRequest
+
+func (p *ProjectServiceCreateProjectArgs) GetReq() (v *CreateProjectRequest) {
+	if !p.IsSetReq() {
+		return ProjectServiceCreateProjectArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *ProjectServiceCreateProjectArgs) SetReq(val *CreateProjectRequest) {
+	p.Req = val
+}
+
+func (p *ProjectServiceCreateProjectArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *ProjectServiceCreateProjectArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ProjectServiceCreateProjectArgs(%+v)", *p)
+}
+
+var fieldIDToName_ProjectServiceCreateProjectArgs = map[int16]string{
+	1: "req",
+}
+
+type ProjectServiceCreateProjectResult struct {
+	Success *ProjectDetailDTO `thrift:"success,0,optional" frugal:"0,optional,ProjectDetailDTO" json:"success,omitempty"`
+}
+
+func NewProjectServiceCreateProjectResult() *ProjectServiceCreateProjectResult {
+	return &ProjectServiceCreateProjectResult{}
+}
+
+func (p *ProjectServiceCreateProjectResult) InitDefault() {
+}
+
+var ProjectServiceCreateProjectResult_Success_DEFAULT *ProjectDetailDTO
+
+func (p *ProjectServiceCreateProjectResult) GetSuccess() (v *ProjectDetailDTO) {
+	if !p.IsSetSuccess() {
+		return ProjectServiceCreateProjectResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ProjectServiceCreateProjectResult) SetSuccess(x interface{}) {
+	p.Success = x.(*ProjectDetailDTO)
+}
+
+func (p *ProjectServiceCreateProjectResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ProjectServiceCreateProjectResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ProjectServiceCreateProjectResult(%+v)", *p)
+}
+
+var fieldIDToName_ProjectServiceCreateProjectResult = map[int16]string{
+	0: "success",
+}
+
+type ProjectServiceUpdateProjectTitleArgs struct {
+	Req *UpdateProjectTitleRequest `thrift:"req,1" frugal:"1,default,UpdateProjectTitleRequest" json:"req"`
+}
+
+func NewProjectServiceUpdateProjectTitleArgs() *ProjectServiceUpdateProjectTitleArgs {
+	return &ProjectServiceUpdateProjectTitleArgs{}
+}
+
+func (p *ProjectServiceUpdateProjectTitleArgs) InitDefault() {
+}
+
+var ProjectServiceUpdateProjectTitleArgs_Req_DEFAULT *UpdateProjectTitleRequest
+
+func (p *ProjectServiceUpdateProjectTitleArgs) GetReq() (v *UpdateProjectTitleRequest) {
+	if !p.IsSetReq() {
+		return ProjectServiceUpdateProjectTitleArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *ProjectServiceUpdateProjectTitleArgs) SetReq(val *UpdateProjectTitleRequest) {
+	p.Req = val
+}
+
+func (p *ProjectServiceUpdateProjectTitleArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *ProjectServiceUpdateProjectTitleArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ProjectServiceUpdateProjectTitleArgs(%+v)", *p)
+}
+
+var fieldIDToName_ProjectServiceUpdateProjectTitleArgs = map[int16]string{
+	1: "req",
+}
+
+type ProjectServiceUpdateProjectTitleResult struct {
+	Success *ProjectDetailDTO `thrift:"success,0,optional" frugal:"0,optional,ProjectDetailDTO" json:"success,omitempty"`
+}
+
+func NewProjectServiceUpdateProjectTitleResult() *ProjectServiceUpdateProjectTitleResult {
+	return &ProjectServiceUpdateProjectTitleResult{}
+}
+
+func (p *ProjectServiceUpdateProjectTitleResult) InitDefault() {
+}
+
+var ProjectServiceUpdateProjectTitleResult_Success_DEFAULT *ProjectDetailDTO
+
+func (p *ProjectServiceUpdateProjectTitleResult) GetSuccess() (v *ProjectDetailDTO) {
+	if !p.IsSetSuccess() {
+		return ProjectServiceUpdateProjectTitleResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ProjectServiceUpdateProjectTitleResult) SetSuccess(x interface{}) {
+	p.Success = x.(*ProjectDetailDTO)
+}
+
+func (p *ProjectServiceUpdateProjectTitleResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ProjectServiceUpdateProjectTitleResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ProjectServiceUpdateProjectTitleResult(%+v)", *p)
+}
+
+var fieldIDToName_ProjectServiceUpdateProjectTitleResult = map[int16]string{
+	0: "success",
+}
+
+type ProjectAssetService interface {
+	AttachAssetToProject(ctx context.Context, req *AttachAssetToProjectRequest) (r *ProjectAssetDTO, err error)
+}
+
+type ProjectAssetServiceAttachAssetToProjectArgs struct {
+	Req *AttachAssetToProjectRequest `thrift:"req,1" frugal:"1,default,AttachAssetToProjectRequest" json:"req"`
+}
+
+func NewProjectAssetServiceAttachAssetToProjectArgs() *ProjectAssetServiceAttachAssetToProjectArgs {
+	return &ProjectAssetServiceAttachAssetToProjectArgs{}
+}
+
+func (p *ProjectAssetServiceAttachAssetToProjectArgs) InitDefault() {
+}
+
+var ProjectAssetServiceAttachAssetToProjectArgs_Req_DEFAULT *AttachAssetToProjectRequest
+
+func (p *ProjectAssetServiceAttachAssetToProjectArgs) GetReq() (v *AttachAssetToProjectRequest) {
+	if !p.IsSetReq() {
+		return ProjectAssetServiceAttachAssetToProjectArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *ProjectAssetServiceAttachAssetToProjectArgs) SetReq(val *AttachAssetToProjectRequest) {
+	p.Req = val
+}
+
+func (p *ProjectAssetServiceAttachAssetToProjectArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *ProjectAssetServiceAttachAssetToProjectArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ProjectAssetServiceAttachAssetToProjectArgs(%+v)", *p)
+}
+
+var fieldIDToName_ProjectAssetServiceAttachAssetToProjectArgs = map[int16]string{
+	1: "req",
+}
+
+type ProjectAssetServiceAttachAssetToProjectResult struct {
+	Success *ProjectAssetDTO `thrift:"success,0,optional" frugal:"0,optional,ProjectAssetDTO" json:"success,omitempty"`
+}
+
+func NewProjectAssetServiceAttachAssetToProjectResult() *ProjectAssetServiceAttachAssetToProjectResult {
+	return &ProjectAssetServiceAttachAssetToProjectResult{}
+}
+
+func (p *ProjectAssetServiceAttachAssetToProjectResult) InitDefault() {
+}
+
+var ProjectAssetServiceAttachAssetToProjectResult_Success_DEFAULT *ProjectAssetDTO
+
+func (p *ProjectAssetServiceAttachAssetToProjectResult) GetSuccess() (v *ProjectAssetDTO) {
+	if !p.IsSetSuccess() {
+		return ProjectAssetServiceAttachAssetToProjectResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ProjectAssetServiceAttachAssetToProjectResult) SetSuccess(x interface{}) {
+	p.Success = x.(*ProjectAssetDTO)
+}
+
+func (p *ProjectAssetServiceAttachAssetToProjectResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ProjectAssetServiceAttachAssetToProjectResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ProjectAssetServiceAttachAssetToProjectResult(%+v)", *p)
+}
+
+var fieldIDToName_ProjectAssetServiceAttachAssetToProjectResult = map[int16]string{
+	0: "success",
+}
+
 type AssetService interface {
+	CreateUploadIntent(ctx context.Context, req *CreateUploadIntentRequest) (r *UploadIntentDTO, err error)
+
+	ConfirmUploadedAsset(ctx context.Context, req *ConfirmUploadedAssetRequest) (r *AssetDetailDTO, err error)
+
 	BatchCheckAssetAccess(ctx context.Context, req *BatchCheckAssetAccessRequest) (r *BatchCheckAssetAccessResponse, err error)
 
 	PrepareGeneratedAssetObjects(ctx context.Context, req *PrepareGeneratedAssetObjectsRequest) (r *PrepareGeneratedAssetObjectsResponse, err error)
+}
+
+type AssetServiceCreateUploadIntentArgs struct {
+	Req *CreateUploadIntentRequest `thrift:"req,1" frugal:"1,default,CreateUploadIntentRequest" json:"req"`
+}
+
+func NewAssetServiceCreateUploadIntentArgs() *AssetServiceCreateUploadIntentArgs {
+	return &AssetServiceCreateUploadIntentArgs{}
+}
+
+func (p *AssetServiceCreateUploadIntentArgs) InitDefault() {
+}
+
+var AssetServiceCreateUploadIntentArgs_Req_DEFAULT *CreateUploadIntentRequest
+
+func (p *AssetServiceCreateUploadIntentArgs) GetReq() (v *CreateUploadIntentRequest) {
+	if !p.IsSetReq() {
+		return AssetServiceCreateUploadIntentArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *AssetServiceCreateUploadIntentArgs) SetReq(val *CreateUploadIntentRequest) {
+	p.Req = val
+}
+
+func (p *AssetServiceCreateUploadIntentArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *AssetServiceCreateUploadIntentArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AssetServiceCreateUploadIntentArgs(%+v)", *p)
+}
+
+var fieldIDToName_AssetServiceCreateUploadIntentArgs = map[int16]string{
+	1: "req",
+}
+
+type AssetServiceCreateUploadIntentResult struct {
+	Success *UploadIntentDTO `thrift:"success,0,optional" frugal:"0,optional,UploadIntentDTO" json:"success,omitempty"`
+}
+
+func NewAssetServiceCreateUploadIntentResult() *AssetServiceCreateUploadIntentResult {
+	return &AssetServiceCreateUploadIntentResult{}
+}
+
+func (p *AssetServiceCreateUploadIntentResult) InitDefault() {
+}
+
+var AssetServiceCreateUploadIntentResult_Success_DEFAULT *UploadIntentDTO
+
+func (p *AssetServiceCreateUploadIntentResult) GetSuccess() (v *UploadIntentDTO) {
+	if !p.IsSetSuccess() {
+		return AssetServiceCreateUploadIntentResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AssetServiceCreateUploadIntentResult) SetSuccess(x interface{}) {
+	p.Success = x.(*UploadIntentDTO)
+}
+
+func (p *AssetServiceCreateUploadIntentResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AssetServiceCreateUploadIntentResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AssetServiceCreateUploadIntentResult(%+v)", *p)
+}
+
+var fieldIDToName_AssetServiceCreateUploadIntentResult = map[int16]string{
+	0: "success",
+}
+
+type AssetServiceConfirmUploadedAssetArgs struct {
+	Req *ConfirmUploadedAssetRequest `thrift:"req,1" frugal:"1,default,ConfirmUploadedAssetRequest" json:"req"`
+}
+
+func NewAssetServiceConfirmUploadedAssetArgs() *AssetServiceConfirmUploadedAssetArgs {
+	return &AssetServiceConfirmUploadedAssetArgs{}
+}
+
+func (p *AssetServiceConfirmUploadedAssetArgs) InitDefault() {
+}
+
+var AssetServiceConfirmUploadedAssetArgs_Req_DEFAULT *ConfirmUploadedAssetRequest
+
+func (p *AssetServiceConfirmUploadedAssetArgs) GetReq() (v *ConfirmUploadedAssetRequest) {
+	if !p.IsSetReq() {
+		return AssetServiceConfirmUploadedAssetArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *AssetServiceConfirmUploadedAssetArgs) SetReq(val *ConfirmUploadedAssetRequest) {
+	p.Req = val
+}
+
+func (p *AssetServiceConfirmUploadedAssetArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *AssetServiceConfirmUploadedAssetArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AssetServiceConfirmUploadedAssetArgs(%+v)", *p)
+}
+
+var fieldIDToName_AssetServiceConfirmUploadedAssetArgs = map[int16]string{
+	1: "req",
+}
+
+type AssetServiceConfirmUploadedAssetResult struct {
+	Success *AssetDetailDTO `thrift:"success,0,optional" frugal:"0,optional,AssetDetailDTO" json:"success,omitempty"`
+}
+
+func NewAssetServiceConfirmUploadedAssetResult() *AssetServiceConfirmUploadedAssetResult {
+	return &AssetServiceConfirmUploadedAssetResult{}
+}
+
+func (p *AssetServiceConfirmUploadedAssetResult) InitDefault() {
+}
+
+var AssetServiceConfirmUploadedAssetResult_Success_DEFAULT *AssetDetailDTO
+
+func (p *AssetServiceConfirmUploadedAssetResult) GetSuccess() (v *AssetDetailDTO) {
+	if !p.IsSetSuccess() {
+		return AssetServiceConfirmUploadedAssetResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AssetServiceConfirmUploadedAssetResult) SetSuccess(x interface{}) {
+	p.Success = x.(*AssetDetailDTO)
+}
+
+func (p *AssetServiceConfirmUploadedAssetResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AssetServiceConfirmUploadedAssetResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AssetServiceConfirmUploadedAssetResult(%+v)", *p)
+}
+
+var fieldIDToName_AssetServiceConfirmUploadedAssetResult = map[int16]string{
+	0: "success",
 }
 
 type AssetServiceBatchCheckAssetAccessArgs struct {
@@ -7038,5 +12166,951 @@ func (p *PlatformDictionaryServiceListAssetElementTypesResult) String() string {
 }
 
 var fieldIDToName_PlatformDictionaryServiceListAssetElementTypesResult = map[int16]string{
+	0: "success",
+}
+
+type WorkService interface {
+	CreateWork(ctx context.Context, req *CreateWorkRequest) (r *WorkDetailDTO, err error)
+}
+
+type WorkServiceCreateWorkArgs struct {
+	Req *CreateWorkRequest `thrift:"req,1" frugal:"1,default,CreateWorkRequest" json:"req"`
+}
+
+func NewWorkServiceCreateWorkArgs() *WorkServiceCreateWorkArgs {
+	return &WorkServiceCreateWorkArgs{}
+}
+
+func (p *WorkServiceCreateWorkArgs) InitDefault() {
+}
+
+var WorkServiceCreateWorkArgs_Req_DEFAULT *CreateWorkRequest
+
+func (p *WorkServiceCreateWorkArgs) GetReq() (v *CreateWorkRequest) {
+	if !p.IsSetReq() {
+		return WorkServiceCreateWorkArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *WorkServiceCreateWorkArgs) SetReq(val *CreateWorkRequest) {
+	p.Req = val
+}
+
+func (p *WorkServiceCreateWorkArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *WorkServiceCreateWorkArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkServiceCreateWorkArgs(%+v)", *p)
+}
+
+var fieldIDToName_WorkServiceCreateWorkArgs = map[int16]string{
+	1: "req",
+}
+
+type WorkServiceCreateWorkResult struct {
+	Success *WorkDetailDTO `thrift:"success,0,optional" frugal:"0,optional,WorkDetailDTO" json:"success,omitempty"`
+}
+
+func NewWorkServiceCreateWorkResult() *WorkServiceCreateWorkResult {
+	return &WorkServiceCreateWorkResult{}
+}
+
+func (p *WorkServiceCreateWorkResult) InitDefault() {
+}
+
+var WorkServiceCreateWorkResult_Success_DEFAULT *WorkDetailDTO
+
+func (p *WorkServiceCreateWorkResult) GetSuccess() (v *WorkDetailDTO) {
+	if !p.IsSetSuccess() {
+		return WorkServiceCreateWorkResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *WorkServiceCreateWorkResult) SetSuccess(x interface{}) {
+	p.Success = x.(*WorkDetailDTO)
+}
+
+func (p *WorkServiceCreateWorkResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *WorkServiceCreateWorkResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkServiceCreateWorkResult(%+v)", *p)
+}
+
+var fieldIDToName_WorkServiceCreateWorkResult = map[int16]string{
+	0: "success",
+}
+
+type WorkShareService interface {
+	PreviewShareWork(ctx context.Context, req *PreviewShareWorkRequest) (r *ShareWorkPreviewDTO, err error)
+
+	ConfirmShareWork(ctx context.Context, req *ConfirmShareWorkRequest) (r *WorkShareResultDTO, err error)
+}
+
+type WorkShareServicePreviewShareWorkArgs struct {
+	Req *PreviewShareWorkRequest `thrift:"req,1" frugal:"1,default,PreviewShareWorkRequest" json:"req"`
+}
+
+func NewWorkShareServicePreviewShareWorkArgs() *WorkShareServicePreviewShareWorkArgs {
+	return &WorkShareServicePreviewShareWorkArgs{}
+}
+
+func (p *WorkShareServicePreviewShareWorkArgs) InitDefault() {
+}
+
+var WorkShareServicePreviewShareWorkArgs_Req_DEFAULT *PreviewShareWorkRequest
+
+func (p *WorkShareServicePreviewShareWorkArgs) GetReq() (v *PreviewShareWorkRequest) {
+	if !p.IsSetReq() {
+		return WorkShareServicePreviewShareWorkArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *WorkShareServicePreviewShareWorkArgs) SetReq(val *PreviewShareWorkRequest) {
+	p.Req = val
+}
+
+func (p *WorkShareServicePreviewShareWorkArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *WorkShareServicePreviewShareWorkArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkShareServicePreviewShareWorkArgs(%+v)", *p)
+}
+
+var fieldIDToName_WorkShareServicePreviewShareWorkArgs = map[int16]string{
+	1: "req",
+}
+
+type WorkShareServicePreviewShareWorkResult struct {
+	Success *ShareWorkPreviewDTO `thrift:"success,0,optional" frugal:"0,optional,ShareWorkPreviewDTO" json:"success,omitempty"`
+}
+
+func NewWorkShareServicePreviewShareWorkResult() *WorkShareServicePreviewShareWorkResult {
+	return &WorkShareServicePreviewShareWorkResult{}
+}
+
+func (p *WorkShareServicePreviewShareWorkResult) InitDefault() {
+}
+
+var WorkShareServicePreviewShareWorkResult_Success_DEFAULT *ShareWorkPreviewDTO
+
+func (p *WorkShareServicePreviewShareWorkResult) GetSuccess() (v *ShareWorkPreviewDTO) {
+	if !p.IsSetSuccess() {
+		return WorkShareServicePreviewShareWorkResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *WorkShareServicePreviewShareWorkResult) SetSuccess(x interface{}) {
+	p.Success = x.(*ShareWorkPreviewDTO)
+}
+
+func (p *WorkShareServicePreviewShareWorkResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *WorkShareServicePreviewShareWorkResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkShareServicePreviewShareWorkResult(%+v)", *p)
+}
+
+var fieldIDToName_WorkShareServicePreviewShareWorkResult = map[int16]string{
+	0: "success",
+}
+
+type WorkShareServiceConfirmShareWorkArgs struct {
+	Req *ConfirmShareWorkRequest `thrift:"req,1" frugal:"1,default,ConfirmShareWorkRequest" json:"req"`
+}
+
+func NewWorkShareServiceConfirmShareWorkArgs() *WorkShareServiceConfirmShareWorkArgs {
+	return &WorkShareServiceConfirmShareWorkArgs{}
+}
+
+func (p *WorkShareServiceConfirmShareWorkArgs) InitDefault() {
+}
+
+var WorkShareServiceConfirmShareWorkArgs_Req_DEFAULT *ConfirmShareWorkRequest
+
+func (p *WorkShareServiceConfirmShareWorkArgs) GetReq() (v *ConfirmShareWorkRequest) {
+	if !p.IsSetReq() {
+		return WorkShareServiceConfirmShareWorkArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *WorkShareServiceConfirmShareWorkArgs) SetReq(val *ConfirmShareWorkRequest) {
+	p.Req = val
+}
+
+func (p *WorkShareServiceConfirmShareWorkArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *WorkShareServiceConfirmShareWorkArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkShareServiceConfirmShareWorkArgs(%+v)", *p)
+}
+
+var fieldIDToName_WorkShareServiceConfirmShareWorkArgs = map[int16]string{
+	1: "req",
+}
+
+type WorkShareServiceConfirmShareWorkResult struct {
+	Success *WorkShareResultDTO `thrift:"success,0,optional" frugal:"0,optional,WorkShareResultDTO" json:"success,omitempty"`
+}
+
+func NewWorkShareServiceConfirmShareWorkResult() *WorkShareServiceConfirmShareWorkResult {
+	return &WorkShareServiceConfirmShareWorkResult{}
+}
+
+func (p *WorkShareServiceConfirmShareWorkResult) InitDefault() {
+}
+
+var WorkShareServiceConfirmShareWorkResult_Success_DEFAULT *WorkShareResultDTO
+
+func (p *WorkShareServiceConfirmShareWorkResult) GetSuccess() (v *WorkShareResultDTO) {
+	if !p.IsSetSuccess() {
+		return WorkShareServiceConfirmShareWorkResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *WorkShareServiceConfirmShareWorkResult) SetSuccess(x interface{}) {
+	p.Success = x.(*WorkShareResultDTO)
+}
+
+func (p *WorkShareServiceConfirmShareWorkResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *WorkShareServiceConfirmShareWorkResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkShareServiceConfirmShareWorkResult(%+v)", *p)
+}
+
+var fieldIDToName_WorkShareServiceConfirmShareWorkResult = map[int16]string{
+	0: "success",
+}
+
+type FeaturedWorkAdminService interface {
+	PreviewTakeDownWork(ctx context.Context, req *PreviewTakeDownPublicWorkRequest) (r *TakeDownPublicWorkPreviewDTO, err error)
+
+	ConfirmTakeDownWork(ctx context.Context, req *ConfirmTakeDownPublicWorkRequest) (r *AdminPublicWorkDTO, err error)
+}
+
+type FeaturedWorkAdminServicePreviewTakeDownWorkArgs struct {
+	Req *PreviewTakeDownPublicWorkRequest `thrift:"req,1" frugal:"1,default,PreviewTakeDownPublicWorkRequest" json:"req"`
+}
+
+func NewFeaturedWorkAdminServicePreviewTakeDownWorkArgs() *FeaturedWorkAdminServicePreviewTakeDownWorkArgs {
+	return &FeaturedWorkAdminServicePreviewTakeDownWorkArgs{}
+}
+
+func (p *FeaturedWorkAdminServicePreviewTakeDownWorkArgs) InitDefault() {
+}
+
+var FeaturedWorkAdminServicePreviewTakeDownWorkArgs_Req_DEFAULT *PreviewTakeDownPublicWorkRequest
+
+func (p *FeaturedWorkAdminServicePreviewTakeDownWorkArgs) GetReq() (v *PreviewTakeDownPublicWorkRequest) {
+	if !p.IsSetReq() {
+		return FeaturedWorkAdminServicePreviewTakeDownWorkArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *FeaturedWorkAdminServicePreviewTakeDownWorkArgs) SetReq(val *PreviewTakeDownPublicWorkRequest) {
+	p.Req = val
+}
+
+func (p *FeaturedWorkAdminServicePreviewTakeDownWorkArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *FeaturedWorkAdminServicePreviewTakeDownWorkArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("FeaturedWorkAdminServicePreviewTakeDownWorkArgs(%+v)", *p)
+}
+
+var fieldIDToName_FeaturedWorkAdminServicePreviewTakeDownWorkArgs = map[int16]string{
+	1: "req",
+}
+
+type FeaturedWorkAdminServicePreviewTakeDownWorkResult struct {
+	Success *TakeDownPublicWorkPreviewDTO `thrift:"success,0,optional" frugal:"0,optional,TakeDownPublicWorkPreviewDTO" json:"success,omitempty"`
+}
+
+func NewFeaturedWorkAdminServicePreviewTakeDownWorkResult() *FeaturedWorkAdminServicePreviewTakeDownWorkResult {
+	return &FeaturedWorkAdminServicePreviewTakeDownWorkResult{}
+}
+
+func (p *FeaturedWorkAdminServicePreviewTakeDownWorkResult) InitDefault() {
+}
+
+var FeaturedWorkAdminServicePreviewTakeDownWorkResult_Success_DEFAULT *TakeDownPublicWorkPreviewDTO
+
+func (p *FeaturedWorkAdminServicePreviewTakeDownWorkResult) GetSuccess() (v *TakeDownPublicWorkPreviewDTO) {
+	if !p.IsSetSuccess() {
+		return FeaturedWorkAdminServicePreviewTakeDownWorkResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *FeaturedWorkAdminServicePreviewTakeDownWorkResult) SetSuccess(x interface{}) {
+	p.Success = x.(*TakeDownPublicWorkPreviewDTO)
+}
+
+func (p *FeaturedWorkAdminServicePreviewTakeDownWorkResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *FeaturedWorkAdminServicePreviewTakeDownWorkResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("FeaturedWorkAdminServicePreviewTakeDownWorkResult(%+v)", *p)
+}
+
+var fieldIDToName_FeaturedWorkAdminServicePreviewTakeDownWorkResult = map[int16]string{
+	0: "success",
+}
+
+type FeaturedWorkAdminServiceConfirmTakeDownWorkArgs struct {
+	Req *ConfirmTakeDownPublicWorkRequest `thrift:"req,1" frugal:"1,default,ConfirmTakeDownPublicWorkRequest" json:"req"`
+}
+
+func NewFeaturedWorkAdminServiceConfirmTakeDownWorkArgs() *FeaturedWorkAdminServiceConfirmTakeDownWorkArgs {
+	return &FeaturedWorkAdminServiceConfirmTakeDownWorkArgs{}
+}
+
+func (p *FeaturedWorkAdminServiceConfirmTakeDownWorkArgs) InitDefault() {
+}
+
+var FeaturedWorkAdminServiceConfirmTakeDownWorkArgs_Req_DEFAULT *ConfirmTakeDownPublicWorkRequest
+
+func (p *FeaturedWorkAdminServiceConfirmTakeDownWorkArgs) GetReq() (v *ConfirmTakeDownPublicWorkRequest) {
+	if !p.IsSetReq() {
+		return FeaturedWorkAdminServiceConfirmTakeDownWorkArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *FeaturedWorkAdminServiceConfirmTakeDownWorkArgs) SetReq(val *ConfirmTakeDownPublicWorkRequest) {
+	p.Req = val
+}
+
+func (p *FeaturedWorkAdminServiceConfirmTakeDownWorkArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *FeaturedWorkAdminServiceConfirmTakeDownWorkArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("FeaturedWorkAdminServiceConfirmTakeDownWorkArgs(%+v)", *p)
+}
+
+var fieldIDToName_FeaturedWorkAdminServiceConfirmTakeDownWorkArgs = map[int16]string{
+	1: "req",
+}
+
+type FeaturedWorkAdminServiceConfirmTakeDownWorkResult struct {
+	Success *AdminPublicWorkDTO `thrift:"success,0,optional" frugal:"0,optional,AdminPublicWorkDTO" json:"success,omitempty"`
+}
+
+func NewFeaturedWorkAdminServiceConfirmTakeDownWorkResult() *FeaturedWorkAdminServiceConfirmTakeDownWorkResult {
+	return &FeaturedWorkAdminServiceConfirmTakeDownWorkResult{}
+}
+
+func (p *FeaturedWorkAdminServiceConfirmTakeDownWorkResult) InitDefault() {
+}
+
+var FeaturedWorkAdminServiceConfirmTakeDownWorkResult_Success_DEFAULT *AdminPublicWorkDTO
+
+func (p *FeaturedWorkAdminServiceConfirmTakeDownWorkResult) GetSuccess() (v *AdminPublicWorkDTO) {
+	if !p.IsSetSuccess() {
+		return FeaturedWorkAdminServiceConfirmTakeDownWorkResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *FeaturedWorkAdminServiceConfirmTakeDownWorkResult) SetSuccess(x interface{}) {
+	p.Success = x.(*AdminPublicWorkDTO)
+}
+
+func (p *FeaturedWorkAdminServiceConfirmTakeDownWorkResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *FeaturedWorkAdminServiceConfirmTakeDownWorkResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("FeaturedWorkAdminServiceConfirmTakeDownWorkResult(%+v)", *p)
+}
+
+var fieldIDToName_FeaturedWorkAdminServiceConfirmTakeDownWorkResult = map[int16]string{
+	0: "success",
+}
+
+type PublicContentService interface {
+	ListPublicWorks(ctx context.Context, req *ListPublicWorksRequest) (r *ListPublicWorksResponse, err error)
+
+	GetPublicWork(ctx context.Context, req *GetPublicWorkRequest) (r *PublicWorkDetailDTO, err error)
+}
+
+type PublicContentServiceListPublicWorksArgs struct {
+	Req *ListPublicWorksRequest `thrift:"req,1" frugal:"1,default,ListPublicWorksRequest" json:"req"`
+}
+
+func NewPublicContentServiceListPublicWorksArgs() *PublicContentServiceListPublicWorksArgs {
+	return &PublicContentServiceListPublicWorksArgs{}
+}
+
+func (p *PublicContentServiceListPublicWorksArgs) InitDefault() {
+}
+
+var PublicContentServiceListPublicWorksArgs_Req_DEFAULT *ListPublicWorksRequest
+
+func (p *PublicContentServiceListPublicWorksArgs) GetReq() (v *ListPublicWorksRequest) {
+	if !p.IsSetReq() {
+		return PublicContentServiceListPublicWorksArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *PublicContentServiceListPublicWorksArgs) SetReq(val *ListPublicWorksRequest) {
+	p.Req = val
+}
+
+func (p *PublicContentServiceListPublicWorksArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *PublicContentServiceListPublicWorksArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PublicContentServiceListPublicWorksArgs(%+v)", *p)
+}
+
+var fieldIDToName_PublicContentServiceListPublicWorksArgs = map[int16]string{
+	1: "req",
+}
+
+type PublicContentServiceListPublicWorksResult struct {
+	Success *ListPublicWorksResponse `thrift:"success,0,optional" frugal:"0,optional,ListPublicWorksResponse" json:"success,omitempty"`
+}
+
+func NewPublicContentServiceListPublicWorksResult() *PublicContentServiceListPublicWorksResult {
+	return &PublicContentServiceListPublicWorksResult{}
+}
+
+func (p *PublicContentServiceListPublicWorksResult) InitDefault() {
+}
+
+var PublicContentServiceListPublicWorksResult_Success_DEFAULT *ListPublicWorksResponse
+
+func (p *PublicContentServiceListPublicWorksResult) GetSuccess() (v *ListPublicWorksResponse) {
+	if !p.IsSetSuccess() {
+		return PublicContentServiceListPublicWorksResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *PublicContentServiceListPublicWorksResult) SetSuccess(x interface{}) {
+	p.Success = x.(*ListPublicWorksResponse)
+}
+
+func (p *PublicContentServiceListPublicWorksResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *PublicContentServiceListPublicWorksResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PublicContentServiceListPublicWorksResult(%+v)", *p)
+}
+
+var fieldIDToName_PublicContentServiceListPublicWorksResult = map[int16]string{
+	0: "success",
+}
+
+type PublicContentServiceGetPublicWorkArgs struct {
+	Req *GetPublicWorkRequest `thrift:"req,1" frugal:"1,default,GetPublicWorkRequest" json:"req"`
+}
+
+func NewPublicContentServiceGetPublicWorkArgs() *PublicContentServiceGetPublicWorkArgs {
+	return &PublicContentServiceGetPublicWorkArgs{}
+}
+
+func (p *PublicContentServiceGetPublicWorkArgs) InitDefault() {
+}
+
+var PublicContentServiceGetPublicWorkArgs_Req_DEFAULT *GetPublicWorkRequest
+
+func (p *PublicContentServiceGetPublicWorkArgs) GetReq() (v *GetPublicWorkRequest) {
+	if !p.IsSetReq() {
+		return PublicContentServiceGetPublicWorkArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *PublicContentServiceGetPublicWorkArgs) SetReq(val *GetPublicWorkRequest) {
+	p.Req = val
+}
+
+func (p *PublicContentServiceGetPublicWorkArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *PublicContentServiceGetPublicWorkArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PublicContentServiceGetPublicWorkArgs(%+v)", *p)
+}
+
+var fieldIDToName_PublicContentServiceGetPublicWorkArgs = map[int16]string{
+	1: "req",
+}
+
+type PublicContentServiceGetPublicWorkResult struct {
+	Success *PublicWorkDetailDTO `thrift:"success,0,optional" frugal:"0,optional,PublicWorkDetailDTO" json:"success,omitempty"`
+}
+
+func NewPublicContentServiceGetPublicWorkResult() *PublicContentServiceGetPublicWorkResult {
+	return &PublicContentServiceGetPublicWorkResult{}
+}
+
+func (p *PublicContentServiceGetPublicWorkResult) InitDefault() {
+}
+
+var PublicContentServiceGetPublicWorkResult_Success_DEFAULT *PublicWorkDetailDTO
+
+func (p *PublicContentServiceGetPublicWorkResult) GetSuccess() (v *PublicWorkDetailDTO) {
+	if !p.IsSetSuccess() {
+		return PublicContentServiceGetPublicWorkResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *PublicContentServiceGetPublicWorkResult) SetSuccess(x interface{}) {
+	p.Success = x.(*PublicWorkDetailDTO)
+}
+
+func (p *PublicContentServiceGetPublicWorkResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *PublicContentServiceGetPublicWorkResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PublicContentServiceGetPublicWorkResult(%+v)", *p)
+}
+
+var fieldIDToName_PublicContentServiceGetPublicWorkResult = map[int16]string{
+	0: "success",
+}
+
+type NotificationService interface {
+	CreateNotification(ctx context.Context, req *CreateNotificationRequest) (r *NotificationDTO, err error)
+
+	ListNotifications(ctx context.Context, req *ListNotificationsRequest) (r *ListNotificationsResponse, err error)
+
+	GetUnreadCount(ctx context.Context, req *GetUnreadCountRequest) (r *UnreadCountDTO, err error)
+
+	MarkNotificationRead(ctx context.Context, req *MarkNotificationReadRequest) (r *NotificationDTO, err error)
+
+	MarkAllNotificationsRead(ctx context.Context, req *MarkAllNotificationsReadRequest) (r *UnreadCountDTO, err error)
+}
+
+type NotificationServiceCreateNotificationArgs struct {
+	Req *CreateNotificationRequest `thrift:"req,1" frugal:"1,default,CreateNotificationRequest" json:"req"`
+}
+
+func NewNotificationServiceCreateNotificationArgs() *NotificationServiceCreateNotificationArgs {
+	return &NotificationServiceCreateNotificationArgs{}
+}
+
+func (p *NotificationServiceCreateNotificationArgs) InitDefault() {
+}
+
+var NotificationServiceCreateNotificationArgs_Req_DEFAULT *CreateNotificationRequest
+
+func (p *NotificationServiceCreateNotificationArgs) GetReq() (v *CreateNotificationRequest) {
+	if !p.IsSetReq() {
+		return NotificationServiceCreateNotificationArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *NotificationServiceCreateNotificationArgs) SetReq(val *CreateNotificationRequest) {
+	p.Req = val
+}
+
+func (p *NotificationServiceCreateNotificationArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *NotificationServiceCreateNotificationArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationServiceCreateNotificationArgs(%+v)", *p)
+}
+
+var fieldIDToName_NotificationServiceCreateNotificationArgs = map[int16]string{
+	1: "req",
+}
+
+type NotificationServiceCreateNotificationResult struct {
+	Success *NotificationDTO `thrift:"success,0,optional" frugal:"0,optional,NotificationDTO" json:"success,omitempty"`
+}
+
+func NewNotificationServiceCreateNotificationResult() *NotificationServiceCreateNotificationResult {
+	return &NotificationServiceCreateNotificationResult{}
+}
+
+func (p *NotificationServiceCreateNotificationResult) InitDefault() {
+}
+
+var NotificationServiceCreateNotificationResult_Success_DEFAULT *NotificationDTO
+
+func (p *NotificationServiceCreateNotificationResult) GetSuccess() (v *NotificationDTO) {
+	if !p.IsSetSuccess() {
+		return NotificationServiceCreateNotificationResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *NotificationServiceCreateNotificationResult) SetSuccess(x interface{}) {
+	p.Success = x.(*NotificationDTO)
+}
+
+func (p *NotificationServiceCreateNotificationResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *NotificationServiceCreateNotificationResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationServiceCreateNotificationResult(%+v)", *p)
+}
+
+var fieldIDToName_NotificationServiceCreateNotificationResult = map[int16]string{
+	0: "success",
+}
+
+type NotificationServiceListNotificationsArgs struct {
+	Req *ListNotificationsRequest `thrift:"req,1" frugal:"1,default,ListNotificationsRequest" json:"req"`
+}
+
+func NewNotificationServiceListNotificationsArgs() *NotificationServiceListNotificationsArgs {
+	return &NotificationServiceListNotificationsArgs{}
+}
+
+func (p *NotificationServiceListNotificationsArgs) InitDefault() {
+}
+
+var NotificationServiceListNotificationsArgs_Req_DEFAULT *ListNotificationsRequest
+
+func (p *NotificationServiceListNotificationsArgs) GetReq() (v *ListNotificationsRequest) {
+	if !p.IsSetReq() {
+		return NotificationServiceListNotificationsArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *NotificationServiceListNotificationsArgs) SetReq(val *ListNotificationsRequest) {
+	p.Req = val
+}
+
+func (p *NotificationServiceListNotificationsArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *NotificationServiceListNotificationsArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationServiceListNotificationsArgs(%+v)", *p)
+}
+
+var fieldIDToName_NotificationServiceListNotificationsArgs = map[int16]string{
+	1: "req",
+}
+
+type NotificationServiceListNotificationsResult struct {
+	Success *ListNotificationsResponse `thrift:"success,0,optional" frugal:"0,optional,ListNotificationsResponse" json:"success,omitempty"`
+}
+
+func NewNotificationServiceListNotificationsResult() *NotificationServiceListNotificationsResult {
+	return &NotificationServiceListNotificationsResult{}
+}
+
+func (p *NotificationServiceListNotificationsResult) InitDefault() {
+}
+
+var NotificationServiceListNotificationsResult_Success_DEFAULT *ListNotificationsResponse
+
+func (p *NotificationServiceListNotificationsResult) GetSuccess() (v *ListNotificationsResponse) {
+	if !p.IsSetSuccess() {
+		return NotificationServiceListNotificationsResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *NotificationServiceListNotificationsResult) SetSuccess(x interface{}) {
+	p.Success = x.(*ListNotificationsResponse)
+}
+
+func (p *NotificationServiceListNotificationsResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *NotificationServiceListNotificationsResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationServiceListNotificationsResult(%+v)", *p)
+}
+
+var fieldIDToName_NotificationServiceListNotificationsResult = map[int16]string{
+	0: "success",
+}
+
+type NotificationServiceGetUnreadCountArgs struct {
+	Req *GetUnreadCountRequest `thrift:"req,1" frugal:"1,default,GetUnreadCountRequest" json:"req"`
+}
+
+func NewNotificationServiceGetUnreadCountArgs() *NotificationServiceGetUnreadCountArgs {
+	return &NotificationServiceGetUnreadCountArgs{}
+}
+
+func (p *NotificationServiceGetUnreadCountArgs) InitDefault() {
+}
+
+var NotificationServiceGetUnreadCountArgs_Req_DEFAULT *GetUnreadCountRequest
+
+func (p *NotificationServiceGetUnreadCountArgs) GetReq() (v *GetUnreadCountRequest) {
+	if !p.IsSetReq() {
+		return NotificationServiceGetUnreadCountArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *NotificationServiceGetUnreadCountArgs) SetReq(val *GetUnreadCountRequest) {
+	p.Req = val
+}
+
+func (p *NotificationServiceGetUnreadCountArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *NotificationServiceGetUnreadCountArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationServiceGetUnreadCountArgs(%+v)", *p)
+}
+
+var fieldIDToName_NotificationServiceGetUnreadCountArgs = map[int16]string{
+	1: "req",
+}
+
+type NotificationServiceGetUnreadCountResult struct {
+	Success *UnreadCountDTO `thrift:"success,0,optional" frugal:"0,optional,UnreadCountDTO" json:"success,omitempty"`
+}
+
+func NewNotificationServiceGetUnreadCountResult() *NotificationServiceGetUnreadCountResult {
+	return &NotificationServiceGetUnreadCountResult{}
+}
+
+func (p *NotificationServiceGetUnreadCountResult) InitDefault() {
+}
+
+var NotificationServiceGetUnreadCountResult_Success_DEFAULT *UnreadCountDTO
+
+func (p *NotificationServiceGetUnreadCountResult) GetSuccess() (v *UnreadCountDTO) {
+	if !p.IsSetSuccess() {
+		return NotificationServiceGetUnreadCountResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *NotificationServiceGetUnreadCountResult) SetSuccess(x interface{}) {
+	p.Success = x.(*UnreadCountDTO)
+}
+
+func (p *NotificationServiceGetUnreadCountResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *NotificationServiceGetUnreadCountResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationServiceGetUnreadCountResult(%+v)", *p)
+}
+
+var fieldIDToName_NotificationServiceGetUnreadCountResult = map[int16]string{
+	0: "success",
+}
+
+type NotificationServiceMarkNotificationReadArgs struct {
+	Req *MarkNotificationReadRequest `thrift:"req,1" frugal:"1,default,MarkNotificationReadRequest" json:"req"`
+}
+
+func NewNotificationServiceMarkNotificationReadArgs() *NotificationServiceMarkNotificationReadArgs {
+	return &NotificationServiceMarkNotificationReadArgs{}
+}
+
+func (p *NotificationServiceMarkNotificationReadArgs) InitDefault() {
+}
+
+var NotificationServiceMarkNotificationReadArgs_Req_DEFAULT *MarkNotificationReadRequest
+
+func (p *NotificationServiceMarkNotificationReadArgs) GetReq() (v *MarkNotificationReadRequest) {
+	if !p.IsSetReq() {
+		return NotificationServiceMarkNotificationReadArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *NotificationServiceMarkNotificationReadArgs) SetReq(val *MarkNotificationReadRequest) {
+	p.Req = val
+}
+
+func (p *NotificationServiceMarkNotificationReadArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *NotificationServiceMarkNotificationReadArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationServiceMarkNotificationReadArgs(%+v)", *p)
+}
+
+var fieldIDToName_NotificationServiceMarkNotificationReadArgs = map[int16]string{
+	1: "req",
+}
+
+type NotificationServiceMarkNotificationReadResult struct {
+	Success *NotificationDTO `thrift:"success,0,optional" frugal:"0,optional,NotificationDTO" json:"success,omitempty"`
+}
+
+func NewNotificationServiceMarkNotificationReadResult() *NotificationServiceMarkNotificationReadResult {
+	return &NotificationServiceMarkNotificationReadResult{}
+}
+
+func (p *NotificationServiceMarkNotificationReadResult) InitDefault() {
+}
+
+var NotificationServiceMarkNotificationReadResult_Success_DEFAULT *NotificationDTO
+
+func (p *NotificationServiceMarkNotificationReadResult) GetSuccess() (v *NotificationDTO) {
+	if !p.IsSetSuccess() {
+		return NotificationServiceMarkNotificationReadResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *NotificationServiceMarkNotificationReadResult) SetSuccess(x interface{}) {
+	p.Success = x.(*NotificationDTO)
+}
+
+func (p *NotificationServiceMarkNotificationReadResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *NotificationServiceMarkNotificationReadResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationServiceMarkNotificationReadResult(%+v)", *p)
+}
+
+var fieldIDToName_NotificationServiceMarkNotificationReadResult = map[int16]string{
+	0: "success",
+}
+
+type NotificationServiceMarkAllNotificationsReadArgs struct {
+	Req *MarkAllNotificationsReadRequest `thrift:"req,1" frugal:"1,default,MarkAllNotificationsReadRequest" json:"req"`
+}
+
+func NewNotificationServiceMarkAllNotificationsReadArgs() *NotificationServiceMarkAllNotificationsReadArgs {
+	return &NotificationServiceMarkAllNotificationsReadArgs{}
+}
+
+func (p *NotificationServiceMarkAllNotificationsReadArgs) InitDefault() {
+}
+
+var NotificationServiceMarkAllNotificationsReadArgs_Req_DEFAULT *MarkAllNotificationsReadRequest
+
+func (p *NotificationServiceMarkAllNotificationsReadArgs) GetReq() (v *MarkAllNotificationsReadRequest) {
+	if !p.IsSetReq() {
+		return NotificationServiceMarkAllNotificationsReadArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *NotificationServiceMarkAllNotificationsReadArgs) SetReq(val *MarkAllNotificationsReadRequest) {
+	p.Req = val
+}
+
+func (p *NotificationServiceMarkAllNotificationsReadArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *NotificationServiceMarkAllNotificationsReadArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationServiceMarkAllNotificationsReadArgs(%+v)", *p)
+}
+
+var fieldIDToName_NotificationServiceMarkAllNotificationsReadArgs = map[int16]string{
+	1: "req",
+}
+
+type NotificationServiceMarkAllNotificationsReadResult struct {
+	Success *UnreadCountDTO `thrift:"success,0,optional" frugal:"0,optional,UnreadCountDTO" json:"success,omitempty"`
+}
+
+func NewNotificationServiceMarkAllNotificationsReadResult() *NotificationServiceMarkAllNotificationsReadResult {
+	return &NotificationServiceMarkAllNotificationsReadResult{}
+}
+
+func (p *NotificationServiceMarkAllNotificationsReadResult) InitDefault() {
+}
+
+var NotificationServiceMarkAllNotificationsReadResult_Success_DEFAULT *UnreadCountDTO
+
+func (p *NotificationServiceMarkAllNotificationsReadResult) GetSuccess() (v *UnreadCountDTO) {
+	if !p.IsSetSuccess() {
+		return NotificationServiceMarkAllNotificationsReadResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *NotificationServiceMarkAllNotificationsReadResult) SetSuccess(x interface{}) {
+	p.Success = x.(*UnreadCountDTO)
+}
+
+func (p *NotificationServiceMarkAllNotificationsReadResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *NotificationServiceMarkAllNotificationsReadResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationServiceMarkAllNotificationsReadResult(%+v)", *p)
+}
+
+var fieldIDToName_NotificationServiceMarkAllNotificationsReadResult = map[int16]string{
 	0: "success",
 }

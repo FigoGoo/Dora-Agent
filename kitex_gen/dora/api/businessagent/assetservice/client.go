@@ -11,6 +11,8 @@ import (
 
 // Client is designed to provide IDL-compatible methods with call-option parameter for kitex framework.
 type Client interface {
+	CreateUploadIntent(ctx context.Context, req *businessagent.CreateUploadIntentRequest, callOptions ...callopt.Option) (r *businessagent.UploadIntentDTO, err error)
+	ConfirmUploadedAsset(ctx context.Context, req *businessagent.ConfirmUploadedAssetRequest, callOptions ...callopt.Option) (r *businessagent.AssetDetailDTO, err error)
 	BatchCheckAssetAccess(ctx context.Context, req *businessagent.BatchCheckAssetAccessRequest, callOptions ...callopt.Option) (r *businessagent.BatchCheckAssetAccessResponse, err error)
 	PrepareGeneratedAssetObjects(ctx context.Context, req *businessagent.PrepareGeneratedAssetObjectsRequest, callOptions ...callopt.Option) (r *businessagent.PrepareGeneratedAssetObjectsResponse, err error)
 }
@@ -42,6 +44,16 @@ func MustNewClient(destService string, opts ...client.Option) Client {
 
 type kAssetServiceClient struct {
 	*kClient
+}
+
+func (p *kAssetServiceClient) CreateUploadIntent(ctx context.Context, req *businessagent.CreateUploadIntentRequest, callOptions ...callopt.Option) (r *businessagent.UploadIntentDTO, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.CreateUploadIntent(ctx, req)
+}
+
+func (p *kAssetServiceClient) ConfirmUploadedAsset(ctx context.Context, req *businessagent.ConfirmUploadedAssetRequest, callOptions ...callopt.Option) (r *businessagent.AssetDetailDTO, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.ConfirmUploadedAsset(ctx, req)
 }
 
 func (p *kAssetServiceClient) BatchCheckAssetAccess(ctx context.Context, req *businessagent.BatchCheckAssetAccessRequest, callOptions ...callopt.Option) (r *businessagent.BatchCheckAssetAccessResponse, err error) {

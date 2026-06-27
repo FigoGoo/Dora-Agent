@@ -20,6 +20,20 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"CreateProject": kitex.NewMethodInfo(
+		createProjectHandler,
+		newProjectServiceCreateProjectArgs,
+		newProjectServiceCreateProjectResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"UpdateProjectTitle": kitex.NewMethodInfo(
+		updateProjectTitleHandler,
+		newProjectServiceUpdateProjectTitleArgs,
+		newProjectServiceUpdateProjectTitleResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 }
 
 var (
@@ -104,6 +118,42 @@ func newProjectServiceCheckProjectAccessResult() interface{} {
 	return businessagent.NewProjectServiceCheckProjectAccessResult()
 }
 
+func createProjectHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*businessagent.ProjectServiceCreateProjectArgs)
+	realResult := result.(*businessagent.ProjectServiceCreateProjectResult)
+	success, err := handler.(businessagent.ProjectService).CreateProject(ctx, realArg.Req)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newProjectServiceCreateProjectArgs() interface{} {
+	return businessagent.NewProjectServiceCreateProjectArgs()
+}
+
+func newProjectServiceCreateProjectResult() interface{} {
+	return businessagent.NewProjectServiceCreateProjectResult()
+}
+
+func updateProjectTitleHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*businessagent.ProjectServiceUpdateProjectTitleArgs)
+	realResult := result.(*businessagent.ProjectServiceUpdateProjectTitleResult)
+	success, err := handler.(businessagent.ProjectService).UpdateProjectTitle(ctx, realArg.Req)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newProjectServiceUpdateProjectTitleArgs() interface{} {
+	return businessagent.NewProjectServiceUpdateProjectTitleArgs()
+}
+
+func newProjectServiceUpdateProjectTitleResult() interface{} {
+	return businessagent.NewProjectServiceUpdateProjectTitleResult()
+}
+
 type kClient struct {
 	c client.Client
 }
@@ -119,6 +169,26 @@ func (p *kClient) CheckProjectAccess(ctx context.Context, req *businessagent.Che
 	_args.Req = req
 	var _result businessagent.ProjectServiceCheckProjectAccessResult
 	if err = p.c.Call(ctx, "CheckProjectAccess", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) CreateProject(ctx context.Context, req *businessagent.CreateProjectRequest) (r *businessagent.ProjectDetailDTO, err error) {
+	var _args businessagent.ProjectServiceCreateProjectArgs
+	_args.Req = req
+	var _result businessagent.ProjectServiceCreateProjectResult
+	if err = p.c.Call(ctx, "CreateProject", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) UpdateProjectTitle(ctx context.Context, req *businessagent.UpdateProjectTitleRequest) (r *businessagent.ProjectDetailDTO, err error) {
+	var _args businessagent.ProjectServiceUpdateProjectTitleArgs
+	_args.Req = req
+	var _result businessagent.ProjectServiceUpdateProjectTitleResult
+	if err = p.c.Call(ctx, "UpdateProjectTitle", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil

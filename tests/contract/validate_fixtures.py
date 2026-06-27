@@ -18,12 +18,27 @@ THRIFT_IDL = REPO_ROOT / "api" / "thrift" / "business_agent_service.thrift"
 SEED_DIR = REPO_ROOT / "tests" / "business" / "seed"
 
 WRITE_RPC_METHODS = {
+    "ConfirmTransferOwner",
+    "CreateAdmin",
+    "DisableAdmin",
+    "ConfirmSetUserStatus",
+    "CreateProject",
+    "UpdateProjectTitle",
+    "AttachAssetToProject",
+    "CreateUploadIntent",
+    "ConfirmUploadedAsset",
     "FreezeCredits",
     "ChargeToolUsageCredits",
     "ReleaseFrozenCredits",
     "PrepareGeneratedAssetObjects",
     "CommitGeneratedAssetAndCharge",
     "SaveSkillTestResult",
+    "CreateWork",
+    "ConfirmShareWork",
+    "ConfirmTakeDownWork",
+    "CreateNotification",
+    "MarkNotificationRead",
+    "MarkAllNotificationsRead",
 }
 
 REQUIRED_RPC_SCENARIOS = {
@@ -49,6 +64,19 @@ DOMAIN_REQUIREMENTS = {
         "archived_readonly_error",
         "cross_space_permission_denied",
         "project_not_found_error",
+        "create_project_success",
+        "update_project_title_success",
+        "attach_asset_success",
+    },
+    "enterprise": {
+        "transfer_owner_preview_success",
+        "transfer_owner_confirm_success",
+    },
+    "admin": {
+        "create_admin_success",
+        "disable_admin_success",
+        "preview_user_status_success",
+        "confirm_user_status_success",
     },
     "skill": {
         "published_routable_success",
@@ -83,10 +111,28 @@ DOMAIN_REQUIREMENTS = {
     },
     "asset": {
         "batch_access_success",
+        "create_upload_intent_success",
+        "confirm_uploaded_asset_success",
         "prepare_slots_success",
         "upload_authorization_expired_error",
         "object_key_mismatch_error",
         "save_failed_error",
+    },
+    "work": {
+        "create_work_success",
+        "share_preview_success",
+        "share_confirm_success",
+        "take_down_preview_success",
+        "take_down_confirm_success",
+        "public_list_success",
+        "public_detail_success",
+    },
+    "notification": {
+        "create_notification_success",
+        "list_notifications_success",
+        "unread_count_success",
+        "mark_read_success",
+        "mark_all_read_success",
     },
 }
 

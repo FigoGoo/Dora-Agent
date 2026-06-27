@@ -15,6 +15,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/security"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -91,10 +92,24 @@ type ProjectDetailDTO struct {
 
 type ProjectAssetDTO struct {
 	AssetID         string    `json:"asset_id"`
+	AssetRole       string    `json:"asset_role,omitempty"`
 	SourceType      string    `json:"source_type"`
 	SourceSessionID string    `json:"source_session_id,omitempty"`
 	SourceRunID     string    `json:"source_run_id,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
+}
+
+type AttachAssetInput struct {
+	Auth             AuthContext
+	ProjectID        string
+	AssetID          string
+	AssetRole        string
+	SourceSessionID  string
+	SourceRunID      string
+	SourceArtifactID string
+	SourceType       string
+	DisplayOrder     int
+	Meta             RequestMeta
 }
 
 type ProjectWorkDTO struct {
@@ -319,9 +334,103 @@ func (a *App) ListProjectAssets(ctx context.Context, auth AuthContext, projectID
 	}
 	items := make([]ProjectAssetDTO, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, ProjectAssetDTO{AssetID: row.AssetID, SourceType: row.SourceType, SourceSessionID: value(row.SourceSessionID), SourceRunID: value(row.SourceRunID), CreatedAt: row.CreatedAt})
+		items = append(items, ProjectAssetDTO{AssetID: row.AssetID, AssetRole: row.AssetRole, SourceType: row.SourceType, SourceSessionID: value(row.SourceSessionID), SourceRunID: value(row.SourceRunID), CreatedAt: row.CreatedAt})
 	}
 	return Page[ProjectAssetDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+}
+
+func (a *App) AttachAssetToProject(ctx context.Context, in AttachAssetInput) (ProjectAssetDTO, error) {
+	if in.Auth.UserID == "" || in.Auth.SpaceID == "" {
+		return ProjectAssetDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "auth context is required")
+	}
+	if in.ProjectID == "" || in.AssetID == "" {
+		return ProjectAssetDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "project_id and asset_id are required")
+	}
+	role := strings.TrimSpace(in.AssetRole)
+	if role == "" {
+		role = "content"
+	}
+	sourceType := strings.TrimSpace(in.SourceType)
+	if sourceType == "" {
+		sourceType = "agent"
+	}
+	hash := in.Meta.RequestHash
+	if hash == "" {
+		hash = security.HashIdentifier(in.Auth.UserID + ":" + in.ProjectID + ":" + in.AssetID + ":" + role)
+	}
+	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "project.asset.attach", IdempotencyKey: in.Meta.IdempotencyKey,
+		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
+	})
+	if err != nil {
+		return ProjectAssetDTO{}, err
+	}
+	if decision.Mode == idempotency.DecisionConflict {
+		return ProjectAssetDTO{}, bizerrors.New(bizerrors.CodeIdempotencyConflict, "asset attach idempotency key conflicts")
+	}
+	if decision.Mode == idempotency.DecisionProcessing {
+		return ProjectAssetDTO{}, bizerrors.New(bizerrors.CodeProcessing, "asset attach request is processing")
+	}
+	var dto ProjectAssetDTO
+	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		project, err := a.getVisibleProjectTx(tx, in.Auth, in.ProjectID)
+		if err != nil {
+			return err
+		}
+		if project.Status == StatusArchived {
+			return bizerrors.New(bizerrors.CodeProjectArchived, "project is archived")
+		}
+		var asset struct {
+			ID      string
+			SpaceID string
+			OwnerID string `gorm:"column:owner_user_id"`
+			Project *string
+			Status  string
+		}
+		if err := tx.Table("assets").Select("id, space_id, owner_user_id, project_id AS project, status").Where("id = ?", in.AssetID).First(&asset).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return bizerrors.New(bizerrors.CodeResourceNotFound, "asset not found")
+			}
+			return err
+		}
+		if asset.SpaceID != in.Auth.SpaceID || asset.OwnerID != in.Auth.UserID {
+			return bizerrors.New(bizerrors.CodePermissionDenied, "asset is not visible to current user")
+		}
+		if asset.Project != nil && *asset.Project != project.ID {
+			return bizerrors.New(bizerrors.CodeCrossSpaceDenied, "asset belongs to a different project")
+		}
+		if asset.Status != StatusActive {
+			return bizerrors.New(bizerrors.CodeStateConflict, "asset is not active")
+		}
+		now := a.now()
+		row := businesscore.ProjectAsset{
+			ID: security.RandomID("pa_"), ProjectID: project.ID, AssetID: in.AssetID, AssetRole: role,
+			AttachedByUserID: in.Auth.UserID, AttachedBy: optionalString(sourceType), Status: StatusActive,
+			SourceSessionID: optionalString(in.SourceSessionID), SourceRunID: optionalString(in.SourceRunID),
+			SourceArtifactID: optionalString(in.SourceArtifactID), SourceType: sourceType, DisplayOrder: in.DisplayOrder, CreatedAt: now,
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "project_id"}, {Name: "asset_id"}},
+			DoUpdates: clause.Assignments(map[string]any{"status": StatusActive, "asset_role": role, "source_type": sourceType}),
+		}).Create(&row).Error; err != nil {
+			return err
+		}
+		audit := auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, "project.asset.attach", "project_asset", in.AssetID, "success")
+		if err := tx.Create(audit).Error; err != nil {
+			return err
+		}
+		dto = ProjectAssetDTO{
+			AssetID: in.AssetID, AssetRole: role, SourceType: sourceType,
+			SourceSessionID: in.SourceSessionID, SourceRunID: in.SourceRunID, CreatedAt: now,
+		}
+		return nil
+	})
+	if err != nil {
+		_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
+		return ProjectAssetDTO{}, err
+	}
+	_ = a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "project_asset", ID: dto.AssetID})
+	return dto, nil
 }
 
 func (a *App) ListProjectWorks(ctx context.Context, auth AuthContext, projectID string, page PageRequest) (Page[ProjectWorkDTO], error) {

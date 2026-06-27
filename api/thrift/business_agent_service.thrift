@@ -530,16 +530,439 @@ struct SaveSkillTestResultResponse {
   3: required bool saved,
 }
 
+struct EnterpriseSummaryDTO {
+  1: required string enterprise_id,
+  2: required string space_id,
+  3: required string name,
+  4: required string owner_user_id,
+  5: optional string current_user_role,
+  6: required string status,
+  7: required i64 member_count,
+}
+
+struct PreviewTransferOwnerRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string target_member_id,
+  4: required string reason,
+}
+
+struct TransferOwnerPreviewDTO {
+  1: required string preview_token,
+  2: required list<string> impact_items,
+  3: required string expires_at,
+}
+
+struct ConfirmTransferOwnerRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string target_member_id,
+  4: required string reason,
+  5: required string preview_token,
+}
+
+struct PlatformAdminDTO {
+  1: required string admin_id,
+  2: required string account,
+  3: required string status,
+  4: required bool must_rotate_password,
+  5: required string created_at,
+}
+
+struct CreateAdminRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string account,
+  4: required string initial_password,
+  5: required string reason,
+}
+
+struct DisableAdminRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string admin_id,
+  4: required string reason,
+}
+
+struct PreviewSetUserStatusRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string target_user_id,
+  4: required string target_status,
+  5: required string reason,
+}
+
+struct UserStatusPreviewDTO {
+  1: required string preview_token,
+  2: required string current_status,
+  3: required string target_status,
+  4: required list<string> impact_summary,
+  5: required bool public_content_retained,
+  6: required bool private_content_not_exposed,
+  7: required string expires_at,
+}
+
+struct ConfirmSetUserStatusRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string target_user_id,
+  4: required string target_status,
+  5: required string reason,
+  6: required string preview_token,
+}
+
+struct AdminUserSummaryDTO {
+  1: required string user_id,
+  2: required string status,
+  3: required string public_nickname,
+  4: optional string email_masked,
+  5: optional string phone_masked,
+  6: optional string personal_space_id,
+  7: required string registered_at,
+  8: optional string last_login_at,
+}
+
+struct CreateProjectRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string title,
+  4: optional string initial_prompt_digest,
+  5: optional string source,
+  6: optional string space_id,
+}
+
+struct ProjectDetailDTO {
+  1: required string project_id,
+  2: required string title,
+  3: optional string description,
+  4: optional string cover_asset_id,
+  5: required string status,
+  6: required bool creative_allowed,
+  7: required list<string> allowed_actions,
+  8: optional string agent_session_query_ref,
+  9: required string updated_at,
+}
+
+struct UpdateProjectTitleRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string project_id,
+  4: required string title,
+  5: optional string base_updated_at,
+}
+
+struct AttachAssetToProjectRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string project_id,
+  4: required string asset_id,
+  5: optional string asset_role,
+  6: optional string source_session_id,
+  7: optional string source_run_id,
+  8: optional string source_artifact_id,
+  9: optional string source_type,
+  10: optional i32 display_order,
+}
+
+struct ProjectAssetDTO {
+  1: required string asset_id,
+  2: required string source_type,
+  3: optional string source_session_id,
+  4: optional string source_run_id,
+  5: required string created_at,
+}
+
+struct CreateUploadIntentRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string project_id,
+  4: required string asset_type,
+  5: required string filename,
+  6: required string content_type,
+  7: required i64 size_bytes,
+  8: optional string checksum,
+  9: optional string metadata_text,
+  10: required SafetyEvidenceDTO safety_evidence,
+}
+
+struct UploadIntentDTO {
+  1: required string upload_intent_id,
+  2: required string asset_id,
+  3: required string bucket,
+  4: required string object_key,
+  5: required string upload_url,
+  6: required map<string,string> upload_headers,
+  7: required string expires_at,
+  8: required i64 max_size_bytes,
+  9: required string content_type,
+}
+
+struct ConfirmUploadedAssetRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string upload_intent_id,
+  4: required string etag,
+  5: required i64 size_bytes,
+  6: required string content_type,
+  7: required string checksum,
+}
+
+struct AssetDetailDTO {
+  1: required string asset_id,
+  2: required string asset_type,
+  3: required string status,
+  4: optional string project_id,
+  5: optional string preview_url,
+  6: required list<string> access_actions,
+}
+
+struct CreateWorkRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string project_id,
+  4: required string title,
+  5: optional string description,
+  6: required list<string> asset_ids,
+  7: optional string cover_asset_id,
+  8: optional string category,
+  9: optional list<string> tags,
+}
+
+struct WorkDetailDTO {
+  1: required string work_id,
+  2: required string project_id,
+  3: required string title,
+  4: optional string description,
+  5: required string share_status,
+  6: optional string cover_asset_id,
+  7: optional string category,
+  8: required list<string> tags,
+  9: required list<string> asset_ids,
+  10: required list<string> allowed_actions,
+  11: required string updated_at,
+}
+
+struct PreviewShareWorkRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string work_id,
+  4: required string public_title,
+  5: optional string public_description,
+  6: optional list<string> tags,
+  7: required SafetyEvidenceDTO safety_evidence,
+}
+
+struct ShareWorkPreviewDTO {
+  1: required string preview_token,
+  2: required string work_id,
+  3: required string public_title,
+  4: required string public_description_digest,
+  5: required list<string> tags,
+  6: required list<string> privacy_redaction_summary,
+  7: required list<string> public_media_summary,
+  8: required string expires_at,
+}
+
+struct ConfirmShareWorkRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string work_id,
+  4: required string preview_token,
+}
+
+struct WorkShareResultDTO {
+  1: required string work_id,
+  2: required string public_work_id,
+  3: required string share_url,
+  4: required string share_status,
+  5: required string snapshot_id,
+}
+
+struct PreviewTakeDownPublicWorkRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string public_work_id,
+  4: required string reason,
+  5: required bool notify_author,
+}
+
+struct TakeDownPublicWorkPreviewDTO {
+  1: required string preview_token,
+  2: required string public_work_id,
+  3: required string work_id,
+  4: required string current_status,
+  5: required list<string> impact_items,
+  6: required bool public_link_will_be_inaccessible,
+  7: required bool source_asset_retained,
+  8: required bool notify_author,
+  9: required string expires_at,
+}
+
+struct ConfirmTakeDownPublicWorkRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string public_work_id,
+  4: required string preview_token,
+  5: required string reason,
+  6: required bool notify_author,
+}
+
+struct AdminPublicWorkDTO {
+  1: required string public_work_id,
+  2: required string work_id,
+  3: required string title,
+  4: optional map<string,string> author_summary,
+  5: required string status,
+  6: required string published_at,
+  7: optional string taken_down_at,
+  8: optional string notification_status,
+}
+
+struct ListPublicWorksRequest {
+  1: optional string category,
+  2: optional string tag,
+  3: optional string resource_type,
+  4: optional string sort_by,
+  5: optional i32 page_size,
+  6: optional i32 offset,
+}
+
+struct PublicWorkCardDTO {
+  1: required string public_work_id,
+  2: required string title,
+  3: optional string cover_url,
+  4: required string share_url,
+  5: optional string category,
+  6: required list<string> tags,
+  7: optional string resource_type,
+  8: required i64 like_count,
+  9: required string published_at,
+}
+
+struct ListPublicWorksResponse {
+  1: required list<PublicWorkCardDTO> items,
+  2: required i32 limit,
+  3: required i32 offset,
+  4: required i64 total,
+}
+
+struct GetPublicWorkRequest {
+  1: required string public_work_id,
+  2: optional AuthContext auth_context,
+  3: required RequestMeta request_meta,
+}
+
+struct PublicWorkDetailDTO {
+  1: required string public_work_id,
+  2: required string title,
+  3: optional string description,
+  4: required string share_url,
+  5: required list<map<string,string>> public_media_refs,
+  6: required string author_display_name,
+  7: optional string category,
+  8: required list<string> tags,
+  9: required i64 like_count,
+  10: required bool liked_by_current_user,
+}
+
+struct CreateNotificationRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string recipient_user_id,
+  4: optional string recipient_space_id,
+  5: optional string recipient_enterprise_id,
+  6: required string type,
+  7: required string title,
+  8: required string summary,
+  9: optional string body,
+  10: required map<string,string> navigation_hint,
+  11: optional string related_resource_type,
+  12: optional string related_resource_id,
+}
+
+struct NotificationDTO {
+  1: required string notification_id,
+  2: required string type,
+  3: required string title,
+  4: required string summary,
+  5: optional string body,
+  6: required map<string,string> navigation_hint,
+  7: optional string read_at,
+  8: required string created_at,
+  9: optional string related_resource_type,
+  10: optional string related_resource_id,
+}
+
+struct ListNotificationsRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: optional string type,
+  4: optional string read_state,
+  5: optional i32 page_size,
+  6: optional i32 offset,
+}
+
+struct ListNotificationsResponse {
+  1: required list<NotificationDTO> items,
+  2: required i32 limit,
+  3: required i32 offset,
+  4: required i64 total,
+}
+
+struct GetUnreadCountRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+}
+
+struct UnreadCountDTO {
+  1: required i64 unread_count,
+}
+
+struct MarkNotificationReadRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: required string notification_id,
+}
+
+struct MarkAllNotificationsReadRequest {
+  1: required AuthContext auth_context,
+  2: required RequestMeta request_meta,
+  3: optional string type,
+}
+
 service AccountSpaceService {
   ResolveCurrentSpaceContextResponse ResolveCurrentSpaceContext(1: ResolveCurrentSpaceContextRequest req)
   ResolveAuthContextFromTokenResponse ResolveAuthContextFromToken(1: ResolveAuthContextFromTokenRequest req)
 }
 
+service EnterpriseService {
+  TransferOwnerPreviewDTO PreviewTransferOwner(1: PreviewTransferOwnerRequest req)
+  EnterpriseSummaryDTO ConfirmTransferOwner(1: ConfirmTransferOwnerRequest req)
+}
+
+service AdminService {
+  PlatformAdminDTO CreateAdmin(1: CreateAdminRequest req)
+  PlatformAdminDTO DisableAdmin(1: DisableAdminRequest req)
+}
+
+service UserAdminService {
+  UserStatusPreviewDTO PreviewSetUserStatus(1: PreviewSetUserStatusRequest req)
+  AdminUserSummaryDTO ConfirmSetUserStatus(1: ConfirmSetUserStatusRequest req)
+}
+
 service ProjectService {
   ProjectAccessResponse CheckProjectAccess(1: CheckProjectAccessRequest req)
+  ProjectDetailDTO CreateProject(1: CreateProjectRequest req)
+  ProjectDetailDTO UpdateProjectTitle(1: UpdateProjectTitleRequest req)
+}
+
+service ProjectAssetService {
+  ProjectAssetDTO AttachAssetToProject(1: AttachAssetToProjectRequest req)
 }
 
 service AssetService {
+  UploadIntentDTO CreateUploadIntent(1: CreateUploadIntentRequest req)
+  AssetDetailDTO ConfirmUploadedAsset(1: ConfirmUploadedAssetRequest req)
   BatchCheckAssetAccessResponse BatchCheckAssetAccess(1: BatchCheckAssetAccessRequest req)
   PrepareGeneratedAssetObjectsResponse PrepareGeneratedAssetObjects(1: PrepareGeneratedAssetObjectsRequest req)
 }
@@ -575,4 +998,31 @@ service ModelConfigService {
 
 service PlatformDictionaryService {
   ListAssetElementTypesResponse ListAssetElementTypes(1: ListAssetElementTypesRequest req)
+}
+
+service WorkService {
+  WorkDetailDTO CreateWork(1: CreateWorkRequest req)
+}
+
+service WorkShareService {
+  ShareWorkPreviewDTO PreviewShareWork(1: PreviewShareWorkRequest req)
+  WorkShareResultDTO ConfirmShareWork(1: ConfirmShareWorkRequest req)
+}
+
+service FeaturedWorkAdminService {
+  TakeDownPublicWorkPreviewDTO PreviewTakeDownWork(1: PreviewTakeDownPublicWorkRequest req)
+  AdminPublicWorkDTO ConfirmTakeDownWork(1: ConfirmTakeDownPublicWorkRequest req)
+}
+
+service PublicContentService {
+  ListPublicWorksResponse ListPublicWorks(1: ListPublicWorksRequest req)
+  PublicWorkDetailDTO GetPublicWork(1: GetPublicWorkRequest req)
+}
+
+service NotificationService {
+  NotificationDTO CreateNotification(1: CreateNotificationRequest req)
+  ListNotificationsResponse ListNotifications(1: ListNotificationsRequest req)
+  UnreadCountDTO GetUnreadCount(1: GetUnreadCountRequest req)
+  NotificationDTO MarkNotificationRead(1: MarkNotificationReadRequest req)
+  UnreadCountDTO MarkAllNotificationsRead(1: MarkAllNotificationsReadRequest req)
 }

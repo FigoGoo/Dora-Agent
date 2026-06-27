@@ -12,6 +12,8 @@ import (
 // Client is designed to provide IDL-compatible methods with call-option parameter for kitex framework.
 type Client interface {
 	CheckProjectAccess(ctx context.Context, req *businessagent.CheckProjectAccessRequest, callOptions ...callopt.Option) (r *businessagent.ProjectAccessResponse, err error)
+	CreateProject(ctx context.Context, req *businessagent.CreateProjectRequest, callOptions ...callopt.Option) (r *businessagent.ProjectDetailDTO, err error)
+	UpdateProjectTitle(ctx context.Context, req *businessagent.UpdateProjectTitleRequest, callOptions ...callopt.Option) (r *businessagent.ProjectDetailDTO, err error)
 }
 
 // NewClient creates a client for the service defined in IDL.
@@ -46,4 +48,14 @@ type kProjectServiceClient struct {
 func (p *kProjectServiceClient) CheckProjectAccess(ctx context.Context, req *businessagent.CheckProjectAccessRequest, callOptions ...callopt.Option) (r *businessagent.ProjectAccessResponse, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.CheckProjectAccess(ctx, req)
+}
+
+func (p *kProjectServiceClient) CreateProject(ctx context.Context, req *businessagent.CreateProjectRequest, callOptions ...callopt.Option) (r *businessagent.ProjectDetailDTO, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.CreateProject(ctx, req)
+}
+
+func (p *kProjectServiceClient) UpdateProjectTitle(ctx context.Context, req *businessagent.UpdateProjectTitleRequest, callOptions ...callopt.Option) (r *businessagent.ProjectDetailDTO, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.UpdateProjectTitle(ctx, req)
 }
