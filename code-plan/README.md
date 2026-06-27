@@ -61,6 +61,16 @@ owner：主控 Codex 汇总维护
 | M5 公开触达和通知 | 业务 12/13、Agent 06/10 | 作品公开快照、点赞、下架、站内信、AG-UI 展示事件 | 公开内容不泄露隐私，通知和公开状态由业务服务维护。 |
 | M6 服务级验收 | 测试 00、Agent 14、业务 15 | RPC contract、HTTP contract、AG-UI replay、DB 验证、跨服务主链路报告 | 非前端、非部署范围内的阻断缺陷清零，未执行项有原因和风险说明。 |
 
+### Agent 07 里程碑拆分
+
+`code-plan/agent/07-RPC客户端业务能力调用与DTO映射设计.md` 是 Agent 调用业务服务的完整 RPC client 事实源，不代表整篇 Agent 07 都在 M2 完成。后续开发和验收按以下分期判定：
+
+| 全局阶段 | Agent 07 范围 | 验收口径 |
+| --- | --- | --- |
+| M2 身份项目能力 | `AccountSpaceService.ResolveCurrentSpaceContext`、`ProjectService.CheckProjectAccess` 的 `view` 与 `continue_creation` 用法 | session/run 创建、追加输入、interrupt accept/reject、cancel 和 snapshot 前完成空间解析与项目权限校验；同时检查 RPC error 与正常响应中的 `allowed`、`creative_allowed`。 |
+| M3 配置能力 | `SkillCatalogService`、`ToolCapabilityService`、`ModelConfigService`、`PlatformDictionaryService.ListAssetElementTypes` | Skill 路由、Tool 策略、模型选择、元素类型字典完成后才可标记通过。 |
+| M4 积分资产闭环 | `CreditService`、`AssetService`、`AssetCreditCommitService`、`ProjectService.CheckProjectAccess` 的 `attach_asset`、`commit_asset`、`create_work` 用法 | 预估、确认、冻结、扣费、释放、上传槽、资产保存和创作结果提交完成后才可标记通过。 |
+
 ## 全局 Done Gate
 
 - [x] 产品文档 `product_status: Done`，正式开发计划不依赖 `docs/project/**`。
