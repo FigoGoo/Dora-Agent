@@ -16,7 +16,7 @@
         {
           "asset_id": "ast_generated_1001",
           "preview_url": "http://localhost:19080/api/assets/ast_generated_1001/preview",
-          "element_type": "image.primary"
+          "element_type": "image_ref"
         }
       ]
     },

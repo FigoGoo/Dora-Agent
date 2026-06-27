@@ -31,7 +31,7 @@
     "memory_policy_json": "{\"enabled\":true}",
     "confirmation_policy_json": "{\"requires_confirmation\":\"when_tool_requires_or_credit_cost\"}",
     "test_input_json": "{\"prompt\":\"make a product storyboard\"}",
-    "expected_elements_json": "[{\"element_type\":\"image.primary\"}]"
+    "expected_elements_json": "[{\"element_type\":\"image_ref\"}]"
   },
   "assertions": [
     "business service returns test input and expected elements for sandbox execution",

@@ -2,10 +2,14 @@ package rpc
 
 import (
 	"context"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/asset"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetcommit"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetdict"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/credit"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/modelconfig"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/skillcatalog"
@@ -20,6 +24,9 @@ type Handler struct {
 	Tool       *toolpolicy.App
 	Skill      *skillcatalog.App
 	Dictionary *assetdict.App
+	Credit     *credit.App
+	Asset      *asset.App
+	Commit     *assetcommit.App
 }
 
 func NewUnimplementedHandler() *Handler {
@@ -38,6 +45,12 @@ func NewHandler(accountApp *accountspace.App, projectApp *project.App, optionalA
 			h.Skill = typed
 		case *assetdict.App:
 			h.Dictionary = typed
+		case *credit.App:
+			h.Credit = typed
+		case *asset.App:
+			h.Asset = typed
+		case *assetcommit.App:
+			h.Commit = typed
 		}
 	}
 	return h
@@ -119,35 +132,214 @@ func (h *Handler) CheckProjectAccess(ctx context.Context, req *businessagent.Che
 }
 
 func (h *Handler) BatchCheckAssetAccess(ctx context.Context, req *businessagent.BatchCheckAssetAccessRequest) (*businessagent.BatchCheckAssetAccessResponse, error) {
-	return nil, bizerrors.NotImplemented("AssetService.BatchCheckAssetAccess")
+	if h.Asset == nil {
+		return nil, bizerrors.NotImplemented("AssetService.BatchCheckAssetAccess")
+	}
+	if req == nil || req.AuthContext == nil {
+		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "auth_context is required")
+	}
+	results, err := h.Asset.BatchCheckAssetAccess(ctx, authContextFromRPC(req.AuthContext), req.ProjectId, req.AssetIds, req.Purpose)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*businessagent.AssetAccessResult_, 0, len(results))
+	for _, item := range results {
+		out = append(out, &businessagent.AssetAccessResult_{
+			AssetId: item.AssetID, Allowed: item.Allowed, Reason: item.Reason, AssetSummary: item.AssetSummary,
+		})
+	}
+	return &businessagent.BatchCheckAssetAccessResponse{Results: out}, nil
 }
 
 func (h *Handler) PrepareGeneratedAssetObjects(ctx context.Context, req *businessagent.PrepareGeneratedAssetObjectsRequest) (*businessagent.PrepareGeneratedAssetObjectsResponse, error) {
-	return nil, bizerrors.NotImplemented("AssetService.PrepareGeneratedAssetObjects")
+	if h.Asset == nil {
+		return nil, bizerrors.NotImplemented("AssetService.PrepareGeneratedAssetObjects")
+	}
+	if req == nil || req.AuthContext == nil || req.RequestMeta == nil {
+		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "auth_context and request_meta are required")
+	}
+	artifacts := make([]asset.GeneratedObjectInput, 0, len(req.Artifacts))
+	for _, item := range req.Artifacts {
+		artifacts = append(artifacts, asset.GeneratedObjectInput{
+			ArtifactID: item.ArtifactId, ResourceType: item.ResourceType, Filename: item.Filename,
+			ContentType: item.ContentType, SizeBytes: item.SizeBytes, Checksum: item.GetChecksum(), MetadataSummary: item.MetadataSummary,
+		})
+	}
+	slots, err := h.Asset.PrepareGeneratedAssetObjects(ctx, authContextFromRPC(req.AuthContext), metaFromRPC(req.RequestMeta), req.ProjectId, req.SessionId, req.RunId, artifacts)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*businessagent.GeneratedAssetUploadSlot, 0, len(slots))
+	for _, slot := range slots {
+		out = append(out, &businessagent.GeneratedAssetUploadSlot{
+			ArtifactId: slot.ArtifactID, Bucket: slot.Bucket, ObjectKey: slot.ObjectKey, UploadUrl: slot.UploadURL,
+			UploadHeaders: slot.UploadHeaders, ExpiresAt: slot.ExpiresAt.Format(time.RFC3339Nano), MaxSizeBytes: slot.MaxSizeBytes,
+		})
+	}
+	return &businessagent.PrepareGeneratedAssetObjectsResponse{UploadSlots: out}, nil
 }
 
 func (h *Handler) EstimateGenerationCredits(ctx context.Context, req *businessagent.EstimateGenerationCreditsRequest) (*businessagent.EstimateGenerationCreditsResponse, error) {
-	return nil, bizerrors.NotImplemented("CreditService.EstimateGenerationCredits")
+	if h.Credit == nil {
+		return nil, bizerrors.NotImplemented("CreditService.EstimateGenerationCredits")
+	}
+	if req == nil || req.AuthContext == nil || req.RequestMeta == nil {
+		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "auth_context and request_meta are required")
+	}
+	items := make([]credit.ToolUsageItem, 0, len(req.ToolUsageItems))
+	for _, item := range req.ToolUsageItems {
+		items = append(items, toolUsageFromRPC(item))
+	}
+	out, err := h.Credit.EstimateGenerationCredits(ctx, credit.EstimateGenerationInput{
+		Auth: authContextFromRPC(req.AuthContext), Meta: metaFromRPC(req.RequestMeta), ProjectID: req.ProjectId,
+		ResourceType: req.ResourceType, ModelID: req.ModelId, PricingSnapshotID: req.PricingSnapshotId,
+		Quantity: req.GetQuantity(), DurationSeconds: req.GetDurationSeconds(), ToolUsageItems: items, SafetyEvidence: req.SafetyEvidence,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return estimateToRPC(out), nil
 }
 
 func (h *Handler) EstimateToolCredits(ctx context.Context, req *businessagent.EstimateToolCreditsRequest) (*businessagent.EstimateToolCreditsResponse, error) {
-	return nil, bizerrors.NotImplemented("CreditService.EstimateToolCredits")
+	if h.Credit == nil {
+		return nil, bizerrors.NotImplemented("CreditService.EstimateToolCredits")
+	}
+	if req == nil || req.AuthContext == nil || req.RequestMeta == nil {
+		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "auth_context and request_meta are required")
+	}
+	items := make([]credit.ToolUsageItem, 0, len(req.ToolUsageItems))
+	for _, item := range req.ToolUsageItems {
+		items = append(items, toolUsageFromRPC(item))
+	}
+	out, err := h.Credit.EstimateToolCredits(ctx, credit.EstimateToolInput{
+		Auth: authContextFromRPC(req.AuthContext), Meta: metaFromRPC(req.RequestMeta), ProjectID: req.ProjectId,
+		ToolUsageItems: items, SafetyEvidence: req.SafetyEvidence,
+	})
+	if err != nil {
+		return nil, err
+	}
+	estimate := estimateToRPC(out)
+	return &businessagent.EstimateToolCreditsResponse{
+		EstimateId: estimate.EstimateId, EstimatePoints: estimate.EstimatePoints, AvailablePoints: estimate.AvailablePoints,
+		ExpiresSoonPoints: estimate.ExpiresSoonPoints, CreditAccountScope: estimate.CreditAccountScope, CreditAccountId: estimate.CreditAccountId,
+		LineItems: estimate.LineItems, ExpiresAt: estimate.ExpiresAt, Insufficient: estimate.Insufficient,
+	}, nil
 }
 
 func (h *Handler) FreezeCredits(ctx context.Context, req *businessagent.FreezeCreditsRequest) (*businessagent.FreezeCreditsResponse, error) {
-	return nil, bizerrors.NotImplemented("CreditService.FreezeCredits")
+	if h.Credit == nil {
+		return nil, bizerrors.NotImplemented("CreditService.FreezeCredits")
+	}
+	if req == nil || req.AuthContext == nil || req.RequestMeta == nil {
+		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "auth_context and request_meta are required")
+	}
+	out, err := h.Credit.FreezeCredits(ctx, credit.FreezeInput{
+		Auth: authContextFromRPC(req.AuthContext), Meta: metaFromRPC(req.RequestMeta), EstimateID: req.EstimateId,
+		Points: req.Points, RunID: req.RunId, ConfirmationID: req.GetConfirmationId(), AccountID: req.GetAccountId(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &businessagent.FreezeCreditsResponse{FreezeId: out.FreezeID, FrozenPoints: out.FrozenPoints, ExpiresAt: out.ExpiresAt.Format(time.RFC3339Nano)}, nil
 }
 
 func (h *Handler) ChargeToolUsageCredits(ctx context.Context, req *businessagent.ChargeToolUsageCreditsRequest) (*businessagent.ChargeToolUsageCreditsResponse, error) {
-	return nil, bizerrors.NotImplemented("CreditService.ChargeToolUsageCredits")
+	if h.Credit == nil {
+		return nil, bizerrors.NotImplemented("CreditService.ChargeToolUsageCredits")
+	}
+	if req == nil || req.AuthContext == nil || req.RequestMeta == nil {
+		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "auth_context and request_meta are required")
+	}
+	items := make([]credit.ChargeItemInput, 0, len(req.ChargeItems))
+	for _, item := range req.ChargeItems {
+		items = append(items, credit.ChargeItemInput{
+			EstimateItemID: item.EstimateItemId, ToolCallID: item.ToolCallId, ToolName: item.ToolName,
+			ToolType: item.ToolType, BillingUnit: item.BillingUnit, ActualQuantity: item.ActualQuantity,
+			ExecutionStatus: item.ExecutionStatus, MetadataSummary: item.MetadataSummary,
+		})
+	}
+	out, err := h.Credit.ChargeToolUsageCredits(ctx, credit.ChargeToolInput{
+		Auth: authContextFromRPC(req.AuthContext), Meta: metaFromRPC(req.RequestMeta), ProjectID: req.ProjectId,
+		EstimateID: req.EstimateId, FreezeID: req.FreezeId, SessionID: req.SessionId, RunID: req.RunId, ChargeItems: items,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &businessagent.ChargeToolUsageCreditsResponse{
+		ToolChargeId: out.ToolChargeID, ChargedPoints: out.ChargedPoints, ReleasedPoints: out.ReleasedPoints,
+		FreezeStatus: out.FreezeStatus, LedgerEntryIds: out.LedgerEntryIDs, ChargedLineItems: chargedItemsToRPC(out.ChargedLineItems),
+	}, nil
 }
 
 func (h *Handler) ReleaseFrozenCredits(ctx context.Context, req *businessagent.ReleaseFrozenCreditsRequest) (*businessagent.ReleaseFrozenCreditsResponse, error) {
-	return nil, bizerrors.NotImplemented("CreditService.ReleaseFrozenCredits")
+	if h.Credit == nil {
+		return nil, bizerrors.NotImplemented("CreditService.ReleaseFrozenCredits")
+	}
+	if req == nil || req.AuthContext == nil || req.RequestMeta == nil {
+		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "auth_context and request_meta are required")
+	}
+	out, err := h.Credit.ReleaseFrozenCredits(ctx, credit.ReleaseInput{
+		Auth: authContextFromRPC(req.AuthContext), Meta: metaFromRPC(req.RequestMeta), FreezeID: req.FreezeId,
+		ReleasePoints: req.ReleasePoints, Reason: req.Reason, RunID: req.RunId,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &businessagent.ReleaseFrozenCreditsResponse{ReleasedPoints: out.ReleasedPoints, ReleaseStatus: out.ReleaseStatus}, nil
 }
 
 func (h *Handler) CommitGeneratedAssetAndCharge(ctx context.Context, req *businessagent.CommitGeneratedAssetAndChargeRequest) (*businessagent.CommitGeneratedAssetAndChargeResponse, error) {
-	return nil, bizerrors.NotImplemented("AssetCreditCommitService.CommitGeneratedAssetAndCharge")
+	if h.Commit == nil {
+		return nil, bizerrors.NotImplemented("AssetCreditCommitService.CommitGeneratedAssetAndCharge")
+	}
+	if req == nil || req.AuthContext == nil || req.RequestMeta == nil {
+		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "auth_context and request_meta are required")
+	}
+	artifacts := make([]assetcommit.CommitArtifactInput, 0, len(req.Artifacts))
+	for _, item := range req.Artifacts {
+		storage := item.GetStorageObjectRef()
+		if storage == nil {
+			return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "storage_object_ref is required")
+		}
+		artifacts = append(artifacts, assetcommit.CommitArtifactInput{
+			ArtifactID: item.ArtifactId, ResourceType: item.ResourceType, ElementType: item.ElementType,
+			ArtifactSummary: item.ArtifactSummary, ContentURIDigest: item.GetContentUriDigest(), EstimateItemID: item.GetEstimateItemId(),
+			ToolName: item.GetToolName(), ToolType: item.GetToolType(), ChargeQuantity: item.GetChargeQuantity(),
+			MetadataSummary: item.MetadataSummary,
+			StorageObjectRef: assetcommit.StorageObjectRef{
+				ObjectKey: storage.ObjectKey, Bucket: storage.Bucket, ContentType: storage.ContentType,
+				SizeBytes: storage.SizeBytes, Checksum: storage.Checksum, Etag: storage.GetEtag(),
+			},
+		})
+	}
+	finals := make([]assetcommit.FinalElementInput, 0, len(req.FinalElements))
+	for _, item := range req.FinalElements {
+		finals = append(finals, assetcommit.FinalElementInput{
+			ElementType: item.ElementType, ElementPayloadJSON: item.ElementPayloadJson,
+			DisplayOrder: item.DisplayOrder, SourceToolCallID: item.GetSourceToolCallId(),
+		})
+	}
+	out, err := h.Commit.CommitGeneratedAssetAndCharge(ctx, assetcommit.CommitInput{
+		Auth: authContextFromRPC(req.AuthContext), Meta: metaFromRPC(req.RequestMeta), ProjectID: req.ProjectId,
+		SessionID: req.SessionId, RunID: req.RunId, FreezeID: req.FreezeId, EstimateID: req.GetEstimateId(),
+		Artifacts: artifacts, FinalElements: finals, SafetyEvidence: req.SafetyEvidence,
+	})
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]*businessagent.CommittedAssetRefDTO, 0, len(out.AssetRefs))
+	for _, item := range out.AssetRefs {
+		refs = append(refs, &businessagent.CommittedAssetRefDTO{
+			AssetId: item.AssetID, SourceArtifactId: item.SourceArtifactID, ResourceType: item.ResourceType,
+			AssetType: item.AssetType, Status: item.Status, PreviewUrl: optionalString(item.PreviewURL),
+			ElementsSummaryJson: optionalString(item.ElementsSummaryJSON),
+		})
+	}
+	return &businessagent.CommitGeneratedAssetAndChargeResponse{
+		AssetRefs: refs, ChargedPoints: out.ChargedPoints, ReleasedPoints: out.ReleasedPoints,
+		CommitStatus: out.CommitStatus, LedgerRef: optionalString(out.LedgerRef), ChargedLineItems: commitChargedItemsToRPC(out.ChargedLineItems),
+	}, nil
 }
 
 func (h *Handler) ListRoutableSkills(ctx context.Context, req *businessagent.ListRoutableSkillsRequest) (*businessagent.ListRoutableSkillsResponse, error) {
@@ -360,8 +552,81 @@ func modelSummaryToRPC(in modelconfig.ModelSummaryDTO) *businessagent.ModelSumma
 	}
 }
 
+func metaFromRPC(in *businessagent.RequestMeta) accountspace.RequestMeta {
+	if in == nil {
+		return accountspace.RequestMeta{}
+	}
+	return accountspace.RequestMeta{
+		RequestID:      in.RequestId,
+		TraceID:        in.TraceId,
+		IdempotencyKey: in.GetIdempotencyKey(),
+		Source:         in.Source,
+	}
+}
+
+func toolUsageFromRPC(in *businessagent.ToolUsageEstimateItemInput) credit.ToolUsageItem {
+	if in == nil {
+		return credit.ToolUsageItem{}
+	}
+	return credit.ToolUsageItem{
+		ToolName: in.ToolName, ToolType: in.ToolType, BillingUnit: in.BillingUnit,
+		Quantity: in.Quantity, MetadataSummary: in.MetadataSummary,
+	}
+}
+
+func estimateToRPC(in credit.EstimateDTO) *businessagent.EstimateGenerationCreditsResponse {
+	return &businessagent.EstimateGenerationCreditsResponse{
+		EstimateId: in.EstimateID, EstimatePoints: in.EstimatePoints, AvailablePoints: in.AvailablePoints,
+		ExpiresSoonPoints: in.ExpiresSoonPoints, CreditAccountScope: in.CreditAccountScope, CreditAccountId: in.CreditAccountID,
+		LineItems: estimateLineItemsToRPC(in.LineItems), ExpiresAt: in.ExpiresAt.Format(time.RFC3339Nano), Insufficient: in.Insufficient,
+	}
+}
+
+func estimateLineItemsToRPC(items []credit.EstimateLineItemDTO) []*businessagent.CreditEstimateLineItemDTO {
+	out := make([]*businessagent.CreditEstimateLineItemDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, &businessagent.CreditEstimateLineItemDTO{
+			EstimateItemId: item.EstimateItemID, ItemType: item.ItemType, ToolName: optionalString(item.ToolName),
+			ToolType: optionalString(item.ToolType), PricingPolicyId: optionalString(item.PricingPolicyID),
+			ModelId: optionalString(item.ModelID), ResourceType: optionalString(item.ResourceType), BillingUnit: optionalString(item.BillingUnit),
+			Quantity: optionalFloat(item.Quantity), UnitPoints: optionalFloat(item.UnitPoints), EstimatePoints: item.EstimatePoints,
+			FreeReason: optionalString(item.FreeReason), MetadataSummary: item.Metadata,
+		})
+	}
+	return out
+}
+
+func chargedItemsToRPC(items []credit.ChargedLineItemDTO) []*businessagent.ChargedLineItemDTO {
+	out := make([]*businessagent.ChargedLineItemDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, &businessagent.ChargedLineItemDTO{
+			EstimateItemId: item.EstimateItemID, ChargedPoints: item.ChargedPoints, Status: item.Status,
+			AssetId: optionalString(item.AssetID), ToolCallId: optionalString(item.ToolCallID), ArtifactId: optionalString(item.ArtifactID),
+		})
+	}
+	return out
+}
+
+func commitChargedItemsToRPC(items []assetcommit.ChargedLineItemDTO) []*businessagent.ChargedLineItemDTO {
+	out := make([]*businessagent.ChargedLineItemDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, &businessagent.ChargedLineItemDTO{
+			EstimateItemId: item.EstimateItemID, ChargedPoints: item.ChargedPoints, Status: item.Status,
+			AssetId: optionalString(item.AssetID), ToolCallId: optionalString(item.ToolCallID), ArtifactId: optionalString(item.ArtifactID),
+		})
+	}
+	return out
+}
+
 func optionalString(value string) *string {
 	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func optionalFloat(value float64) *float64 {
+	if value == 0 {
 		return nil
 	}
 	return &value

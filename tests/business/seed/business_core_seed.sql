@@ -129,15 +129,15 @@ ON CONFLICT (version_id, tool_name, tool_type) DO NOTHING;
 INSERT INTO skill_output_element_schemas (
   id, skill_id, version_id, element_type, schema_json, required
 ) VALUES (
-  'skel_storyboard_image', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'image.primary', '{"type":"object"}'::jsonb, true
+  'skel_storyboard_image', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'image_ref', '{"type":"object"}'::jsonb, true
 ) ON CONFLICT (version_id, element_type) DO NOTHING;
 
 INSERT INTO skill_test_cases (
   id, skill_id, version_id, case_name, test_input_json, expected_elements_json, status, created_by_user_id
 ) VALUES
-  ('skcase_storyboard_basic', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'basic storyboard', '{"prompt":"make a product storyboard"}'::jsonb, '[{"element_type":"image.primary"}]'::jsonb, 'active', 'usr_1001'),
-  ('skcase_storyboard_caption', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'captioned storyboard', '{"prompt":"make a storyboard with captions"}'::jsonb, '[{"element_type":"image.primary"},{"element_type":"text.caption"}]'::jsonb, 'active', 'usr_1001'),
-  ('skcase_storyboard_variants', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'variant storyboard', '{"prompt":"make three visual variants"}'::jsonb, '[{"element_type":"image.variation"},{"element_type":"metadata.generation"}]'::jsonb, 'active', 'usr_1001')
+  ('skcase_storyboard_basic', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'basic storyboard', '{"prompt":"make a product storyboard"}'::jsonb, '[{"element_type":"image_ref"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_storyboard_caption', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'captioned storyboard', '{"prompt":"make a storyboard with captions"}'::jsonb, '[{"element_type":"image_ref"},{"element_type":"short_text"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_storyboard_variants', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'variant storyboard', '{"prompt":"make three visual variants"}'::jsonb, '[{"element_type":"storyboard"},{"element_type":"parameter_group"}]'::jsonb, 'active', 'usr_1001')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO skill_test_runs (
@@ -179,20 +179,20 @@ ON CONFLICT (code_digest) DO NOTHING;
 INSERT INTO asset_element_types (
   id, element_type, display_name, schema_version, schema_json, status
 ) VALUES
-  ('aet_image_primary', 'image.primary', 'Primary Image', '2026-06-27', '{"type":"object","category":"image","resource_type":"image","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":10,"render_hint":{"component":"image"}}'::jsonb, 'active'),
-  ('aet_image_variation', 'image.variation', 'Image Variation', '2026-06-27', '{"type":"object","category":"image","resource_type":"image","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":20,"render_hint":{"component":"gallery"}}'::jsonb, 'active'),
-  ('aet_image_mask', 'image.mask', 'Image Mask', '2026-06-27', '{"type":"object","category":"image","resource_type":"image","usage_stage":"draft","draft_enabled":true,"final_enabled":false,"editable":true,"referable":true,"sort_order":30,"render_hint":{"component":"mask"}}'::jsonb, 'active'),
-  ('aet_image_thumbnail', 'image.thumbnail', 'Image Thumbnail', '2026-06-27', '{"type":"object","category":"image","resource_type":"image","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":40,"render_hint":{"component":"thumbnail"}}'::jsonb, 'active'),
-  ('aet_text_caption', 'text.caption', 'Caption', '2026-06-27', '{"type":"object","category":"text","resource_type":"text","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":110,"render_hint":{"component":"caption"}}'::jsonb, 'active'),
-  ('aet_text_prompt', 'text.prompt', 'Prompt', '2026-06-27', '{"type":"object","category":"text","resource_type":"text","usage_stage":"draft","draft_enabled":true,"final_enabled":false,"editable":true,"referable":true,"sort_order":120,"render_hint":{"component":"prompt"}}'::jsonb, 'active'),
-  ('aet_text_alt', 'text.alt', 'Alt Text', '2026-06-27', '{"type":"object","category":"text","resource_type":"text","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":130,"render_hint":{"component":"plain_text"}}'::jsonb, 'active'),
-  ('aet_text_storyboard', 'text.storyboard', 'Storyboard Text', '2026-06-27', '{"type":"object","category":"text","resource_type":"text","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":140,"render_hint":{"component":"storyboard"}}'::jsonb, 'active'),
-  ('aet_audio_voiceover', 'audio.voiceover', 'Voiceover', '2026-06-27', '{"type":"object","category":"audio","resource_type":"audio","usage_stage":"final","draft_enabled":false,"final_enabled":true,"editable":false,"referable":true,"sort_order":210,"render_hint":{"component":"audio"}}'::jsonb, 'active'),
-  ('aet_video_clip', 'video.clip', 'Video Clip', '2026-06-27', '{"type":"object","category":"video","resource_type":"video","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":310,"render_hint":{"component":"video"}}'::jsonb, 'active'),
-  ('aet_layout_frame', 'layout.frame', 'Layout Frame', '2026-06-27', '{"type":"object","category":"layout","resource_type":"layout","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":410,"render_hint":{"component":"frame"}}'::jsonb, 'active'),
-  ('aet_layout_scene', 'layout.scene', 'Layout Scene', '2026-06-27', '{"type":"object","category":"layout","resource_type":"layout","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":420,"render_hint":{"component":"scene"}}'::jsonb, 'active'),
-  ('aet_metadata_generation', 'metadata.generation', 'Generation Metadata', '2026-06-27', '{"type":"object","category":"metadata","resource_type":"metadata","usage_stage":"final","draft_enabled":false,"final_enabled":true,"editable":false,"referable":true,"sort_order":510,"render_hint":{"component":"metadata"}}'::jsonb, 'active'),
-  ('aet_safety_evidence', 'safety.evidence', 'Safety Evidence', '2026-06-27', '{"type":"object","category":"safety","resource_type":"safety","usage_stage":"final","draft_enabled":false,"final_enabled":true,"editable":false,"referable":true,"sort_order":610,"render_hint":{"component":"evidence"}}'::jsonb, 'active')
+  ('aet_short_text', 'short_text', 'Short Text', '2026-06-28', '{"type":"object","category":"text","resource_type":"file","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":10,"render_hint":{"component":"text"}}'::jsonb, 'active'),
+  ('aet_long_text', 'long_text', 'Long Text', '2026-06-28', '{"type":"object","category":"text","resource_type":"file","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":20,"render_hint":{"component":"text"}}'::jsonb, 'active'),
+  ('aet_rich_text', 'rich_text', 'Rich Text', '2026-06-28', '{"type":"object","category":"text","resource_type":"file","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":30,"render_hint":{"component":"rich_text"}}'::jsonb, 'active'),
+  ('aet_structured_object', 'structured_object', 'Structured Object', '2026-06-28', '{"type":"object","category":"json","resource_type":"file","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":40,"render_hint":{"component":"json"}}'::jsonb, 'active'),
+  ('aet_list', 'list', 'List', '2026-06-28', '{"type":"object","category":"json","resource_type":"file","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":50,"render_hint":{"component":"list"}}'::jsonb, 'active'),
+  ('aet_image_ref', 'image_ref', 'Image Reference', '2026-06-28', '{"type":"object","category":"image","resource_type":"image","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":60,"render_hint":{"component":"image"}}'::jsonb, 'active'),
+  ('aet_audio_ref', 'audio_ref', 'Audio Reference', '2026-06-28', '{"type":"object","category":"audio","resource_type":"music","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":false,"referable":true,"sort_order":70,"render_hint":{"component":"audio_player"}}'::jsonb, 'active'),
+  ('aet_video_ref', 'video_ref', 'Video Reference', '2026-06-28', '{"type":"object","category":"video","resource_type":"video","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":false,"referable":true,"sort_order":80,"render_hint":{"component":"video_player"}}'::jsonb, 'active'),
+  ('aet_file_ref', 'file_ref', 'File Reference', '2026-06-28', '{"type":"object","category":"file","resource_type":"file","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":false,"referable":true,"sort_order":90,"render_hint":{"component":"file"}}'::jsonb, 'active'),
+  ('aet_prompt', 'prompt', 'Prompt', '2026-06-28', '{"type":"object","category":"prompt","resource_type":"file","usage_stage":"draft","draft_enabled":true,"final_enabled":false,"editable":true,"referable":true,"sort_order":100,"render_hint":{"component":"prompt"}}'::jsonb, 'active'),
+  ('aet_storyboard', 'storyboard', 'Storyboard', '2026-06-28', '{"type":"object","category":"storyboard","resource_type":"file","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":110,"render_hint":{"component":"storyboard"}}'::jsonb, 'active'),
+  ('aet_timeline', 'timeline', 'Timeline', '2026-06-28', '{"type":"object","category":"timeline","resource_type":"file","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":120,"render_hint":{"component":"timeline"}}'::jsonb, 'active'),
+  ('aet_tag_group', 'tag_group', 'Tag Group', '2026-06-28', '{"type":"object","category":"metadata","resource_type":"file","usage_stage":"draft_final","draft_enabled":true,"final_enabled":true,"editable":true,"referable":true,"sort_order":130,"render_hint":{"component":"tags"}}'::jsonb, 'active'),
+  ('aet_parameter_group', 'parameter_group', 'Parameter Group', '2026-06-28', '{"type":"object","category":"parameters","resource_type":"file","usage_stage":"draft","draft_enabled":true,"final_enabled":false,"editable":true,"referable":true,"sort_order":140,"render_hint":{"component":"parameters"}}'::jsonb, 'active')
 ON CONFLICT (element_type) DO NOTHING;
 
 INSERT INTO assets (
@@ -218,7 +218,7 @@ INSERT INTO asset_storage_objects (
 INSERT INTO asset_elements (
   id, asset_id, element_type, element_key, element_summary_json, preview_text, status
 ) VALUES (
-  'asel_generated_1001_primary', 'ast_generated_1001', 'image.primary', 'primary', '{"width":1024,"height":1024}'::jsonb, null, 'active'
+  'asel_generated_1001_primary', 'ast_generated_1001', 'image_ref', 'primary', '{"width":1024,"height":1024}'::jsonb, null, 'active'
 ) ON CONFLICT (asset_id, element_key) DO NOTHING;
 
 INSERT INTO works (
@@ -236,7 +236,7 @@ INSERT INTO work_assets (
 INSERT INTO work_public_snapshots (
   id, snapshot_id, work_id, share_slug, title, description, cover_asset_id, snapshot_json, share_url, visibility, status, like_count, published_by_user_id, published_at
 ) VALUES (
-  'wps_seed_public_row', 'wps_seed_public', 'wrk_seed_public', 'seed-storyboard', 'Seed public storyboard', 'A public seed work', 'ast_generated_1001', '{"assets":[{"asset_id":"ast_generated_1001","element_type":"image.primary"}]}'::jsonb, 'http://localhost:3000/share/seed-storyboard', 'public', 'published', 1, 'usr_1001', '2026-06-27T12:00:00Z'
+  'wps_seed_public_row', 'wps_seed_public', 'wrk_seed_public', 'seed-storyboard', 'Seed public storyboard', 'A public seed work', 'ast_generated_1001', '{"assets":[{"asset_id":"ast_generated_1001","element_type":"image_ref"}]}'::jsonb, 'http://localhost:3000/share/seed-storyboard', 'public', 'published', 1, 'usr_1001', '2026-06-27T12:00:00Z'
 ) ON CONFLICT (snapshot_id) DO NOTHING;
 
 INSERT INTO work_likes (

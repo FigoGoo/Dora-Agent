@@ -13,51 +13,30 @@
       "trace_id": "trace_element_types_001",
       "source": "agent_service"
     },
-    "page_size": 10,
-    "schema_version": "2026-06-27"
+    "page_size": 20,
+    "schema_version": "2026-06-28"
   },
   "response": {
-    "schema_version": "2026-06-27",
+    "schema_version": "2026-06-28",
     "element_types": [
-      {
-        "element_type": "image.primary",
-        "display_name": "Primary Image",
-        "category": "media",
-        "schema_version": "2026-06-27",
-        "schema_hint_json": "{\"type\":\"object\",\"required\":[\"asset_id\"]}",
-        "render_hint_json": "{\"component\":\"image_preview\"}",
-        "active": true,
-        "sort_order": 10,
-        "resource_type": "image",
-        "status": "active",
-        "usage_stage": "draft_final",
-        "draft_enabled": true,
-        "final_enabled": true,
-        "editable": true,
-        "referable": true,
-        "render_hint": "image_preview"
-      },
-      {
-        "element_type": "text.caption",
-        "display_name": "Caption",
-        "category": "text",
-        "schema_version": "2026-06-27",
-        "schema_hint_json": "{\"type\":\"object\",\"required\":[\"text\"]}",
-        "render_hint_json": "{\"component\":\"text_block\"}",
-        "active": true,
-        "sort_order": 20,
-        "resource_type": "text",
-        "status": "active",
-        "usage_stage": "draft_final",
-        "draft_enabled": true,
-        "final_enabled": true,
-        "editable": true,
-        "referable": true,
-        "render_hint": "text_block"
-      }
+      {"element_type": "short_text", "display_name": "Short Text", "category": "text", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\"}", "render_hint_json": "{\"component\":\"text\"}", "active": true, "sort_order": 10, "resource_type": "file", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": true, "referable": true, "render_hint": "text"},
+      {"element_type": "long_text", "display_name": "Long Text", "category": "text", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\"}", "render_hint_json": "{\"component\":\"text\"}", "active": true, "sort_order": 20, "resource_type": "file", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": true, "referable": true, "render_hint": "text"},
+      {"element_type": "rich_text", "display_name": "Rich Text", "category": "text", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\"}", "render_hint_json": "{\"component\":\"rich_text\"}", "active": true, "sort_order": 30, "resource_type": "file", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": true, "referable": true, "render_hint": "rich_text"},
+      {"element_type": "structured_object", "display_name": "Structured Object", "category": "json", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\"}", "render_hint_json": "{\"component\":\"json\"}", "active": true, "sort_order": 40, "resource_type": "file", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": true, "referable": true, "render_hint": "json"},
+      {"element_type": "list", "display_name": "List", "category": "json", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\"}", "render_hint_json": "{\"component\":\"list\"}", "active": true, "sort_order": 50, "resource_type": "file", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": true, "referable": true, "render_hint": "list"},
+      {"element_type": "image_ref", "display_name": "Image Reference", "category": "image", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\",\"required\":[\"asset_id\"]}", "render_hint_json": "{\"component\":\"image\"}", "active": true, "sort_order": 60, "resource_type": "image", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": true, "referable": true, "render_hint": "image"},
+      {"element_type": "audio_ref", "display_name": "Audio Reference", "category": "audio", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\",\"required\":[\"asset_id\"]}", "render_hint_json": "{\"component\":\"audio_player\"}", "active": true, "sort_order": 70, "resource_type": "music", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": false, "referable": true, "render_hint": "audio_player"},
+      {"element_type": "video_ref", "display_name": "Video Reference", "category": "video", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\",\"required\":[\"asset_id\"]}", "render_hint_json": "{\"component\":\"video_player\"}", "active": true, "sort_order": 80, "resource_type": "video", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": false, "referable": true, "render_hint": "video_player"},
+      {"element_type": "file_ref", "display_name": "File Reference", "category": "file", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\",\"required\":[\"asset_id\"]}", "render_hint_json": "{\"component\":\"file\"}", "active": true, "sort_order": 90, "resource_type": "file", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": false, "referable": true, "render_hint": "file"},
+      {"element_type": "prompt", "display_name": "Prompt", "category": "prompt", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\"}", "render_hint_json": "{\"component\":\"prompt\"}", "active": true, "sort_order": 100, "resource_type": "file", "status": "active", "usage_stage": "draft", "draft_enabled": true, "final_enabled": false, "editable": true, "referable": true, "render_hint": "prompt"},
+      {"element_type": "storyboard", "display_name": "Storyboard", "category": "storyboard", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\"}", "render_hint_json": "{\"component\":\"storyboard\"}", "active": true, "sort_order": 110, "resource_type": "file", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": true, "referable": true, "render_hint": "storyboard"},
+      {"element_type": "timeline", "display_name": "Timeline", "category": "timeline", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\"}", "render_hint_json": "{\"component\":\"timeline\"}", "active": true, "sort_order": 120, "resource_type": "file", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": true, "referable": true, "render_hint": "timeline"},
+      {"element_type": "tag_group", "display_name": "Tag Group", "category": "metadata", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\"}", "render_hint_json": "{\"component\":\"tags\"}", "active": true, "sort_order": 130, "resource_type": "file", "status": "active", "usage_stage": "draft_final", "draft_enabled": true, "final_enabled": true, "editable": true, "referable": true, "render_hint": "tags"},
+      {"element_type": "parameter_group", "display_name": "Parameter Group", "category": "parameters", "schema_version": "2026-06-28", "schema_hint_json": "{\"type\":\"object\"}", "render_hint_json": "{\"component\":\"parameters\"}", "active": true, "sort_order": 140, "resource_type": "file", "status": "active", "usage_stage": "draft", "draft_enabled": true, "final_enabled": false, "editable": true, "referable": true, "render_hint": "parameters"}
     ]
   },
   "assertions": [
-    "Agent consumes element types through RPC rather than hardcoding them"
+    "Agent consumes the 14 canonical M4 asset element types through RPC rather than hardcoding them",
+    "schema_hint_json and render_hint_json are present for every type"
   ]
 }

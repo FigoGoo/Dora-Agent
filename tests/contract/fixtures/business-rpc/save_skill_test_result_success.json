@@ -27,7 +27,7 @@
     "test_run_id": "skrun_storyboard_001",
     "test_case_id": "skcase_storyboard_basic",
     "status": "passed",
-    "actual_elements_json": "[{\"element_type\":\"image.primary\",\"count\":1}]",
+    "actual_elements_json": "[{\"element_type\":\"image_ref\",\"count\":1}]",
     "safety_evidence_json": "{\"safety_evidence_id\":\"safe_skill_test_001\",\"scene\":\"skill_test\",\"result\":\"passed\",\"target_type\":\"skill_test_prompt\",\"target_ref_id\":\"skcase_storyboard_basic\",\"evaluated_object_digest\":\"sha256:skill-test-prompt-digest\",\"policy_version\":\"safety-policy-2026-06\",\"evidence_version\":\"1\",\"evaluated_at\":\"2026-06-27T12:00:00Z\",\"expires_at\":\"2026-12-31T12:30:00Z\",\"source_run_id\":\"skrun_storyboard_001\",\"trace_id\":\"trace_save_skill_result_001\"}",
     "agent_trace_id": "trace_save_skill_result_001"
   },

@@ -31,7 +31,7 @@
       {
         "artifact_id": "art_1001",
         "resource_type": "image",
-        "element_type": "image.primary",
+        "element_type": "image_ref",
         "artifact_summary": {
           "filename": "generated-image.png",
           "content_type": "image/png"
@@ -56,7 +56,7 @@
     ],
     "final_elements": [
       {
-        "element_type": "image.primary",
+        "element_type": "image_ref",
         "element_payload_json": "{\"title\":\"Generated image\",\"asset_id\":\"ast_generated_1001\",\"artifact_id\":\"art_1001\",\"component\":\"image_preview\"}",
         "display_order": 1,
         "source_tool_call_id": "tool_call_image_generate_001"
@@ -87,7 +87,7 @@
         "asset_type": "generated",
         "status": "available",
         "preview_url": "https://cdn.doraigc.com/generated/ast_generated_1001.png",
-        "elements_summary_json": "{\"count\":1,\"primary_element_type\":\"image.primary\"}"
+        "elements_summary_json": "{\"count\":1,\"primary_element_type\":\"image_ref\"}"
       }
     ],
     "charged_points": 24,

@@ -7,14 +7,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/application/workbench"
-	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
-	"gorm.io/datatypes"
 )
 
 func TestM2AgentSessionRunProjectGate(t *testing.T) {
@@ -47,8 +44,8 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 		}},
 	})
 	runID := runResp["run_id"].(string)
-	if runResp["status"] != "running" {
-		t.Fatalf("expected running run after M3 runtime start, got %#v", runResp)
+	if runResp["status"] != "waiting_confirmation" {
+		t.Fatalf("expected waiting confirmation run after M4 credit estimate, got %#v", runResp)
 	}
 	createdRun, err := repo.GetRun(t.Context(), runID)
 	if err != nil {
@@ -126,17 +123,17 @@ func TestM2AgentInterruptRoutes(t *testing.T) {
 	}, "local-dev")
 	router := NewRouter(RouterOptions{App: app})
 
-	acceptRunID := createWaitingInterruptRun(t, router, repo, "accept", "intr_accept_1001")
-	accepted := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+acceptRunID+"/interrupts/intr_accept_1001/accept", "idem-accept", map[string]any{
-		"run_id": acceptRunID, "interrupt_id": "intr_accept_1001", "action": "confirm", "confirmed_payload_digest": "sha256:payload",
+	acceptRunID, acceptInterruptID := createWaitingInterruptRun(t, router, repo, "accept")
+	accepted := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+acceptRunID+"/interrupts/"+acceptInterruptID+"/accept", "idem-accept", map[string]any{
+		"run_id": acceptRunID, "interrupt_id": acceptInterruptID, "action": "confirm", "confirmed_payload_digest": "sha256:payload",
 	})
-	if accepted["status"] != "running" {
+	if accepted["status"] != "completed" {
 		t.Fatalf("accept interrupt response = %#v", accepted)
 	}
 
-	rejectRunID := createWaitingInterruptRun(t, router, repo, "reject", "intr_reject_1001")
-	rejected := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+rejectRunID+"/interrupts/intr_reject_1001/reject", "idem-reject", map[string]any{
-		"run_id": rejectRunID, "interrupt_id": "intr_reject_1001", "reason_code": "user_rejected",
+	rejectRunID, rejectInterruptID := createWaitingInterruptRun(t, router, repo, "reject")
+	rejected := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+rejectRunID+"/interrupts/"+rejectInterruptID+"/reject", "idem-reject", map[string]any{
+		"run_id": rejectRunID, "interrupt_id": rejectInterruptID, "reason_code": "user_rejected",
 	})
 	if rejected["status"] != "failed" || rejected["error_code"] != "INTERRUPT_REJECTED" {
 		t.Fatalf("reject interrupt response = %#v", rejected)
@@ -174,7 +171,7 @@ func TestM2AgentDeniedAccessBodyBlocksResumeActions(t *testing.T) {
 		t.Fatalf("expected PROJECT_ARCHIVED append block, status=%d body=%#v", appendResp.Code, appendResp.Body)
 	}
 
-	interruptRunID := createWaitingInterruptRun(t, allowedRouter, repo, "denied-accept", "intr_denied_accept_1001")
+	interruptRunID, interruptID := createWaitingInterruptRun(t, allowedRouter, repo, "denied-accept")
 	deniedRouter := NewRouter(RouterOptions{App: workbench.New(repo, workbench.StaticGateway{
 		Space:  workbench.SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
 		Access: workbench.ProjectAccessDTO{Allowed: false, ProjectStatus: "active", CreativeAllowed: true, UserMessage: "project permission denied"},
@@ -190,8 +187,8 @@ func TestM2AgentDeniedAccessBodyBlocksResumeActions(t *testing.T) {
 			t.Fatalf("expected denied read path %s, status=%d body=%#v", path, readResp.Code, readResp.Body)
 		}
 	}
-	acceptResp := agentRaw(t, deniedRouter, http.MethodPost, "/api/agent/runs/"+interruptRunID+"/interrupts/intr_denied_accept_1001/accept", "idem-denied-accept", map[string]any{
-		"run_id": interruptRunID, "interrupt_id": "intr_denied_accept_1001", "action": "confirm", "confirmed_payload_digest": "sha256:payload",
+	acceptResp := agentRaw(t, deniedRouter, http.MethodPost, "/api/agent/runs/"+interruptRunID+"/interrupts/"+interruptID+"/accept", "idem-denied-accept", map[string]any{
+		"run_id": interruptRunID, "interrupt_id": interruptID, "action": "confirm", "confirmed_payload_digest": "sha256:payload",
 	})
 	if acceptResp.Code != http.StatusForbidden || acceptResp.ErrorCode() != "PERMISSION_DENIED" {
 		t.Fatalf("expected PERMISSION_DENIED interrupt block, status=%d body=%#v", acceptResp.Code, acceptResp.Body)
@@ -380,7 +377,7 @@ func agentRequest(method, path, idem string, body any) *http.Request {
 	return req
 }
 
-func createWaitingInterruptRun(t *testing.T, router http.Handler, repo *repository.Repository, suffix string, interruptID string) string {
+func createWaitingInterruptRun(t *testing.T, router http.Handler, repo *repository.Repository, suffix string) (string, string) {
 	t.Helper()
 	sessionResp := agentJSON(t, router, http.MethodPost, "/api/agent/sessions", "idem-session-"+suffix, map[string]any{"project_id": "prj_active_1001", "initial_title": suffix})
 	sessionID := sessionResp["session_id"].(string)
@@ -390,24 +387,9 @@ func createWaitingInterruptRun(t *testing.T, router http.Handler, repo *reposito
 		"user_input": map[string]any{"client_message_id": "cm_" + suffix, "content_type": "text", "text": "needs confirmation"},
 	})
 	runID := runResp["run_id"].(string)
-	run, err := repo.GetRun(t.Context(), runID)
+	interrupt, err := repo.GetRequiredInterrupt(t.Context(), runID)
 	if err != nil {
-		t.Fatalf("get run before interrupt: %v", err)
+		t.Fatalf("get required interrupt: %v", err)
 	}
-	if run.Status == state.RunStatusPending {
-		if err := repo.UpdateRunStatus(t.Context(), runID, state.RunStatusRunning, "", ""); err != nil {
-			t.Fatalf("mark running: %v", err)
-		}
-	}
-	if err := repo.UpdateRunStatus(t.Context(), runID, state.RunStatusWaitingConfirmation, "", ""); err != nil {
-		t.Fatalf("mark waiting confirmation: %v", err)
-	}
-	if err := repo.CreateInterrupt(t.Context(), &model.Interrupt{
-		ID: interruptID, RunID: runID, InterruptType: "risk_confirmation", Status: state.InterruptStatusRequired,
-		Reason: "manual confirmation", ConfirmationPayload: datatypes.JSON([]byte(`{"confirmation_id":"` + interruptID + `"}`)),
-		AllowedActions: datatypes.JSON([]byte(`["confirm","reject"]`)), ExpiresAt: time.Now().UTC().Add(time.Hour), TraceID: "trace-agent-m2",
-	}); err != nil {
-		t.Fatalf("create interrupt: %v", err)
-	}
-	return runID
+	return runID, interrupt.ID
 }

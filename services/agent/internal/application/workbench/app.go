@@ -36,6 +36,12 @@ type BusinessGateway interface {
 	ResolveGenerationModelSnapshot(ctx context.Context, auth AuthContextDTO, resourceType string, modelID string, pricingSnapshotID string, traceID string) (ModelRuntimeSnapshotDTO, error)
 	ListAssetElementTypes(ctx context.Context, auth AuthContextDTO, pageSize int, schemaVersion string, traceID string) ([]AssetElementTypeDTO, string, error)
 	SaveSkillTestResult(ctx context.Context, auth AuthContextDTO, req SkillTestResultRequest, traceID string) (SkillTestResultDTO, error)
+	BatchCheckAssetAccess(ctx context.Context, auth AuthContextDTO, req BatchCheckAssetAccessRequest, traceID string) ([]AssetAccessResultDTO, error)
+	EstimateGenerationCredits(ctx context.Context, auth AuthContextDTO, req EstimateGenerationCreditsRequest, traceID string) (CreditEstimateDTO, error)
+	FreezeCredits(ctx context.Context, auth AuthContextDTO, req FreezeCreditsRequest, traceID string) (FreezeCreditsDTO, error)
+	ReleaseFrozenCredits(ctx context.Context, auth AuthContextDTO, req ReleaseFrozenCreditsRequest, traceID string) (ReleaseCreditsDTO, error)
+	PrepareGeneratedAssetObjects(ctx context.Context, auth AuthContextDTO, req PrepareGeneratedAssetObjectsRequest, traceID string) ([]GeneratedUploadSlotDTO, error)
+	CommitGeneratedAssetAndCharge(ctx context.Context, auth AuthContextDTO, req CommitGeneratedAssetAndChargeRequest, traceID string) (AssetCommitDTO, error)
 }
 
 type AuthContextDTO struct {
@@ -152,6 +158,191 @@ type SkillTestResultDTO struct {
 	TestRunID string
 	Status    string
 	Saved     bool
+}
+
+type AssetAccessResultDTO struct {
+	AssetID      string
+	Allowed      bool
+	Reason       string
+	AssetSummary map[string]string
+}
+
+type BatchCheckAssetAccessRequest struct {
+	ProjectID      string
+	AssetIDs       []string
+	Purpose        string
+	IdempotencyKey string
+}
+
+type EstimateGenerationCreditsRequest struct {
+	ProjectID         string
+	ResourceType      string
+	ModelID           string
+	PricingSnapshotID string
+	Quantity          int32
+	DurationSeconds   int32
+	ToolUsageItems    []ToolUsageEstimateItemDTO
+	SafetyEvidence    *businessagent.SafetyEvidenceDTO
+	IdempotencyKey    string
+}
+
+type ToolUsageEstimateItemDTO struct {
+	ToolName        string
+	ToolType        string
+	BillingUnit     string
+	Quantity        float64
+	MetadataSummary map[string]string
+}
+
+type CreditEstimateLineItemDTO struct {
+	EstimateItemID string
+	ItemType       string
+	ToolName       string
+	ToolType       string
+	ModelID        string
+	ResourceType   string
+	BillingUnit    string
+	EstimatePoints int64
+	Metadata       map[string]string
+}
+
+type CreditEstimateDTO struct {
+	EstimateID         string
+	EstimatePoints     int64
+	AvailablePoints    int64
+	ExpiresSoonPoints  int64
+	CreditAccountScope string
+	CreditAccountID    string
+	PricingSnapshotID  string
+	LineItems          []CreditEstimateLineItemDTO
+	ExpiresAt          string
+	Insufficient       bool
+}
+
+type FreezeCreditsRequest struct {
+	EstimateID     string
+	Points         int64
+	RunID          string
+	ConfirmationID string
+	AccountID      string
+	IdempotencyKey string
+}
+
+type FreezeCreditsDTO struct {
+	FreezeID     string
+	FrozenPoints int64
+	ExpiresAt    string
+}
+
+type ReleaseFrozenCreditsRequest struct {
+	FreezeID       string
+	ReleasePoints  int64
+	Reason         string
+	RunID          string
+	IdempotencyKey string
+}
+
+type ReleaseCreditsDTO struct {
+	ReleasedPoints int64
+	ReleaseStatus  string
+}
+
+type GeneratedObjectInputDTO struct {
+	ArtifactID      string
+	ResourceType    string
+	Filename        string
+	ContentType     string
+	SizeBytes       int64
+	Checksum        string
+	MetadataSummary map[string]string
+}
+
+type PrepareGeneratedAssetObjectsRequest struct {
+	ProjectID      string
+	SessionID      string
+	RunID          string
+	Artifacts      []GeneratedObjectInputDTO
+	IdempotencyKey string
+}
+
+type GeneratedUploadSlotDTO struct {
+	ArtifactID    string
+	Bucket        string
+	ObjectKey     string
+	UploadURL     string
+	UploadHeaders map[string]string
+	ExpiresAt     string
+	MaxSizeBytes  int64
+}
+
+type CommitStorageObjectRefDTO struct {
+	ObjectKey   string
+	Bucket      string
+	ContentType string
+	SizeBytes   int64
+	Checksum    string
+	Etag        string
+}
+
+type CommitArtifactDTO struct {
+	ArtifactID       string
+	ResourceType     string
+	ElementType      string
+	ArtifactSummary  map[string]string
+	ContentURIDigest string
+	EstimateItemID   string
+	ToolName         string
+	ToolType         string
+	ChargeQuantity   int64
+	MetadataSummary  map[string]string
+	StorageObjectRef CommitStorageObjectRefDTO
+}
+
+type FinalElementDTO struct {
+	ElementType        string
+	ElementPayloadJSON string
+	DisplayOrder       int32
+	SourceToolCallID   string
+}
+
+type CommitGeneratedAssetAndChargeRequest struct {
+	ProjectID      string
+	SessionID      string
+	RunID          string
+	FreezeID       string
+	EstimateID     string
+	Artifacts      []CommitArtifactDTO
+	FinalElements  []FinalElementDTO
+	SafetyEvidence *businessagent.SafetyEvidenceDTO
+	IdempotencyKey string
+}
+
+type CommittedAssetRefDTO struct {
+	AssetID             string
+	SourceArtifactID    string
+	ResourceType        string
+	AssetType           string
+	Status              string
+	PreviewURL          string
+	ElementsSummaryJSON string
+}
+
+type ChargedLineItemDTO struct {
+	EstimateItemID string
+	ChargedPoints  int64
+	Status         string
+	AssetID        string
+	ToolCallID     string
+	ArtifactID     string
+}
+
+type AssetCommitDTO struct {
+	AssetRefs        []CommittedAssetRefDTO
+	ChargedPoints    int64
+	ReleasedPoints   int64
+	CommitStatus     string
+	LedgerRef        string
+	ChargedLineItems []ChargedLineItemDTO
 }
 
 type App struct {
@@ -466,6 +657,9 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	if err := ensureCreativeProjectAccess(access); err != nil {
 		return CreateRunResponse{}, err
 	}
+	if err := a.ensureReferencedAssetAccess(ctx, auth, req.ProjectID, req.ReferencedAssets, traceID); err != nil {
+		return CreateRunResponse{}, err
+	}
 	runID := securityID("run_")
 	run := &model.Run{
 		ID: runID, SessionID: session.ID, ProjectID: session.ProjectID, SpaceID: session.SpaceID, UserID: session.UserID,
@@ -644,6 +838,9 @@ func (a *App) AcceptInterrupt(ctx context.Context, auth AuthContextDTO, runID st
 				return RunDTO{}, err
 			}
 		}
+	}
+	if err := a.runM4ConfirmedGeneration(ctx, auth, run.ID, interrupt, req.IdempotencyKey, traceID); err != nil {
+		return RunDTO{}, err
 	}
 	updated, err := a.repo.GetRun(ctx, run.ID)
 	if err != nil {
@@ -964,16 +1161,37 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 			_ = a.appendGenerationProgress(ctx, run, traceID, snapshot.ResourceType, "model_snapshot_resolved", 5, false, map[string]any{
 				"model_id": snapshot.ModelID, "pricing_snapshot_id": snapshot.PricingSnapshotID, "timeout_ms": snapshot.TimeoutMS,
 			})
-			result, genErr := a.modelAdapter.Generate(ctx, modeltool.Snapshot{
-				ModelID: snapshot.ModelID, ResourceType: snapshot.ResourceType, ProviderRuntimeRef: snapshot.ProviderRuntimeRef, TimeoutMS: snapshot.TimeoutMS,
-			}, runtimeeino.UserPrompt(prompt))
-			if genErr != nil {
-				_ = a.appendGenerationProgress(ctx, run, traceID, snapshot.ResourceType, "model_adapter_failed", 0, false, map[string]any{"error": genErr.Error()})
-			} else {
-				_ = a.appendGenerationProgress(ctx, run, traceID, snapshot.ResourceType, result.Status, 10, false, map[string]any{
-					"artifact_count":  result.ArtifactCount,
-					"deferred_reason": "real_provider_generation_tos_asset_credit_belongs_to_m4",
+			estimate, estimateErr := a.gateway.EstimateGenerationCredits(ctx, auth, EstimateGenerationCreditsRequest{
+				ProjectID: run.ProjectID, ResourceType: snapshot.ResourceType, ModelID: snapshot.ModelID,
+				PricingSnapshotID: snapshot.PricingSnapshotID, Quantity: 1, SafetyEvidence: safetyEvidenceToRPC(safetyEvidence),
+				IdempotencyKey: "estimate:" + run.ID,
+			}, traceID)
+			if estimateErr != nil {
+				_ = a.appendGenerationProgress(ctx, run, traceID, snapshot.ResourceType, "credit_estimate_failed", 0, false, map[string]any{"error": estimateErr.Error()})
+				_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
+					"error_type": "business_rpc", "error_code": "CREDIT_ESTIMATE_FAILED", "user_message": "积分预估失败",
+					"retryable": true, "support_trace_id": traceID,
 				})
+				_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "CREDIT_ESTIMATE_FAILED", "credit estimate failed")
+				return nil
+			}
+			_ = a.appendRunEvent(ctx, run, "credits.estimated", traceID, map[string]any{
+				"estimate_id": estimate.EstimateID, "estimate_points": estimate.EstimatePoints, "available_points": estimate.AvailablePoints,
+				"expires_soon_points": estimate.ExpiresSoonPoints, "credit_account_scope": estimate.CreditAccountScope,
+				"credit_account_id": estimate.CreditAccountID, "pricing_snapshot_id": snapshot.PricingSnapshotID,
+				"line_items": estimate.LineItems, "expires_at": estimate.ExpiresAt,
+			})
+			if estimate.Insufficient {
+				_ = a.appendRunEvent(ctx, run, "credits.insufficient", traceID, map[string]any{
+					"estimate_points": estimate.EstimatePoints, "available_points": estimate.AvailablePoints,
+					"user_message": "积分不足，请充值或切换空间后重试", "retryable": true,
+					"credit_account_id": estimate.CreditAccountID, "estimate_id": estimate.EstimateID,
+				})
+				_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "CREDIT_INSUFFICIENT", "credit account has insufficient points")
+				return nil
+			}
+			if err := a.createCreditConfirmationInterrupt(ctx, run, snapshot, estimate, safetyEvidence, prompt, traceID); err != nil {
+				return err
 			}
 		}
 	}
@@ -1079,6 +1297,257 @@ func (a *App) createSkillConfirmationInterrupt(ctx context.Context, run *model.R
 	}, "Skill 执行确认", "当前 Skill 策略要求确认后继续", risks, expires, traceID)
 }
 
+func (a *App) createCreditConfirmationInterrupt(ctx context.Context, run *model.Run, snapshot ModelRuntimeSnapshotDTO, estimate CreditEstimateDTO, safety *model.SafetyEvaluation, prompt string, traceID string) error {
+	return a.createConfirmationInterrupt(ctx, run, "credit_generation_confirmation", "generation credit charge requires confirmation", map[string]any{
+		"m4_flow":             "generation_asset_commit",
+		"estimate_id":         estimate.EstimateID,
+		"estimate_points":     estimate.EstimatePoints,
+		"points":              estimate.EstimatePoints,
+		"available_points":    estimate.AvailablePoints,
+		"credit_account_id":   estimate.CreditAccountID,
+		"pricing_snapshot_id": snapshot.PricingSnapshotID,
+		"model_snapshot":      snapshot,
+		"estimate":            estimate,
+		"safety_evidence":     safetyEvidenceToRPC(safety),
+		"prompt_digest":       digestText(prompt),
+	}, "生成与扣费确认", "确认后将冻结积分，生成完成并保存资产后扣费", []string{"credit_freeze", "asset_commit", "project:" + run.ProjectID}, 15*time.Minute, traceID)
+}
+
+type m4ConfirmationPayload struct {
+	M4Flow            string                          `json:"m4_flow"`
+	EstimateID        string                          `json:"estimate_id"`
+	EstimatePoints    int64                           `json:"estimate_points"`
+	CreditAccountID   string                          `json:"credit_account_id"`
+	PricingSnapshotID string                          `json:"pricing_snapshot_id"`
+	ModelSnapshot     ModelRuntimeSnapshotDTO         `json:"model_snapshot"`
+	Estimate          CreditEstimateDTO               `json:"estimate"`
+	SafetyEvidence    businessagent.SafetyEvidenceDTO `json:"safety_evidence"`
+	PromptDigest      string                          `json:"prompt_digest"`
+}
+
+func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO, runID string, interrupt *model.Interrupt, idempotencyKey string, traceID string) error {
+	payload, ok := parseM4ConfirmationPayload(interrupt)
+	if !ok {
+		return nil
+	}
+	if a.gateway == nil {
+		return apperror.New(apperror.CodeNotImplemented, "business gateway is not configured")
+	}
+	run, err := a.repo.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if auth.SpaceID == "" {
+		auth.SpaceID = run.SpaceID
+	}
+	if auth.ActorUserID == "" {
+		auth.ActorUserID = run.UserID
+	}
+	access, err := a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, businessagent.ProjectAccessPurpose_COMMIT_ASSET, traceID)
+	if err != nil {
+		return mapBusinessError(err)
+	}
+	if err := ensureCreativeProjectAccess(access); err != nil {
+		return err
+	}
+	freeze, err := a.gateway.FreezeCredits(ctx, auth, FreezeCreditsRequest{
+		EstimateID: payload.EstimateID, Points: payload.EstimatePoints, RunID: run.ID,
+		ConfirmationID: interrupt.ID, AccountID: payload.CreditAccountID, IdempotencyKey: idempotencyKey + ":freeze",
+	}, traceID)
+	if err != nil {
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "CREDIT_FREEZE_FAILED", "credit freeze failed")
+		_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
+			"error_type": "business_rpc", "error_code": "CREDIT_FREEZE_FAILED", "user_message": "积分冻结失败",
+			"retryable": true, "support_trace_id": traceID,
+		})
+		return mapBusinessError(err)
+	}
+	_ = a.repo.DB().WithContext(ctx).Model(&model.Run{}).Where("id = ?", run.ID).Update("model_selection_snapshot", jsonObject(map[string]any{
+		"model_snapshot": payload.ModelSnapshot, "estimate_id": payload.EstimateID, "freeze_id": freeze.FreezeID,
+		"credit_account_id": payload.CreditAccountID, "pricing_snapshot_id": payload.PricingSnapshotID,
+	}))
+	_ = a.appendRunEvent(ctx, run, "credits.frozen", traceID, map[string]any{
+		"freeze_id": freeze.FreezeID, "frozen_points": freeze.FrozenPoints, "expires_at": freeze.ExpiresAt,
+		"estimate_id": payload.EstimateID, "credit_account_id": payload.CreditAccountID,
+	})
+	prompt, err := a.latestUserPrompt(ctx, run.SessionID)
+	if err != nil {
+		return a.failM4AfterFreeze(ctx, auth, run, freeze, "prompt_unavailable", idempotencyKey, traceID, err)
+	}
+	_ = a.appendGenerationProgress(ctx, run, traceID, payload.ModelSnapshot.ResourceType, "submitted", 20, false, map[string]any{
+		"model_id": payload.ModelSnapshot.ModelID, "estimate_id": payload.EstimateID, "freeze_id": freeze.FreezeID,
+	})
+	result, err := a.modelAdapter.Generate(ctx, modeltool.Snapshot{
+		ModelID: payload.ModelSnapshot.ModelID, ResourceType: payload.ModelSnapshot.ResourceType,
+		ProviderRuntimeRef: payload.ModelSnapshot.ProviderRuntimeRef, TimeoutMS: payload.ModelSnapshot.TimeoutMS,
+	}, runtimeeino.UserPrompt(prompt))
+	if err != nil {
+		return a.failM4AfterFreeze(ctx, auth, run, freeze, "generation_failed", idempotencyKey, traceID, err)
+	}
+	if len(result.Artifacts) == 0 {
+		return a.failM4AfterFreeze(ctx, auth, run, freeze, "generation_empty", idempotencyKey, traceID, apperror.New(apperror.CodeInternal, "generation produced no artifact"))
+	}
+	for _, artifact := range result.Artifacts {
+		_ = a.appendRunEvent(ctx, run, "generation.artifact.completed", traceID, map[string]any{
+			"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType, "name": artifact.Name,
+			"metadata_summary": artifact.MetadataSummary, "elements_summary": artifact.ElementsSummary,
+		})
+	}
+	objects := make([]GeneratedObjectInputDTO, 0, len(result.Artifacts))
+	for _, artifact := range result.Artifacts {
+		objects = append(objects, GeneratedObjectInputDTO{
+			ArtifactID: artifact.ArtifactID, ResourceType: artifact.ResourceType, Filename: artifact.Name,
+			ContentType: artifact.ContentType, SizeBytes: artifact.SizeBytes, Checksum: artifact.Checksum, MetadataSummary: artifact.MetadataSummary,
+		})
+	}
+	slots, err := a.gateway.PrepareGeneratedAssetObjects(ctx, auth, PrepareGeneratedAssetObjectsRequest{
+		ProjectID: run.ProjectID, SessionID: run.SessionID, RunID: run.ID, Artifacts: objects, IdempotencyKey: idempotencyKey + ":prepare_slots",
+	}, traceID)
+	if err != nil {
+		return a.failM4AfterFreeze(ctx, auth, run, freeze, "prepare_asset_slots_failed", idempotencyKey, traceID, err)
+	}
+	slotByArtifact := map[string]GeneratedUploadSlotDTO{}
+	for _, slot := range slots {
+		slotByArtifact[slot.ArtifactID] = slot
+	}
+	commitArtifacts := make([]CommitArtifactDTO, 0, len(result.Artifacts))
+	finalElements := make([]FinalElementDTO, 0, len(result.Artifacts))
+	for i, artifact := range result.Artifacts {
+		slot, ok := slotByArtifact[artifact.ArtifactID]
+		if !ok {
+			return a.failM4AfterFreeze(ctx, auth, run, freeze, "missing_upload_slot", idempotencyKey, traceID, apperror.New(apperror.CodeInternal, "generated upload slot missing"))
+		}
+		_ = a.appendRunEvent(ctx, run, "asset.save.started", traceID, map[string]any{
+			"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType, "project_id": run.ProjectID,
+			"freeze_id": freeze.FreezeID, "estimate_id": payload.EstimateID,
+		})
+		estimateItemID := estimateItemForArtifact(payload.Estimate, artifact.ResourceType)
+		commitArtifacts = append(commitArtifacts, CommitArtifactDTO{
+			ArtifactID: artifact.ArtifactID, ResourceType: artifact.ResourceType, ElementType: artifact.ElementType,
+			ArtifactSummary: artifact.MetadataSummary, ContentURIDigest: digestText(slot.ObjectKey),
+			EstimateItemID: estimateItemID, ToolName: "model_generation", ToolType: artifact.ResourceType, ChargeQuantity: 1,
+			MetadataSummary: artifact.MetadataSummary,
+			StorageObjectRef: CommitStorageObjectRefDTO{
+				ObjectKey: slot.ObjectKey, Bucket: slot.Bucket, ContentType: artifact.ContentType,
+				SizeBytes: artifact.SizeBytes, Checksum: artifact.Checksum, Etag: "local-" + artifact.ArtifactID,
+			},
+		})
+		elementPayload, _ := json.Marshal(map[string]any{"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType, "elements_summary": artifact.ElementsSummary})
+		finalElements = append(finalElements, FinalElementDTO{ElementType: artifact.ElementType, ElementPayloadJSON: string(elementPayload), DisplayOrder: int32(i + 1)})
+	}
+	commit, err := a.gateway.CommitGeneratedAssetAndCharge(ctx, auth, CommitGeneratedAssetAndChargeRequest{
+		ProjectID: run.ProjectID, SessionID: run.SessionID, RunID: run.ID, FreezeID: freeze.FreezeID,
+		EstimateID: payload.EstimateID, Artifacts: commitArtifacts, FinalElements: finalElements,
+		SafetyEvidence: &payload.SafetyEvidence, IdempotencyKey: idempotencyKey + ":commit",
+	}, traceID)
+	if err != nil {
+		_ = a.appendRunEvent(ctx, run, "asset.save.failed", traceID, map[string]any{
+			"artifact_id": firstArtifactID(result.Artifacts), "resource_type": payload.ModelSnapshot.ResourceType,
+			"error_code": "ASSET_COMMIT_FAILED", "user_message": "资产保存失败", "retryable": true, "support_trace_id": traceID,
+		})
+		return a.failM4AfterFreeze(ctx, auth, run, freeze, "asset_commit_failed", idempotencyKey, traceID, err)
+	}
+	for _, ref := range commit.AssetRefs {
+		if err := a.repo.CreateArtifact(ctx, &model.Artifact{
+			ID: securityID("artref_"), SessionID: run.SessionID, ProjectID: run.ProjectID, RunID: run.ID,
+			ArtifactType: "generated_asset", Status: "saved", ElementType: elementTypeForRef(ref, result.Artifacts),
+			Content: jsonObject(map[string]any{
+				"source_artifact_id": ref.SourceArtifactID, "resource_type": ref.ResourceType, "asset_type": ref.AssetType,
+				"elements_summary_json": ref.ElementsSummaryJSON,
+			}),
+			BusinessRefID: ref.AssetID, Visibility: "private", TraceID: traceID,
+		}); err != nil {
+			return a.failM4AfterFreeze(ctx, auth, run, freeze, "agent_artifact_ref_failed", idempotencyKey, traceID, err)
+		}
+		_ = a.appendRunEvent(ctx, run, "asset.save.completed", traceID, map[string]any{
+			"asset_id": ref.AssetID, "artifact_id": ref.SourceArtifactID, "resource_type": ref.ResourceType,
+			"save_status": ref.Status, "elements": []any{map[string]any{"element_type": elementTypeForRef(ref, result.Artifacts)}}, "downloadable": true,
+			"preview_url": ref.PreviewURL,
+		})
+	}
+	_ = a.appendRunEvent(ctx, run, "credits.charged", traceID, map[string]any{
+		"charged_points": commit.ChargedPoints, "released_points": commit.ReleasedPoints, "ledger_ref": commit.LedgerRef,
+		"charged_line_items": commit.ChargedLineItems,
+	})
+	if commit.ReleasedPoints > 0 {
+		_ = a.appendRunEvent(ctx, run, "credits.released", traceID, map[string]any{
+			"freeze_id": freeze.FreezeID, "released_points": commit.ReleasedPoints, "reason": "unused_after_asset_commit",
+		})
+	}
+	assets := assetRefsForEvent(commit.AssetRefs)
+	lastAssetID := ""
+	if len(commit.AssetRefs) > 0 {
+		lastAssetID = commit.AssetRefs[len(commit.AssetRefs)-1].AssetID
+	}
+	_ = a.appendRunEvent(ctx, run, "workspace.assets.updated", traceID, map[string]any{
+		"mode": "append", "assets": assets, "asset_count": len(assets), "last_asset_id": lastAssetID, "version": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	session, _ := a.repo.GetSession(ctx, run.SessionID)
+	nextSequence := int64(0)
+	if session != nil {
+		nextSequence = session.LastEventSequence + 1
+	}
+	_ = a.appendRunEvent(ctx, run, "process.snapshot.saved", traceID, map[string]any{
+		"snapshot_id": "snap_" + run.ID, "snapshot_version": time.Now().UTC().Format(time.RFC3339Nano),
+		"last_event_sequence": nextSequence, "messages_count": 1, "assets_count": len(assets), "blackboard_version": "m4",
+		"freeze_id": freeze.FreezeID, "estimate_id": payload.EstimateID,
+	})
+	sequence, err := a.repo.NextMessageSequence(ctx, run.SessionID)
+	if err != nil {
+		return err
+	}
+	finalMessage := &model.Message{
+		ID: securityID("msg_"), SessionID: run.SessionID, RunID: run.ID, Role: "assistant", ContentType: "text/plain",
+		Content: "生成完成，资产已保存。", Sequence: sequence, TraceID: traceID,
+		Metadata: jsonObject(map[string]any{"asset_count": len(assets), "charged_points": commit.ChargedPoints}),
+	}
+	if err := a.repo.CreateMessage(ctx, finalMessage); err != nil {
+		return err
+	}
+	if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusCompleted, "", ""); err != nil {
+		return err
+	}
+	session, _ = a.repo.GetSession(ctx, run.SessionID)
+	lastSequence := int64(0)
+	if session != nil {
+		lastSequence = session.LastEventSequence + 1
+	}
+	_ = a.appendRunEvent(ctx, run, "agent.run.completed", traceID, map[string]any{
+		"run_status": state.RunStatusCompleted, "completed_at": time.Now().UTC().Format(time.RFC3339Nano),
+		"final_message_id": finalMessage.ID, "last_event_sequence": lastSequence, "snapshot_version": time.Now().UTC().Format(time.RFC3339Nano),
+		"charged_points": commit.ChargedPoints, "asset_count": len(assets),
+	})
+	return a.repo.ResolveInterrupt(ctx, interrupt.ID, state.InterruptStatusResolved)
+}
+
+func parseM4ConfirmationPayload(interrupt *model.Interrupt) (m4ConfirmationPayload, bool) {
+	if interrupt == nil || len(interrupt.ConfirmationPayload) == 0 {
+		return m4ConfirmationPayload{}, false
+	}
+	var payload m4ConfirmationPayload
+	if err := json.Unmarshal(interrupt.ConfirmationPayload, &payload); err != nil {
+		return m4ConfirmationPayload{}, false
+	}
+	return payload, payload.M4Flow == "generation_asset_commit"
+}
+
+func (a *App) failM4AfterFreeze(ctx context.Context, auth AuthContextDTO, run *model.Run, freeze FreezeCreditsDTO, reason string, idempotencyKey string, traceID string, cause error) error {
+	released, releaseErr := a.gateway.ReleaseFrozenCredits(ctx, auth, ReleaseFrozenCreditsRequest{
+		FreezeID: freeze.FreezeID, ReleasePoints: freeze.FrozenPoints, Reason: reason, RunID: run.ID, IdempotencyKey: idempotencyKey + ":release:" + reason,
+	}, traceID)
+	if releaseErr == nil {
+		_ = a.appendRunEvent(ctx, run, "credits.released", traceID, map[string]any{
+			"freeze_id": freeze.FreezeID, "released_points": released.ReleasedPoints, "reason": reason,
+		})
+	}
+	_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
+		"error_type": "m4_close_loop", "error_code": strings.ToUpper(reason), "user_message": "生成保存流程失败，已尝试释放冻结积分",
+		"retryable": true, "support_trace_id": traceID,
+	})
+	_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, strings.ToUpper(reason), cause.Error())
+	return mapBusinessError(cause)
+}
+
 func (a *App) createConfirmationInterrupt(ctx context.Context, run *model.Run, interruptType, reason string, confirmationPayload map[string]any, title, summary string, risks []string, ttl time.Duration, traceID string) error {
 	if _, err := a.repo.GetRequiredInterrupt(ctx, run.ID); err == nil {
 		return nil
@@ -1112,9 +1581,19 @@ func (a *App) createConfirmationInterrupt(ctx context.Context, run *model.Run, i
 		}
 	}
 	run.Status = state.RunStatusWaitingConfirmation
+	points := int64(0)
+	if value, ok := confirmationPayload["points"].(int64); ok {
+		points = value
+	}
+	if value, ok := confirmationPayload["points"].(int); ok {
+		points = int64(value)
+	}
+	if value, ok := confirmationPayload["estimate_points"].(int64); ok {
+		points = value
+	}
 	return a.appendRunEvent(ctx, run, "confirmation.required", traceID, map[string]any{
 		"confirmation_id": interruptID, "interrupt_id": interruptID, "title": title, "summary": summary,
-		"risks": risks, "points": 0, "expires_at": expiresAt.Format(time.RFC3339Nano), "actions": []string{"confirm", "reject"},
+		"risks": risks, "points": points, "expires_at": expiresAt.Format(time.RFC3339Nano), "actions": []string{"confirm", "reject"},
 		"confirmation_payload": confirmationPayload,
 	})
 }
@@ -1157,6 +1636,117 @@ func (a *App) recordPromptSafetyEvaluation(ctx context.Context, run *model.Run, 
 		})
 		return safety, apperror.New(apperror.CodeInternal, "safety evaluation failed")
 	}
+}
+
+func safetyEvidenceToRPC(safety *model.SafetyEvaluation) *businessagent.SafetyEvidenceDTO {
+	if safety == nil {
+		return nil
+	}
+	expiresAt := safety.ExpiresAt.Format(time.RFC3339Nano)
+	return &businessagent.SafetyEvidenceDTO{
+		SafetyEvidenceId:      safety.SafetyEvidenceID,
+		Scene:                 safety.Scene,
+		Result_:               safety.Result,
+		TargetType:            safety.TargetType,
+		TargetRefId:           optionalString(safety.TargetRefID),
+		EvaluatedObjectDigest: safety.EvaluatedObjectDigest,
+		PolicyVersion:         safety.PolicyVersion,
+		EvidenceVersion:       safety.EvidenceVersion,
+		EvaluatedAt:           safety.EvaluatedAt.Format(time.RFC3339Nano),
+		ExpiresAt:             &expiresAt,
+		SourceSessionId:       optionalString(safety.SourceSessionID),
+		SourceRunId:           optionalString(safety.SourceRunID),
+		SourceArtifactId:      optionalString(safety.SourceArtifactID),
+		TraceId:               safety.TraceID,
+		UserVisibleReason:     optionalString(safety.UserVisibleReason),
+	}
+}
+
+func (a *App) ensureReferencedAssetAccess(ctx context.Context, auth AuthContextDTO, projectID string, refs []AssetReferenceDTO, traceID string) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ids = append(ids, ref.AssetID)
+	}
+	results, err := a.gateway.BatchCheckAssetAccess(ctx, auth, BatchCheckAssetAccessRequest{
+		ProjectID: projectID, AssetIDs: ids, Purpose: "reference_for_generation",
+	}, traceID)
+	if err != nil {
+		return mapBusinessError(err)
+	}
+	for _, result := range results {
+		if !result.Allowed {
+			message := "referenced asset is not accessible"
+			if strings.TrimSpace(result.Reason) != "" {
+				message = result.Reason
+			}
+			return apperror.New(apperror.CodePermissionDenied, message)
+		}
+	}
+	return nil
+}
+
+func (a *App) latestUserPrompt(ctx context.Context, sessionID string) (string, error) {
+	messages, err := a.repo.ListMessages(ctx, sessionID, 100, 0)
+	if err != nil {
+		return "", err
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" && strings.TrimSpace(messages[i].Content) != "" {
+			return messages[i].Content, nil
+		}
+	}
+	return "", apperror.New(apperror.CodeResourceNotFound, "user prompt not found")
+}
+
+func estimateItemForArtifact(estimate CreditEstimateDTO, resourceType string) string {
+	for _, item := range estimate.LineItems {
+		if item.ItemType == "model_generation" && (item.ResourceType == "" || item.ResourceType == resourceType) {
+			return item.EstimateItemID
+		}
+	}
+	if len(estimate.LineItems) > 0 {
+		return estimate.LineItems[0].EstimateItemID
+	}
+	return ""
+}
+
+func firstArtifactID(artifacts []modeltool.Artifact) string {
+	if len(artifacts) == 0 {
+		return ""
+	}
+	return artifacts[0].ArtifactID
+}
+
+func elementTypeForRef(ref CommittedAssetRefDTO, artifacts []modeltool.Artifact) string {
+	for _, artifact := range artifacts {
+		if artifact.ArtifactID == ref.SourceArtifactID {
+			return artifact.ElementType
+		}
+	}
+	switch ref.ResourceType {
+	case "image":
+		return "image_ref"
+	case "audio", "music":
+		return "audio_ref"
+	case "video":
+		return "video_ref"
+	default:
+		return "file_ref"
+	}
+}
+
+func assetRefsForEvent(refs []CommittedAssetRefDTO) []map[string]any {
+	out := make([]map[string]any, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, map[string]any{
+			"asset_id": ref.AssetID, "resource_type": ref.ResourceType, "asset_type": ref.AssetType,
+			"status": ref.Status, "source_artifact_id": ref.SourceArtifactID, "preview_url": ref.PreviewURL,
+		})
+	}
+	return out
 }
 
 func (a *App) appendSkillMissingEvent(ctx context.Context, run *model.Run, traceID string, reason string, message string) error {
@@ -1300,6 +1890,13 @@ func digestStrings(values []string) string {
 	data, _ := json.Marshal(values)
 	sum := sha256.Sum256(data)
 	return fmt.Sprintf("sha256:%x", sum[:])
+}
+
+func optionalString(value string) *string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return &value
 }
 
 func creditAccountScope(auth AuthContextDTO) string {

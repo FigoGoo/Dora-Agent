@@ -437,7 +437,7 @@
         "height": 1024
       },
       "elements_summary": {
-        "primary": "image.primary"
+        "primary": "image_ref"
       }
     }
   },
@@ -480,7 +480,7 @@
       "save_status": "completed",
       "elements": [
         {
-          "element_type": "image.primary"
+          "element_type": "image_ref"
         }
       ],
       "downloadable": true

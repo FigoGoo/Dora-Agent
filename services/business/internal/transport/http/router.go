@@ -8,7 +8,10 @@ import (
 
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/asset"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetcommit"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetdict"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/credit"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/modelconfig"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/skillcatalog"
@@ -30,6 +33,9 @@ type RouterOptions struct {
 	Tool         *toolpolicy.App
 	Skill        *skillcatalog.App
 	Dictionary   *assetdict.App
+	Credit       *credit.App
+	Asset        *asset.App
+	Commit       *assetcommit.App
 }
 
 func NewRouter(opts RouterOptions) *gin.Engine {
@@ -62,6 +68,7 @@ func NewRouter(opts RouterOptions) *gin.Engine {
 
 	registerM2Routes(router, opts)
 	registerM3Routes(router, opts)
+	registerM4Routes(router, opts)
 
 	return router
 }

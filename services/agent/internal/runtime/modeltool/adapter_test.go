@@ -14,8 +14,11 @@ func TestLocalAdapterGenerate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if result.Status != "deferred_to_m4" || result.ArtifactCount != 0 {
+	if result.Status != "completed" || result.ArtifactCount != 1 || len(result.Artifacts) != 1 {
 		t.Fatalf("unexpected local result: %#v", result)
+	}
+	if result.Artifacts[0].ElementType != "image_ref" || result.Artifacts[0].Checksum == "" {
+		t.Fatalf("unexpected artifact: %#v", result.Artifacts[0])
 	}
 }
 
