@@ -168,7 +168,7 @@ flowchart TD
 
 1. 完成全部 PRD Review 和 Done Gate。
 2. 输出项目开发计划到 `docs/project/`。
-3. 工程 subagent 输出需求映射矩阵。
+3. 工程角色 owner 输出需求映射矩阵。
 4. 先定义账户、空间、模型、Tool、Skill、积分、资产的 RPC/API 契约。
 5. 定义 AG-UI 事件协议和 Agent 领域数据模型。
 6. 准备本地 SQL 脚本。

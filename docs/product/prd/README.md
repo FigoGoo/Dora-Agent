@@ -10,7 +10,7 @@ product_status：Done
 
 本目录用于承接已经确认过的产品系统设计讨论，并将其转化为后续页面设计、契约设计、后端开发、Agent 开发和测试验收可直接引用的 PRD。
 
-当前 PRD 套件已由用户确认进入 `product_status：Done`，工程 subagent 可以按开发流程先输出需求映射矩阵，再进入契约设计和代码开发。
+当前 PRD 套件已由用户确认进入 `product_status：Done`，工程角色 owner 可以按开发流程先输出需求映射矩阵，再进入契约设计和代码开发。
 
 ## PRD 列表
 
@@ -34,7 +34,7 @@ product_status：Done
 
 1. 产品体验设计师按模块与用户继续确认 PRD。
 2. 确认完成后，将对应 PRD 的 `product_status` 从 `Draft` 更新为 `Done`。
-3. 工程 subagent 进入开发前，先基于 Done PRD 输出需求映射矩阵。
+3. 工程角色 owner 进入开发前，先基于 Done PRD 输出需求映射矩阵。
 4. 涉及跨服务边界时，先补 RPC、API、AG-UI、Agent 数据模型和 SQL 脚本文档。
 5. 正式开发按功能点提交，不按大而全的系统批量提交。
 
