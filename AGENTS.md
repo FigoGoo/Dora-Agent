@@ -77,3 +77,6 @@ Dora-Agent 是面向 AIGC 智能体创作工作台的全栈项目，覆盖用户
 - 变更 RPC、API、AG-UI、数据模型、SQL、配置、权限、错误码或测试夹具时，同步对应文档和契约事实源。
 - 开发完成后，在相关设计、契约、迭代文档或测试报告中记录验证命令、证据路径、遗留风险和后续动作。
 - 服务边界、字段级事实源和测试要求不要写在 `AGENTS.md`，到 `docs/current/README.md`、`docs/contracts/README.md`、`docs/standards/README.md` 查询。
+
+## git 提交规范
+- 项目提交需要使用中文描述
