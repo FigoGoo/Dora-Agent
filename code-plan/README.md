@@ -71,6 +71,16 @@ owner：主控 Codex 汇总维护
 | M3 配置能力 | `SkillCatalogService.ListRoutableSkills`、`GetPublishedSkillSpec`、`GetReviewCandidateSkillSpec`、`SaveSkillTestResult`；`ToolCapabilityService.CheckToolExecutionPolicy`；`ModelConfigService.ListAvailableGenerationModels`、`ResolveDefaultModel`、`ResolveGenerationModelSnapshot`；`PlatformDictionaryService.ListAssetElementTypes` | Skill 路由、Skill 测试、Tool 策略、模型选择、模型快照和元素类型字典完成后才可标记通过。 |
 | M4 积分资产闭环 | `CreditService.EstimateGenerationCredits`、`EstimateToolCredits`、`FreezeCredits`、`ChargeToolUsageCredits`、`ReleaseFrozenCredits`；`AssetService.BatchCheckAssetAccess`、`PrepareGeneratedAssetObjects`；`AssetCreditCommitService.CommitGeneratedAssetAndCharge`；`ProjectService.CheckProjectAccess` 的 `attach_asset`、`commit_asset`、`create_work` 用法 | 预估、确认、冻结、扣费、释放、资产访问校验、上传槽、资产保存和创作结果提交完成后才可标记通过。 |
 
+### M3 / M4 / M6 阻断任务承接
+
+以下任务来自 M2 后续复核，不再允许以“已延期”作为完成说明；必须在对应阶段的实现、fixture、验证脚本和报告中闭环。
+
+| 阶段 | 阻断任务 | Done 口径 |
+| --- | --- | --- |
+| M3 配置能力 | Agent 07 中 Skill / Tool / Model / PlatformDictionary RPC client 与业务 Kitex server；Agent 01 的 `runtime/eino`、`runtime/tool`、`runtime/skill`、`runtime/memory`、`events` 分层；Agent 04 的 token 鉴权、真实 SSE、输入引用校验、view 权限校验和错误码；Agent 05 的 `StartTurn` / `ResumeTurn` / `CancelRun` 基础 TurnLoop；Agent 03 中支撑 M3 的 session/run/event/snapshot/artifact repository；Agent 11 中 provider 配置、trace 和配置测试；业务 01/02 中支撑 M3 RPC 的分层、BusinessError 和公共字段基线。 | M3 相关 RPC 不再返回 `NOT_IMPLEMENTED`；Agent gateway 有对应 client 字段和 mapper；业务 06/07/08 与 `PlatformDictionaryService.ListAssetElementTypes` 只读字典子集有真实应用服务、contract fixture 和测试；M3 报告不得把未执行项写为通过。 |
+| M4 积分资产闭环 | Agent 07 中 Credit / Asset / AssetCreditCommit RPC client 与业务 Kitex server；`ProjectService.CheckProjectAccess` 的 `attach_asset`、`commit_asset`、`create_work` 用法；Agent 05/09 中安全通过后预估、确认、冻结、生成、上传槽、保存、扣费、释放和失败补偿；业务 09/10/11 的积分、资产、元素、保存扣费事务；项目资产绑定和资产权限校验。 | M4 相关 RPC 不再返回 `NOT_IMPLEMENTED`；保存成功前不扣费，失败/取消/归档能释放冻结；资产 object key 由业务签发，Agent 只保存业务返回引用；业务 DB 和 Agent DB 边界测试通过。 |
+| M6 服务级验收 | M2 遗留的业务 03/04/05 RPC / Application 完整性、业务 04 后台 RPC、业务 05 项目 RPC 和资产绑定、业务 14 真实测试矩阵、Agent/业务架构依赖方向测试、全量 route parity、全量 contract fixture 和 `NOT_IMPLEMENTED` 扫描。 | 非前端、非部署范围内的 Agent、业务、RPC、OpenAPI、AG-UI、DB、fixture 和服务级主链路阻断项清零；测试报告只记录真实执行结果，未执行项写明原因、影响和 owner。 |
+
 ## 全局 Done Gate
 
 - [x] 产品文档 `product_status: Done`，正式开发计划不依赖 `docs/project/**`。
