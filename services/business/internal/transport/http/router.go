@@ -95,9 +95,11 @@ func traceMiddleware() gin.HandlerFunc {
 
 func requestMetaMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Set("request_id", c.GetHeader("X-Request-Id"))
+		requestID := c.GetHeader("X-Request-Id")
+		c.Set("request_id", requestID)
 		c.Set("idempotency_key", c.GetHeader("Idempotency-Key"))
 		c.Set("actor_user_id", c.GetHeader("X-Actor-User-Id"))
+		c.Request = c.Request.WithContext(logger.WithRequestID(c.Request.Context(), requestID))
 		c.Next()
 	}
 }
@@ -107,11 +109,12 @@ func requestLogMiddleware(log *slog.Logger) gin.HandlerFunc {
 		started := time.Now()
 		c.Next()
 		log.InfoContext(c.Request.Context(), "business_http_request",
-			"trace_id", logger.TraceID(c.Request.Context()),
-			"method", c.Request.Method,
-			"path", c.FullPath(),
-			"status", c.Writer.Status(),
-			"latency_ms", time.Since(started).Milliseconds(),
+			logger.FieldTraceID, logger.TraceID(c.Request.Context()),
+			logger.FieldRequestID, logger.RequestID(c.Request.Context()),
+			logger.FieldMethod, c.Request.Method,
+			logger.FieldPath, c.FullPath(),
+			logger.FieldStatus, c.Writer.Status(),
+			logger.FieldLatencyMS, time.Since(started).Milliseconds(),
 		)
 	}
 }

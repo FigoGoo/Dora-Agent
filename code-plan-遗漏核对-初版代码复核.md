@@ -252,10 +252,20 @@
 
 ## 批 F 子切片记录（2026-06-28 · WORK-9）✅
 
-提交：随本切片提交（WORK-9）
+提交：`e4a44e1`（WORK-9）
 验证：`go test ./services/business/internal/pkg/auditlog ./services/business/internal/application/accountspace ./services/business/internal/application/admin ./services/business/internal/application/project ./services/business/internal/application/work` 通过；`git diff --check` 通过。
 
 - **WORK-9 ✅ 已修**：`business_action` 收敛到 `services/business/internal/pkg/auditlog` 中心枚举，覆盖账号/企业/后台/项目/作品当前写入 `business_audit_logs` 的 action；应用层审计写入点改用常量，测试固化无重复、命名口径和关键 action 覆盖。
 
 范围决策：
 - 仅收敛 `business_audit_logs.business_action`，不把 idempotency `Scope`、Tool policy `change_type` 等相邻字符串混入同一枚举，避免不同语义被中心常量误绑。
+
+## 批 E 子切片记录（2026-06-28 · INFRA-4）✅
+
+提交：随本切片提交（INFRA-4）
+验证：`go test ./services/business/internal/infra/logger ./services/business/internal/transport/http` 通过；`git diff --check` 通过。
+
+- **INFRA-4 ✅ 已固化**：业务结构化日志字段集收敛到 `services/business/internal/infra/logger` 常量与字段清单，基础字段为 `service/env`，HTTP 请求日志必带 `trace_id/request_id/method/path/status/latency_ms`；请求中间件将 `request_id` 放入 context，router 测试解析 JSON 日志验证字段全集。
+
+范围决策：
+- 本切片先固化业务 HTTP 入口公共字段，不展开全链路 OTel/W3C traceparent；后者仍归 INFRA-5。

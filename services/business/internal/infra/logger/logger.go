@@ -9,7 +9,24 @@ import (
 
 type contextKey string
 
-const TraceIDKey contextKey = "trace_id"
+const (
+	FieldService   = "service"
+	FieldEnv       = "env"
+	FieldTraceID   = "trace_id"
+	FieldRequestID = "request_id"
+	FieldMethod    = "method"
+	FieldPath      = "path"
+	FieldStatus    = "status"
+	FieldLatencyMS = "latency_ms"
+)
+
+var BaseFields = []string{FieldService, FieldEnv}
+var HTTPRequestFields = []string{FieldTraceID, FieldRequestID, FieldMethod, FieldPath, FieldStatus, FieldLatencyMS}
+
+const (
+	TraceIDKey   contextKey = FieldTraceID
+	RequestIDKey contextKey = FieldRequestID
+)
 
 func WithTraceID(ctx context.Context, traceID string) context.Context {
 	return context.WithValue(ctx, TraceIDKey, traceID)
@@ -20,11 +37,20 @@ func TraceID(ctx context.Context) string {
 	return value
 }
 
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, RequestIDKey, requestID)
+}
+
+func RequestID(ctx context.Context) string {
+	value, _ := ctx.Value(RequestIDKey).(string)
+	return value
+}
+
 func New(w io.Writer, service, env, level string) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{
 		Level:       parseLevel(level),
 		ReplaceAttr: redactAttr,
-	})).With("service", service, "env", env)
+	})).With(FieldService, service, FieldEnv, env)
 }
 
 func parseLevel(level string) slog.Level {
