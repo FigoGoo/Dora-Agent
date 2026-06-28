@@ -122,6 +122,7 @@
 - **created_by/updated_by operator 回填二片 ✅ 已修**：Tool 策略后台写路径从 admin auth 回填公共列，覆盖 `tool_definitions`、`tool_policies`、`tool_pricing_policies`、`tool_whitelist_rules`。
 - **created_by/updated_by operator 回填三片 ✅ 已修**：模型配置后台写路径从 admin auth 回填公共列，覆盖 `model_providers`、`models`、`default_models`（应用层暂无 model_prices 管理写入口）。
 - **created_by/updated_by operator 回填四片 ✅ 已修**：资产上传/生成提交写路径从 user auth 回填公共列，覆盖 `assets`、`asset_storage_objects`、`upload_intents`、`asset_elements`、`generated_asset_object_slots`、`asset_commit_batches`、`asset_commit_items`。
+- **created_by/updated_by operator 回填五片 ✅ 已修**：通知写路径回填公共列，系统创建/失败记录写 `system`，用户读操作写 `updated_by=user_id`，覆盖 `notifications`、`notification_create_failures`。
 
 范围决策（逐条可追溯）：
 - `tenant_id` 未全表加——沿用 `space_id` 为隔离键，避免冗余。
@@ -129,7 +130,7 @@
 - append-only 10 张表不软删、不映射 DeletedAt；`skill_review_records` 经代码核实为 insert-only 事件流，与 `work_moderation_records` 对称纳入。
 
 遗留（后续子切片，不阻塞）：
-- **created_by/updated_by operator 回填继续逐域推进**：账户/Skill/积分/通知等表按领域操作者字段和权限语义单独映射。
+- **created_by/updated_by operator 回填继续逐域推进**：账户/Skill/积分等表按领域操作者字段和权限语义单独映射。
 - 明细/价格表已纳入软删（可软删停用），如需改 append-only 另议。
 
 ## 批 B 完成记录（2026-06-28 · 安全/越权红线 + SKILL-2）✅
@@ -388,4 +389,4 @@
 
 范围决策：
 - 本切片不重写任何现有唯一约束，避免释放账号、兑换码、财务、幂等、公开分享等不应复用的历史键。
-- `created_by/updated_by operator 回填` 已启动项目/作品域、Tool 策略域、模型配置域与资产域；GORM 未映射公共列不能用简单 `SetColumn` callback 粗暴补齐，剩余表继续逐域设计。
+- `created_by/updated_by operator 回填` 已启动项目/作品域、Tool 策略域、模型配置域、资产域与通知域；GORM 未映射公共列不能用简单 `SetColumn` callback 粗暴补齐，剩余表继续逐域设计。

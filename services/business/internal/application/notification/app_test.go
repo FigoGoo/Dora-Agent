@@ -26,6 +26,7 @@ func TestNotificationsAreUserScopedAndReadIdempotently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create notification: %v", err)
 	}
+	requireNotificationOperatorColumns(t, app, "notifications", "notification_id = ?", "system", "system", created.NotificationID)
 	replayed, err := app.CreateNotification(t.Context(), CreateNotificationInput{
 		RecipientUserID: "usr_1001", Type: "skill_review_approved", Title: "Skill approved", Summary: "Approved",
 		RelatedResourceType: "skill", RelatedResourceID: "sk_seed_storyboard",
@@ -51,6 +52,7 @@ func TestNotificationsAreUserScopedAndReadIdempotently(t *testing.T) {
 	if err != nil || read.ReadAt == nil {
 		t.Fatalf("mark read: %#v err=%v", read, err)
 	}
+	requireNotificationOperatorColumns(t, app, "notifications", "notification_id = ?", "system", auth.UserID, created.NotificationID)
 	again, err := app.MarkNotificationRead(t.Context(), auth, notificationMeta("trace-read", "idem-read"), created.NotificationID)
 	if err != nil || again.NotificationID != created.NotificationID {
 		t.Fatalf("expected mark read replay: %#v err=%v", again, err)
@@ -98,6 +100,14 @@ func TestNotificationsAreUserScopedAndReadIdempotently(t *testing.T) {
 	if blockedNav.Allowed || blockedNav.DeniedReason != string(bizerrors.CodePermissionDenied) {
 		t.Fatalf("expected removed member navigation denied, got %#v", blockedNav)
 	}
+
+	if err := app.RecordCreateFailure(t.Context(), FailureInput{
+		RecipientUserID: "usr_1001", Type: "skill_review_failed", RelatedResourceType: "skill", RelatedResourceID: "sk_seed_storyboard",
+		IdempotencyKey: "ntffail:skill:sk_seed_storyboard", ErrorCode: "CREATE_FAILED", ErrorSummary: "create failed", TraceID: "trace-failure",
+	}); err != nil {
+		t.Fatalf("record create failure: %v", err)
+	}
+	requireNotificationOperatorColumns(t, app, "notification_create_failures", "idempotency_key = ?", "system", "system", "ntffail:skill:sk_seed_storyboard")
 }
 
 func newNotificationTestApp(t *testing.T) *App {
@@ -122,4 +132,29 @@ func codeOf(err error) bizerrors.Code {
 		return businessErr.Code
 	}
 	return ""
+}
+
+func requireNotificationOperatorColumns(t *testing.T, app *App, table string, where string, wantCreatedBy string, wantUpdatedBy string, args ...any) {
+	t.Helper()
+	var row struct {
+		CreatedBy *string `gorm:"column:created_by"`
+		UpdatedBy *string `gorm:"column:updated_by"`
+	}
+	tx := app.repo.DB().Raw("SELECT created_by, updated_by FROM "+table+" WHERE "+where+" ORDER BY created_at DESC LIMIT 1", args...).Scan(&row)
+	if tx.Error != nil {
+		t.Fatalf("query operator columns for %s: %v", table, tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		t.Fatalf("expected row in %s where %s", table, where)
+	}
+	if ptrValue(row.CreatedBy) != wantCreatedBy || ptrValue(row.UpdatedBy) != wantUpdatedBy {
+		t.Fatalf("unexpected operator columns in %s: created_by=%q updated_by=%q", table, ptrValue(row.CreatedBy), ptrValue(row.UpdatedBy))
+	}
+}
+
+func ptrValue(ptr *string) string {
+	if ptr == nil {
+		return ""
+	}
+	return *ptr
 }
