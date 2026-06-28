@@ -199,3 +199,13 @@
 
 范围决策：
 - 保持“不能禁用当前会话 admin”的原有入口保护；新增最后 active 管理员守护作为领域不变量，覆盖未来批处理或内部调用绕过当前会话保护的风险。
+
+## 批 F 子切片记录（2026-06-28 · WORK-3）✅
+
+提交：待提交（WORK-3）
+验证：`go test ./services/business/internal/application/work` 通过。
+
+- **WORK-3 ✅ 已修**：`CreateWork` / `UpdateWork` 对非空 `category` 校验 `work_categories.category_key` 且必须为 active；非法自由字符串返回 `INVALID_ARGUMENT`。
+
+范围决策：
+- 空 category 仍允许，保持存量作品兼容；第一版 active 字典以 seed/migration 中的 `work_categories` 为准。

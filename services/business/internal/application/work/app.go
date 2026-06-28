@@ -295,7 +295,7 @@ func (a *App) CreateWork(ctx context.Context, in CreateWorkInput) (WorkDetailDTO
 	if len(assetIDs) == 0 {
 		return WorkDetailDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "asset_ids is required")
 	}
-	hash := requestHash(in.Meta, in.Auth, map[string]any{"project_id": in.ProjectID, "title": title, "asset_ids": assetIDs, "cover_asset_id": in.CoverAssetID})
+	hash := requestHash(in.Meta, in.Auth, map[string]any{"project_id": in.ProjectID, "title": title, "asset_ids": assetIDs, "cover_asset_id": in.CoverAssetID, "category": in.Category})
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
 		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "work.create", IdempotencyKey: in.Meta.IdempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
@@ -319,6 +319,9 @@ func (a *App) CreateWork(ctx context.Context, in CreateWorkInput) (WorkDetailDTO
 			return err
 		}
 		if err := a.validateProjectAssetsTx(tx, project.ID, assetIDs, in.CoverAssetID); err != nil {
+			return err
+		}
+		if err := a.validateWorkCategoryTx(tx, in.Category); err != nil {
 			return err
 		}
 		now := a.now()
@@ -420,8 +423,12 @@ func (a *App) UpdateWork(ctx context.Context, in UpdateWorkInput) (WorkDetailDTO
 			work.Description = optionalString(*in.Description)
 		}
 		if in.Category != nil {
-			updates["category"] = optionalString(*in.Category)
-			work.Category = optionalString(*in.Category)
+			category := strings.TrimSpace(*in.Category)
+			if err := a.validateWorkCategoryTx(tx, category); err != nil {
+				return err
+			}
+			updates["category"] = optionalString(category)
+			work.Category = optionalString(category)
 		}
 		if in.Tags != nil {
 			tags := normalizeTags(in.Tags)
@@ -1214,6 +1221,23 @@ func (a *App) hasWorkPatchChangesTx(tx *gorm.DB, work businesscore.Work, in Upda
 		currentIDs = append(currentIDs, item.AssetID)
 	}
 	return !slices.Equal(assetIDs, currentIDs), nil
+}
+
+func (a *App) validateWorkCategoryTx(tx *gorm.DB, category string) error {
+	category = strings.TrimSpace(category)
+	if category == "" {
+		return nil
+	}
+	var count int64
+	if err := tx.Model(&businesscore.WorkCategory{}).
+		Where("category_key = ? AND status = ?", category, "active").
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return bizerrors.New(bizerrors.CodeInvalidArgument, "work category is not active")
+	}
+	return nil
 }
 
 func (a *App) getActiveSnapshot(ctx context.Context, publicWorkID string) (businesscore.WorkPublicSnapshot, error) {

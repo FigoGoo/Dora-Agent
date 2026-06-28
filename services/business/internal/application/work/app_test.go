@@ -24,7 +24,7 @@ func TestShareWorkPreviewConfirmCreatesSanitizedPublicSnapshot(t *testing.T) {
 	created, err := app.CreateWork(t.Context(), CreateWorkInput{
 		Auth: auth, Meta: workMeta("trace-work-create", "idem-work-create"),
 		ProjectID: "prj_active_1001", Title: "Private work", Description: "private desc",
-		AssetIDs: []string{"ast_generated_1001"}, CoverAssetID: "ast_generated_1001", Category: "image", Tags: []string{"seed"},
+		AssetIDs: []string{"ast_generated_1001"}, CoverAssetID: "ast_generated_1001", Category: "storyboard", Tags: []string{"seed"},
 	})
 	if err != nil {
 		t.Fatalf("create work: %v", err)
@@ -89,6 +89,37 @@ func TestShareWorkPreviewConfirmCreatesSanitizedPublicSnapshot(t *testing.T) {
 	_, err = app.GetPublicWork(t.Context(), GetPublicWorkInput{PublicWorkID: shared.PublicWorkID})
 	if codeOf(err) != bizerrors.CodeResourceNotFound {
 		t.Fatalf("expected public work unavailable after unshare, got %v", err)
+	}
+}
+
+func TestWorkCategoryMustUseActiveDictionary(t *testing.T) {
+	app := newWorkTestApp(t, nil)
+	auth := accountspace.AuthContext{UserID: "usr_1001", SpaceID: "sp_personal_1001", LoginIdentityType: "personal"}
+
+	_, err := app.CreateWork(t.Context(), CreateWorkInput{
+		Auth: auth, Meta: workMeta("trace-work-bad-category", "idem-work-bad-category"),
+		ProjectID: "prj_active_1001", Title: "Bad category work", AssetIDs: []string{"ast_generated_1001"},
+		CoverAssetID: "ast_generated_1001", Category: "free_text",
+	})
+	if codeOf(err) != bizerrors.CodeInvalidArgument {
+		t.Fatalf("expected invalid category create error, got %v", err)
+	}
+
+	created, err := app.CreateWork(t.Context(), CreateWorkInput{
+		Auth: auth, Meta: workMeta("trace-work-good-category", "idem-work-good-category"),
+		ProjectID: "prj_active_1001", Title: "Good category work", AssetIDs: []string{"ast_generated_1001"},
+		CoverAssetID: "ast_generated_1001", Category: "storyboard",
+	})
+	if err != nil {
+		t.Fatalf("create valid category work: %v", err)
+	}
+	badUpdate := "free_text"
+	_, err = app.UpdateWork(t.Context(), UpdateWorkInput{
+		Auth: auth, Meta: workMeta("trace-work-update-bad-category", "idem-work-update-bad-category"),
+		WorkID: created.Work.WorkID, Category: &badUpdate,
+	})
+	if codeOf(err) != bizerrors.CodeInvalidArgument {
+		t.Fatalf("expected invalid category update error, got %v", err)
 	}
 }
 
