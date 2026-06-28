@@ -199,6 +199,7 @@ func (g *BusinessGateway) GetReviewCandidateSkillSpec(ctx context.Context, auth 
 		InputSchemaJSON: resp.InputSchemaJson, OutputSchemaJSON: resp.OutputSchemaJson, ToolRefs: resp.ToolRefs,
 		MemoryPolicyJSON: resp.MemoryPolicyJson, ConfirmationPolicyJSON: resp.ConfirmationPolicyJson,
 		TestInputJSON: value(resp.TestInputJson), ExpectedElementsJSON: value(resp.ExpectedElementsJson),
+		OutputElements: outputElementsFromRPC(resp.OutputElements),
 	}, nil
 }
 

@@ -124,6 +124,7 @@ type ReviewCandidateSkillSpecDTO struct {
 	ConfirmationPolicyJSON string
 	TestInputJSON          string
 	ExpectedElementsJSON   string
+	OutputElements         []SkillOutputElementDTO
 }
 
 type ToolExecutionPolicyDTO struct {

@@ -96,16 +96,17 @@ type OutputElementDTO struct {
 }
 
 type ReviewCandidateDTO struct {
-	SkillID                string   `json:"skill_id"`
-	VersionID              string   `json:"version_id"`
-	SkillSpecJSON          string   `json:"skill_spec_json"`
-	InputSchemaJSON        string   `json:"input_schema_json"`
-	OutputSchemaJSON       string   `json:"output_schema_json"`
-	ToolRefs               []string `json:"tool_refs"`
-	MemoryPolicyJSON       string   `json:"memory_policy_json"`
-	ConfirmationPolicyJSON string   `json:"confirmation_policy_json"`
-	TestInputJSON          string   `json:"test_input_json,omitempty"`
-	ExpectedElementsJSON   string   `json:"expected_elements_json,omitempty"`
+	SkillID                string             `json:"skill_id"`
+	VersionID              string             `json:"version_id"`
+	SkillSpecJSON          string             `json:"skill_spec_json"`
+	InputSchemaJSON        string             `json:"input_schema_json"`
+	OutputSchemaJSON       string             `json:"output_schema_json"`
+	ToolRefs               []string           `json:"tool_refs"`
+	MemoryPolicyJSON       string             `json:"memory_policy_json"`
+	ConfirmationPolicyJSON string             `json:"confirmation_policy_json"`
+	TestInputJSON          string             `json:"test_input_json,omitempty"`
+	ExpectedElementsJSON   string             `json:"expected_elements_json,omitempty"`
+	OutputElements         []OutputElementDTO `json:"output_elements,omitempty"`
 }
 
 type SkillDetailDTO struct {
@@ -297,10 +298,15 @@ func (a *App) GetReviewCandidateSkillSpec(ctx context.Context, auth accountspace
 	if err != nil {
 		return ReviewCandidateDTO{}, err
 	}
+	outputElements, err := a.outputElements(ctx, sv.ID)
+	if err != nil {
+		return ReviewCandidateDTO{}, err
+	}
 	dto := ReviewCandidateDTO{
 		SkillID: skillID, VersionID: sv.ID, SkillSpecJSON: string(sv.SkillSpecJSON),
 		InputSchemaJSON: string(sv.InputSchemaJSON), OutputSchemaJSON: string(sv.OutputSchemaJSON),
 		ToolRefs: toolRefs, MemoryPolicyJSON: string(sv.MemoryPolicyJSON), ConfirmationPolicyJSON: jsonString(sv.ConfirmationPolicyJSON, defaultConfirmationPolicyJSON),
+		OutputElements: outputElements,
 	}
 	if strings.TrimSpace(testCaseID) != "" {
 		var testCase businesscore.SkillTestCase

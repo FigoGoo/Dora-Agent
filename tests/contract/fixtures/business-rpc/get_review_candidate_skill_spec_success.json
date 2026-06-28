@@ -31,11 +31,26 @@
     "memory_policy_json": "{\"enabled\":true}",
     "confirmation_policy_json": "{\"requires_confirmation\":\"when_tool_requires_or_credit_cost\"}",
     "test_input_json": "{\"prompt\":\"make a product storyboard\"}",
-    "expected_elements_json": "[{\"element_type\":\"image_ref\"}]"
+    "expected_elements_json": "[{\"element_type\":\"image_ref\"}]",
+    "output_elements": [
+      {
+        "element_type": "image_ref",
+        "element_name": "Image Reference",
+        "required": true,
+        "use_draft": true,
+        "use_final": true,
+        "editable": true,
+        "referable": true,
+        "display_order": 0,
+        "display_slot": "blackboard",
+        "schema_json": "{\"type\":\"object\"}"
+      }
+    ]
   },
   "assertions": [
     "business service returns test input and expected elements for sandbox execution",
     "memory_policy_json defaults to enabled=true when version input omits it",
-    "confirmation_policy_json is returned for Skill test runtime"
+    "confirmation_policy_json is returned for Skill test runtime",
+    "review candidate response includes output_elements so audit-time skill test can validate draft/final output structure"
   ]
 }

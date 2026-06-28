@@ -409,6 +409,7 @@ func (h *Handler) GetReviewCandidateSkillSpec(ctx context.Context, req *business
 		SkillId: out.SkillID, VersionId: out.VersionID, SkillSpecJson: out.SkillSpecJSON, InputSchemaJson: out.InputSchemaJSON,
 		OutputSchemaJson: out.OutputSchemaJSON, ToolRefs: out.ToolRefs, MemoryPolicyJson: out.MemoryPolicyJSON,
 		ConfirmationPolicyJson: out.ConfirmationPolicyJSON, TestInputJson: optionalString(out.TestInputJSON), ExpectedElementsJson: optionalString(out.ExpectedElementsJSON),
+		OutputElements: outputElementsToRPC(out.OutputElements),
 	}, nil
 }
 

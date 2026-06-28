@@ -143,6 +143,7 @@
   - FP2 ✅ `0021` per-skill 输出元素结构 schema + `SaveSkill` 写入/字典上限校验。
   - FP3a ✅ thrift 声明 `SkillOutputElementDTO` + `SkillSpecResponse.output_elements`；application `GetPublishedSkillSpec` 装配。
   - FP3b ✅ `de9ac8e` 重新生成 `kitex_gen`，补 RPC handler 映射与 `GetPublishedSkillSpec.output_elements` contract fixture。
+  - FP3c ✅ `ReviewCandidateSkillSpecResponse.output_elements` 同步补齐，审核态 Skill 测试可直接拿结构声明，与 `expected_elements_json` 并存。
   - FP4 ✅ `de9ac8e` agent 侧消费 `output_elements` 组织产物，草稿落 `agent_artifacts`、最终走 `CommitGeneratedAssetAndCharge.final_elements`。
   - 设计归档：`docs/contracts/rpc/SKILL-2-输出元素结构契约设计.md`；当前事实源以 Thrift、migration、实现和 M6 测试报告承接。
 
@@ -152,7 +153,7 @@
 - SKILL-2 FP1 经实现期核查退化：字典双态属性已由 `asset_element_types.schema_json` 内嵌承载，取消表列迁移（外科手术式改动）。
 
 遗留（后续，不阻塞）：
-- `ReviewCandidateSkillSpecResponse` 是否同步补 `output_elements`（设计 §5 待确认 4，建议补）；不影响已发布 Skill 的 `GetPublishedSkillSpec` 路由和 agent 消费闭环。
+- SKILL-2 当前无阻塞遗留；后续若新增审核态校验规则，以 `api/thrift/business_agent_service.thrift`、contract fixture 和 application 测试为事实源推进。
 
 ## 批 C 完成记录（2026-06-28 · 确认恢复闭环）✅
 

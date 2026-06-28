@@ -128,6 +128,10 @@ func (g StaticGateway) GetReviewCandidateSkillSpec(ctx context.Context, auth Aut
 		ToolRefs: []string{"web_fetch:browser"}, MemoryPolicyJSON: `{"enabled":false}`,
 		ConfirmationPolicyJSON: `{"requires_confirmation":false}`, TestInputJSON: `{"prompt":"test"}`,
 		ExpectedElementsJSON: `["structured_object"]`,
+		OutputElements: []SkillOutputElementDTO{{
+			ElementType: "structured_object", ElementName: "结构化结果", Required: true, UseDraft: true, UseFinal: true,
+			Editable: true, Referable: true, DisplayOrder: 1, DisplaySlot: "both", SchemaJSON: `{"type":"object"}`,
+		}},
 	}, nil
 }
 

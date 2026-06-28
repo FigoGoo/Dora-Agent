@@ -55,3 +55,41 @@ func TestGetPublishedSkillSpecIncludesOutputElements(t *testing.T) {
 		t.Fatalf("第二个应为 lyrics 且仅最终态: %#v", spec.OutputElements[1])
 	}
 }
+
+func TestGetReviewCandidateSkillSpecIncludesOutputElements(t *testing.T) {
+	app := newSkillTestApp(t)
+	db := app.repo.DB().WithContext(t.Context())
+	now := time.Now().UTC()
+	userID := "usr_fp3_review"
+
+	skill := &businesscore.Skill{
+		ID: "skl_fp3_review", SkillKey: "fp3_review", SkillName: "FP3 Review", SkillScope: "personal",
+		OwnerUserID: &userID, Status: "draft", RouteHintsJSON: emptyJSON, CreatedAt: now, UpdatedAt: now,
+	}
+	sv := &businesscore.SkillVersion{
+		ID: "skv_fp3_review", SkillID: "skl_fp3_review", Version: "0.1.0", Status: "pending_review",
+		SkillSpecJSON: emptyJSON, InputSchemaJSON: emptyJSON, OutputSchemaJSON: emptyJSON,
+		MemoryPolicyJSON: emptyJSON, ConfirmationPolicyJSON: emptyJSON, CreatedAt: now, UpdatedAt: now,
+	}
+	element := &businesscore.SkillOutputElementSchema{
+		ID: "soe_fp3_review_title", SkillID: "skl_fp3_review", VersionID: "skv_fp3_review", ElementType: "skill2.title", ElementName: "标题",
+		SchemaJSON: emptyJSON, Required: true, DisplayOrder: 1, DisplaySlot: "blackboard", UseDraft: true, UseFinal: true, Editable: true, Referable: true, CreatedAt: now,
+	}
+	for _, row := range []any{skill, sv, element} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatalf("seed %T: %v", row, err)
+		}
+	}
+
+	auth := accountspace.AuthContext{UserID: userID, LoginIdentityType: "personal"}
+	spec, err := app.GetReviewCandidateSkillSpec(t.Context(), auth, "skl_fp3_review", "skv_fp3_review", "")
+	if err != nil {
+		t.Fatalf("get review candidate skill spec: %v", err)
+	}
+	if len(spec.OutputElements) != 1 {
+		t.Fatalf("应含 1 个候选输出元素，got %d", len(spec.OutputElements))
+	}
+	if spec.OutputElements[0].ElementType != "skill2.title" || !spec.OutputElements[0].UseDraft || !spec.OutputElements[0].UseFinal {
+		t.Fatalf("候选响应应包含完整输出元素结构: %#v", spec.OutputElements[0])
+	}
+}
