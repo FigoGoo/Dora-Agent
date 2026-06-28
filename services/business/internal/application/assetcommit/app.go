@@ -328,7 +328,8 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 			RunID: in.RunID, FreezeID: in.FreezeID, EstimateID: estimateID, ActorUserID: in.Auth.UserID, SpaceID: in.Auth.SpaceID,
 			SafetyEvidenceID: in.SafetyEvidence.SafetyEvidenceId, SafetyEvidenceHash: safetyDigest(in.SafetyEvidence),
 			ChargedPoints: charged, ReleasedPoints: released, CommitStatus: commitStatusForSkipped(lineItems), LedgerRef: &ledgerID,
-			IdempotencyKey: in.Meta.IdempotencyKey, TraceID: in.Meta.TraceID, CreatedAt: now, UpdatedAt: now,
+			IdempotencyKey: in.Meta.IdempotencyKey, TraceID: in.Meta.TraceID,
+			CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&batch).Error; err != nil {
 			return err
@@ -393,6 +394,7 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 	}
 	slot.Status = "uploaded"
 	slot.Etag = optionalString(verified.Etag)
+	slot.UpdatedBy = optionalString(in.Auth.UserID)
 	slot.UpdatedAt = now
 	if err := tx.Save(&slot).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -403,7 +405,8 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 		ID: assetID, AssetNo: "A" + strings.ToUpper(assetID[4:12]), OwnerUserID: in.Auth.UserID, SpaceID: in.Auth.SpaceID,
 		EnterpriseID: optionalString(in.Auth.EnterpriseID), ProjectID: &in.ProjectID, AssetType: assetTypeFromResource(artifact.ResourceType),
 		Title: optionalString(title), Status: "active", Visibility: "private", SourceType: "agent_commit", SourceRefID: &artifact.ArtifactID,
-		ContentDigest: optionalString(artifact.StorageObjectRef.Checksum), MetadataJSON: mustJSON(artifact.MetadataSummary), CreatedAt: now, UpdatedAt: now,
+		ContentDigest: optionalString(artifact.StorageObjectRef.Checksum), MetadataJSON: mustJSON(artifact.MetadataSummary),
+		CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := tx.Create(&asset).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -413,7 +416,8 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 		ObjectKeyHash: digest(verified.ObjectKey), ObjectURI: "tos://" + verified.Bucket + "/" + verified.ObjectKey,
 		MIMEType: &verified.ContentType, SizeBytes: &verified.SizeBytes, Checksum: &verified.Checksum,
 		Etag: optionalString(verified.Etag), StorageStatus: "available", PreviewURI: optionalString("/api/assets/" + assetID + "/access?access_type=preview"),
-		DownloadPolicy: mustJSON(map[string]any{"access": "business_signed"}), CreatedAt: now, UpdatedAt: now,
+		DownloadPolicy: mustJSON(map[string]any{"access": "business_signed"}),
+		CreatedBy:      optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := tx.Create(&object).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -421,7 +425,8 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 	elementPayload := map[string]any{"artifact_summary": artifact.ArtifactSummary, "storage_object_ref": map[string]string{"bucket": artifact.StorageObjectRef.Bucket, "object_key_digest": digest(artifact.StorageObjectRef.ObjectKey)}}
 	element := businesscore.AssetElement{
 		ID: security.RandomID("asel_"), AssetID: assetID, ElementType: artifact.ElementType, ElementKey: artifact.ArtifactID,
-		ElementSummaryJSON: mustJSON(elementPayload), Status: "active", CreatedAt: now, UpdatedAt: now,
+		ElementSummaryJSON: mustJSON(elementPayload), Status: "active",
+		CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := tx.Create(&element).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -435,7 +440,7 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 		finalElement := businesscore.AssetElement{
 			ID: security.RandomID("asel_"), AssetID: assetID, ElementType: final.ElementType,
 			ElementKey: final.ElementType + "_" + security.RandomID(""), ElementSummaryJSON: mustJSON(payload),
-			Status: "active", CreatedAt: now, UpdatedAt: now,
+			Status: "active", CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&finalElement).Error; err != nil {
 			return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -444,13 +449,15 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 	projectAsset := businesscore.ProjectAsset{
 		ID: security.RandomID("pa_"), ProjectID: in.ProjectID, AssetID: assetID, AssetRole: "generated",
 		AttachedByUserID: in.Auth.UserID, AttachedBy: optionalString("agent"), Status: "active",
-		SourceSessionID: &in.SessionID, SourceRunID: &in.RunID, SourceArtifactID: &artifact.ArtifactID, SourceType: "agent_commit", CreatedAt: now,
+		SourceSessionID: &in.SessionID, SourceRunID: &in.RunID, SourceArtifactID: &artifact.ArtifactID, SourceType: "agent_commit",
+		CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now,
 	}
 	if err := tx.Create(&projectAsset).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
 	}
 	slot.Status = "committed"
 	slot.Etag = optionalString(verified.Etag)
+	slot.UpdatedBy = optionalString(in.Auth.UserID)
 	slot.UpdatedAt = now
 	if err := tx.Save(&slot).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -461,7 +468,8 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 		ResourceType: artifact.ResourceType, ElementType: artifact.ElementType, EstimateItemID: &artifact.EstimateItemID,
 		ToolName: optionalString(artifact.ToolName), ToolType: optionalString(artifact.ToolType), ChargeQuantity: optionalInt64(artifact.ChargeQuantity),
 		ChargedPoints: charged, ContentURIDigest: optionalString(artifact.ContentURIDigest), ArtifactSummaryJSON: mustJSON(artifact.ArtifactSummary),
-		MetadataJSON: mustJSON(artifact.MetadataSummary), Status: "committed", CreatedAt: now,
+		MetadataJSON: mustJSON(artifact.MetadataSummary), Status: "committed",
+		CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now,
 	}
 	if err := tx.Create(&item).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err

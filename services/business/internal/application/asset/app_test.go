@@ -40,6 +40,58 @@ func TestCreateUploadIntentRequiresRealSafetyEvidence(t *testing.T) {
 	}
 }
 
+func TestAssetOperatorColumnsAreFilledFromUserAuth(t *testing.T) {
+	app := newAssetTestApp(t)
+	auth := accountspace.AuthContext{UserID: "usr_1001", SpaceID: "sp_personal_1001", LoginIdentityType: "personal"}
+
+	created, err := app.CreateUploadIntent(t.Context(), CreateUploadIntentInput{
+		Auth: auth, Meta: assetMeta("trace-asset-operator", "idem-upload-operator"),
+		ProjectID: "prj_active_1001", AssetType: "image", Filename: "operator.png",
+		ContentType: "image/png", SizeBytes: 128, Checksum: "sha256:operator-upload",
+		MetadataText: "operator upload", SafetyEvidence: assetSafetyEvidence("trace-asset-operator"),
+	})
+	if err != nil {
+		t.Fatalf("create upload intent: %v", err)
+	}
+	requireAssetOperatorColumns(t, app, "assets", "id = ?", auth.UserID, auth.UserID, created.AssetID)
+	requireAssetOperatorColumns(t, app, "upload_intents", "upload_intent_id = ?", auth.UserID, auth.UserID, created.UploadIntentID)
+
+	if _, err := app.ConfirmUploadIntent(t.Context(), ConfirmUploadInput{
+		Auth: auth, Meta: assetMeta("trace-asset-operator", "idem-confirm-operator"),
+		UploadIntentID: created.UploadIntentID, Etag: "uploaded-operator-etag", SizeBytes: 128,
+		ContentType: "image/png", Checksum: "sha256:operator-upload-confirmed",
+	}); err != nil {
+		t.Fatalf("confirm upload intent: %v", err)
+	}
+	requireAssetOperatorColumns(t, app, "assets", "id = ?", auth.UserID, auth.UserID, created.AssetID)
+	requireAssetOperatorColumns(t, app, "asset_storage_objects", "asset_id = ?", auth.UserID, auth.UserID, created.AssetID)
+	requireAssetOperatorColumns(t, app, "upload_intents", "upload_intent_id = ?", auth.UserID, auth.UserID, created.UploadIntentID)
+
+	aborted, err := app.CreateUploadIntent(t.Context(), CreateUploadIntentInput{
+		Auth: auth, Meta: assetMeta("trace-asset-abort", "idem-upload-abort-operator"),
+		ProjectID: "prj_active_1001", AssetType: "image", Filename: "abort.png",
+		ContentType: "image/png", SizeBytes: 128, Checksum: "sha256:operator-abort",
+		MetadataText: "operator abort", SafetyEvidence: assetSafetyEvidence("trace-asset-abort"),
+	})
+	if err != nil {
+		t.Fatalf("create abort upload intent: %v", err)
+	}
+	if _, err := app.AbortUploadIntent(t.Context(), auth, assetMeta("trace-asset-abort", "idem-abort-operator"), aborted.UploadIntentID); err != nil {
+		t.Fatalf("abort upload intent: %v", err)
+	}
+	requireAssetOperatorColumns(t, app, "assets", "id = ?", auth.UserID, auth.UserID, aborted.AssetID)
+	requireAssetOperatorColumns(t, app, "upload_intents", "upload_intent_id = ?", auth.UserID, auth.UserID, aborted.UploadIntentID)
+
+	if _, err := app.PrepareGeneratedAssetObjects(t.Context(), auth, assetMeta("trace-asset-slot", "idem-slot-operator"), "prj_active_1001", "sess_operator", "run_operator", []GeneratedObjectInput{{
+		ArtifactID: "art_operator", ResourceType: "image", Filename: "generated.png",
+		ContentType: "image/png", SizeBytes: 128, Checksum: "sha256:operator-slot",
+		MetadataSummary: map[string]string{"display_name": "operator slot"},
+	}}); err != nil {
+		t.Fatalf("prepare generated asset object: %v", err)
+	}
+	requireAssetOperatorColumns(t, app, "generated_asset_object_slots", "run_id = ? AND artifact_id = ?", auth.UserID, auth.UserID, "run_operator", "art_operator")
+}
+
 func newAssetTestApp(t *testing.T) *App {
 	t.Helper()
 	db := testdb.StartPostgres(t, "dora_business_asset_app")
@@ -71,4 +123,29 @@ func codeOf(err error) bizerrors.Code {
 		return businessErr.Code
 	}
 	return ""
+}
+
+func requireAssetOperatorColumns(t *testing.T, app *App, table string, where string, wantCreatedBy string, wantUpdatedBy string, args ...any) {
+	t.Helper()
+	var row struct {
+		CreatedBy *string `gorm:"column:created_by"`
+		UpdatedBy *string `gorm:"column:updated_by"`
+	}
+	tx := app.repo.DB().Raw("SELECT created_by, updated_by FROM "+table+" WHERE "+where+" ORDER BY created_at DESC LIMIT 1", args...).Scan(&row)
+	if tx.Error != nil {
+		t.Fatalf("query operator columns for %s: %v", table, tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		t.Fatalf("expected row in %s where %s", table, where)
+	}
+	if testString(row.CreatedBy) != wantCreatedBy || testString(row.UpdatedBy) != wantUpdatedBy {
+		t.Fatalf("unexpected operator columns in %s: created_by=%q updated_by=%q", table, testString(row.CreatedBy), testString(row.UpdatedBy))
+	}
+}
+
+func testString(ptr *string) string {
+	if ptr == nil {
+		return ""
+	}
+	return *ptr
 }

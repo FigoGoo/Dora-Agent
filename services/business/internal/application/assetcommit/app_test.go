@@ -77,6 +77,13 @@ func TestCommitGeneratedAssetAndChargePersistsFullSuccessPath(t *testing.T) {
 	if countRows(t, env.repo, &businesscore.AssetCommitItem{}, "artifact_id = ? AND estimate_item_id = ?", base.artifactID, estimateItem.EstimateItemID) != 1 {
 		t.Fatalf("expected asset commit item row")
 	}
+	requireCommitOperatorColumns(t, env.repo, "assets", "id = ?", env.auth.UserID, env.auth.UserID, out.AssetRefs[0].AssetID)
+	requireCommitOperatorColumns(t, env.repo, "asset_storage_objects", "asset_id = ?", env.auth.UserID, env.auth.UserID, out.AssetRefs[0].AssetID)
+	requireCommitOperatorColumns(t, env.repo, "asset_elements", "asset_id = ? AND element_key = ?", env.auth.UserID, env.auth.UserID, out.AssetRefs[0].AssetID, base.artifactID)
+	requireCommitOperatorColumns(t, env.repo, "project_assets", "source_artifact_id = ?", env.auth.UserID, env.auth.UserID, base.artifactID)
+	requireCommitOperatorColumns(t, env.repo, "generated_asset_object_slots", "run_id = ? AND artifact_id = ?", env.auth.UserID, env.auth.UserID, base.runID, base.artifactID)
+	requireCommitOperatorColumns(t, env.repo, "asset_commit_batches", "ledger_ref = ?", env.auth.UserID, env.auth.UserID, out.LedgerRef)
+	requireCommitOperatorColumns(t, env.repo, "asset_commit_items", "artifact_id = ? AND estimate_item_id = ?", env.auth.UserID, env.auth.UserID, base.artifactID, estimateItem.EstimateItemID)
 	if countRows(t, env.repo, &businesscore.CreditLedgerEntry{}, "entry_type = ? AND source_type = ? AND source_id = ?", "asset_commit_charge", "asset_commit", out.LedgerRef) != 0 {
 		t.Fatalf("ledger source_id should be commit_id, not ledger ref")
 	}
@@ -347,4 +354,22 @@ func optionalFloatForTest(value float64) *float64 {
 		return nil
 	}
 	return &value
+}
+
+func requireCommitOperatorColumns(t *testing.T, repo *businesscore.Repository, table string, where string, wantCreatedBy string, wantUpdatedBy string, args ...any) {
+	t.Helper()
+	var row struct {
+		CreatedBy *string `gorm:"column:created_by"`
+		UpdatedBy *string `gorm:"column:updated_by"`
+	}
+	tx := repo.DB().Raw("SELECT created_by, updated_by FROM "+table+" WHERE "+where+" ORDER BY created_at DESC LIMIT 1", args...).Scan(&row)
+	if tx.Error != nil {
+		t.Fatalf("query operator columns for %s: %v", table, tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		t.Fatalf("expected row in %s where %s", table, where)
+	}
+	if value(row.CreatedBy) != wantCreatedBy || value(row.UpdatedBy) != wantUpdatedBy {
+		t.Fatalf("unexpected operator columns in %s: created_by=%q updated_by=%q", table, value(row.CreatedBy), value(row.UpdatedBy))
+	}
 }

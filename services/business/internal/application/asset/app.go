@@ -311,7 +311,7 @@ func (a *App) CreateUploadIntent(ctx context.Context, in CreateUploadIntentInput
 			EnterpriseID: optionalString(in.Auth.EnterpriseID), ProjectID: &in.ProjectID, AssetType: in.AssetType, Title: optionalString(title),
 			Status: StatusPending, Visibility: "private", SourceType: "upload", SourceRefID: optionalString(in.Meta.RequestID),
 			ContentDigest: optionalString(in.Checksum), MetadataJSON: mustJSON(map[string]any{"filename_digest": digest(in.Filename), "metadata_text_digest": digest(in.MetadataText)}),
-			CreatedAt: now, UpdatedAt: now,
+			CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&asset).Error; err != nil {
 			return err
@@ -322,7 +322,7 @@ func (a *App) CreateUploadIntent(ctx context.Context, in CreateUploadIntentInput
 			ProjectID: &in.ProjectID, AssetType: in.AssetType, Bucket: &a.tos.Bucket, ObjectKey: &objectKey,
 			ObjectKeyHash: digest(objectKey), MIMEType: &in.ContentType, MaxSizeBytes: in.SizeBytes, Status: StatusCreated,
 			ExpiresAt: now.Add(15 * time.Minute), ConfirmedAssetID: &assetID, IdempotencyKey: in.Meta.IdempotencyKey,
-			TraceID: in.Meta.TraceID, CreatedAt: now, UpdatedAt: now,
+			TraceID: in.Meta.TraceID, CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&intent).Error; err != nil {
 			return err
@@ -377,7 +377,7 @@ func (a *App) ConfirmUploadIntent(ctx context.Context, in ConfirmUploadInput) (A
 			return bizerrors.New(bizerrors.CodeStateConflict, "upload intent is missing asset")
 		}
 		assetID = *intent.ConfirmedAssetID
-		if err := tx.Model(&businesscore.Asset{}).Where("id = ?", assetID).Updates(map[string]any{"status": StatusActive, "content_digest": in.Checksum, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&businesscore.Asset{}).Where("id = ?", assetID).Updates(map[string]any{"status": StatusActive, "content_digest": in.Checksum, "updated_at": now, "updated_by": in.Auth.UserID}).Error; err != nil {
 			return err
 		}
 		objectKey := value(intent.ObjectKey)
@@ -386,12 +386,13 @@ func (a *App) ConfirmUploadIntent(ctx context.Context, in ConfirmUploadInput) (A
 			ObjectKeyHash: digest(objectKey), ObjectURI: "tos://" + a.tos.Bucket + "/" + objectKey, MIMEType: optionalString(in.ContentType),
 			SizeBytes: &in.SizeBytes, Checksum: &in.Checksum, Etag: optionalString(in.Etag), StorageStatus: "available",
 			PreviewURI: optionalString(a.publicURL(objectKey)), DownloadPolicy: mustJSON(map[string]any{"access": "signed_by_business"}),
-			CreatedAt: now, UpdatedAt: now,
+			CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&object).Error; err != nil {
 			return err
 		}
 		intent.Status = StatusConfirmed
+		intent.UpdatedBy = optionalString(in.Auth.UserID)
 		intent.UpdatedAt = now
 		if err := tx.Save(&intent).Error; err != nil {
 			return err
@@ -420,12 +421,13 @@ func (a *App) AbortUploadIntent(ctx context.Context, auth AuthContext, meta Requ
 			return bizerrors.New(bizerrors.CodeStateConflict, "confirmed upload intent cannot be aborted")
 		}
 		intent.Status = StatusAborted
+		intent.UpdatedBy = optionalString(auth.UserID)
 		intent.UpdatedAt = a.now()
 		if err := tx.Save(&intent).Error; err != nil {
 			return err
 		}
 		if intent.ConfirmedAssetID != nil {
-			_ = tx.Model(&businesscore.Asset{}).Where("id = ?", *intent.ConfirmedAssetID).Updates(map[string]any{"status": "deleted", "updated_at": a.now()}).Error
+			_ = tx.Model(&businesscore.Asset{}).Where("id = ?", *intent.ConfirmedAssetID).Updates(map[string]any{"status": "deleted", "updated_at": a.now(), "updated_by": auth.UserID}).Error
 		}
 		dto = a.uploadIntentDTO(intent)
 		return nil
@@ -536,7 +538,7 @@ func (a *App) PrepareGeneratedAssetObjects(ctx context.Context, auth AuthContext
 				ArtifactID: artifact.ArtifactID, ResourceType: artifact.ResourceType, Bucket: a.tos.Bucket, ObjectKey: objectKey,
 				ObjectKeyHash: digest(objectKey), ContentType: artifact.ContentType, SizeBytes: artifact.SizeBytes, Checksum: optionalStringValue(artifact.Checksum),
 				Status: StatusCreated, IdempotencyKey: meta.IdempotencyKey, MetadataJSON: mustJSON(artifact.MetadataSummary), ExpiresAt: now.Add(15 * time.Minute),
-				CreatedByUserID: auth.UserID, TraceID: meta.TraceID, CreatedAt: now, UpdatedAt: now,
+				CreatedByUserID: auth.UserID, TraceID: meta.TraceID, CreatedBy: optionalString(auth.UserID), UpdatedBy: optionalString(auth.UserID), CreatedAt: now, UpdatedAt: now,
 			}
 			if err := tx.Create(&row).Error; err != nil {
 				return err

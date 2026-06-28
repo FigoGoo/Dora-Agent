@@ -243,6 +243,8 @@ type Asset struct {
 	SourceRefID   *string        `gorm:"column:source_ref_id"`
 	ContentDigest *string        `gorm:"column:content_digest"`
 	MetadataJSON  datatypes.JSON `gorm:"column:metadata_json;type:jsonb"`
+	CreatedBy     *string        `gorm:"column:created_by"`
+	UpdatedBy     *string        `gorm:"column:updated_by"`
 	CreatedAt     time.Time      `gorm:"column:created_at"`
 	UpdatedAt     time.Time      `gorm:"column:updated_at"`
 	DeletedAt     gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -264,6 +266,8 @@ type AssetStorageObject struct {
 	StorageStatus  string         `gorm:"column:storage_status"`
 	PreviewURI     *string        `gorm:"column:preview_uri"`
 	DownloadPolicy datatypes.JSON `gorm:"column:download_policy_json;type:jsonb"`
+	CreatedBy      *string        `gorm:"column:created_by"`
+	UpdatedBy      *string        `gorm:"column:updated_by"`
 	CreatedAt      time.Time      `gorm:"column:created_at"`
 	UpdatedAt      time.Time      `gorm:"column:updated_at"`
 	DeletedAt      gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -288,6 +292,8 @@ type UploadIntent struct {
 	ConfirmedAssetID *string        `gorm:"column:confirmed_asset_id"`
 	IdempotencyKey   string         `gorm:"column:idempotency_key"`
 	TraceID          string         `gorm:"column:trace_id"`
+	CreatedBy        *string        `gorm:"column:created_by"`
+	UpdatedBy        *string        `gorm:"column:updated_by"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -303,6 +309,8 @@ type AssetElement struct {
 	ElementSummaryJSON datatypes.JSON `gorm:"column:element_summary_json;type:jsonb"`
 	PreviewText        *string        `gorm:"column:preview_text"`
 	Status             string         `gorm:"column:status"`
+	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
 	CreatedAt          time.Time      `gorm:"column:created_at"`
 	UpdatedAt          time.Time      `gorm:"column:updated_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -346,6 +354,8 @@ type GeneratedAssetObjectSlot struct {
 	ExpiresAt       time.Time      `gorm:"column:expires_at"`
 	CreatedByUserID string         `gorm:"column:created_by_user_id"`
 	TraceID         string         `gorm:"column:trace_id"`
+	CreatedBy       *string        `gorm:"column:created_by"`
+	UpdatedBy       *string        `gorm:"column:updated_by"`
 	CreatedAt       time.Time      `gorm:"column:created_at"`
 	UpdatedAt       time.Time      `gorm:"column:updated_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -371,6 +381,8 @@ type AssetCommitBatch struct {
 	LedgerRef          *string        `gorm:"column:ledger_ref"`
 	IdempotencyKey     string         `gorm:"column:idempotency_key"`
 	TraceID            string         `gorm:"column:trace_id"`
+	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
 	CreatedAt          time.Time      `gorm:"column:created_at"`
 	UpdatedAt          time.Time      `gorm:"column:updated_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -394,6 +406,8 @@ type AssetCommitItem struct {
 	ArtifactSummaryJSON datatypes.JSON `gorm:"column:artifact_summary_json;type:jsonb"`
 	MetadataJSON        datatypes.JSON `gorm:"column:metadata_json;type:jsonb"`
 	Status              string         `gorm:"column:status"`
+	CreatedBy           *string        `gorm:"column:created_by"`
+	UpdatedBy           *string        `gorm:"column:updated_by"`
 	CreatedAt           time.Time      `gorm:"column:created_at"`
 	DeletedAt           gorm.DeletedAt `gorm:"column:deleted_at"`
 }
