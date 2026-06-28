@@ -324,3 +324,16 @@
 
 范围决策：
 - 本切片只打通 W3C Trace Context 传播和 OTel context 承载，不引入 exporter/backend，也不改现有 `trace_id` 持久化字段。
+
+## 批 E 子切片记录（2026-06-28 · INFRA-10）✅
+
+提交：`959ab65`（INFRA-10）
+验证：`go test -count=1 ./services/internal/envconfig ./services/internal/configsource ./services/business/internal/infra/config ./services/agent/internal/infra/config` 通过；`go test -count=1 ./services/business/internal/bootstrap ./services/agent/internal/infra/rpc` 通过；`git diff --check` 通过。
+
+- **INFRA-10 ✅ 已修**：新增共享 `services/internal/configsource`，配置链从默认/文件/env 扩展为文件 -> etcd 非敏感 overlay -> env 最终覆盖；`DORA_CONFIG_SOURCE=etcd` 时按 `ETCD_NAMESPACE/<service>/<CONFIG_KEY>` 读取 business/agent 服务级配置。
+- business/agent 分别声明 etcd 非敏感配置 allowlist，数据库 URL、AK/SK、Token、密码、secret ref、etcd bootstrap 参数等不允许从普通 etcd 配置路径覆盖；读到非 allowlist key 直接 fail closed。
+- `.env.example` 与本地配置规范新增 `DORA_CONFIG_SOURCE` / `DORA_CONFIG_ETCD_TIMEOUT`，明确本地默认 `env`、etcd key 命名和密钥纪律。
+
+范围决策：
+- `AGENT_CONFIG_SOURCE` 继续表示 Agent runtime config 来源（如 postgres），不复用为服务级配置源；新增全局 `DORA_CONFIG_SOURCE` 专管 business/agent 服务配置 overlay。
+- 本切片只实现启动期读取，不引入动态 watch、审计写入或回滚流程；这些属于配置运营面，不用隐式后台线程冒充。
