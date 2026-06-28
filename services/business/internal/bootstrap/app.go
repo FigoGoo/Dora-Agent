@@ -77,6 +77,8 @@ func New(cfg config.BusinessConfig) (*App, error) {
 	creditApp := credit.New(repo, guard, auditWriter)
 	assetApp := asset.New(repo, guard, auditWriter, asset.TOSOptions{
 		Env: cfg.AppEnv, Bucket: cfg.TOS.Bucket, BaseURL: cfg.TOS.BaseURL,
+		Endpoint: cfg.TOS.Endpoint, Region: cfg.TOS.Region,
+		AccessKeyID: cfg.TOS.AccessKeyID, SecretAccessKey: cfg.TOS.SecretAccessKey,
 	})
 	commitVerifier, err := assetcommit.NewTOSHeadObjectVerifier(cfg.TOS.Endpoint, cfg.TOS.Region, cfg.TOS.AccessKeyID, cfg.TOS.SecretAccessKey)
 	if err != nil {

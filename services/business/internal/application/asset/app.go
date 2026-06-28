@@ -18,6 +18,8 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/auditlog"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/security"
+	"github.com/volcengine/ve-tos-golang-sdk/v2/tos"
+	"github.com/volcengine/ve-tos-golang-sdk/v2/tos/enum"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -36,17 +38,61 @@ type AuthContext = accountspace.AuthContext
 type RequestMeta = accountspace.RequestMeta
 
 type TOSOptions struct {
-	Env     string
-	Bucket  string
-	BaseURL string
+	Env             string
+	Bucket          string
+	BaseURL         string
+	Endpoint        string
+	Region          string
+	AccessKeyID     string
+	SecretAccessKey string
+}
+
+// UploadURLSigner 为前端直传签发 TOS 预签名 PUT URL。
+// 本地无 TOS 凭证(Endpoint/Region/AK/SK 任一为空)时为 nil，uploadURL 回退占位，便于本地与测试不依赖真实 TOS。
+type UploadURLSigner interface {
+	PresignPut(bucket, objectKey, contentType string, ttl time.Duration) (string, error)
+}
+
+type tosPresigner struct{ client *tos.ClientV2 }
+
+func newUploadURLSigner(opts TOSOptions) UploadURLSigner {
+	if strings.TrimSpace(opts.Endpoint) == "" || strings.TrimSpace(opts.Region) == "" ||
+		strings.TrimSpace(opts.AccessKeyID) == "" || strings.TrimSpace(opts.SecretAccessKey) == "" {
+		return nil
+	}
+	client, err := tos.NewClientV2(opts.Endpoint, tos.WithRegion(opts.Region),
+		tos.WithCredentials(tos.NewStaticCredentials(opts.AccessKeyID, opts.SecretAccessKey)))
+	if err != nil {
+		return nil
+	}
+	return tosPresigner{client: client}
+}
+
+// PresignPut 生成 TOS 直传预签名 URL，限制单 key + Content-Type；不暴露 AK/SK。
+func (p tosPresigner) PresignPut(bucket, objectKey, contentType string, ttl time.Duration) (string, error) {
+	input := &tos.PreSignedURLInput{
+		HTTPMethod: enum.HttpMethodPut,
+		Bucket:     bucket,
+		Key:        objectKey,
+		Expires:    int64(ttl.Seconds()),
+	}
+	if strings.TrimSpace(contentType) != "" {
+		input.Header = map[string]string{"Content-Type": contentType}
+	}
+	out, err := p.client.PreSignedURL(input)
+	if err != nil {
+		return "", err
+	}
+	return out.SignedUrl, nil
 }
 
 type App struct {
-	repo  *businesscore.Repository
-	guard *idempotency.IdempotencyGuard
-	audit auditlog.Writer
-	tos   TOSOptions
-	now   func() time.Time
+	repo   *businesscore.Repository
+	guard  *idempotency.IdempotencyGuard
+	audit  auditlog.Writer
+	tos    TOSOptions
+	signer UploadURLSigner
+	now    func() time.Time
 }
 
 func New(repo *businesscore.Repository, guard *idempotency.IdempotencyGuard, audit auditlog.Writer, tos TOSOptions) *App {
@@ -59,7 +105,7 @@ func New(repo *businesscore.Repository, guard *idempotency.IdempotencyGuard, aud
 	if strings.TrimRight(tos.BaseURL, "/") == "" {
 		tos.BaseURL = "http://localhost/tos"
 	}
-	return &App{repo: repo, guard: guard, audit: audit, tos: tos, now: func() time.Time { return time.Now().UTC() }}
+	return &App{repo: repo, guard: guard, audit: audit, tos: tos, signer: newUploadURLSigner(tos), now: func() time.Time { return time.Now().UTC() }}
 }
 
 type Page[T any] struct {
@@ -600,14 +646,14 @@ func (a *App) uploadIntentDTO(row businesscore.UploadIntent) UploadIntentDTO {
 	objectKey := value(row.ObjectKey)
 	return UploadIntentDTO{
 		UploadIntentID: row.UploadIntentID, AssetID: value(row.ConfirmedAssetID), Bucket: value(row.Bucket), ObjectKey: objectKey,
-		UploadURL: a.uploadURL(objectKey), UploadHeaders: uploadHeaders(value(row.MIMEType), row.MaxSizeBytes),
+		UploadURL: a.uploadURL(objectKey, value(row.MIMEType), row.ExpiresAt), UploadHeaders: uploadHeaders(value(row.MIMEType), row.MaxSizeBytes),
 		ExpiresAt: row.ExpiresAt, MaxSizeBytes: row.MaxSizeBytes, ContentType: value(row.MIMEType),
 	}
 }
 
 func (a *App) generatedSlotDTO(row businesscore.GeneratedAssetObjectSlot) GeneratedUploadSlotDTO {
 	return GeneratedUploadSlotDTO{
-		ArtifactID: row.ArtifactID, Bucket: row.Bucket, ObjectKey: row.ObjectKey, UploadURL: a.uploadURL(row.ObjectKey),
+		ArtifactID: row.ArtifactID, Bucket: row.Bucket, ObjectKey: row.ObjectKey, UploadURL: a.uploadURL(row.ObjectKey, row.ContentType, row.ExpiresAt),
 		UploadHeaders: uploadHeaders(row.ContentType, row.SizeBytes), ExpiresAt: row.ExpiresAt, MaxSizeBytes: row.SizeBytes,
 	}
 }
@@ -616,8 +662,25 @@ func (a *App) objectKey(spaceID, projectID, path, id, contentType string) string
 	return strings.Trim(a.tos.Env, "/") + "/spaces/" + safeSegment(spaceID) + "/projects/" + safeSegment(projectID) + "/" + strings.Trim(path, "/") + "/" + safeSegment(id) + extensionForContentType(contentType)
 }
 
-func (a *App) uploadURL(objectKey string) string {
+func (a *App) uploadURL(objectKey, contentType string, expiresAt time.Time) string {
+	if a.signer != nil {
+		if url, err := a.signer.PresignPut(a.tos.Bucket, objectKey, contentType, clampUploadTTL(expiresAt.Sub(a.now()))); err == nil && url != "" {
+			return url
+		}
+	}
 	return strings.TrimRight(a.tos.BaseURL, "/") + "/" + strings.TrimLeft(objectKey, "/") + "?upload_token=local-m4"
+}
+
+// clampUploadTTL 把上传凭证有效期约束到规范要求的 5-15 分钟。
+func clampUploadTTL(d time.Duration) time.Duration {
+	const minTTL, maxTTL = 5 * time.Minute, 15 * time.Minute
+	if d < minTTL {
+		return minTTL
+	}
+	if d > maxTTL {
+		return maxTTL
+	}
+	return d
 }
 
 func (a *App) publicURL(objectKey string) string {
