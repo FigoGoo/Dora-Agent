@@ -46,14 +46,16 @@ type ModelRuntimeSnapshotDTO struct {
 }
 
 type ProviderDTO struct {
-	ProviderID   string         `json:"provider_id"`
-	ProviderCode string         `json:"provider_code"`
-	DisplayName  string         `json:"display_name"`
-	ProviderType string         `json:"provider_type"`
-	Status       string         `json:"status"`
-	BaseURL      string         `json:"base_url,omitempty"`
-	Config       map[string]any `json:"config,omitempty"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	ProviderID      string         `json:"provider_id"`
+	ProviderCode    string         `json:"provider_code"`
+	ProviderName    string         `json:"provider_name,omitempty"`
+	DisplayName     string         `json:"display_name"`
+	ProviderType    string         `json:"provider_type"`
+	Status          string         `json:"status"`
+	SecretRefStatus string         `json:"secret_ref_status,omitempty"`
+	BaseURL         string         `json:"base_url,omitempty"`
+	Config          map[string]any `json:"config,omitempty"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 type ModelAdminDTO struct {
@@ -66,6 +68,7 @@ type ModelAdminDTO struct {
 	Status             string         `json:"status"`
 	RouteConfig        map[string]any `json:"route_config,omitempty"`
 	PricingSnapshotID  string         `json:"pricing_snapshot_id,omitempty"`
+	IsDefault          bool           `json:"is_default"`
 	DefaultForResource bool           `json:"default_for_resource"`
 	UpdatedAt          time.Time      `json:"updated_at"`
 }
@@ -339,6 +342,13 @@ func (a *App) SetDefaultModel(ctx context.Context, auth admin.AdminAuth, resourc
 	if auth.AdminID == "" {
 		return ModelSummaryDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
 	}
+	if strings.TrimSpace(pricingSnapshotID) == "" {
+		price, err := a.activePrice(ctx, strings.TrimSpace(modelID), strings.TrimSpace(resourceType), "")
+		if err != nil {
+			return ModelSummaryDTO{}, err
+		}
+		pricingSnapshotID = price.PricingSnapshotID
+	}
 	if _, err := a.ResolveGenerationModelSnapshot(ctx, accountspace.AuthContext{}, resourceType, modelID, pricingSnapshotID); err != nil {
 		return ModelSummaryDTO{}, err
 	}
@@ -412,7 +422,7 @@ func (a *App) modelAdminDTO(ctx context.Context, row businesscore.Model) ModelAd
 		ModelID: row.ID, ProviderID: row.ProviderID, ModelCode: row.ModelCode, DisplayName: row.DisplayName,
 		ResourceType: row.ResourceType, CapabilityTags: stringSlice(row.CapabilityTags), Status: row.Status,
 		RouteConfig: jsonObject(row.RouteConfigJSON), PricingSnapshotID: price.PricingSnapshotID,
-		DefaultForResource: defaultModel.ModelID == row.ID, UpdatedAt: row.UpdatedAt,
+		IsDefault: defaultModel.ModelID == row.ID, DefaultForResource: defaultModel.ModelID == row.ID, UpdatedAt: row.UpdatedAt,
 	}
 }
 
@@ -421,9 +431,14 @@ func providerDTO(row businesscore.ModelProvider) ProviderDTO {
 	if row.BaseURL != nil {
 		baseURL = *row.BaseURL
 	}
+	config := jsonObject(row.ConfigJSON)
+	secretRefStatus := ""
+	if _, ok := config["secret_key_ref"].(string); ok {
+		secretRefStatus = "configured"
+	}
 	return ProviderDTO{
-		ProviderID: row.ID, ProviderCode: row.ProviderCode, DisplayName: row.DisplayName,
-		ProviderType: row.ProviderType, Status: row.Status, BaseURL: baseURL, Config: jsonObject(row.ConfigJSON), UpdatedAt: row.UpdatedAt,
+		ProviderID: row.ID, ProviderCode: row.ProviderCode, ProviderName: row.DisplayName, DisplayName: row.DisplayName,
+		ProviderType: row.ProviderType, Status: row.Status, SecretRefStatus: secretRefStatus, BaseURL: baseURL, Config: config, UpdatedAt: row.UpdatedAt,
 	}
 }
 

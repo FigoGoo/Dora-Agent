@@ -51,6 +51,55 @@ func TestAdminUserDetailDoesNotExposeBusinessOwnership(t *testing.T) {
 	}
 }
 
+func TestAdminLoginUsesSevenDayRememberWindow(t *testing.T) {
+	app := newAdminTestApp(t)
+	now := time.Date(2026, 6, 29, 8, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return now }
+
+	session, err := app.Login(t.Context(), AdminLoginInput{
+		Account: "admin@dora.local", Password: "local-admin-change-me", Meta: RequestMeta{TraceID: "trace-admin-login"},
+	})
+	if err != nil {
+		t.Fatalf("admin login: %v", err)
+	}
+
+	want := now.Add(7 * 24 * time.Hour)
+	if !session.ExpiresAt.Equal(want) {
+		t.Fatalf("admin session expiry=%s want=%s", session.ExpiresAt, want)
+	}
+}
+
+func TestAdminAuthenticateTokenRenewsSevenDayWindow(t *testing.T) {
+	app := newAdminTestApp(t)
+	loginAt := time.Date(2026, 6, 29, 8, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return loginAt }
+	session, err := app.Login(t.Context(), AdminLoginInput{
+		Account: "admin@dora.local", Password: "local-admin-change-me", Meta: RequestMeta{TraceID: "trace-admin-login"},
+	})
+	if err != nil {
+		t.Fatalf("admin login: %v", err)
+	}
+	renewAt := loginAt.Add(6 * 24 * time.Hour)
+	app.now = func() time.Time { return renewAt }
+
+	auth, err := app.AuthenticateToken(t.Context(), "Bearer "+session.AccessToken)
+	if err != nil {
+		t.Fatalf("authenticate token: %v", err)
+	}
+
+	want := renewAt.Add(7 * 24 * time.Hour)
+	if !auth.ExpiresAt.Equal(want) {
+		t.Fatalf("renewed auth expiry=%s want=%s", auth.ExpiresAt, want)
+	}
+	var stored businesscore.PlatformAdminSession
+	if err := app.repo.DB().WithContext(t.Context()).Where("id = ?", auth.SessionID).First(&stored).Error; err != nil {
+		t.Fatalf("load renewed session: %v", err)
+	}
+	if !stored.ExpiresAt.Equal(want) {
+		t.Fatalf("stored session expiry=%s want=%s", stored.ExpiresAt, want)
+	}
+}
+
 func TestAdminUserDetailUsesTypedOwnershipPlaceholders(t *testing.T) {
 	detail := UserDetailDTO{
 		Spaces:                []AdminUserSpaceDTO{},

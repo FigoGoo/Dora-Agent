@@ -164,7 +164,7 @@ func (h m3Handler) listAssetElementTypes(c *gin.Context) {
 }
 
 func (h m3Handler) adminListProviders(c *gin.Context) {
-	out, err := h.model.ListProviders(c.Request.Context(), adminAuth(c), c.Query("status"), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	out, err := h.model.ListProviders(c.Request.Context(), adminAuth(c), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
@@ -179,14 +179,28 @@ func (h m3Handler) adminPatchProvider(c *gin.Context) {
 func (h m3Handler) adminSaveProviderWithID(c *gin.Context, providerID string) {
 	var req struct {
 		ProviderCode string         `json:"provider_code"`
+		ProviderName string         `json:"provider_name"`
 		DisplayName  string         `json:"display_name"`
 		ProviderType string         `json:"provider_type"`
 		Status       string         `json:"status"`
+		SecretKeyRef string         `json:"secret_key_ref"`
 		BaseURL      string         `json:"base_url"`
 		Config       map[string]any `json:"config"`
 	}
 	if !bindJSON(c, &req) {
 		return
+	}
+	if req.DisplayName == "" {
+		req.DisplayName = req.ProviderName
+	}
+	if req.ProviderCode == "" {
+		req.ProviderCode = stableCode(req.DisplayName)
+	}
+	if req.Config == nil {
+		req.Config = map[string]any{}
+	}
+	if strings.TrimSpace(req.SecretKeyRef) != "" {
+		req.Config["secret_key_ref"] = strings.TrimSpace(req.SecretKeyRef)
 	}
 	out, err := h.model.SaveProvider(c.Request.Context(), modelconfig.SaveProviderInput{Auth: adminAuth(c), ProviderID: providerID, ProviderCode: req.ProviderCode, DisplayName: req.DisplayName, ProviderType: req.ProviderType, Status: req.Status, BaseURL: req.BaseURL, Config: req.Config})
 	respond(c, out, err)
@@ -202,7 +216,7 @@ func (h m3Handler) adminConnectivityTest(c *gin.Context) {
 }
 
 func (h m3Handler) adminListModels(c *gin.Context) {
-	out, err := h.model.ListModels(c.Request.Context(), adminAuth(c), c.Query("resource_type"), c.Query("status"), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	out, err := h.model.ListModels(c.Request.Context(), adminAuth(c), c.Query("resource_type"), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
@@ -216,17 +230,21 @@ func (h m3Handler) adminPatchModel(c *gin.Context) {
 
 func (h m3Handler) adminSaveModelWithID(c *gin.Context, modelID string) {
 	var req struct {
-		ProviderID     string         `json:"provider_id"`
-		ModelCode      string         `json:"model_code"`
-		DisplayName    string         `json:"display_name"`
-		ResourceType   string         `json:"resource_type"`
-		Status         string         `json:"status"`
-		CapabilityTags []string       `json:"capability_tags"`
-		RouteConfig    map[string]any `json:"route_config"`
-		CredentialID   string         `json:"credential_id"`
+		ProviderID        string         `json:"provider_id"`
+		ModelCode         string         `json:"model_code"`
+		DisplayName       string         `json:"display_name"`
+		ResourceType      string         `json:"resource_type"`
+		PricingSnapshotID string         `json:"pricing_snapshot_id"`
+		Status            string         `json:"status"`
+		CapabilityTags    []string       `json:"capability_tags"`
+		RouteConfig       map[string]any `json:"route_config"`
+		CredentialID      string         `json:"credential_id"`
 	}
 	if !bindJSON(c, &req) {
 		return
+	}
+	if req.ModelCode == "" {
+		req.ModelCode = stableCode(req.DisplayName)
 	}
 	out, err := h.model.SaveModel(c.Request.Context(), modelconfig.SaveModelInput{Auth: adminAuth(c), ModelID: modelID, ProviderID: req.ProviderID, ModelCode: req.ModelCode, DisplayName: req.DisplayName, ResourceType: req.ResourceType, Status: req.Status, CapabilityTags: req.CapabilityTags, RouteConfig: req.RouteConfig, CredentialID: req.CredentialID})
 	respond(c, out, err)
@@ -257,7 +275,7 @@ func (h m3Handler) adminSetModelStatus(c *gin.Context) {
 }
 
 func (h m3Handler) adminListTools(c *gin.Context) {
-	out, err := h.tool.ListAdminTools(c.Request.Context(), adminAuth(c), c.Query("status"), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	out, err := h.tool.ListAdminTools(c.Request.Context(), adminAuth(c), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
@@ -332,7 +350,7 @@ func (h m3Handler) adminSaveToolWhitelist(c *gin.Context) {
 }
 
 func (h m3Handler) adminListSystemSkills(c *gin.Context) {
-	out, err := h.skill.ListSystemSkills(c.Request.Context(), adminAuth(c), c.Query("status"), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	out, err := h.skill.ListSystemSkills(c.Request.Context(), adminAuth(c), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
@@ -392,24 +410,42 @@ func (h m3Handler) adminDeprecateSkill(c *gin.Context) {
 }
 
 func (h m3Handler) adminListSkillReviews(c *gin.Context) {
-	out, err := h.skill.ListReviews(c.Request.Context(), adminAuth(c), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	out, err := h.skill.ListReviews(c.Request.Context(), adminAuth(c), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
 func (h m3Handler) adminConfirmSkillReview(c *gin.Context) {
-	var req struct {
-		Action  string `json:"action"`
-		Comment string `json:"comment"`
-	}
+	var req adminSkillReviewRequest
 	if !bindJSON(c, &req) {
 		return
 	}
-	out, err := h.skill.ConfirmReview(c.Request.Context(), adminAuth(c), c.Param("review_id"), req.Action, req.Comment)
+	out, err := h.skill.ConfirmReview(c.Request.Context(), adminAuth(c), c.Param("review_id"), req.normalizedAction(), req.normalizedComment())
 	respond(c, out, err)
 }
 
+type adminSkillReviewRequest struct {
+	Action   string `json:"action"`
+	Comment  string `json:"comment"`
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
+}
+
+func (r adminSkillReviewRequest) normalizedAction() string {
+	if strings.TrimSpace(r.Action) != "" {
+		return strings.TrimSpace(r.Action)
+	}
+	return strings.TrimSpace(r.Decision)
+}
+
+func (r adminSkillReviewRequest) normalizedComment() string {
+	if strings.TrimSpace(r.Comment) != "" {
+		return strings.TrimSpace(r.Comment)
+	}
+	return strings.TrimSpace(r.Reason)
+}
+
 func (h m3Handler) adminListAssetElementTypes(c *gin.Context) {
-	out, err := h.dictionary.ListAdminElementTypes(c.Request.Context(), adminAuth(c), c.Query("status"), intQuery(c, "limit", 20), intQuery(c, "offset", 0))
+	out, err := h.dictionary.ListAdminElementTypes(c.Request.Context(), adminAuth(c), c.Query("status"), adminPageLimit(c, 20), adminPageOffset(c))
 	respond(c, out, err)
 }
 
@@ -464,6 +500,26 @@ func parseToolKey(toolKey, fallbackType string) (string, string) {
 		return parts[0], parts[1]
 	}
 	return toolKey, fallbackType
+}
+
+func stableCode(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	for _, ch := range value {
+		switch {
+		case ch >= 'a' && ch <= 'z', ch >= '0' && ch <= '9':
+			builder.WriteRune(ch)
+		case ch == '-' || ch == '_' || ch == '.':
+			builder.WriteRune(ch)
+		case builder.Len() > 0:
+			builder.WriteByte('_')
+		}
+	}
+	code := strings.Trim(builder.String(), "_")
+	if code == "" {
+		return "default"
+	}
+	return code
 }
 
 func loggerTrace(c *gin.Context) string {

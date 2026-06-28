@@ -40,6 +40,7 @@ type ExecutionPolicyDTO struct {
 }
 
 type ToolDTO struct {
+	ToolKey              string            `json:"tool_key"`
 	ToolName             string            `json:"tool_name"`
 	ToolType             string            `json:"tool_type"`
 	DisplayName          string            `json:"display_name"`
@@ -227,7 +228,22 @@ func (a *App) ImpactPreview(ctx context.Context, auth admin.AdminAuth, toolName,
 	if err := a.repo.DB().WithContext(ctx).Model(&businesscore.SkillToolBinding{}).Where("tool_name = ? AND tool_type = ?", toolName, toolType).Count(&bindingCount).Error; err != nil {
 		return nil, err
 	}
-	return map[string]any{"tool_name": toolName, "tool_type": toolType, "affected_skill_bindings": bindingCount, "requires_review": bindingCount > 0}, nil
+	var skillIDs []string
+	if err := a.repo.DB().WithContext(ctx).Model(&businesscore.SkillToolBinding{}).
+		Where("tool_name = ? AND tool_type = ?", toolName, toolType).
+		Distinct("skill_id").
+		Pluck("skill_id", &skillIDs).Error; err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"tool_key":                composeToolKey(toolName, toolType),
+		"tool_name":               toolName,
+		"tool_type":               toolType,
+		"impact_count":            int64(len(skillIDs)),
+		"affected_skill_ids":      skillIDs,
+		"affected_skill_bindings": bindingCount,
+		"requires_review":         bindingCount > 0,
+	}, nil
 }
 
 func (a *App) listTools(ctx context.Context, userAuth accountspace.AuthContext, _ admin.AdminAuth, status string, limit, offset int) (Page[ToolDTO], error) {
@@ -264,11 +280,19 @@ func (a *App) toolDTO(ctx context.Context, auth accountspace.AuthContext, toolNa
 		description = *definition.Description
 	}
 	return ToolDTO{
+		ToolKey:  composeToolKey(definition.ToolName, definition.ToolType),
 		ToolName: definition.ToolName, ToolType: definition.ToolType, DisplayName: definition.DisplayName, Description: description,
 		Status: definition.Status, Version: definition.Version, Allowed: policy.Allowed, RiskLevel: policy.RiskLevel,
 		RequiresConfirmation: policy.RequiresConfirmation, TimeoutMS: policy.TimeoutMS, RetryPolicy: policy.RetryPolicy,
 		CancelPolicy: policy.CancelPolicy, ChargeMode: policy.ChargeMode, BillingUnit: policy.BillingUnit, PricingPolicyID: policy.PricingPolicyID,
 	}, nil
+}
+
+func composeToolKey(toolName, toolType string) string {
+	if strings.TrimSpace(toolType) == "" {
+		return strings.TrimSpace(toolName)
+	}
+	return strings.TrimSpace(toolName) + ":" + strings.TrimSpace(toolType)
 }
 
 func (a *App) activePolicy(ctx context.Context, toolName, toolType string) (businesscore.ToolPolicy, error) {

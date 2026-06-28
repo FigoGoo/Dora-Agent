@@ -2,7 +2,7 @@
 
 状态：active
 owner：文档与契约责任域；业务服务责任域和前端责任域确认
-更新时间：2026-06-28
+更新时间：2026-06-29
 适用范围：Dora-Agent Web 前端 -> 业务 API 适配层
 
 ## 成熟度复核
@@ -57,6 +57,7 @@ owner：文档与契约责任域；业务服务责任域和前端责任域确认
 - 用户端工程目录固定为 `frontend/`，承载公开页、登录态 C 端、项目、工作台、资产、作品和企业空间。
 - 管理端工程目录固定为 `admin_frontend/`，承载独立后台登录态和 `/api/admin/**`。
 - 两端 cookie/token 命名空间隔离；后台请求 `RequestMeta.source=admin`，必须包含 `admin_id`、操作原因和审计字段。
+- 后台登录成功返回 `AdminSessionDTO.expires_at`；后台 session 为 7 天滑动窗口，任一有效 `/api/admin/**` 鉴权请求都会续期并通过 `X-Admin-Session-Expires-At` 响应头返回新的过期时间。
 - 未登录公开读 API 不返回用户私有资产、会话、黑板、提示词、积分、模型成本。
 - 需要登录的动作返回 `UNAUTHENTICATED`，前端弹 LoginModal。
 - 列表默认 `page_size = 10`，最大值建议 `50`。

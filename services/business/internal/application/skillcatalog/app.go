@@ -96,16 +96,21 @@ type OutputElementDTO struct {
 }
 
 type ReviewCandidateDTO struct {
-	SkillID                string   `json:"skill_id"`
-	VersionID              string   `json:"version_id"`
-	SkillSpecJSON          string   `json:"skill_spec_json"`
-	InputSchemaJSON        string   `json:"input_schema_json"`
-	OutputSchemaJSON       string   `json:"output_schema_json"`
-	ToolRefs               []string `json:"tool_refs"`
-	MemoryPolicyJSON       string   `json:"memory_policy_json"`
-	ConfirmationPolicyJSON string   `json:"confirmation_policy_json"`
-	TestInputJSON          string   `json:"test_input_json,omitempty"`
-	ExpectedElementsJSON   string   `json:"expected_elements_json,omitempty"`
+	ReviewID               string     `json:"review_id,omitempty"`
+	SkillID                string     `json:"skill_id"`
+	VersionID              string     `json:"version_id"`
+	SkillName              string     `json:"skill_name,omitempty"`
+	CreatorID              string     `json:"creator_id,omitempty"`
+	Status                 string     `json:"status,omitempty"`
+	SubmittedAt            *time.Time `json:"submitted_at,omitempty"`
+	SkillSpecJSON          string     `json:"skill_spec_json"`
+	InputSchemaJSON        string     `json:"input_schema_json"`
+	OutputSchemaJSON       string     `json:"output_schema_json"`
+	ToolRefs               []string   `json:"tool_refs"`
+	MemoryPolicyJSON       string     `json:"memory_policy_json"`
+	ConfirmationPolicyJSON string     `json:"confirmation_policy_json"`
+	TestInputJSON          string     `json:"test_input_json,omitempty"`
+	ExpectedElementsJSON   string     `json:"expected_elements_json,omitempty"`
 }
 
 type SkillDetailDTO struct {
@@ -293,12 +298,21 @@ func (a *App) GetReviewCandidateSkillSpec(ctx context.Context, auth accountspace
 	if err := a.repo.DB().WithContext(ctx).Where("id = ? AND skill_id = ?", versionID, skillID).First(&sv).Error; err != nil {
 		return ReviewCandidateDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "skill version not found")
 	}
+	var skill businesscore.Skill
+	_ = a.repo.DB().WithContext(ctx).Where("id = ?", skillID).First(&skill).Error
 	toolRefs, err := a.toolRefs(ctx, skillID, sv.ID)
 	if err != nil {
 		return ReviewCandidateDTO{}, err
 	}
+	creatorID := ""
+	if sv.SubmittedByUserID != nil {
+		creatorID = *sv.SubmittedByUserID
+	} else if skill.OwnerUserID != nil {
+		creatorID = *skill.OwnerUserID
+	}
 	dto := ReviewCandidateDTO{
-		SkillID: skillID, VersionID: sv.ID, SkillSpecJSON: string(sv.SkillSpecJSON),
+		ReviewID: sv.ID, SkillID: skillID, VersionID: sv.ID, SkillName: skill.SkillName, CreatorID: creatorID,
+		Status: sv.Status, SubmittedAt: sv.SubmittedAt, SkillSpecJSON: string(sv.SkillSpecJSON),
 		InputSchemaJSON: string(sv.InputSchemaJSON), OutputSchemaJSON: string(sv.OutputSchemaJSON),
 		ToolRefs: toolRefs, MemoryPolicyJSON: string(sv.MemoryPolicyJSON), ConfirmationPolicyJSON: jsonString(sv.ConfirmationPolicyJSON, defaultConfirmationPolicyJSON),
 	}
