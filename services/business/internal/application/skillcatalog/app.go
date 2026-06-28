@@ -11,6 +11,7 @@ import (
 
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetdict"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/notification"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
@@ -32,6 +33,7 @@ const (
 type App struct {
 	repo         *businesscore.Repository
 	notification notificationService
+	dictionary   dictionaryReader
 	now          func() time.Time
 }
 
@@ -46,6 +48,15 @@ type notificationService interface {
 
 func (a *App) SetNotificationService(service notificationService) {
 	a.notification = service
+}
+
+// dictionaryReader 提供 asset_element_types 字典上限，供输出元素结构校验「不得超字典上限」(SKILL-2 FP2)。
+type dictionaryReader interface {
+	ElementTypeLimits(ctx context.Context, elementTypes []string) (map[string]assetdict.ElementTypeLimit, error)
+}
+
+func (a *App) SetDictionary(reader dictionaryReader) {
+	a.dictionary = reader
 }
 
 type SkillSummaryDTO struct {
@@ -356,6 +367,22 @@ type SaveSkillInput struct {
 	OutputSchemaJSON       string
 	MemoryPolicyJSON       string
 	ConfirmationPolicyJSON string
+	OutputElements         []OutputElementInput
+}
+
+// OutputElementInput 声明 Skill 一个输出元素结构(SKILL-2 FP2)。element_type 必须是平台内置
+// 且 active 的资产元素类型；use_draft/use_final/editable/referable 不得超字典上限。
+type OutputElementInput struct {
+	ElementType  string
+	ElementName  string
+	Required     bool
+	UseDraft     bool
+	UseFinal     bool
+	Editable     bool
+	Referable    bool
+	DisplayOrder int32
+	DisplaySlot  string
+	SchemaJSON   string
 }
 
 func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO, error) {
@@ -367,6 +394,9 @@ func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO,
 	}
 	if !validJSONOrEmpty(in.SkillSpecJSON) || !validJSONOrEmpty(in.InputSchemaJSON) || !validJSONOrEmpty(in.OutputSchemaJSON) || !validJSONOrEmpty(in.ConfirmationPolicyJSON) {
 		return SkillDetailDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "skill schemas must be json")
+	}
+	if err := a.validateOutputElements(ctx, in.OutputElements); err != nil {
+		return SkillDetailDTO{}, err
 	}
 	now := a.now()
 	skillID := strings.TrimSpace(in.SkillID)
@@ -399,7 +429,86 @@ func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO,
 	if err := a.repo.DB().WithContext(ctx).Create(&sv).Error; err != nil {
 		return SkillDetailDTO{}, err
 	}
+	if err := a.saveOutputElements(ctx, skill.ID, versionID, now, in.OutputElements); err != nil {
+		return SkillDetailDTO{}, err
+	}
 	return skillDTO(skill), nil
+}
+
+// validateOutputElements 校验输出元素结构：类型必须平台内置且 active，双态/编辑/引用不得超字典上限(SKILL-2 FP2)。
+func (a *App) validateOutputElements(ctx context.Context, elements []OutputElementInput) error {
+	if len(elements) == 0 {
+		return nil
+	}
+	if a.dictionary == nil {
+		return bizerrors.New(bizerrors.CodeStateConflict, "element dictionary is unavailable")
+	}
+	types := make([]string, 0, len(elements))
+	seen := make(map[string]bool, len(elements))
+	for _, el := range elements {
+		et := strings.TrimSpace(el.ElementType)
+		if et == "" {
+			return bizerrors.New(bizerrors.CodeInvalidArgument, "output element type is required")
+		}
+		if seen[et] {
+			return bizerrors.New(bizerrors.CodeInvalidArgument, "duplicate output element type: "+et)
+		}
+		seen[et] = true
+		if !el.UseDraft && !el.UseFinal {
+			return bizerrors.New(bizerrors.CodeInvalidArgument, "output element must enable draft or final stage: "+et)
+		}
+		if !validJSONOrEmpty(el.SchemaJSON) {
+			return bizerrors.New(bizerrors.CodeInvalidArgument, "output element schema_json must be json: "+et)
+		}
+		types = append(types, et)
+	}
+	limits, err := a.dictionary.ElementTypeLimits(ctx, types)
+	if err != nil {
+		return err
+	}
+	for _, el := range elements {
+		et := strings.TrimSpace(el.ElementType)
+		limit, ok := limits[et]
+		if !ok || !limit.Active {
+			return bizerrors.New(bizerrors.CodeInvalidArgument, "output element type is not a platform built-in active type: "+et)
+		}
+		if el.UseDraft && !limit.DraftEnabled {
+			return bizerrors.New(bizerrors.CodeInvalidArgument, "draft stage not allowed for element type: "+et)
+		}
+		if el.UseFinal && !limit.FinalEnabled {
+			return bizerrors.New(bizerrors.CodeInvalidArgument, "final stage not allowed for element type: "+et)
+		}
+		if el.Editable && !limit.Editable {
+			return bizerrors.New(bizerrors.CodeInvalidArgument, "editable not allowed for element type: "+et)
+		}
+		if el.Referable && !limit.Referable {
+			return bizerrors.New(bizerrors.CodeInvalidArgument, "referable not allowed for element type: "+et)
+		}
+	}
+	return nil
+}
+
+// saveOutputElements 批量持久化输出元素结构(一次 Create，避免逐条写)。校验已在 validateOutputElements 前置完成。
+func (a *App) saveOutputElements(ctx context.Context, skillID, versionID string, now time.Time, elements []OutputElementInput) error {
+	if len(elements) == 0 {
+		return nil
+	}
+	rows := make([]businesscore.SkillOutputElementSchema, 0, len(elements))
+	for _, el := range elements {
+		slot := strings.TrimSpace(el.DisplaySlot)
+		if slot == "" {
+			slot = "blackboard"
+		}
+		rows = append(rows, businesscore.SkillOutputElementSchema{
+			ID: security.RandomID("soe_"), SkillID: skillID, VersionID: versionID,
+			ElementType: strings.TrimSpace(el.ElementType), ElementName: strings.TrimSpace(el.ElementName),
+			SchemaJSON: datatypes.JSON([]byte(normalizeJSON(el.SchemaJSON, "{}"))), Required: el.Required,
+			DisplayOrder: el.DisplayOrder, DisplaySlot: slot,
+			UseDraft: el.UseDraft, UseFinal: el.UseFinal, Editable: el.Editable, Referable: el.Referable,
+			CreatedAt: now,
+		})
+	}
+	return a.repo.DB().WithContext(ctx).Create(&rows).Error
 }
 
 func (a *App) GetSkill(ctx context.Context, auth accountspace.AuthContext, skillID string) (SkillDetailDTO, error) {

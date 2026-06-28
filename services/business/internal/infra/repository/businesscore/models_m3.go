@@ -254,14 +254,21 @@ type SkillToolBinding struct {
 func (SkillToolBinding) TableName() string { return "skill_tool_bindings" }
 
 type SkillOutputElementSchema struct {
-	ID          string         `gorm:"column:id;primaryKey"`
-	SkillID     string         `gorm:"column:skill_id"`
-	VersionID   string         `gorm:"column:version_id"`
-	ElementType string         `gorm:"column:element_type"`
-	SchemaJSON  datatypes.JSON `gorm:"column:schema_json;type:jsonb"`
-	Required    bool           `gorm:"column:required"`
-	CreatedAt   time.Time      `gorm:"column:created_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"column:deleted_at"`
+	ID           string         `gorm:"column:id;primaryKey"`
+	SkillID      string         `gorm:"column:skill_id"`
+	VersionID    string         `gorm:"column:version_id"`
+	ElementType  string         `gorm:"column:element_type"`
+	ElementName  string         `gorm:"column:element_name"`
+	SchemaJSON   datatypes.JSON `gorm:"column:schema_json;type:jsonb"`
+	Required     bool           `gorm:"column:required"`
+	DisplayOrder int32          `gorm:"column:display_order"`
+	DisplaySlot  string         `gorm:"column:display_slot"`
+	UseDraft     bool           `gorm:"column:use_draft"`
+	UseFinal     bool           `gorm:"column:use_final"`
+	Editable     bool           `gorm:"column:editable"`
+	Referable    bool           `gorm:"column:referable"`
+	CreatedAt    time.Time      `gorm:"column:created_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (SkillOutputElementSchema) TableName() string { return "skill_output_element_schemas" }

@@ -74,6 +74,7 @@ func New(cfg config.BusinessConfig) (*App, error) {
 	dictionaryApp := assetdict.New(repo)
 	notificationApp := notification.New(repo, guard)
 	skillApp.SetNotificationService(notificationApp)
+	skillApp.SetDictionary(dictionaryApp)
 	creditApp := credit.New(repo, guard, auditWriter)
 	assetApp := asset.New(repo, guard, auditWriter, asset.TOSOptions{
 		Env: cfg.AppEnv, Bucket: cfg.TOS.Bucket, BaseURL: cfg.TOS.BaseURL,
