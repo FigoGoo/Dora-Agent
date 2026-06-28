@@ -107,3 +107,23 @@
 6. **批 F 收尾**：P2 剩余 + P3。
 
 > 接缝组无待办。SEAM-3 仅需把设计文档措辞同步为"PERMISSION_DENIED 错误码"，不影响代码。
+
+---
+
+## 批 A 完成记录（2026-06-28 · INFRA-1 / INFRA-13）✅
+
+提交：`64235b1`(0019 公共列 + 0020 append-only) · `54a8c8c`(0020 补 skill_review_records) · `5171b53`(model 软删 52 struct)
+验证：`go test ./...` 全绿（agent 8 包 + business 20 包，testcontainer 跑完整 migration up/down）。
+
+- **INFRA-1 ✅ 已修**：续号迭代 `0019` 为 53 张可变业务表补 `created_by/updated_by/deleted_at`；model 层 52 个 struct 启用 `gorm.DeletedAt` 自动软删（User/Asset/Work 由裸 `*time.Time` 死字段激活）。
+- **INFRA-13 ✅ 已修**：`0020` 对 **10 张** append-only 审计/流水表加 `BEFORE UPDATE OR DELETE` 触发器（DB 级不可篡改，任何角色含 superuser 都拦）。
+
+范围决策（逐条可追溯）：
+- `tenant_id` 未全表加——沿用 `space_id` 为隔离键，避免冗余。
+- `created_by/updated_by` 仅 schema 加列预留，model **不映射**——与现有领域操作者字段（`CreatedByAdminID` 等）冗余；operator 回填留子切片。
+- append-only 10 张表不软删、不映射 DeletedAt；`skill_review_records` 经代码核实为 insert-only 事件流，与 `work_moderation_records` 对称纳入。
+
+遗留（后续子切片，不阻塞）：
+- **created_by/updated_by operator 回填**：贯穿各写路径从 auth context 取操作者。
+- **软删唯一约束复用评估**：`email/account_no/各 _no` 等自然键软删后仍占用，若需"软删后复用"须补 partial unique index（`WHERE deleted_at IS NULL`）。当前业务多用 `status` 而非软删，暂不阻塞。
+- 明细/价格表已纳入软删（可软删停用），如需改 append-only 另议。
