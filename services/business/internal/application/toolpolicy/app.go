@@ -136,6 +136,7 @@ func (a *App) UpdatePolicy(ctx context.Context, auth admin.AdminAuth, toolName, 
 		policy.CancelPolicyJSON = mustJSON(cancelPolicy)
 	}
 	policy.ChangedByAdminID = &auth.AdminID
+	policy.UpdatedBy = stringPtr(auth.AdminID)
 	policy.UpdatedAt = a.now()
 	if err := a.repo.DB().WithContext(ctx).Save(&policy).Error; err != nil {
 		return ToolDTO{}, err
@@ -154,11 +155,11 @@ func (a *App) UpdatePricing(ctx context.Context, auth admin.AdminAuth, toolName,
 		ID: security.RandomID("tprice_"), PricingPolicyID: security.RandomID("tool_price_"), ToolName: toolName, ToolType: toolType,
 		ChargeMode: defaultString(chargeMode, "per_call"), BillingUnit: defaultString(billingUnit, "call"), UnitPoints: unitPoints,
 		FreeQuota: freeQuota, MinChargePoints: minChargePoints, Status: activeStatus, EffectiveAt: now, ChangedByAdminID: &auth.AdminID,
-		MetadataJSON: datatypes.JSON([]byte("{}")), CreatedAt: now, UpdatedAt: now,
+		MetadataJSON: datatypes.JSON([]byte("{}")), CreatedBy: stringPtr(auth.AdminID), UpdatedBy: stringPtr(auth.AdminID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := a.repo.DB().WithContext(ctx).Model(&businesscore.ToolPricingPolicy{}).
 		Where("tool_name = ? AND tool_type = ? AND status = ?", toolName, toolType, activeStatus).
-		Updates(map[string]any{"status": "inactive", "updated_at": now}).Error; err != nil {
+		Updates(map[string]any{"status": "inactive", "updated_at": now, "updated_by": auth.AdminID}).Error; err != nil {
 		return ToolDTO{}, err
 	}
 	if err := a.repo.DB().WithContext(ctx).Create(&pricing).Error; err != nil {
@@ -177,6 +178,7 @@ func (a *App) SetToolStatus(ctx context.Context, auth admin.AdminAuth, toolName,
 		return ToolDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "tool not found")
 	}
 	definition.Status = status
+	definition.UpdatedBy = stringPtr(auth.AdminID)
 	definition.UpdatedAt = a.now()
 	if err := a.repo.DB().WithContext(ctx).Save(&definition).Error; err != nil {
 		return ToolDTO{}, err
@@ -205,13 +207,14 @@ func (a *App) SaveWhitelist(ctx context.Context, auth admin.AdminAuth, toolName,
 	if err == gorm.ErrRecordNotFound {
 		existing = businesscore.ToolWhitelistRule{
 			ID: security.RandomID("twl_"), ToolName: toolName, ToolType: toolType, ScopeType: scopeType,
-			ScopeID: scopeID, CreatedAt: now,
+			ScopeID: scopeID, CreatedBy: stringPtr(auth.AdminID), CreatedAt: now,
 		}
 	}
 	existing.Allowed = allowed
 	existing.Reason = reasonPtr
 	existing.Status = activeStatus
 	existing.ChangedByAdminID = &auth.AdminID
+	existing.UpdatedBy = stringPtr(auth.AdminID)
 	existing.UpdatedAt = now
 	if err := a.repo.DB().WithContext(ctx).Save(&existing).Error; err != nil {
 		return ToolDTO{}, err
@@ -380,4 +383,12 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(value)
+}
+
+func stringPtr(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }

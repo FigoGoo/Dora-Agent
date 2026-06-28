@@ -119,6 +119,7 @@
 - **INFRA-1 ✅ 已修**：续号迭代 `0019` 为 53 张可变业务表补 `created_by/updated_by/deleted_at`；model 层 52 个 struct 启用 `gorm.DeletedAt` 自动软删（User/Asset/Work 由裸 `*time.Time` 死字段激活）。
 - **INFRA-13 ✅ 已修**：`0020` 对 **10 张** append-only 审计/流水表加 `BEFORE UPDATE OR DELETE` 触发器（DB 级不可篡改，任何角色含 superuser 都拦）。
 - **created_by/updated_by operator 回填首片 ✅ 已修**：项目/作品主写路径已从 auth context 回填公共列，覆盖 `projects`、`project_assets`、`project_works`、`works`、`work_assets`、`work_public_snapshots`、`work_likes`；管理员下架写入 `updated_by=admin_id`。
+- **created_by/updated_by operator 回填二片 ✅ 已修**：Tool 策略后台写路径从 admin auth 回填公共列，覆盖 `tool_definitions`、`tool_policies`、`tool_pricing_policies`、`tool_whitelist_rules`。
 
 范围决策（逐条可追溯）：
 - `tenant_id` 未全表加——沿用 `space_id` 为隔离键，避免冗余。
@@ -126,7 +127,7 @@
 - append-only 10 张表不软删、不映射 DeletedAt；`skill_review_records` 经代码核实为 insert-only 事件流，与 `work_moderation_records` 对称纳入。
 
 遗留（后续子切片，不阻塞）：
-- **created_by/updated_by operator 回填继续逐域推进**：账户/模型/Tool/Skill/积分/资产/通知等表按领域操作者字段和权限语义单独映射。
+- **created_by/updated_by operator 回填继续逐域推进**：账户/模型/Skill/积分/资产/通知等表按领域操作者字段和权限语义单独映射。
 - 明细/价格表已纳入软删（可软删停用），如需改 append-only 另议。
 
 ## 批 B 完成记录（2026-06-28 · 安全/越权红线 + SKILL-2）✅
@@ -385,4 +386,4 @@
 
 范围决策：
 - 本切片不重写任何现有唯一约束，避免释放账号、兑换码、财务、幂等、公开分享等不应复用的历史键。
-- `created_by/updated_by operator 回填` 已启动首片（项目/作品域）；GORM 未映射公共列不能用简单 `SetColumn` callback 粗暴补齐，剩余表继续逐域设计。
+- `created_by/updated_by operator 回填` 已启动项目/作品域与 Tool 策略域；GORM 未映射公共列不能用简单 `SetColumn` callback 粗暴补齐，剩余表继续逐域设计。

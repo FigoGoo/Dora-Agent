@@ -115,6 +115,8 @@ type ToolDefinition struct {
 	InputSchemaJSON  datatypes.JSON `gorm:"column:input_schema_json;type:jsonb"`
 	OutputSchemaJSON datatypes.JSON `gorm:"column:output_schema_json;type:jsonb"`
 	CreatedByAdminID *string        `gorm:"column:created_by_admin_id"`
+	CreatedBy        *string        `gorm:"column:created_by"`
+	UpdatedBy        *string        `gorm:"column:updated_by"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -137,6 +139,8 @@ type ToolPolicy struct {
 	EffectiveAt          time.Time      `gorm:"column:effective_at"`
 	ExpiredAt            *time.Time     `gorm:"column:expired_at"`
 	ChangedByAdminID     *string        `gorm:"column:changed_by_admin_id"`
+	CreatedBy            *string        `gorm:"column:created_by"`
+	UpdatedBy            *string        `gorm:"column:updated_by"`
 	CreatedAt            time.Time      `gorm:"column:created_at"`
 	UpdatedAt            time.Time      `gorm:"column:updated_at"`
 	DeletedAt            gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -159,6 +163,8 @@ type ToolPricingPolicy struct {
 	ExpiredAt        *time.Time     `gorm:"column:expired_at"`
 	ChangedByAdminID *string        `gorm:"column:changed_by_admin_id"`
 	MetadataJSON     datatypes.JSON `gorm:"column:metadata_json;type:jsonb"`
+	CreatedBy        *string        `gorm:"column:created_by"`
+	UpdatedBy        *string        `gorm:"column:updated_by"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -176,6 +182,8 @@ type ToolWhitelistRule struct {
 	Reason           *string        `gorm:"column:reason"`
 	Status           string         `gorm:"column:status"`
 	ChangedByAdminID *string        `gorm:"column:changed_by_admin_id"`
+	CreatedBy        *string        `gorm:"column:created_by"`
+	UpdatedBy        *string        `gorm:"column:updated_by"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
