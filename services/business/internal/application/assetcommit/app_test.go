@@ -13,6 +13,8 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/auditlog"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/security"
+	"gorm.io/gorm"
 )
 
 func TestCommitRejectsUnverifiedGeneratedObject(t *testing.T) {
@@ -91,6 +93,57 @@ func TestCommitGeneratedAssetAndChargePersistsFullSuccessPath(t *testing.T) {
 	afterAvailable, afterFrozen := creditAccountBalance(t, env.repo, base.estimate.CreditAccountID)
 	if afterAvailable != beforeAvailable || afterFrozen != beforeFrozen-estimateItem.EstimatePoints {
 		t.Fatalf("unexpected account balance after commit: before=(%d,%d) after=(%d,%d)", beforeAvailable, beforeFrozen, afterAvailable, afterFrozen)
+	}
+}
+
+func TestCommitGeneratedAssetAndChargePartiallyCommitsAndReleasesMissingArtifact(t *testing.T) {
+	env := newCommitTestEnv(t)
+	base := env.prepare(t, "run_partial_commit", nil)
+	secondEstimateItemID := appendSecondModelEstimateItem(t, env.repo, base)
+	in := base.commitInput("idem-commit-partial", base.estimate.LineItems[0].EstimateItemID, "uploaded-partial-etag")
+	in.Artifacts = append(in.Artifacts, CommitArtifactInput{
+		ArtifactID: "art_missing_" + base.runID, ResourceType: "image", ElementType: "image_ref", EstimateItemID: secondEstimateItemID,
+		ToolName: "model_generation", ToolType: "image", ChargeQuantity: 1,
+		ArtifactSummary: map[string]string{"display_name": "missing"}, MetadataSummary: map[string]string{"display_name": "missing"},
+		ContentURIDigest: "sha256:missing-content-uri",
+		StorageObjectRef: StorageObjectRef{
+			Bucket: base.slot.Bucket, ObjectKey: "missing/" + base.runID + ".png", ContentType: "image/png",
+			SizeBytes: 128, Checksum: "sha256:missing-" + base.runID, Etag: "uploaded-missing-etag",
+		},
+	})
+
+	out, err := env.commit.CommitGeneratedAssetAndCharge(t.Context(), in)
+	if err != nil {
+		t.Fatalf("partial commit should not fail when at least one artifact is committed: %v", err)
+	}
+	if out.CommitStatus != "partial_committed" || len(out.AssetRefs) != 1 {
+		t.Fatalf("unexpected partial commit result: %#v", out)
+	}
+	if out.ChargedPoints != base.estimate.LineItems[0].EstimatePoints || out.ReleasedPoints != base.estimate.LineItems[0].EstimatePoints {
+		t.Fatalf("expected one artifact charged and one released, got charged=%d released=%d", out.ChargedPoints, out.ReleasedPoints)
+	}
+	if len(out.ChargedLineItems) != 2 || out.ChargedLineItems[1].Status != "skipped" || out.ChargedLineItems[1].ChargedPoints != 0 {
+		t.Fatalf("expected skipped line for missing artifact, got %#v", out.ChargedLineItems)
+	}
+	replay, err := env.commit.CommitGeneratedAssetAndCharge(t.Context(), in)
+	if err != nil {
+		t.Fatalf("partial commit replay: %v", err)
+	}
+	if replay.CommitStatus != out.CommitStatus || len(replay.ChargedLineItems) != 2 || replay.ChargedLineItems[1].Status != "skipped" {
+		t.Fatalf("partial commit replay should preserve skipped line, got %#v", replay)
+	}
+	if countRows(t, env.repo, &businesscore.Asset{}, "source_ref_id = ?", base.artifactID) != 1 {
+		t.Fatalf("expected first artifact committed")
+	}
+	if countRows(t, env.repo, &businesscore.Asset{}, "source_ref_id = ?", "art_missing_"+base.runID) != 0 {
+		t.Fatalf("missing artifact must not create asset")
+	}
+	var freeze businesscore.CreditFreeze
+	if err := env.repo.DB().WithContext(t.Context()).Where("freeze_id = ?", base.freeze.FreezeID).First(&freeze).Error; err != nil {
+		t.Fatalf("load freeze: %v", err)
+	}
+	if freeze.Status != "charged" || freeze.ChargedPoints != out.ChargedPoints || freeze.ReleasedPoints != out.ReleasedPoints {
+		t.Fatalf("unexpected freeze after partial commit: %#v", freeze)
 	}
 }
 
@@ -234,4 +287,64 @@ func codeOf(err error) bizerrors.Code {
 		return businessErr.Code
 	}
 	return ""
+}
+
+func appendSecondModelEstimateItem(t *testing.T, repo *businesscore.Repository, base commitBase) string {
+	t.Helper()
+	now := time.Now().UTC()
+	first := base.estimate.LineItems[0]
+	secondID := "est_item_partial_" + base.runID
+	if err := repo.DB().WithContext(t.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&businesscore.CreditEstimateItem{
+			ID: security.RandomID("cesti_"), EstimateID: base.estimate.EstimateID, EstimateItemID: secondID, ItemType: "model_generation",
+			ModelID: optionalString(first.ModelID), ResourceType: optionalString(first.ResourceType), BillingUnit: optionalString(first.BillingUnit),
+			Quantity: optionalFloatForTest(1), UnitPoints: optionalFloatForTest(first.UnitPoints), EstimatePoints: first.EstimatePoints,
+			Status: "estimated", MetadataJSON: mustJSON(map[string]any{"order": 99, "metadata_summary": map[string]string{"test": "partial"}}), CreatedAt: now,
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&businesscore.CreditEstimate{}).Where("estimate_id = ?", base.estimate.EstimateID).Updates(map[string]any{
+			"estimate_points": base.estimate.EstimatePoints + first.EstimatePoints,
+			"updated_at":      now,
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&businesscore.CreditFreeze{}).Where("freeze_id = ?", base.freeze.FreezeID).Updates(map[string]any{
+			"frozen_points": base.freeze.FrozenPoints + first.EstimatePoints,
+			"updated_at":    now,
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&businesscore.CreditAccount{}).Where("id = ?", base.estimate.CreditAccountID).Updates(map[string]any{
+			"available_points": gorm.Expr("available_points - ?", first.EstimatePoints),
+			"frozen_points":    gorm.Expr("frozen_points + ?", first.EstimatePoints),
+			"updated_at":       now,
+		}).Error; err != nil {
+			return err
+		}
+		var freezeItem businesscore.CreditFreezeBatchItem
+		if err := tx.Where("freeze_id = ?", base.freeze.FreezeID).Order("created_at ASC").First(&freezeItem).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&businesscore.CreditFreezeBatchItem{}).Where("id = ?", freezeItem.ID).Updates(map[string]any{
+			"frozen_points": gorm.Expr("frozen_points + ?", first.EstimatePoints),
+			"updated_at":    now,
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&businesscore.CreditBatch{}).Where("id = ?", freezeItem.BatchID).Updates(map[string]any{
+			"remaining_points": gorm.Expr("remaining_points - ?", first.EstimatePoints),
+			"updated_at":       now,
+		}).Error
+	}); err != nil {
+		t.Fatalf("append second estimate item: %v", err)
+	}
+	return secondID
+}
+
+func optionalFloatForTest(value float64) *float64 {
+	if value == 0 {
+		return nil
+	}
+	return &value
 }
