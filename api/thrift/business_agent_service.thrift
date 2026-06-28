@@ -128,6 +128,21 @@ struct GetPublishedSkillSpecRequest {
   4: optional string version,
 }
 
+// SkillOutputElementDTO 声明 Skill 一个输出元素结构(SKILL-2)。element_type 为平台内置 active 资产元素类型；
+// use_draft/use_final 表达草稿/最终双态，editable/referable 不得超字典上限。
+struct SkillOutputElementDTO {
+  1: required string element_type,
+  2: required string element_name,
+  3: required bool required,
+  4: required bool use_draft,
+  5: required bool use_final,
+  6: required bool editable,
+  7: required bool referable,
+  8: optional i32 display_order,
+  9: optional string display_slot,
+  10: optional string schema_json,
+}
+
 struct SkillSpecResponse {
   1: required string skill_id,
   2: required string version,
@@ -137,6 +152,7 @@ struct SkillSpecResponse {
   6: optional string memory_policy_json,
   7: required string confirmation_policy_json,
   8: required string execution_policy_summary_json,
+  9: optional list<SkillOutputElementDTO> output_elements,
 }
 
 struct CheckToolExecutionPolicyRequest {

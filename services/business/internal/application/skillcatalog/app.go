@@ -69,14 +69,30 @@ type SkillSummaryDTO struct {
 }
 
 type SkillSpecDTO struct {
-	SkillID                    string   `json:"skill_id"`
-	Version                    string   `json:"version"`
-	SkillSpecJSON              string   `json:"skill_spec_json"`
-	OutputSchemaJSON           string   `json:"output_schema_json"`
-	ToolRefs                   []string `json:"tool_refs"`
-	MemoryPolicyJSON           string   `json:"memory_policy_json,omitempty"`
-	ConfirmationPolicyJSON     string   `json:"confirmation_policy_json"`
-	ExecutionPolicySummaryJSON string   `json:"execution_policy_summary_json"`
+	SkillID                    string             `json:"skill_id"`
+	Version                    string             `json:"version"`
+	SkillSpecJSON              string             `json:"skill_spec_json"`
+	OutputSchemaJSON           string             `json:"output_schema_json"`
+	ToolRefs                   []string           `json:"tool_refs"`
+	MemoryPolicyJSON           string             `json:"memory_policy_json,omitempty"`
+	ConfirmationPolicyJSON     string             `json:"confirmation_policy_json"`
+	ExecutionPolicySummaryJSON string             `json:"execution_policy_summary_json"`
+	OutputElements             []OutputElementDTO `json:"output_elements,omitempty"`
+}
+
+// OutputElementDTO 暴露 Skill 输出元素结构(SKILL-2 FP3)，供 agent 按结构组织草稿/最终产物。
+// 对应 thrift SkillOutputElementDTO（codegen 后由 RPC handler 映射）。
+type OutputElementDTO struct {
+	ElementType  string `json:"element_type"`
+	ElementName  string `json:"element_name"`
+	Required     bool   `json:"required"`
+	UseDraft     bool   `json:"use_draft"`
+	UseFinal     bool   `json:"use_final"`
+	Editable     bool   `json:"editable"`
+	Referable    bool   `json:"referable"`
+	DisplayOrder int32  `json:"display_order"`
+	DisplaySlot  string `json:"display_slot"`
+	SchemaJSON   string `json:"schema_json,omitempty"`
 }
 
 type ReviewCandidateDTO struct {
@@ -234,11 +250,37 @@ func (a *App) GetPublishedSkillSpec(ctx context.Context, auth accountspace.AuthC
 	if err != nil {
 		return SkillSpecDTO{}, err
 	}
+	outputElements, err := a.outputElements(ctx, sv.ID)
+	if err != nil {
+		return SkillSpecDTO{}, err
+	}
 	return SkillSpecDTO{
 		SkillID: skill.ID, Version: sv.Version, SkillSpecJSON: string(sv.SkillSpecJSON),
 		OutputSchemaJSON: string(sv.OutputSchemaJSON), ToolRefs: toolRefs, MemoryPolicyJSON: string(sv.MemoryPolicyJSON),
 		ConfirmationPolicyJSON: jsonString(sv.ConfirmationPolicyJSON, defaultConfirmationPolicyJSON), ExecutionPolicySummaryJSON: executionSummary(toolRefs),
+		OutputElements: outputElements,
 	}, nil
+}
+
+// outputElements 装配某版本的输出元素结构(按 display_order 稳定排序，一次查询避免 N+1)。SKILL-2 FP3。
+func (a *App) outputElements(ctx context.Context, versionID string) ([]OutputElementDTO, error) {
+	var rows []businesscore.SkillOutputElementSchema
+	if err := a.repo.DB().WithContext(ctx).Where("version_id = ?", versionID).
+		Order("display_order ASC, element_type ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	out := make([]OutputElementDTO, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, OutputElementDTO{
+			ElementType: row.ElementType, ElementName: row.ElementName, Required: row.Required,
+			UseDraft: row.UseDraft, UseFinal: row.UseFinal, Editable: row.Editable, Referable: row.Referable,
+			DisplayOrder: row.DisplayOrder, DisplaySlot: row.DisplaySlot, SchemaJSON: string(row.SchemaJSON),
+		})
+	}
+	return out, nil
 }
 
 func (a *App) GetReviewCandidateSkillSpec(ctx context.Context, auth accountspace.AuthContext, skillID, versionID, testCaseID string) (ReviewCandidateDTO, error) {
