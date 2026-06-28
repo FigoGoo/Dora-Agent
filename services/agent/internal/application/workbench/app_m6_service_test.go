@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
@@ -160,6 +161,85 @@ func TestSkillOutputElementsDriveDraftAndFinalArtifacts(t *testing.T) {
 	}
 	if !sawDraft || !sawFinalRef {
 		t.Fatalf("expected draft_element and asset_ref artifacts, got %#v", artifacts)
+	}
+	tasks, err := app.repo.ListTasksByRun(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("list generation tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].TaskType != "generation_asset_commit" || tasks[0].Status != state.TaskStatusCompleted {
+		t.Fatalf("expected completed generation task, got %#v", tasks)
+	}
+	snapshot, err := app.BuildRunSnapshot(t.Context(), auth, run.RunID, "trace-skill2")
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if len(snapshot.Tasks) != 1 || snapshot.Tasks[0].TaskID != tasks[0].ID {
+		t.Fatalf("snapshot should expose persisted generation task, got %#v", snapshot.Tasks)
+	}
+}
+
+func TestRecoverGenerationTasksReleasesFrozenTaskAfterRestart(t *testing.T) {
+	app, gateway := newM6ServiceApp(t)
+	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
+	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "recover", IdempotencyKey: "idem-recover-session"}, "trace-recover")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	run, err := app.CreateRun(t.Context(), auth, CreateRunRequest{
+		SessionID: session.SessionID, ProjectID: "prj_active_1001", IdempotencyKey: "idem-recover-run",
+		UserInput: UserInputDTO{ClientMessageID: "cm_recover", ContentType: "text", Text: "lookup with web fetch"},
+	}, "trace-recover")
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	stale := time.Now().UTC().Add(-10 * time.Minute)
+	task := &model.Task{
+		ID: "task_recover_generation", RunID: run.RunID, TaskType: "generation_asset_commit", ResourceType: "image",
+		Status: state.TaskStatusRunning, ProgressPercent: 25,
+		ProgressDetail: jsonObject(map[string]any{
+			"stage": "credits_frozen", "freeze_id": "frz_recover", "frozen_points": int64(10),
+			"estimate_id": "est_generation_m6", "idempotency_key": "idem-recover-confirm",
+			"auth": map[string]any{"actor_user_id": auth.ActorUserID, "login_identity_type": auth.LoginIdentityType, "space_id": auth.SpaceID},
+		}),
+		StartedAt: &stale, UpdatedAt: stale, TraceID: "trace-recover",
+	}
+	if err := app.repo.CreateTask(t.Context(), task); err != nil {
+		t.Fatalf("create stale task: %v", err)
+	}
+	if err := app.repo.UpdateRunStatus(t.Context(), run.RunID, state.RunStatusResuming, "", ""); err != nil {
+		t.Fatalf("mark run resuming: %v", err)
+	}
+
+	result, err := app.RecoverGenerationTasks(t.Context(), time.Minute, 10, "trace-recover")
+	if err != nil {
+		t.Fatalf("recover generation tasks: %v", err)
+	}
+	if result.Scanned != 1 || result.Released != 1 || result.ReleaseFails != 0 {
+		t.Fatalf("unexpected recovery result: %#v", result)
+	}
+	if !containsCall(gateway.calls, "ReleaseFrozenCredits") {
+		t.Fatalf("recovery should release frozen credits, calls=%v", gateway.calls)
+	}
+	updatedTask, err := app.repo.GetTask(t.Context(), task.ID)
+	if err != nil {
+		t.Fatalf("get recovered task: %v", err)
+	}
+	if updatedTask.Status != state.TaskStatusFailed || updatedTask.ErrorCode != "RESTART_RECOVERED" {
+		t.Fatalf("expected recovered failed task, got status=%s error=%s", updatedTask.Status, updatedTask.ErrorCode)
+	}
+	updatedRun, err := app.repo.GetRun(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("get recovered run: %v", err)
+	}
+	if updatedRun.Status != state.RunStatusCancelled || updatedRun.ErrorCode != "RESTART_RECOVERED" {
+		t.Fatalf("expected recovered run cancellation, got status=%s error=%s", updatedRun.Status, updatedRun.ErrorCode)
+	}
+	events, err := app.repo.ListEventsAfterSequence(t.Context(), run.RunID, 0, 100)
+	if err != nil {
+		t.Fatalf("list recovered events: %v", err)
+	}
+	if !hasEvent(events, "credits.released") || !hasEvent(events, "agent.run.cancelled") {
+		t.Fatalf("recovery events missing: %#v", events)
 	}
 }
 

@@ -144,6 +144,39 @@ func TestAgentMigrationRepositoryAndBoundaries(t *testing.T) {
 		t.Fatalf("list artifacts len=%d err=%v", len(artifacts), err)
 	}
 
+	staleStartedAt := now.Add(-2 * time.Hour)
+	staleUpdatedAt := now.Add(-90 * time.Minute)
+	task := &model.Task{
+		ID:              "task_generation_1",
+		RunID:           resumableRun.ID,
+		TaskType:        "generation_asset_commit",
+		ResourceType:    "image",
+		Status:          state.TaskStatusRunning,
+		ProgressPercent: 30,
+		ProgressDetail:  datatypes.JSON([]byte(`{"stage":"credits_frozen","freeze_id":"frz_1"}`)),
+		StartedAt:       &staleStartedAt,
+		UpdatedAt:       staleUpdatedAt,
+		TraceID:         "trace-agent-db",
+	}
+	if err := repo.CreateTask(t.Context(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if stale, err := repo.ListStaleRunningTasks(t.Context(), "generation_asset_commit", now, 10); err != nil || len(stale) != 1 || stale[0].ID != task.ID {
+		t.Fatalf("list stale tasks got=%#v err=%v", stale, err)
+	}
+	if err := repo.UpdateTaskProgress(t.Context(), task.ID, 45, datatypes.JSON([]byte(`{"stage":"model_submitted"}`))); err != nil {
+		t.Fatalf("update task progress: %v", err)
+	}
+	if tasks, err := repo.ListTasksByRun(t.Context(), resumableRun.ID); err != nil || len(tasks) != 1 || tasks[0].ProgressPercent != 45 {
+		t.Fatalf("list tasks got=%#v err=%v", tasks, err)
+	}
+	if err := repo.UpdateTaskStatus(t.Context(), task.ID, state.TaskStatusFailed, "RECOVERED_AFTER_RESTART"); err != nil {
+		t.Fatalf("fail task: %v", err)
+	}
+	if err := repo.UpdateTaskStatus(t.Context(), task.ID, state.TaskStatusRunning, ""); !errors.Is(err, repository.ErrInvalidStateTransition) {
+		t.Fatalf("expected invalid task transition, got %v", err)
+	}
+
 	safety := &model.SafetyEvaluation{
 		SafetyEvidenceID:      "safety_1",
 		Scene:                 "generation",

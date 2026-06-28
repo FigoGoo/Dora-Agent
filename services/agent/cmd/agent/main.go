@@ -45,6 +45,11 @@ func main() {
 		os.Exit(1)
 	}
 	app := workbench.New(repository.New(db), gateway, cfg.DefaultConfigVersion)
+	if result, err := app.RecoverGenerationTasks(context.Background(), 5*time.Minute, 100, "startup-recovery"); err != nil {
+		logger.Error("agent_generation_recovery_failed", "error", err)
+	} else if result.Scanned > 0 {
+		logger.Info("agent_generation_recovery_complete", "scanned", result.Scanned, "released", result.Released, "reconcile", result.Reconcile, "release_fails", result.ReleaseFails)
+	}
 
 	router := agenthttp.NewRouter(agenthttp.RouterOptions{
 		Logger: logger,

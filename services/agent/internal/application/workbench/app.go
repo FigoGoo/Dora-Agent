@@ -422,6 +422,26 @@ type AssetCommitDTO struct {
 	ChargedLineItems []ChargedLineItemDTO
 }
 
+type TaskDTO struct {
+	TaskID          string         `json:"task_id"`
+	RunID           string         `json:"run_id"`
+	TaskType        string         `json:"task_type"`
+	ResourceType    string         `json:"resource_type"`
+	Status          string         `json:"status"`
+	ProgressPercent int            `json:"progress_percent"`
+	ProgressDetail  map[string]any `json:"progress_detail"`
+	CancelRequested bool           `json:"cancel_requested"`
+	ErrorCode       string         `json:"error_code,omitempty"`
+	UpdatedAt       string         `json:"updated_at"`
+}
+
+type GenerationRecoveryResult struct {
+	Scanned      int
+	Released     int
+	Reconcile    int
+	ReleaseFails int
+}
+
 type App struct {
 	repo             *repository.Repository
 	gateway          BusinessGateway
@@ -654,7 +674,7 @@ type SnapshotResponse struct {
 	Messages          []MessageDTO   `json:"messages"`
 	Assets            []any          `json:"assets"`
 	Blackboard        map[string]any `json:"blackboard"`
-	Tasks             []any          `json:"tasks"`
+	Tasks             []TaskDTO      `json:"tasks"`
 	Interrupt         *InterruptDTO  `json:"interrupt,omitempty"`
 	LastEventSequence int64          `json:"last_event_sequence"`
 	ReadonlyReason    string         `json:"readonly_reason,omitempty"`
@@ -1207,6 +1227,14 @@ func (a *App) buildSnapshot(ctx context.Context, auth AuthContextDTO, sessionID 
 		dto := runDTOFromModel(*run)
 		runDTO = &dto
 	}
+	tasks := []TaskDTO{}
+	if run != nil {
+		if rows, err := a.repo.ListTasksByRun(ctx, run.ID); err != nil {
+			return SnapshotResponse{}, err
+		} else {
+			tasks = taskDTOs(rows)
+		}
+	}
 	var interruptDTO *InterruptDTO
 	if run != nil {
 		if interrupt, err := a.repo.GetRequiredInterrupt(ctx, run.ID); err == nil {
@@ -1217,7 +1245,7 @@ func (a *App) buildSnapshot(ctx context.Context, auth AuthContextDTO, sessionID 
 		}
 	}
 	return SnapshotResponse{
-		Session: sessionDTO(*session), Run: runDTO, Messages: messageDTOs, Assets: []any{}, Blackboard: map[string]any{}, Tasks: []any{},
+		Session: sessionDTO(*session), Run: runDTO, Messages: messageDTOs, Assets: []any{}, Blackboard: map[string]any{}, Tasks: tasks,
 		Interrupt: interruptDTO, LastEventSequence: session.LastEventSequence, ReadonlyReason: readonly,
 	}, nil
 }
@@ -1874,11 +1902,22 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 		_ = a.cancelRunForPermissionLoss(ctx, run, traceID, err)
 		return err
 	}
+	task, err := a.startGenerationTask(ctx, run, payload, idempotencyKey, traceID)
+	if err != nil {
+		return err
+	}
+	_ = a.updateGenerationTaskStage(ctx, task, 20, "freeze_requested", map[string]any{
+		"estimate_id": payload.EstimateID, "estimate_points": payload.EstimatePoints,
+		"credit_account_id": payload.CreditAccountID, "confirmation_id": interrupt.ID,
+		"idempotency_key": idempotencyKey, "freeze_idempotency_key": idempotencyKey + ":freeze",
+		"auth": generationTaskAuth(auth),
+	})
 	freeze, err := a.gateway.FreezeCredits(ctx, auth, FreezeCreditsRequest{
 		EstimateID: payload.EstimateID, Points: payload.EstimatePoints, RunID: run.ID,
 		ConfirmationID: interrupt.ID, AccountID: payload.CreditAccountID, IdempotencyKey: idempotencyKey + ":freeze",
 	}, traceID)
 	if err != nil {
+		_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusFailed, "CREDIT_FREEZE_FAILED")
 		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "CREDIT_FREEZE_FAILED", "credit freeze failed")
 		_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
 			"error_type": "business_rpc", "error_code": "CREDIT_FREEZE_FAILED", "user_message": "积分冻结失败",
@@ -1886,6 +1925,11 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 		})
 		return mapBusinessError(err)
 	}
+	_ = a.updateGenerationTaskStage(ctx, task, 25, "credits_frozen", map[string]any{
+		"freeze_id": freeze.FreezeID, "frozen_points": freeze.FrozenPoints, "estimate_id": payload.EstimateID,
+		"credit_account_id": payload.CreditAccountID, "idempotency_key": idempotencyKey,
+		"auth": generationTaskAuth(auth),
+	})
 	_ = a.repo.DB().WithContext(ctx).Model(&model.Run{}).Where("id = ?", run.ID).Update("model_selection_snapshot", jsonObject(map[string]any{
 		"model_snapshot": payload.ModelSnapshot, "estimate_id": payload.EstimateID, "freeze_id": freeze.FreezeID,
 		"credit_account_id": payload.CreditAccountID, "pricing_snapshot_id": payload.PricingSnapshotID,
@@ -1896,7 +1940,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	})
 	prompt, err := a.latestUserPrompt(ctx, run.SessionID)
 	if err != nil {
-		return a.failM4AfterFreeze(ctx, auth, run, freeze, "prompt_unavailable", idempotencyKey, traceID, err)
+		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "prompt_unavailable", idempotencyKey, traceID, err)
 	}
 	// GEN-5 fail-closed：实际发往模型的 prompt 必须与已通过安全评估的 prompt 完全一致，
 	// 杜绝确认/评估之后输入被改写的"评 A 发 B"旁路；不一致则释放冻结、终止 run，绝不发模型。
@@ -1905,9 +1949,10 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 			"safety_status": state.SafetyResultFailed, "error_code": "SAFETY_PROMPT_DIGEST_MISMATCH",
 			"user_message": "输入在确认后发生变化，请重新发起生成", "retryable": true, "support_trace_id": traceID,
 		})
-		return a.failM4AfterFreeze(ctx, auth, run, freeze, "prompt_digest_mismatch", idempotencyKey, traceID,
+		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "prompt_digest_mismatch", idempotencyKey, traceID,
 			apperror.New(apperror.CodePermissionDenied, "prompt changed after safety evaluation"))
 	}
+	_ = a.updateGenerationTaskStage(ctx, task, 35, "model_submitted", nil)
 	_ = a.appendGenerationProgress(ctx, run, traceID, payload.ModelSnapshot.ResourceType, "submitted", 20, false, map[string]any{
 		"model_id": payload.ModelSnapshot.ModelID, "estimate_id": payload.EstimateID, "freeze_id": freeze.FreezeID,
 	})
@@ -1916,11 +1961,12 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 		ProviderRuntimeRef: payload.ModelSnapshot.ProviderRuntimeRef, TimeoutMS: payload.ModelSnapshot.TimeoutMS,
 	}, runtimeeino.UserPrompt(prompt))
 	if err != nil {
-		return a.failM4AfterFreeze(ctx, auth, run, freeze, "generation_failed", idempotencyKey, traceID, err)
+		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "generation_failed", idempotencyKey, traceID, err)
 	}
 	if len(result.Artifacts) == 0 {
-		return a.failM4AfterFreeze(ctx, auth, run, freeze, "generation_empty", idempotencyKey, traceID, apperror.New(apperror.CodeInternal, "generation produced no artifact"))
+		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "generation_empty", idempotencyKey, traceID, apperror.New(apperror.CodeInternal, "generation produced no artifact"))
 	}
+	_ = a.updateGenerationTaskStage(ctx, task, 55, "artifacts_generated", map[string]any{"artifact_count": len(result.Artifacts)})
 	for _, artifact := range result.Artifacts {
 		_ = a.appendRunEvent(ctx, run, "generation.artifact.completed", traceID, map[string]any{
 			"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType, "name": artifact.Name,
@@ -1938,15 +1984,16 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 		ProjectID: run.ProjectID, SessionID: run.SessionID, RunID: run.ID, Artifacts: objects, IdempotencyKey: idempotencyKey + ":prepare_slots",
 	}, traceID)
 	if err != nil {
-		return a.failM4AfterFreeze(ctx, auth, run, freeze, "prepare_asset_slots_failed", idempotencyKey, traceID, err)
+		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "prepare_asset_slots_failed", idempotencyKey, traceID, err)
 	}
+	_ = a.updateGenerationTaskStage(ctx, task, 65, "asset_slots_prepared", map[string]any{"slot_count": len(slots)})
 	slotByArtifact := map[string]GeneratedUploadSlotDTO{}
 	for _, slot := range slots {
 		slotByArtifact[slot.ArtifactID] = slot
 	}
 	estimateItems, err := estimateItemsForArtifacts(payload.Estimate, result.Artifacts)
 	if err != nil {
-		return a.failM4AfterFreeze(ctx, auth, run, freeze, "estimate_item_unavailable", idempotencyKey, traceID, err)
+		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "estimate_item_unavailable", idempotencyKey, traceID, err)
 	}
 	outputPlan := buildOutputElementPlan(payload.OutputElements, result.Artifacts)
 	commitArtifacts := make([]CommitArtifactDTO, 0, len(result.Artifacts))
@@ -1954,12 +2001,12 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	for i, artifact := range result.Artifacts {
 		if outputPlan.UseDraft(artifact.ElementType) {
 			if err := a.createDraftArtifact(ctx, run, artifact, outputPlan.DraftElement(artifact.ElementType), traceID); err != nil {
-				return a.failM4AfterFreeze(ctx, auth, run, freeze, "agent_draft_artifact_failed", idempotencyKey, traceID, err)
+				return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "agent_draft_artifact_failed", idempotencyKey, traceID, err)
 			}
 		}
 		slot, ok := slotByArtifact[artifact.ArtifactID]
 		if !ok {
-			return a.failM4AfterFreeze(ctx, auth, run, freeze, "missing_upload_slot", idempotencyKey, traceID, apperror.New(apperror.CodeInternal, "generated upload slot missing"))
+			return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "missing_upload_slot", idempotencyKey, traceID, apperror.New(apperror.CodeInternal, "generated upload slot missing"))
 		}
 		_ = a.appendRunEvent(ctx, run, "asset.save.started", traceID, map[string]any{
 			"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType, "project_id": run.ProjectID,
@@ -1971,7 +2018,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 				"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType,
 				"error_code": "ASSET_SAVE_FAILED", "user_message": "产物上传失败", "retryable": true, "support_trace_id": traceID,
 			})
-			return a.failM4AfterFreeze(ctx, auth, run, freeze, "artifact_upload_failed", idempotencyKey, traceID, uploadErr)
+			return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "artifact_upload_failed", idempotencyKey, traceID, uploadErr)
 		}
 		estimateItemID := estimateItems[artifact.ArtifactID]
 		commitArtifacts = append(commitArtifacts, CommitArtifactDTO{
@@ -1992,6 +2039,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 			finalElements = append(finalElements, FinalElementDTO{ElementType: element.ElementType, ElementPayloadJSON: string(elementPayload), DisplayOrder: displayOrderOrDefault(element, int32(i+1))})
 		}
 	}
+	_ = a.updateGenerationTaskStage(ctx, task, 85, "asset_commit_started", map[string]any{"artifact_count": len(commitArtifacts), "final_element_count": len(finalElements)})
 	commit, err := a.gateway.CommitGeneratedAssetAndCharge(ctx, auth, CommitGeneratedAssetAndChargeRequest{
 		ProjectID: run.ProjectID, SessionID: run.SessionID, RunID: run.ID, FreezeID: freeze.FreezeID,
 		EstimateID: payload.EstimateID, Artifacts: commitArtifacts, FinalElements: finalElements,
@@ -2002,7 +2050,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 			"artifact_id": firstArtifactID(result.Artifacts), "resource_type": payload.ModelSnapshot.ResourceType,
 			"error_code": "ASSET_COMMIT_FAILED", "user_message": "资产保存失败", "retryable": true, "support_trace_id": traceID,
 		})
-		return a.failM4AfterFreeze(ctx, auth, run, freeze, "asset_commit_failed", idempotencyKey, traceID, err)
+		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "asset_commit_failed", idempotencyKey, traceID, err)
 	}
 	for _, ref := range commit.AssetRefs {
 		if err := a.repo.CreateArtifact(ctx, &model.Artifact{
@@ -2014,7 +2062,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 			}),
 			BusinessRefID: ref.AssetID, Visibility: "private", TraceID: traceID,
 		}); err != nil {
-			return a.failM4AfterFreeze(ctx, auth, run, freeze, "agent_artifact_ref_failed", idempotencyKey, traceID, err)
+			return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "agent_artifact_ref_failed", idempotencyKey, traceID, err)
 		}
 		_ = a.appendRunEvent(ctx, run, "asset.save.completed", traceID, map[string]any{
 			"asset_id": ref.AssetID, "artifact_id": ref.SourceArtifactID, "resource_type": ref.ResourceType,
@@ -2026,6 +2074,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 		"charged_points": commit.ChargedPoints, "released_points": commit.ReleasedPoints, "ledger_ref": commit.LedgerRef,
 		"charged_line_items": commit.ChargedLineItems,
 	})
+	_ = a.updateGenerationTaskStage(ctx, task, 95, "asset_commit_completed", map[string]any{"charged_points": commit.ChargedPoints, "released_points": commit.ReleasedPoints})
 	if commit.ReleasedPoints > 0 {
 		_ = a.appendRunEvent(ctx, run, "credits.released", traceID, map[string]any{
 			"freeze_id": freeze.FreezeID, "released_points": commit.ReleasedPoints, "reason": "unused_after_asset_commit",
@@ -2074,6 +2123,8 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 		"final_message_id": finalMessage.ID, "last_event_sequence": lastSequence, "snapshot_version": time.Now().UTC().Format(time.RFC3339Nano),
 		"charged_points": commit.ChargedPoints, "asset_count": len(assets),
 	})
+	_ = a.updateGenerationTaskStage(ctx, task, 100, "completed", map[string]any{"asset_count": len(assets)})
+	_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusCompleted, "")
 	return a.repo.ResolveInterrupt(ctx, interrupt.ID, state.InterruptStatusResolved)
 }
 
@@ -2086,6 +2137,179 @@ func parseM4ConfirmationPayload(interrupt *model.Interrupt) (m4ConfirmationPaylo
 		return m4ConfirmationPayload{}, false
 	}
 	return payload, payload.M4Flow == "generation_asset_commit"
+}
+
+func (a *App) startGenerationTask(ctx context.Context, run *model.Run, payload m4ConfirmationPayload, idempotencyKey string, traceID string) (*model.Task, error) {
+	task := &model.Task{
+		ID:              securityID("task_"),
+		RunID:           run.ID,
+		TaskType:        "generation_asset_commit",
+		ResourceType:    payload.ModelSnapshot.ResourceType,
+		Status:          state.TaskStatusRunning,
+		ProgressPercent: 10,
+		ProgressDetail: jsonObject(map[string]any{
+			"stage":               "started",
+			"estimate_id":         payload.EstimateID,
+			"estimate_points":     payload.EstimatePoints,
+			"credit_account_id":   payload.CreditAccountID,
+			"pricing_snapshot_id": payload.PricingSnapshotID,
+			"idempotency_key":     idempotencyKey,
+		}),
+		TraceID: traceID,
+	}
+	if err := a.repo.CreateTask(ctx, task); err != nil {
+		return nil, err
+	}
+	_ = a.appendRunEvent(ctx, run, "generation.task.started", traceID, map[string]any{
+		"task_id": task.ID, "task_type": task.TaskType, "resource_type": task.ResourceType,
+		"estimate_id": payload.EstimateID,
+	})
+	return task, nil
+}
+
+func (a *App) updateGenerationTaskStage(ctx context.Context, task *model.Task, progress int, stage string, extra map[string]any) error {
+	if task == nil {
+		return nil
+	}
+	detail := jsonMap(task.ProgressDetail)
+	for key, value := range extra {
+		detail[key] = value
+	}
+	detail["stage"] = stage
+	task.ProgressPercent = progress
+	task.ProgressDetail = jsonObject(detail)
+	task.UpdatedAt = time.Now().UTC()
+	return a.repo.UpdateTaskProgress(ctx, task.ID, progress, task.ProgressDetail)
+}
+
+func generationTaskAuth(auth AuthContextDTO) map[string]any {
+	return map[string]any{
+		"actor_user_id":       auth.ActorUserID,
+		"login_identity_type": auth.LoginIdentityType,
+		"space_id":            auth.SpaceID,
+		"enterprise_id":       auth.EnterpriseID,
+		"enterprise_role":     auth.EnterpriseRole,
+	}
+}
+
+func authFromGenerationTask(detail map[string]any, run *model.Run) AuthContextDTO {
+	auth := AuthContextDTO{}
+	if raw, ok := detail["auth"].(map[string]any); ok {
+		auth.ActorUserID = stringFromMap(raw, "actor_user_id")
+		auth.LoginIdentityType = stringFromMap(raw, "login_identity_type")
+		auth.SpaceID = stringFromMap(raw, "space_id")
+		auth.EnterpriseID = stringFromMap(raw, "enterprise_id")
+		auth.EnterpriseRole = stringFromMap(raw, "enterprise_role")
+	}
+	if auth.ActorUserID == "" {
+		auth.ActorUserID = run.UserID
+	}
+	if auth.SpaceID == "" {
+		auth.SpaceID = run.SpaceID
+	}
+	if auth.LoginIdentityType == "" {
+		auth.LoginIdentityType = "personal"
+	}
+	return auth
+}
+
+func (a *App) RecoverGenerationTasks(ctx context.Context, staleAfter time.Duration, limit int, traceID string) (GenerationRecoveryResult, error) {
+	if a.gateway == nil {
+		return GenerationRecoveryResult{}, apperror.New(apperror.CodeNotImplemented, "business gateway is not configured")
+	}
+	if staleAfter <= 0 {
+		staleAfter = 5 * time.Minute
+	}
+	tasks, err := a.repo.ListStaleRunningTasks(ctx, "generation_asset_commit", time.Now().UTC().Add(-staleAfter), limit)
+	if err != nil {
+		return GenerationRecoveryResult{}, err
+	}
+	result := GenerationRecoveryResult{Scanned: len(tasks)}
+	for _, task := range tasks {
+		if a.recoverGenerationTask(ctx, task, traceID, &result) != nil {
+			result.ReleaseFails++
+		}
+	}
+	return result, nil
+}
+
+func (a *App) recoverGenerationTask(ctx context.Context, task model.Task, traceID string, result *GenerationRecoveryResult) error {
+	run, err := a.repo.GetRun(ctx, task.RunID)
+	if err != nil {
+		return err
+	}
+	detail := jsonMap(task.ProgressDetail)
+	stage := stringFromMap(detail, "stage")
+	if stage == "" || stage == "started" {
+		_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusCancelled, "RESTART_RECOVERED_BEFORE_FREEZE")
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusCancelled, "RESTART_RECOVERED", "generation task was recovered before credit freeze")
+		_ = a.appendRunEvent(ctx, run, "agent.run.cancelled", traceID, map[string]any{
+			"run_status": state.RunStatusCancelled, "cancel_reason": "restart_recovery_before_freeze",
+			"released_points": 0, "task_id": task.ID,
+		})
+		return nil
+	}
+	if stage == "asset_commit_started" || stage == "asset_commit_completed" {
+		_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusFailed, "NEEDS_RECONCILIATION")
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "NEEDS_RECONCILIATION", "generation task may have reached asset commit before restart")
+		_ = a.appendRunEvent(ctx, run, "generation.task.reconciliation_required", traceID, map[string]any{
+			"task_id": task.ID, "stage": stage, "freeze_id": stringFromMap(detail, "freeze_id"),
+			"user_message": "生成保存流程需要对账确认",
+		})
+		result.Reconcile++
+		return nil
+	}
+	freezeID := stringFromMap(detail, "freeze_id")
+	auth := authFromGenerationTask(detail, run)
+	idempotencyKey := stringFromMap(detail, "idempotency_key")
+	if freezeID == "" {
+		replay, err := a.gateway.FreezeCredits(ctx, auth, FreezeCreditsRequest{
+			EstimateID:     stringFromMap(detail, "estimate_id"),
+			Points:         int64FromMap(detail, "estimate_points"),
+			RunID:          run.ID,
+			ConfirmationID: stringFromMap(detail, "confirmation_id"),
+			AccountID:      stringFromMap(detail, "credit_account_id"),
+			IdempotencyKey: stringFromMap(detail, "freeze_idempotency_key"),
+		}, traceID)
+		if err != nil {
+			return err
+		}
+		freezeID = replay.FreezeID
+		detail["freeze_id"] = replay.FreezeID
+		detail["frozen_points"] = replay.FrozenPoints
+		detail["stage"] = "credits_frozen"
+		task.ProgressDetail = jsonObject(detail)
+		_ = a.repo.UpdateTaskProgress(ctx, task.ID, task.ProgressPercent, task.ProgressDetail)
+	}
+	frozenPoints := int64FromMap(detail, "frozen_points")
+	if frozenPoints <= 0 {
+		frozenPoints = int64FromMap(detail, "estimate_points")
+	}
+	release, err := a.gateway.ReleaseFrozenCredits(ctx, auth, ReleaseFrozenCreditsRequest{
+		FreezeID: freezeID, ReleasePoints: frozenPoints, Reason: "restart_recovery", RunID: run.ID,
+		IdempotencyKey: idempotencyKey + ":release:restart_recovery",
+	}, traceID)
+	if err != nil {
+		return err
+	}
+	_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusFailed, "RESTART_RECOVERED")
+	_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusCancelled, "RESTART_RECOVERED", "generation task was recovered after restart")
+	_ = a.appendRunEvent(ctx, run, "credits.released", traceID, map[string]any{
+		"freeze_id": freezeID, "released_points": release.ReleasedPoints, "reason": "restart_recovery",
+	})
+	_ = a.appendRunEvent(ctx, run, "agent.run.cancelled", traceID, map[string]any{
+		"run_status": state.RunStatusCancelled, "cancel_reason": "restart_recovery",
+		"released_points": release.ReleasedPoints, "task_id": task.ID,
+	})
+	result.Released++
+	return nil
+}
+
+func (a *App) failGenerationTaskAfterFreeze(ctx context.Context, auth AuthContextDTO, run *model.Run, task *model.Task, freeze FreezeCreditsDTO, reason string, idempotencyKey string, traceID string, cause error) error {
+	if task != nil {
+		_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusFailed, strings.ToUpper(reason))
+	}
+	return a.failM4AfterFreeze(ctx, auth, run, freeze, reason, idempotencyKey, traceID, cause)
 }
 
 func (a *App) failM4AfterFreeze(ctx context.Context, auth AuthContextDTO, run *model.Run, freeze FreezeCreditsDTO, reason string, idempotencyKey string, traceID string, cause error) error {
@@ -2693,6 +2917,18 @@ func runResponse(run model.Run) CreateRunResponse {
 
 func messageDTO(message model.Message) MessageDTO {
 	return MessageDTO{MessageID: message.ID, SessionID: message.SessionID, RunID: message.RunID, Role: message.Role, ContentType: message.ContentType, Content: message.Content, Sequence: message.Sequence, SafetyStatus: message.SafetyStatus, CreatedAt: message.CreatedAt}
+}
+
+func taskDTOs(tasks []model.Task) []TaskDTO {
+	out := make([]TaskDTO, 0, len(tasks))
+	for _, task := range tasks {
+		out = append(out, TaskDTO{
+			TaskID: task.ID, RunID: task.RunID, TaskType: task.TaskType, ResourceType: task.ResourceType,
+			Status: task.Status, ProgressPercent: task.ProgressPercent, ProgressDetail: jsonMap(task.ProgressDetail),
+			CancelRequested: task.CancelRequested, ErrorCode: task.ErrorCode, UpdatedAt: task.UpdatedAt.Format(time.RFC3339Nano),
+		})
+	}
+	return out
 }
 
 func (a *App) interruptSnapshotDTO(ctx context.Context, runID string, interrupt *model.Interrupt) InterruptDTO {
