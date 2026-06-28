@@ -302,7 +302,15 @@ func (a *App) ListEnterpriseUsage(ctx context.Context, auth AuthContext, limit, 
 	if auth.EnterpriseID == "" {
 		return Page[LedgerDTO]{}, bizerrors.New(bizerrors.CodePermissionDenied, "enterprise identity is required")
 	}
-	return a.ListLedger(ctx, auth, limit, offset)
+	account, err := a.resolveAccount(ctx, a.repo.DB().WithContext(ctx), auth)
+	if err != nil {
+		return Page[LedgerDTO]{}, err
+	}
+	// ACCT-3：企业拥有者看企业全部流水；普通成员只看自己在企业空间产生的消耗明细(本人 project 的流水)。
+	if auth.EnterpriseRole == accountspace.RoleOwner {
+		return a.listLedgerForAccount(ctx, account.ID, limit, offset)
+	}
+	return a.listLedgerForMember(ctx, account.ID, auth.UserID, auth.EnterpriseID, limit, offset)
 }
 
 func (a *App) EstimateGenerationCredits(ctx context.Context, in EstimateGenerationInput) (EstimateDTO, error) {
@@ -1027,13 +1035,36 @@ func (a *App) listLedgerForAccount(ctx context.Context, accountID string, limit,
 	if err := a.repo.DB().WithContext(ctx).Where("account_id = ?", accountID).Order("created_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
 		return Page[LedgerDTO]{}, err
 	}
+	var total int64
+	_ = a.repo.DB().WithContext(ctx).Model(&businesscore.CreditLedgerEntry{}).Where("account_id = ?", accountID).Count(&total).Error
+	return ledgerPage(rows, total, limit, offset), nil
+}
+
+// listLedgerForMember 仅返回成员本人在企业空间产生的流水(ACCT-3：成员只看自己的消耗明细)。
+// 归属以"本人在企业空间发起的 project"为界——企业 project.owner_user_id = 发起成员；
+// 无 project 的兑换/发放流水属拥有者范畴，成员不可见，子查询自然排除。
+func (a *App) listLedgerForMember(ctx context.Context, accountID, memberUserID, enterpriseID string, limit, offset int) (Page[LedgerDTO], error) {
+	limit, offset = normalizePage(limit, offset, 100)
+	memberProjects := a.repo.DB().WithContext(ctx).Model(&businesscore.Project{}).
+		Select("id").Where("owner_user_id = ? AND enterprise_id = ?", memberUserID, enterpriseID)
+	var rows []businesscore.CreditLedgerEntry
+	if err := a.repo.DB().WithContext(ctx).
+		Where("account_id = ? AND project_id IN (?)", accountID, memberProjects).
+		Order("created_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[LedgerDTO]{}, err
+	}
+	var total int64
+	_ = a.repo.DB().WithContext(ctx).Model(&businesscore.CreditLedgerEntry{}).
+		Where("account_id = ? AND project_id IN (?)", accountID, memberProjects).Count(&total).Error
+	return ledgerPage(rows, total, limit, offset), nil
+}
+
+func ledgerPage(rows []businesscore.CreditLedgerEntry, total int64, limit, offset int) Page[LedgerDTO] {
 	items := make([]LedgerDTO, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, LedgerDTO{EntryID: row.ID, EntryType: row.EntryType, Amount: row.PointsDelta, BalanceAfter: row.BalanceAfter, ResourceType: row.SourceType, ResourceID: row.SourceID, CreatedAt: row.CreatedAt})
 	}
-	var total int64
-	_ = a.repo.DB().WithContext(ctx).Model(&businesscore.CreditLedgerEntry{}).Where("account_id = ?", accountID).Count(&total).Error
-	return Page[LedgerDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+	return Page[LedgerDTO]{Items: items, Limit: limit, Offset: offset, Total: total}
 }
 
 func (a *App) activeModelPrice(ctx context.Context, modelID, resourceType, pricingSnapshotID string) (businesscore.ModelPrice, error) {
