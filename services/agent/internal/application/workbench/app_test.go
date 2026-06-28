@@ -54,6 +54,23 @@ func TestOutputElementPlanKeepsDraftAndFinalDeclarations(t *testing.T) {
 	}
 }
 
+func TestSkillMissingFallbackDoesNotRecommendSkillCreation(t *testing.T) {
+	payload := skillMissingPayload("", "")
+	if payload["fallback_mode"] != "text_model" || payload["recommend_create_skill"] != false {
+		t.Fatalf("fallback payload must be text-only and not recommend creating Skill: %#v", payload)
+	}
+	if payload["reason"] != "no_published_skill" {
+		t.Fatalf("fallback reason not defaulted: %#v", payload)
+	}
+}
+
+func TestToolPolicyRiskContextRequiresPerToolWhitelistCheck(t *testing.T) {
+	ctx := toolPolicyRiskContext("web_fetch:browser")
+	if ctx["runtime_whitelist_check"] != "required_per_tool" || ctx["tool_ref"] != "web_fetch:browser" {
+		t.Fatalf("tool policy runtime recheck context not explicit: %#v", ctx)
+	}
+}
+
 func TestStreamingArtifactUploaderConsumesStream(t *testing.T) {
 	body := []byte("streamed artifact")
 	sum := sha256.Sum256(body)

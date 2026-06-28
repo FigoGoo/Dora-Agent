@@ -1468,7 +1468,7 @@ func (a *App) recordToolPolicyEvents(ctx context.Context, auth AuthContextDTO, r
 			continue
 		}
 		toolCallID := securityID("tool_")
-		policy, err := a.gateway.CheckToolExecutionPolicy(ctx, auth, toolName, toolType, run.ProjectID, map[string]string{"source": "m3_start_turn"}, traceID)
+		policy, err := a.gateway.CheckToolExecutionPolicy(ctx, auth, toolName, toolType, run.ProjectID, toolPolicyRiskContext(ref), traceID)
 		if err != nil {
 			_ = a.appendRunEvent(ctx, run, "tool.call.failed", traceID, map[string]any{
 				"tool_call_id": toolCallID, "error_code": "TOOL_POLICY_RPC_FAILED", "user_message": "工具策略校验失败",
@@ -2350,15 +2350,28 @@ func assetRefsForEvent(refs []CommittedAssetRefDTO) []map[string]any {
 }
 
 func (a *App) appendSkillMissingEvent(ctx context.Context, run *model.Run, traceID string, reason string, message string) error {
+	return a.appendRunEvent(ctx, run, "agent.skill.missing", traceID, skillMissingPayload(reason, message))
+}
+
+func skillMissingPayload(reason string, message string) map[string]any {
 	if strings.TrimSpace(reason) == "" {
 		reason = "no_published_skill"
 	}
 	if strings.TrimSpace(message) == "" {
 		message = "未命中可路由 Skill，使用文本模型兜底"
 	}
-	return a.appendRunEvent(ctx, run, "agent.skill.missing", traceID, map[string]any{
+	return map[string]any{
 		"fallback_mode": "text_model", "matched_tags": []string{}, "user_message": message, "reason": reason,
-	})
+		"recommend_create_skill": false,
+	}
+}
+
+func toolPolicyRiskContext(toolRef string) map[string]string {
+	return map[string]string{
+		"source":                  "m3_start_turn",
+		"tool_ref":                strings.TrimSpace(toolRef),
+		"runtime_whitelist_check": "required_per_tool",
+	}
 }
 
 func validateRunInputs(req CreateRunRequest) error {

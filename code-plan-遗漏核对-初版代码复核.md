@@ -223,7 +223,7 @@
 
 ## 批 F 子切片记录（2026-06-28 · P3 显式化防回归）✅
 
-提交：待提交（TURN-4 / INFRA-14 / WORK-8 / WORK-10）
+提交：`e513a17`（TURN-4 / INFRA-14 / WORK-8 / WORK-10）
 验证：`go test ./services/business/internal/application/work ./services/business/internal/application/admin` 通过；`python3 tests/contract/validate_fixtures.py` 通过；`git diff --check` 通过。
 
 - **TURN-4 ✅ 已修**：AG-UI 前端渲染规则明确 `timestamp` 仅用于展示和排障，不得作为排序依据、补偿游标或缺口判定条件；排序/合并仍以同一 `run_id` 内的 `sequence` 为准。
@@ -234,3 +234,18 @@
 范围决策：
 - 本切片不引入防刷频控；WORK-10 原缺口中的频控属于产品/风控策略，不用隐式限流冒充闭环。
 - 不新增管理员改用户密码入口；WORK-8 只固化红线并验证现有状态治理流程不会误触密码字段。
+
+## 批 F 子切片记录（2026-06-28 · P2 显式化/类型化收口）✅
+
+提交：待提交（WORK-5 / WORK-7 / INFRA-11 / SKILL-9 / SKILL-10）
+验证：`go test ./services/business/internal/application/admin ./services/agent/internal/application/workbench` 通过；`python3 tests/contract/validate_fixtures.py` 通过；`git diff --check` 通过。
+
+- **WORK-5 ✅ 已修**：后台模块 owner 归属收敛为 `AdminModuleOwners` 中心枚举，覆盖平台管理员、用户管理、系统 Skill、Skill 审核、模型供应商、模型、Tool、积分发放、兑换码、精选作品和审计日志，并声明 owner domain 与 audit scope。
+- **WORK-7 ✅ 已修**：`AdminUserDetailDTO` 的空间、企业成员、审计引用占位从 `[]map[string]string` 改为强类型空白名单 DTO，继续保持 ACCT-8 红线：管理通道不展开业务归属明细。
+- **INFRA-11 ✅ 已成文**：业务数据模型补主要领域状态流转矩阵，明确用户、管理员、企业成员、Skill、Tool、项目、积分冻结、兑换码、作品的允许流转和禁止/前置条件。
+- **SKILL-9 ✅ 已固化**：文本兜底 payload 明确 `fallback_mode=text_model` 且 `recommend_create_skill=false`，文档要求不得在兜底中推销或建议创建 Skill。
+- **SKILL-10 ✅ 已固化**：Tool 绑定声明和运行期策略复检分离成文；Agent 发送 Tool policy RPC 时携带 `runtime_whitelist_check=required_per_tool` 风险上下文，测试固化逐 Tool 复检语义。
+
+范围决策：
+- 不新增后台 RBAC；第一版仍是单一平台管理员角色，本切片只声明模块归属，便于审计和后续 RBAC 演进。
+- INFRA-11 先固化矩阵口径，不改业务状态机行为；已存在的状态守卫由各 application 测试继续覆盖。

@@ -141,10 +141,28 @@ type UserSummaryDTO struct {
 }
 
 type UserDetailDTO struct {
-	Summary               UserSummaryDTO      `json:"summary"`
-	Spaces                []map[string]string `json:"spaces"`
-	EnterpriseMemberships []map[string]string `json:"enterprise_memberships"`
-	RecentAuditRefs       []map[string]string `json:"recent_audit_refs"`
+	Summary               UserSummaryDTO               `json:"summary"`
+	Spaces                []AdminUserSpaceDTO          `json:"spaces"`
+	EnterpriseMemberships []AdminUserEnterpriseRoleDTO `json:"enterprise_memberships"`
+	RecentAuditRefs       []AdminUserAuditRefDTO       `json:"recent_audit_refs"`
+}
+
+type AdminUserSpaceDTO struct {
+	SpaceID   string `json:"space_id"`
+	SpaceType string `json:"space_type"`
+	Status    string `json:"status"`
+}
+
+type AdminUserEnterpriseRoleDTO struct {
+	EnterpriseID string `json:"enterprise_id"`
+	Role         string `json:"role"`
+	Status       string `json:"status"`
+}
+
+type AdminUserAuditRefDTO struct {
+	AuditID        string `json:"audit_id"`
+	BusinessAction string `json:"business_action"`
+	TraceID        string `json:"trace_id"`
 }
 
 type UserStatusPreviewDTO struct {
@@ -175,6 +193,50 @@ type Page[T any] struct {
 	Limit  int   `json:"limit"`
 	Offset int   `json:"offset"`
 	Total  int64 `json:"total"`
+}
+
+const (
+	AdminModuleAdmins         = "platform_admins"
+	AdminModuleUsers          = "users"
+	AdminModuleSystemSkills   = "system_skills"
+	AdminModuleSkillReviews   = "skill_reviews"
+	AdminModuleModelProviders = "model_providers"
+	AdminModuleModels         = "models"
+	AdminModuleTools          = "tools"
+	AdminModuleCreditGrants   = "credit_grants"
+	AdminModuleRedeemCodes    = "redeem_codes"
+	AdminModuleFeaturedWorks  = "featured_works"
+	AdminModuleAuditLogs      = "audit_logs"
+)
+
+type AdminModuleOwner struct {
+	Module      string
+	DisplayName string
+	OwnerDomain string
+	AuditScope  string
+}
+
+var AdminModuleOwners = []AdminModuleOwner{
+	{Module: AdminModuleAdmins, DisplayName: "平台管理员账号", OwnerDomain: "admin", AuditScope: "platform_admin"},
+	{Module: AdminModuleUsers, DisplayName: "用户管理", OwnerDomain: "admin", AuditScope: "user"},
+	{Module: AdminModuleSystemSkills, DisplayName: "系统 Skill", OwnerDomain: "skill", AuditScope: "skill"},
+	{Module: AdminModuleSkillReviews, DisplayName: "Skill 审核", OwnerDomain: "skill", AuditScope: "skill_review"},
+	{Module: AdminModuleModelProviders, DisplayName: "模型供应商", OwnerDomain: "model", AuditScope: "model_provider"},
+	{Module: AdminModuleModels, DisplayName: "模型管理", OwnerDomain: "model", AuditScope: "model"},
+	{Module: AdminModuleTools, DisplayName: "Tool 管理", OwnerDomain: "tool", AuditScope: "tool"},
+	{Module: AdminModuleCreditGrants, DisplayName: "积分发放", OwnerDomain: "credit", AuditScope: "credit"},
+	{Module: AdminModuleRedeemCodes, DisplayName: "兑换码", OwnerDomain: "credit", AuditScope: "redeem_code"},
+	{Module: AdminModuleFeaturedWorks, DisplayName: "精选作品", OwnerDomain: "work", AuditScope: "public_work"},
+	{Module: AdminModuleAuditLogs, DisplayName: "审计日志", OwnerDomain: "audit", AuditScope: "business_audit_log"},
+}
+
+func AdminModuleOwnerByModule(module string) (AdminModuleOwner, bool) {
+	for _, owner := range AdminModuleOwners {
+		if owner.Module == module {
+			return owner, true
+		}
+	}
+	return AdminModuleOwner{}, false
 }
 
 func (a *App) BootstrapInitialAdmin(ctx context.Context, in BootstrapInput) (PlatformAdminDTO, error) {
@@ -531,7 +593,12 @@ func (a *App) GetUserSummary(ctx context.Context, auth AdminAuth, userID string)
 	// (空间 / 企业成员 / 归属审计)。这些字段保持空占位是有意为之，不是待补 TODO——如需查看
 	// 用户业务空间内容须走独立留痕的只读通道并单独鉴权，不得在此复用 admin 身份跨入业务归属。
 	// 见 docs/standards/安全规范.md「管理员越权红线」。
-	return UserDetailDTO{Summary: userDTO(user), Spaces: []map[string]string{}, EnterpriseMemberships: []map[string]string{}, RecentAuditRefs: []map[string]string{}}, nil
+	return UserDetailDTO{
+		Summary:               userDTO(user),
+		Spaces:                []AdminUserSpaceDTO{},
+		EnterpriseMemberships: []AdminUserEnterpriseRoleDTO{},
+		RecentAuditRefs:       []AdminUserAuditRefDTO{},
+	}, nil
 }
 
 func (a *App) PreviewSetUserStatus(ctx context.Context, in UserStatusInput) (UserStatusPreviewDTO, error) {

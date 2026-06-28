@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -47,6 +48,47 @@ func TestAdminUserDetailDoesNotExposeBusinessOwnership(t *testing.T) {
 	if len(detail.Spaces) != 0 || len(detail.EnterpriseMemberships) != 0 || len(detail.RecentAuditRefs) != 0 {
 		t.Fatalf("ACCT-8 越权红线：admin 通道不得暴露业务空间归属明细，got spaces=%d members=%d audit=%d",
 			len(detail.Spaces), len(detail.EnterpriseMemberships), len(detail.RecentAuditRefs))
+	}
+}
+
+func TestAdminUserDetailUsesTypedOwnershipPlaceholders(t *testing.T) {
+	detail := UserDetailDTO{
+		Spaces:                []AdminUserSpaceDTO{},
+		EnterpriseMemberships: []AdminUserEnterpriseRoleDTO{},
+		RecentAuditRefs:       []AdminUserAuditRefDTO{},
+	}
+	if detail.Spaces == nil || detail.EnterpriseMemberships == nil || detail.RecentAuditRefs == nil {
+		t.Fatalf("admin user detail ownership placeholders must be typed non-nil slices: %#v", detail)
+	}
+}
+
+func TestAdminModuleOwnersCoverFirstVersionBackofficeModules(t *testing.T) {
+	want := []string{
+		AdminModuleAdmins, AdminModuleUsers, AdminModuleSystemSkills, AdminModuleSkillReviews,
+		AdminModuleModelProviders, AdminModuleModels, AdminModuleTools, AdminModuleCreditGrants,
+		AdminModuleRedeemCodes, AdminModuleFeaturedWorks, AdminModuleAuditLogs,
+	}
+	if len(AdminModuleOwners) != len(want) {
+		t.Fatalf("admin module owner count mismatch got=%d want=%d", len(AdminModuleOwners), len(want))
+	}
+	seen := map[string]bool{}
+	for _, module := range want {
+		owner, ok := AdminModuleOwnerByModule(module)
+		if !ok {
+			t.Fatalf("missing admin module owner for %s", module)
+		}
+		if owner.OwnerDomain == "" || owner.AuditScope == "" || owner.DisplayName == "" {
+			t.Fatalf("admin module owner must declare domain/audit/display: %#v", owner)
+		}
+		seen[module] = true
+	}
+	for _, owner := range AdminModuleOwners {
+		if !slices.Contains(want, owner.Module) {
+			t.Fatalf("unexpected admin module owner %s", owner.Module)
+		}
+		if seen[owner.Module] && owner.Module == "" {
+			t.Fatalf("admin module owner has empty module: %#v", owner)
+		}
 	}
 }
 
