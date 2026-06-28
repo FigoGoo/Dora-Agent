@@ -5262,16 +5262,17 @@ var fieldIDToName_GetReviewCandidateSkillSpecRequest = map[int16]string{
 }
 
 type ReviewCandidateSkillSpecResponse struct {
-	SkillId                string   `thrift:"skill_id,1,required" frugal:"1,required,string" json:"skill_id"`
-	VersionId              string   `thrift:"version_id,2,required" frugal:"2,required,string" json:"version_id"`
-	SkillSpecJson          string   `thrift:"skill_spec_json,3,required" frugal:"3,required,string" json:"skill_spec_json"`
-	InputSchemaJson        string   `thrift:"input_schema_json,4,required" frugal:"4,required,string" json:"input_schema_json"`
-	OutputSchemaJson       string   `thrift:"output_schema_json,5,required" frugal:"5,required,string" json:"output_schema_json"`
-	ToolRefs               []string `thrift:"tool_refs,6,required" frugal:"6,required,list<string>" json:"tool_refs"`
-	MemoryPolicyJson       string   `thrift:"memory_policy_json,7,required" frugal:"7,required,string" json:"memory_policy_json"`
-	ConfirmationPolicyJson string   `thrift:"confirmation_policy_json,8,required" frugal:"8,required,string" json:"confirmation_policy_json"`
-	TestInputJson          *string  `thrift:"test_input_json,9,optional" frugal:"9,optional,string" json:"test_input_json,omitempty"`
-	ExpectedElementsJson   *string  `thrift:"expected_elements_json,10,optional" frugal:"10,optional,string" json:"expected_elements_json,omitempty"`
+	SkillId                string                   `thrift:"skill_id,1,required" frugal:"1,required,string" json:"skill_id"`
+	VersionId              string                   `thrift:"version_id,2,required" frugal:"2,required,string" json:"version_id"`
+	SkillSpecJson          string                   `thrift:"skill_spec_json,3,required" frugal:"3,required,string" json:"skill_spec_json"`
+	InputSchemaJson        string                   `thrift:"input_schema_json,4,required" frugal:"4,required,string" json:"input_schema_json"`
+	OutputSchemaJson       string                   `thrift:"output_schema_json,5,required" frugal:"5,required,string" json:"output_schema_json"`
+	ToolRefs               []string                 `thrift:"tool_refs,6,required" frugal:"6,required,list<string>" json:"tool_refs"`
+	MemoryPolicyJson       string                   `thrift:"memory_policy_json,7,required" frugal:"7,required,string" json:"memory_policy_json"`
+	ConfirmationPolicyJson string                   `thrift:"confirmation_policy_json,8,required" frugal:"8,required,string" json:"confirmation_policy_json"`
+	TestInputJson          *string                  `thrift:"test_input_json,9,optional" frugal:"9,optional,string" json:"test_input_json,omitempty"`
+	ExpectedElementsJson   *string                  `thrift:"expected_elements_json,10,optional" frugal:"10,optional,string" json:"expected_elements_json,omitempty"`
+	OutputElements         []*SkillOutputElementDTO `thrift:"output_elements,11,optional" frugal:"11,optional,list<SkillOutputElementDTO>" json:"output_elements,omitempty"`
 }
 
 func NewReviewCandidateSkillSpecResponse() *ReviewCandidateSkillSpecResponse {
@@ -5330,6 +5331,15 @@ func (p *ReviewCandidateSkillSpecResponse) GetExpectedElementsJson() (v string) 
 	}
 	return *p.ExpectedElementsJson
 }
+
+var ReviewCandidateSkillSpecResponse_OutputElements_DEFAULT []*SkillOutputElementDTO
+
+func (p *ReviewCandidateSkillSpecResponse) GetOutputElements() (v []*SkillOutputElementDTO) {
+	if !p.IsSetOutputElements() {
+		return ReviewCandidateSkillSpecResponse_OutputElements_DEFAULT
+	}
+	return p.OutputElements
+}
 func (p *ReviewCandidateSkillSpecResponse) SetSkillId(val string) {
 	p.SkillId = val
 }
@@ -5360,6 +5370,9 @@ func (p *ReviewCandidateSkillSpecResponse) SetTestInputJson(val *string) {
 func (p *ReviewCandidateSkillSpecResponse) SetExpectedElementsJson(val *string) {
 	p.ExpectedElementsJson = val
 }
+func (p *ReviewCandidateSkillSpecResponse) SetOutputElements(val []*SkillOutputElementDTO) {
+	p.OutputElements = val
+}
 
 func (p *ReviewCandidateSkillSpecResponse) IsSetTestInputJson() bool {
 	return p.TestInputJson != nil
@@ -5367,6 +5380,10 @@ func (p *ReviewCandidateSkillSpecResponse) IsSetTestInputJson() bool {
 
 func (p *ReviewCandidateSkillSpecResponse) IsSetExpectedElementsJson() bool {
 	return p.ExpectedElementsJson != nil
+}
+
+func (p *ReviewCandidateSkillSpecResponse) IsSetOutputElements() bool {
+	return p.OutputElements != nil
 }
 
 func (p *ReviewCandidateSkillSpecResponse) String() string {
@@ -5387,6 +5404,7 @@ var fieldIDToName_ReviewCandidateSkillSpecResponse = map[int16]string{
 	8:  "confirmation_policy_json",
 	9:  "test_input_json",
 	10: "expected_elements_json",
+	11: "output_elements",
 }
 
 type SaveSkillTestResultRequest struct {

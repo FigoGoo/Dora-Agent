@@ -450,11 +450,12 @@ func (a *App) FreezeCredits(ctx context.Context, in FreezeInput) (FreezeDTO, err
 			return bizerrors.New(bizerrors.CodeStateConflict, "credit account has insufficient points")
 		}
 		freezeID := security.RandomID("frz_")
-		if err := a.allocateFreezeBatches(tx, account.ID, freezeID, in.Points, now); err != nil {
+		if err := a.allocateFreezeBatches(tx, account.ID, freezeID, in.Points, in.Auth.UserID, now); err != nil {
 			return err
 		}
 		account.AvailablePoints -= in.Points
 		account.FrozenPoints += in.Points
+		account.UpdatedBy = optionalString(in.Auth.UserID)
 		account.UpdatedAt = now
 		if err := tx.Save(&account).Error; err != nil {
 			return err
@@ -463,7 +464,7 @@ func (a *App) FreezeCredits(ctx context.Context, in FreezeInput) (FreezeDTO, err
 			ID: security.RandomID("cfz_"), FreezeID: freezeID, EstimateID: estimate.EstimateID, AccountID: account.ID,
 			ProjectID: estimate.ProjectID, RunID: in.RunID, ConfirmationID: optionalString(in.ConfirmationID),
 			FrozenPoints: in.Points, Status: StatusFrozen, ExpiresAt: now.Add(24 * time.Hour), IdempotencyKey: in.Meta.IdempotencyKey,
-			TraceID: in.Meta.TraceID, CreatedAt: now, UpdatedAt: now,
+			TraceID: in.Meta.TraceID, CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&freeze).Error; err != nil {
 			return err
@@ -471,7 +472,7 @@ func (a *App) FreezeCredits(ctx context.Context, in FreezeInput) (FreezeDTO, err
 		if err := tx.Create(ledger(account, "freeze", 0, "credit_freeze", freezeID, estimate.ProjectID, in.RunID, in.Meta.TraceID, in.Meta.IdempotencyKey)).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&businesscore.CreditEstimate{}).Where("estimate_id = ?", estimate.EstimateID).Updates(map[string]any{"status": "frozen", "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&businesscore.CreditEstimate{}).Where("estimate_id = ?", estimate.EstimateID).Updates(map[string]any{"status": "frozen", "updated_by": in.Auth.UserID, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		dto = FreezeDTO{FreezeID: freezeID, FrozenPoints: in.Points, ExpiresAt: freeze.ExpiresAt}
@@ -510,7 +511,7 @@ func (a *App) ReleaseFrozenCredits(ctx context.Context, in ReleaseInput) (Releas
 	}
 	var dto ReleaseDTO
 	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		freeze, released, err := a.releaseFreezeLocked(tx, in.FreezeID, in.ReleasePoints, in.Reason, in.RunID, in.Meta.TraceID, in.Meta.IdempotencyKey)
+		freeze, released, err := a.releaseFreezeLocked(tx, in.FreezeID, in.ReleasePoints, in.Reason, in.RunID, in.Auth.UserID, in.Meta.TraceID, in.Meta.IdempotencyKey)
 		if err != nil {
 			return err
 		}
@@ -560,7 +561,7 @@ func (a *App) ChargeToolUsageCredits(ctx context.Context, in ChargeToolInput) (C
 		var charged int64
 		lines := make([]ChargedLineItemDTO, 0, len(in.ChargeItems))
 		for _, item := range in.ChargeItems {
-			line, err := a.chargeToolItem(tx, chargeID, in.EstimateID, item, now)
+			line, err := a.chargeToolItem(tx, chargeID, in.EstimateID, item, in.Auth.UserID, now)
 			if err != nil {
 				return err
 			}
@@ -573,7 +574,7 @@ func (a *App) ChargeToolUsageCredits(ctx context.Context, in ChargeToolInput) (C
 		}
 		released := int64(0)
 		if unsettled > 0 {
-			updated, releasedPoints, err := a.releaseFreezeRows(tx, &freeze, &account, unsettled, now)
+			updated, releasedPoints, err := a.releaseFreezeRows(tx, &freeze, &account, unsettled, in.Auth.UserID, now)
 			if err != nil {
 				return err
 			}
@@ -586,7 +587,9 @@ func (a *App) ChargeToolUsageCredits(ctx context.Context, in ChargeToolInput) (C
 		if freeze.ChargedPoints+freeze.ReleasedPoints >= freeze.FrozenPoints {
 			freeze.Status = StatusCharged
 		}
+		freeze.UpdatedBy = optionalString(in.Auth.UserID)
 		freeze.UpdatedAt = now
+		account.UpdatedBy = optionalString(in.Auth.UserID)
 		account.UpdatedAt = now
 		if err := tx.Save(&account).Error; err != nil {
 			return err
@@ -598,7 +601,7 @@ func (a *App) ChargeToolUsageCredits(ctx context.Context, in ChargeToolInput) (C
 			ID: security.RandomID("ctcb_"), ToolChargeID: chargeID, AccountID: account.ID, ProjectID: in.ProjectID,
 			EstimateID: in.EstimateID, FreezeID: in.FreezeID, SessionID: in.SessionID, RunID: in.RunID,
 			ChargedPoints: charged, ReleasedPoints: released, Status: StatusCharged, IdempotencyKey: in.Meta.IdempotencyKey,
-			TraceID: in.Meta.TraceID, CreatedAt: now, UpdatedAt: now,
+			TraceID: in.Meta.TraceID, CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&batch).Error; err != nil {
 			return err
@@ -677,12 +680,14 @@ func (a *App) RedeemCode(ctx context.Context, in RedeemInput) (RedeemDTO, error)
 		}
 		creditBatch := businesscore.CreditBatch{
 			ID: creditBatchID, AccountID: account.ID, BatchType: "redeem", SourceType: "redeem_code", SourceID: &code.ID,
-			TotalPoints: points, RemainingPoints: points, ExpiresAt: creditExpiry, Status: StatusActive, CreatedAt: now, UpdatedAt: now,
+			TotalPoints: points, RemainingPoints: points, ExpiresAt: creditExpiry, Status: StatusActive,
+			CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&creditBatch).Error; err != nil {
 			return err
 		}
 		account.AvailablePoints += points
+		account.UpdatedBy = optionalString(in.Auth.UserID)
 		account.UpdatedAt = now
 		if err := tx.Save(&account).Error; err != nil {
 			return err
@@ -692,6 +697,7 @@ func (a *App) RedeemCode(ctx context.Context, in RedeemInput) (RedeemDTO, error)
 		code.RedeemedEnterpriseID = optionalString(in.Auth.EnterpriseID)
 		code.RedeemedAccountID = &account.ID
 		code.RedeemedAt = &now
+		code.UpdatedBy = optionalString(in.Auth.UserID)
 		code.UpdatedAt = now
 		if err := tx.Save(&code).Error; err != nil {
 			return err
@@ -790,12 +796,14 @@ func (a *App) AdminGrantCredits(ctx context.Context, in AdminGrantInput) (AdminG
 		sourceID := in.Auth.AdminID
 		batch := businesscore.CreditBatch{
 			ID: batchID, AccountID: account.ID, BatchType: "grant", SourceType: "admin_grant", SourceID: &sourceID,
-			TotalPoints: in.Points, RemainingPoints: in.Points, ExpiresAt: &in.ExpiresAt, Status: StatusActive, CreatedAt: now, UpdatedAt: now,
+			TotalPoints: in.Points, RemainingPoints: in.Points, ExpiresAt: &in.ExpiresAt, Status: StatusActive,
+			CreatedBy: optionalString(in.Auth.AdminID), UpdatedBy: optionalString(in.Auth.AdminID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&batch).Error; err != nil {
 			return err
 		}
 		account.AvailablePoints += in.Points
+		account.UpdatedBy = optionalString(in.Auth.AdminID)
 		account.UpdatedAt = now
 		if err := tx.Save(&account).Error; err != nil {
 			return err
@@ -872,7 +880,8 @@ func (a *App) CreateRedeemCodes(ctx context.Context, in CreateCodesInput) (Creat
 			AccountType: accountType, BindTargetType: bindTargetType, BindTargetID: optionalString(in.BindTargetID),
 			TargetUserID: targetPtr(bindTargetType, "user", in.BindTargetID), TargetEnterpriseID: targetPtr(bindTargetType, "enterprise", in.BindTargetID),
 			ChannelCode: optionalString(in.Channel), TotalCodes: in.Count, PointsPerCode: in.Points, ExpiresAt: &in.CodeExpiresAt,
-			CreditExpiresAt: &in.CreditExpiresAt, Status: StatusActive, CreatedByAdminID: &in.Auth.AdminID, Reason: optionalString(in.Reason), CreatedAt: now, UpdatedAt: now,
+			CreditExpiresAt: &in.CreditExpiresAt, Status: StatusActive, CreatedByAdminID: &in.Auth.AdminID, Reason: optionalString(in.Reason),
+			CreatedBy: optionalString(in.Auth.AdminID), UpdatedBy: optionalString(in.Auth.AdminID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&batch).Error; err != nil {
 			return err
@@ -881,7 +890,10 @@ func (a *App) CreateRedeemCodes(ctx context.Context, in CreateCodesInput) (Creat
 		for i := 0; i < in.Count; i++ {
 			code := "DORA-" + strings.ToUpper(security.RandomID("")[0:16])
 			codes = append(codes, code)
-			row := businesscore.RedeemCode{ID: security.RandomID("rc_"), BatchID: batch.ID, CodeDigest: codeDigest(code), Status: "unused", ExpiresAt: &in.CodeExpiresAt, CreatedAt: now, UpdatedAt: now}
+			row := businesscore.RedeemCode{
+				ID: security.RandomID("rc_"), BatchID: batch.ID, CodeDigest: codeDigest(code), Status: "unused", ExpiresAt: &in.CodeExpiresAt,
+				CreatedBy: optionalString(in.Auth.AdminID), UpdatedBy: optionalString(in.Auth.AdminID), CreatedAt: now, UpdatedAt: now,
+			}
 			if err := tx.Create(&row).Error; err != nil {
 				return err
 			}
@@ -906,11 +918,13 @@ func (a *App) DisableRedeemCodeBatch(ctx context.Context, auth admin.AdminAuth, 
 		return RedeemCodeDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "redeem code batch not found")
 	}
 	batch.Status = "disabled"
-	batch.UpdatedAt = a.now()
+	now := a.now()
+	batch.UpdatedBy = optionalString(auth.AdminID)
+	batch.UpdatedAt = now
 	if err := a.repo.DB().WithContext(ctx).Save(&batch).Error; err != nil {
 		return RedeemCodeDTO{}, err
 	}
-	_ = a.repo.DB().WithContext(ctx).Model(&businesscore.RedeemCode{}).Where("batch_id = ? AND status = ?", batch.ID, "unused").Updates(map[string]any{"status": "disabled", "updated_at": a.now()}).Error
+	_ = a.repo.DB().WithContext(ctx).Model(&businesscore.RedeemCode{}).Where("batch_id = ? AND status = ?", batch.ID, "unused").Updates(map[string]any{"status": "disabled", "updated_by": auth.AdminID, "updated_at": now}).Error
 	return redeemBatchDTO(batch), nil
 }
 
@@ -940,7 +954,7 @@ func (a *App) createEstimate(ctx context.Context, auth AuthContext, meta Request
 			AccountType: account.AccountType, Insufficient: insufficient, Status: StatusEstimated, ExpiresAt: expiresAt,
 			CreatedByUserID: auth.UserID, TraceID: meta.TraceID, RequestMetaJSON: mustJSON(meta),
 			SafetyEvidenceID: optionalString(evidence.GetSafetyEvidenceId()), SafetyEvidenceHash: optionalString(safetyDigest(evidence)),
-			CreatedAt: now, UpdatedAt: now,
+			CreatedBy: optionalString(auth.UserID), UpdatedBy: optionalString(auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
@@ -953,7 +967,7 @@ func (a *App) createEstimate(ctx context.Context, auth AuthContext, meta Request
 				ModelID: optionalString(item.ModelID), ResourceType: optionalString(item.ResourceType), BillingUnit: optionalString(item.BillingUnit),
 				Quantity: optionalFloat(item.Quantity), UnitPoints: optionalFloat(item.UnitPoints), EstimatePoints: item.EstimatePoints,
 				FreeReason: optionalString(item.FreeReason), Status: StatusEstimated, MetadataJSON: mustJSON(map[string]any{"order": order, "metadata_summary": item.Metadata}),
-				CreatedAt: now,
+				CreatedBy: optionalString(auth.UserID), UpdatedBy: optionalString(auth.UserID), CreatedAt: now,
 			}
 			if err := tx.Create(&row).Error; err != nil {
 				return err
@@ -1136,7 +1150,7 @@ func (a *App) estimateToolLine(ctx context.Context, item ToolUsageItem) (Estimat
 	}, nil
 }
 
-func (a *App) allocateFreezeBatches(tx *gorm.DB, accountID, freezeID string, points int64, now time.Time) error {
+func (a *App) allocateFreezeBatches(tx *gorm.DB, accountID, freezeID string, points int64, operatorID string, now time.Time) error {
 	var batches []businesscore.CreditBatch
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("account_id = ? AND status = ? AND remaining_points > 0", accountID, StatusActive).
@@ -1155,13 +1169,14 @@ func (a *App) allocateFreezeBatches(tx *gorm.DB, accountID, freezeID string, poi
 			take = remaining
 		}
 		batch.RemainingPoints -= take
+		batch.UpdatedBy = optionalString(operatorID)
 		batch.UpdatedAt = now
 		if err := tx.Save(&batch).Error; err != nil {
 			return err
 		}
 		item := businesscore.CreditFreezeBatchItem{
 			ID: security.RandomID("cfbi_"), FreezeID: freezeID, AccountID: accountID, BatchID: batch.ID, FrozenPoints: take,
-			Status: StatusFrozen, CreatedAt: now, UpdatedAt: now,
+			Status: StatusFrozen, CreatedBy: optionalString(operatorID), UpdatedBy: optionalString(operatorID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&item).Error; err != nil {
 			return err
@@ -1201,7 +1216,7 @@ func (a *App) getReleaseDTO(ctx context.Context, freezeID, idempotencyKey string
 	return ReleaseDTO{ReleasedPoints: entry.PointsDelta, ReleaseStatus: freeze.Status}, nil
 }
 
-func (a *App) releaseFreezeLocked(tx *gorm.DB, freezeID string, releasePoints int64, reason, runID, traceID, idempotencyKey string) (businesscore.CreditFreeze, int64, error) {
+func (a *App) releaseFreezeLocked(tx *gorm.DB, freezeID string, releasePoints int64, reason, runID, operatorID, traceID, idempotencyKey string) (businesscore.CreditFreeze, int64, error) {
 	freeze, account, err := a.lockFreezeAndAccount(tx, freezeID)
 	if err != nil {
 		return freeze, 0, err
@@ -1216,7 +1231,8 @@ func (a *App) releaseFreezeLocked(tx *gorm.DB, freezeID string, releasePoints in
 	if releasePoints > remaining {
 		releasePoints = remaining
 	}
-	updated, released, err := a.releaseFreezeRows(tx, &freeze, &account, releasePoints, a.now())
+	now := a.now()
+	updated, released, err := a.releaseFreezeRows(tx, &freeze, &account, releasePoints, operatorID, now)
 	if err != nil {
 		return updated, 0, err
 	}
@@ -1224,7 +1240,9 @@ func (a *App) releaseFreezeLocked(tx *gorm.DB, freezeID string, releasePoints in
 	if updated.ChargedPoints+updated.ReleasedPoints >= updated.FrozenPoints {
 		updated.Status = StatusReleased
 	}
-	updated.UpdatedAt = a.now()
+	updated.UpdatedBy = optionalString(operatorID)
+	updated.UpdatedAt = now
+	account.UpdatedBy = optionalString(operatorID)
 	account.UpdatedAt = updated.UpdatedAt
 	if err := tx.Save(&account).Error; err != nil {
 		return updated, 0, err
@@ -1238,7 +1256,7 @@ func (a *App) releaseFreezeLocked(tx *gorm.DB, freezeID string, releasePoints in
 	return updated, released, nil
 }
 
-func (a *App) releaseFreezeRows(tx *gorm.DB, freeze *businesscore.CreditFreeze, account *businesscore.CreditAccount, releasePoints int64, now time.Time) (businesscore.CreditFreeze, int64, error) {
+func (a *App) releaseFreezeRows(tx *gorm.DB, freeze *businesscore.CreditFreeze, account *businesscore.CreditAccount, releasePoints int64, operatorID string, now time.Time) (businesscore.CreditFreeze, int64, error) {
 	var rows []businesscore.CreditFreezeBatchItem
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("freeze_id = ? AND status = ?", freeze.FreezeID, StatusFrozen).
@@ -1265,6 +1283,7 @@ func (a *App) releaseFreezeRows(tx *gorm.DB, freeze *businesscore.CreditFreeze, 
 		}
 		if batch.ExpiresAt == nil || batch.ExpiresAt.After(now) {
 			batch.RemainingPoints += take
+			batch.UpdatedBy = optionalString(operatorID)
 			batch.UpdatedAt = now
 			if err := tx.Save(&batch).Error; err != nil {
 				return *freeze, 0, err
@@ -1275,6 +1294,7 @@ func (a *App) releaseFreezeRows(tx *gorm.DB, freeze *businesscore.CreditFreeze, 
 		if row.ChargedPoints+row.ReleasedPoints >= row.FrozenPoints {
 			row.Status = StatusReleased
 		}
+		row.UpdatedBy = optionalString(operatorID)
 		row.UpdatedAt = now
 		if err := tx.Save(&row).Error; err != nil {
 			return *freeze, 0, err
@@ -1289,7 +1309,7 @@ func (a *App) releaseFreezeRows(tx *gorm.DB, freeze *businesscore.CreditFreeze, 
 	return *freeze, released, nil
 }
 
-func (a *App) chargeToolItem(tx *gorm.DB, chargeID, estimateID string, item ChargeItemInput, now time.Time) (ChargedLineItemDTO, error) {
+func (a *App) chargeToolItem(tx *gorm.DB, chargeID, estimateID string, item ChargeItemInput, operatorID string, now time.Time) (ChargedLineItemDTO, error) {
 	var estimateItem businesscore.CreditEstimateItem
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("estimate_id = ? AND estimate_item_id = ?", estimateID, item.EstimateItemID).First(&estimateItem).Error; err != nil {
 		return ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "estimate item not found")
@@ -1310,7 +1330,7 @@ func (a *App) chargeToolItem(tx *gorm.DB, chargeID, estimateID string, item Char
 		ID: security.RandomID("ctci_"), ToolChargeID: chargeID, EstimateItemID: item.EstimateItemID,
 		ToolCallID: item.ToolCallID, ToolName: item.ToolName, ToolType: item.ToolType, BillingUnit: item.BillingUnit,
 		ActualQuantity: item.ActualQuantity, ChargedPoints: charged, ExecutionStatus: item.ExecutionStatus,
-		Status: status, MetadataJSON: mustJSON(item.MetadataSummary), CreatedAt: now,
+		Status: status, MetadataJSON: mustJSON(item.MetadataSummary), CreatedBy: optionalString(operatorID), UpdatedBy: optionalString(operatorID), CreatedAt: now,
 	}
 	if err := tx.Create(&row).Error; err != nil {
 		return ChargedLineItemDTO{}, err

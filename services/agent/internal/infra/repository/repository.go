@@ -137,6 +137,17 @@ func (r *Repository) ListMessages(ctx context.Context, sessionID string, limit, 
 	return messages, err
 }
 
+func (r *Repository) GetAssistantMessageByGenerationTask(ctx context.Context, runID, taskID string) (*model.Message, error) {
+	var message model.Message
+	if err := r.db.WithContext(ctx).
+		Where("run_id = ? AND role = ? AND metadata->>'generation_task_id' = ? AND deleted_at IS NULL", runID, "assistant", taskID).
+		Order("sequence DESC").
+		First(&message).Error; err != nil {
+		return nil, err
+	}
+	return &message, nil
+}
+
 func (r *Repository) UpdateRunStatus(ctx context.Context, id, toStatus, errorCode, errorMessage string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run model.Run
@@ -249,6 +260,16 @@ func (r *Repository) CreateArtifact(ctx context.Context, artifact *model.Artifac
 	return r.db.WithContext(ctx).Create(artifact).Error
 }
 
+func (r *Repository) GetArtifactByBusinessRef(ctx context.Context, runID, businessRefID string) (*model.Artifact, error) {
+	var artifact model.Artifact
+	if err := r.db.WithContext(ctx).
+		Where("run_id = ? AND business_ref_id = ? AND deleted_at IS NULL", runID, businessRefID).
+		First(&artifact).Error; err != nil {
+		return nil, err
+	}
+	return &artifact, nil
+}
+
 func (r *Repository) ListArtifacts(ctx context.Context, sessionID string, limit, offset int) ([]model.Artifact, error) {
 	limit = normalizeLimit(limit, 10, 100)
 	var artifacts []model.Artifact
@@ -259,6 +280,88 @@ func (r *Repository) ListArtifacts(ctx context.Context, sessionID string, limit,
 		Offset(offset).
 		Find(&artifacts).Error
 	return artifacts, err
+}
+
+func (r *Repository) CreateTask(ctx context.Context, task *model.Task) error {
+	normalizeTask(task)
+	return r.db.WithContext(ctx).Create(task).Error
+}
+
+func (r *Repository) GetTask(ctx context.Context, id string) (*model.Task, error) {
+	var task model.Task
+	if err := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id).First(&task).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+func (r *Repository) ListTasksByRun(ctx context.Context, runID string) ([]model.Task, error) {
+	var tasks []model.Task
+	err := r.db.WithContext(ctx).
+		Where("run_id = ? AND deleted_at IS NULL", runID).
+		Order("created_at ASC").
+		Find(&tasks).Error
+	return tasks, err
+}
+
+func (r *Repository) ListStaleRunningTasks(ctx context.Context, taskType string, before time.Time, limit int) ([]model.Task, error) {
+	limit = normalizeLimit(limit, 10, 200)
+	var tasks []model.Task
+	err := r.db.WithContext(ctx).
+		Where("task_type = ? AND status = ? AND updated_at < ? AND deleted_at IS NULL", taskType, state.TaskStatusRunning, before).
+		Order("updated_at ASC").
+		Limit(limit).
+		Find(&tasks).Error
+	return tasks, err
+}
+
+func (r *Repository) UpdateTaskProgress(ctx context.Context, id string, progressPercent int, progressDetail datatypes.JSON) error {
+	if len(progressDetail) == 0 {
+		progressDetail = jsonObject()
+	}
+	if progressPercent < 0 {
+		progressPercent = 0
+	}
+	if progressPercent > 100 {
+		progressPercent = 100
+	}
+	return r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Updates(map[string]any{
+			"progress_percent": progressPercent,
+			"progress_detail":  progressDetail,
+			"updated_at":       time.Now().UTC(),
+		}).Error
+}
+
+func (r *Repository) UpdateTaskStatus(ctx context.Context, id, toStatus, errorCode string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var task model.Task
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND deleted_at IS NULL", id).
+			First(&task).Error; err != nil {
+			return err
+		}
+		if task.Status == toStatus {
+			return nil
+		}
+		if !state.CanTransitionTask(task.Status, toStatus) {
+			return fmt.Errorf("%w: %s -> %s", ErrInvalidStateTransition, task.Status, toStatus)
+		}
+		now := time.Now().UTC()
+		updates := map[string]any{
+			"status":     toStatus,
+			"error_code": errorCode,
+			"updated_at": now,
+		}
+		if toStatus == state.TaskStatusRunning && task.StartedAt == nil {
+			updates["started_at"] = now
+		}
+		if toStatus == state.TaskStatusCompleted || toStatus == state.TaskStatusFailed || toStatus == state.TaskStatusCancelled {
+			updates["completed_at"] = now
+		}
+		return tx.Model(&model.Task{}).Where("id = ?", id).Updates(updates).Error
+	})
 }
 
 func (r *Repository) CreateSafetyEvaluation(ctx context.Context, safety *model.SafetyEvaluation) error {
@@ -411,6 +514,30 @@ func normalizeArtifact(artifact *model.Artifact) {
 	}
 	if len(artifact.Content) == 0 {
 		artifact.Content = jsonObject()
+	}
+}
+
+func normalizeTask(task *model.Task) {
+	now := time.Now().UTC()
+	if task.CreatedAt.IsZero() {
+		task.CreatedAt = now
+	}
+	if task.UpdatedAt.IsZero() {
+		task.UpdatedAt = now
+	}
+	if task.Status == "" {
+		task.Status = state.TaskStatusPending
+	}
+	if len(task.ProgressDetail) == 0 {
+		task.ProgressDetail = jsonObject()
+	}
+	if task.Status == state.TaskStatusRunning && task.StartedAt == nil {
+		task.StartedAt = &now
+	}
+	if task.Status == state.TaskStatusCompleted || task.Status == state.TaskStatusFailed || task.Status == state.TaskStatusCancelled {
+		if task.CompletedAt == nil {
+			task.CompletedAt = &now
+		}
 	}
 }
 

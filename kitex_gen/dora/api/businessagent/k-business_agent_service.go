@@ -20663,6 +20663,20 @@ func (p *ReviewCandidateSkillSpecResponse) FastRead(buf []byte) (int, error) {
 					goto SkipFieldError
 				}
 			}
+		case 11:
+			if fieldTypeId == thrift.LIST {
+				l, err = p.FastReadField11(buf[offset:])
+				offset += l
+				if err != nil {
+					goto ReadFieldError
+				}
+			} else {
+				l, err = thrift.Binary.Skip(buf[offset:], fieldTypeId)
+				offset += l
+				if err != nil {
+					goto SkipFieldError
+				}
+			}
 		default:
 			l, err = thrift.Binary.Skip(buf[offset:], fieldTypeId)
 			offset += l
@@ -20872,6 +20886,31 @@ func (p *ReviewCandidateSkillSpecResponse) FastReadField10(buf []byte) (int, err
 	return offset, nil
 }
 
+func (p *ReviewCandidateSkillSpecResponse) FastReadField11(buf []byte) (int, error) {
+	offset := 0
+
+	_, size, l, err := thrift.Binary.ReadListBegin(buf[offset:])
+	offset += l
+	if err != nil {
+		return offset, err
+	}
+	_field := make([]*SkillOutputElementDTO, 0, size)
+	values := make([]SkillOutputElementDTO, size)
+	for i := 0; i < size; i++ {
+		_elem := &values[i]
+		_elem.InitDefault()
+		if l, err := _elem.FastRead(buf[offset:]); err != nil {
+			return offset, err
+		} else {
+			offset += l
+		}
+
+		_field = append(_field, _elem)
+	}
+	p.OutputElements = _field
+	return offset, nil
+}
+
 func (p *ReviewCandidateSkillSpecResponse) FastWrite(buf []byte) int {
 	return p.FastWriteNocopy(buf, nil)
 }
@@ -20889,6 +20928,7 @@ func (p *ReviewCandidateSkillSpecResponse) FastWriteNocopy(buf []byte, w thrift.
 		offset += p.fastWriteField8(buf[offset:], w)
 		offset += p.fastWriteField9(buf[offset:], w)
 		offset += p.fastWriteField10(buf[offset:], w)
+		offset += p.fastWriteField11(buf[offset:], w)
 	}
 	offset += thrift.Binary.WriteFieldStop(buf[offset:])
 	return offset
@@ -20907,6 +20947,7 @@ func (p *ReviewCandidateSkillSpecResponse) BLength() int {
 		l += p.field8Length()
 		l += p.field9Length()
 		l += p.field10Length()
+		l += p.field11Length()
 	}
 	l += thrift.Binary.FieldStopLength()
 	return l
@@ -20993,6 +21034,22 @@ func (p *ReviewCandidateSkillSpecResponse) fastWriteField10(buf []byte, w thrift
 	return offset
 }
 
+func (p *ReviewCandidateSkillSpecResponse) fastWriteField11(buf []byte, w thrift.NocopyWriter) int {
+	offset := 0
+	if p.IsSetOutputElements() {
+		offset += thrift.Binary.WriteFieldBegin(buf[offset:], thrift.LIST, 11)
+		listBeginOffset := offset
+		offset += thrift.Binary.ListBeginLength()
+		var length int
+		for _, v := range p.OutputElements {
+			length++
+			offset += v.FastWriteNocopy(buf[offset:], w)
+		}
+		thrift.Binary.WriteListBegin(buf[listBeginOffset:], thrift.STRUCT, length)
+	}
+	return offset
+}
+
 func (p *ReviewCandidateSkillSpecResponse) field1Length() int {
 	l := 0
 	l += thrift.Binary.FieldBeginLength()
@@ -21067,6 +21124,19 @@ func (p *ReviewCandidateSkillSpecResponse) field10Length() int {
 	if p.IsSetExpectedElementsJson() {
 		l += thrift.Binary.FieldBeginLength()
 		l += thrift.Binary.StringLengthNocopy(*p.ExpectedElementsJson)
+	}
+	return l
+}
+
+func (p *ReviewCandidateSkillSpecResponse) field11Length() int {
+	l := 0
+	if p.IsSetOutputElements() {
+		l += thrift.Binary.FieldBeginLength()
+		l += thrift.Binary.ListBeginLength()
+		for _, v := range p.OutputElements {
+			_ = v
+			l += v.BLength()
+		}
 	}
 	return l
 }

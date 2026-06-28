@@ -10,77 +10,80 @@
 
 **初版实现质量明显高于 code-plan 设计阶段。** 审核报告里"契约冻结前必清"的 **7 条接缝硬冲突初版已全部收敛**（无 codegen 阻断、无联调当场崩）；多条高优先（GEN-1 生成落盘链、GEN-3 additional_input 安全重评、TURN-1 resume 事件、SKILL-1 确认规则持久化、WORK-1 企业作品越权）**已修复**。
 
-真实仍缺集中在 8 个面：**① 业务库数据底座（软删/公共列全库缺，头号）② 安全 digest 一致性（评 A 发 B）③ 崩溃恢复/资金闭环（依赖异步队列，对应 W3 Redis）④ 企业空间越权细则 ⑤ 审计 DB 级不可变 ⑥ 可观测性体系 ⑦ Skill 输出元素双态 ⑧ 断线确认恢复**。
+初版核对时真实缺口集中在 8 个面：**① 业务库数据底座（软删/公共列全库缺，头号）② 安全 digest 一致性（评 A 发 B）③ 崩溃恢复/资金闭环（依赖异步队列，对应 W3 Redis）④ 企业空间越权细则 ⑤ 审计 DB 级不可变 ⑥ 可观测性体系 ⑦ Skill 输出元素双态 ⑧ 断线确认恢复**。
+
+> 2026-06-29 状态回填：上述 8 个面中的 INFRA-1/13、GEN-5、ACCT-3/1b/8、SKILL-2、TURN-8/7/6/10、GEN-7、INFRA-9、INFRA-11、WORK-3/4/8/9、INFRA-4/2/3/5/6/7/10、ACCT-4/6/7、GEN-4/8、operator 回填、注册幂等 tenant 边界、软删唯一约束复用策略均已由后续切片关闭并推送。当前继续推进时以本文下方完成记录、`docs/contracts/**` active 契约和机器可校验事实源为准。
+>
+> GEN-6 后续回填：Redis worker 第一阶段与提交后自动对账 / automatic reconciliation 已补齐；进入 `asset_commit_started/completed` 的陈旧任务会 replay `CommitGeneratedAssetAndCharge` 幂等键并补齐 Agent 侧 artifact/message/task/run/interrupt 收尾，缺少 `commit_request` 的旧任务仍保留人工对账保护。
 
 ## 统计
 
-| 结论 | 数量（按判定） | 含义 |
+| 当前结论 | 数量（按最新完成记录） | 含义 |
 |---|---|---|
-| ✅ FIXED / NA | ~33 | 初版已闭合或设计已变不适用 |
-| 🟡 PARTIAL | ~14 | 有骨架但口径不全 / 仅隐式实现 / 存了没接通 |
-| 🔴 MISSING | ~24 | 仍缺，需改造 |
+| ✅ CLOSED / FIXED / NA | 原 51 项主体已收口 | P0–P3 已通过代码、契约、文档或测试固化关闭 |
+| 🟡 W3 后续能力边界 | 0 | GEN-6 Redis worker + 提交后自动对账已闭合 |
+| 🔴 当前阻塞 MISSING | 0 | W1/P0 承重墙级缺口已清完 |
 
 > 接缝组（SEAM-1~7 + 2 附录）单独结论：**100% 已清**，下表不再展开，仅在末尾备忘。
 
 ---
 
-## 🔴 P0 — 承重墙级真实缺口（最高优先）
+## 🔴 P0 — 承重墙级初版缺口（当前均已闭合）
 
 | ID | 缺口 | 证据 | 应落 |
 |---|---|---|---|
-| **INFRA-1** | 业务库 63 表仅 3 表有 `deleted_at`，`updated_by` 全库为 0，`tenant_id` 仅 2 表；GORM 用裸 `*time.Time` 非 `gorm.DeletedAt`，软删各写各的 | `db/migrations/.../0001..0018` + `infra/repository/businesscore/models*.go` | business 全域 + 02 基线 |
-| **GEN-5** | 评 A 发 B：安全评估 digest 在 start 阶段按当时 prompt 算，发模型时另取 `latestUserPrompt`，二者无一致性断言 → 可让"已评估"证据为一段文本背书、实际生成另一段（安全 fail-closed 旁路）| `agent workbench/app.go:1996`(评估) vs `1749/1756`(发模型) | agent 08+13 |
-| **INFRA-13** | 审计/流水表无 DB 级 append-only（无 REVOKE/RULE/TRIGGER），不可变仅靠应用约定，直连 SQL 可静默篡改 | `db/.../0001`(business_audit_logs)、`0011`(work_moderation_records) | business 02 |
-| **ACCT-3** | 企业积分流水 member 可见全量，未实现"owner 看全 / member 看本人"可见性分级（越权红线）| `credit/app.go:286-306` vs `listLedger ~1024-1037` | business 03+09 |
-| **ACCT-1b** | 缺"绑定 Tool 不在企业白名单 → 该 Skill 不可用"禁用门（有白名单数据但无预先禁用）| `toolpolicy/app.go` + `skillcatalog/app.go` | business 03/05/08 |
-| **SKILL-2** | Skill 输出元素 schema 仅 `element_type/schema_json/required`，缺草稿/最终双态（双态只活在字典表，per-skill 约束拿不到，Skill 完整定义被削）| `db/.../0007_skill_catalog_review.up.sql:67-76` | business 08 + agent 12 |
-| **ACCT-8** | 平台管理员越权红线本域未对称成文/强制（admin 与 user 独立鉴权，无"管理员不得跨入业务空间归属"红线检查）| `accountspace/app.go` + `admin/app.go` | business 03/04 |
+| **INFRA-1 ✅** | 业务库 63 表仅 3 表有 `deleted_at`，`updated_by` 全库为 0，`tenant_id` 仅 2 表；GORM 用裸 `*time.Time` 非 `gorm.DeletedAt`，软删各写各的 | `db/migrations/.../0001..0018` + `infra/repository/businesscore/models*.go` | 批 A：公共列/软删 + operator 回填 + schema baseline |
+| **GEN-5 ✅** | 评 A 发 B：安全评估 digest 在 start 阶段按当时 prompt 算，发模型时另取 `latestUserPrompt`，二者无一致性断言 → 可让"已评估"证据为一段文本背书、实际生成另一段（安全 fail-closed 旁路）| `agent workbench/app.go:1996`(评估) vs `1749/1756`(发模型) | 批 B：发模型前 digest 一致性断言 |
+| **INFRA-13 ✅** | 审计/流水表无 DB 级 append-only（无 REVOKE/RULE/TRIGGER），不可变仅靠应用约定，直连 SQL 可静默篡改 | `db/.../0001`(business_audit_logs)、`0011`(work_moderation_records) | 批 A：10 张 append-only 表触发器 |
+| **ACCT-3 ✅** | 企业积分流水 member 可见全量，未实现"owner 看全 / member 看本人"可见性分级（越权红线）| `credit/app.go:286-306` vs `listLedger ~1024-1037` | 批 B：owner/member 分级过滤 |
+| **ACCT-1b ✅** | 缺"绑定 Tool 不在企业白名单 → 该 Skill 不可用"禁用门（有白名单数据但无预先禁用）| `toolpolicy/app.go` + `skillcatalog/app.go` | 批 B：Skill 路由白名单禁用门 |
+| **SKILL-2 ✅** | Skill 输出元素 schema 仅 `element_type/schema_json/required`，缺草稿/最终双态（双态只活在字典表，per-skill 约束拿不到，Skill 完整定义被削）| `db/.../0007_skill_catalog_review.up.sql:67-76` | 批 B：FP1–FP4 全链闭环 |
+| **ACCT-8 ✅** | 平台管理员越权红线本域未对称成文/强制（admin 与 user 独立鉴权，无"管理员不得跨入业务空间归属"红线检查）| `accountspace/app.go` + `admin/app.go` | 批 B：成文 + 测试固化 |
 
-## 🟠 P1 — 高危：可用性 / 资金 / 联调断点
+## 🟠 P1 — 高危初版缺口（当前均已闭合）
 
 | ID | 缺口 | 证据 | 应落 / 关联 |
 |---|---|---|---|
-| **GEN-6** | 生成全链同步跑在确认 HTTP 请求内，无异步 worker / 重启恢复 / 对账；崩在 Freeze 后 commit 前 → 冻结悬挂至 `expires_at` | `api/http/workbench_handlers.go:146`→`app.go:973`→`1701`(全程同步)；全仓无 worker/recover | agent 05/13 · **W3 Redis 队列+对账** |
-| **TURN-8** | `SnapshotResponse` 缺 `interrupt` 字段 → 断线在待确认态恢复不出确认面板，run 卡死 | `agent workbench/app.go:636-645,1136-1139` | agent 04 对齐 10 |
-| **GEN-7** | `EstimateGenerationCredits` 唯一未用幂等卫的写 RPC，确认前重复预估插孤儿 `credit_estimates` | `credit/app.go:308-339,891`(无 guard.Begin) | business 09 |
-| **INFRA-9** | Agent 运行期配置加载链断开：`agent_runtime_configs` 表 + `GetActiveRuntimeConfig` 都在，但运行期从不调用，`configVersion` 仅作字符串标签（配置化只有壳）| `config.go` + `main.go:47` + 仅测试调用 loader | agent 11/03 |
-| **TURN-7** | reject 直接终结 run 为 failed，无"改模型→取消确认→重估"回退闭环 | `agent workbench/app.go:1003-1016`；state.go 无 waiting_confirmation→running 边 | agent 05 |
-| **ACCT-4** | 移除成员仅置 status=removed + 审计，未对该成员运行中的 active run/task 做终止/拒绝处置 | `accountspace/app.go:828-880` | business 03 + agent 05 |
+| **GEN-6 ✅** | 生成全链同步跑在确认 HTTP 请求内，无异步 worker / 重启恢复 / 对账；崩在 Freeze 后 commit 前 → 冻结悬挂至 `expires_at` | `api/http/workbench_handlers.go:146`→`app.go:973`→`1701`(全程同步)；全仓无 worker/recover | 批 D：恢复/对账底座 + Redis worker + 提交后自动对账 |
+| **TURN-8 ✅** | `SnapshotResponse` 缺 `interrupt` 字段 → 断线在待确认态恢复不出确认面板，run 卡死 | `agent workbench/app.go:636-645,1136-1139` | 批 C：snapshot interrupt 恢复 |
+| **GEN-7 ✅** | `EstimateGenerationCredits` 唯一未用幂等卫的写 RPC，确认前重复预估插孤儿 `credit_estimates` | `credit/app.go:308-339,891`(无 guard.Begin) | 批 D：预估幂等卫 |
+| **INFRA-9 ✅** | Agent 运行期配置加载链断开：`agent_runtime_configs` 表 + `GetActiveRuntimeConfig` 都在，但运行期从不调用，`configVersion` 仅作字符串标签（配置化只有壳）| `config.go` + `main.go:47` + 仅测试调用 loader | 批 D：运行期配置版本落库 |
+| **TURN-7 ✅** | reject 直接终结 run 为 failed，无"改模型→取消确认→重估"回退闭环 | `agent workbench/app.go:1003-1016`；state.go 无 waiting_confirmation→running 边 | 批 C：reject 改 cancelled + 新 run 重估 |
+| **ACCT-4 ✅** | 移除成员仅置 status=removed + 审计，未对该成员运行中的 active run/task 做终止/拒绝处置 | `accountspace/app.go:828-880` | 批 D：active run 权限撤销 fail-closed |
 
-## 🟡 P2 — 中危：体系化缺口
+## 🟡 P2 — 体系化初版缺口（当前均已闭合/固化）
 
 | ID | 缺口 | 证据 | 应落 |
 |---|---|---|---|
-| INFRA-3 | 业务侧无任何指标定义（counter/histogram/gauge）| services/business 全域 | business 02/14 |
-| INFRA-5 | 跨服务仅手工透传明文 `trace_id` 字符串，非 W3C traceparent/OTel context（OTel 仅 indirect 依赖）| `business_gateway.go:599-604` + `go.mod` | agent 11 + business 02 |
-| INFRA-6 | 业务错误码扁平 ~19 值，未对齐 7 类领域分类 | `pkg/errors/error.go:10-30` | business 02 |
-| INFRA-7 | agent 错误模型扁平 Code（~10），无 category 维度；`error_type` 仅 2 临时值 | `apperror/error.go:10-21` | agent 11 |
-| INFRA-10 | 配置实际仅 默认→文件→env 三层，etcd 不是配置源（仅供 Kitex registry），缺 etcd 非敏感加载层 | `infra/config/config.go:113` + `bootstrap/app.go` | business 01/15 + agent 11 |
-| INFRA-11 | 业务状态机无成文"流转矩阵"（常量内联）；非法跳转靠隐式守卫（work/credit 有部分测试）| `work/app.go:30-36` + `credit/app.go:394-411` | business 各域+14 |
-| TURN-6 | `chat.controls.locked` 已定义但 services/agent 无 emit 点（仅测试白名单）；required 锁 vs accepted 锁未辨析 | 草案:115,124；代码无 emit | agent 06/05 |
-| TURN-10 | `payload_schema_version` 存 DB 且 emit 硬编码，但未进 AG-UI 信封 schema，旧前端降级读法未定义 | `models.go:84` + `api/agui/...schema.json:6-19` | agent 06 |
-| WORK-3 | 作品 category 作自由字符串写入，无"内置单选+active 字典"校验（字典表存在但应用层不查）| `work/app.go:286-356,358-465` | business 12 |
-| WORK-4 | 无"最后一个 active 管理员"计数守护，DisableAdmin 仅拦 self → 可锁死 | `admin/app.go:429-472` | business 04 |
-| WORK-5 | 后台 7 模块 owner 归属无声明/枚举 | `admin/app.go` 全域 | business 04+各域 |
-| SKILL-9 | 二级兜底仅静默回退文本模型，无"不推销/不建议建 Skill"成文规则或测试 | `skill/router.go:43` + `workbench/app.go:2158-2168` | agent 08 |
-| SKILL-10 | 运行期确实逐个复检 Tool 策略，但 tool_bindings 无"需运行期逐个复检白名单"显式标注（靠隐式）| `workbench/app.go:1380-1394` | agent 08 |
+| INFRA-3 ✅ | 业务侧无任何指标定义（counter/histogram/gauge）| services/business 全域 | 批 E：内置 metrics registry + `/metrics` |
+| INFRA-5 ✅ | 跨服务仅手工透传明文 `trace_id` 字符串，非 W3C traceparent/OTel context（OTel 仅 indirect 依赖）| `business_gateway.go:599-604` + `go.mod` | 批 E：W3C Trace Context 传播 |
+| INFRA-6 ✅ | 业务错误码扁平 ~19 值，未对齐 7 类领域分类 | `pkg/errors/error.go:10-30` | 批 E：业务错误 category |
+| INFRA-7 ✅ | agent 错误模型扁平 Code（~10），无 category 维度；`error_type` 仅 2 临时值 | `apperror/error.go:10-21` | 批 E：Agent 错误 category |
+| INFRA-10 ✅ | 配置实际仅 默认→文件→env 三层，etcd 不是配置源（仅供 Kitex registry），缺 etcd 非敏感加载层 | `infra/config/config.go:113` + `bootstrap/app.go` | 批 E：etcd 非敏感配置 overlay |
+| INFRA-11 ✅ | 业务状态机无成文"流转矩阵"（常量内联）；非法跳转靠隐式守卫（work/credit 有部分测试）| `work/app.go:30-36` + `credit/app.go:394-411` | 批 F：状态流转矩阵成文 |
+| TURN-6 ✅ | `chat.controls.locked` 已定义但 services/agent 无 emit 点（仅测试白名单）；required 锁 vs accepted 锁未辨析 | 草案:115,124；代码无 emit | 批 C：required 态同步锁控件 |
+| TURN-10 ✅ | `payload_schema_version` 存 DB 且 emit 硬编码，但未进 AG-UI 信封 schema，旧前端降级读法未定义 | `models.go:84` + `api/agui/...schema.json:6-19` | 批 C：AG-UI 信封字段 |
+| WORK-3 ✅ | 作品 category 作自由字符串写入，无"内置单选+active 字典"校验（字典表存在但应用层不查）| `work/app.go:286-356,358-465` | 批 F：active 字典校验 |
+| WORK-4 ✅ | 无"最后一个 active 管理员"计数守护，DisableAdmin 仅拦 self → 可锁死 | `admin/app.go:429-472` | 批 F：最后 active 管理员守护 |
+| WORK-5 ✅ | 后台 7 模块 owner 归属无声明/枚举 | `admin/app.go` 全域 | 批 F：后台模块 owner 中心枚举 |
+| SKILL-9 ✅ | 二级兜底仅静默回退文本模型，无"不推销/不建议建 Skill"成文规则或测试 | `skill/router.go:43` + `workbench/app.go:2158-2168` | 批 F：兜底不推销规则固化 |
+| SKILL-10 ✅ | 运行期确实逐个复检 Tool 策略，但 tool_bindings 无"需运行期逐个复检白名单"显式标注（靠隐式）| `workbench/app.go:1380-1394` | 批 F：逐 Tool 复检语义固化 |
 
-## 🔵 P3 — 低危：口径精化 / 显式化防回归
+## 🔵 P3 — 口径精化 / 显式化防回归（当前均已闭合/固化）
 
 | ID | 缺口 | 证据 |
 |---|---|---|
-| GEN-4 | safety evidence 过期只硬失败+全额释放，无重评续跑（fail-closed 成立，缺可用性）| `assetcommit/app.go:566-573` + `agent app.go:1922-1937` |
-| GEN-8 | commit 端缺"部分 artifact 缺元素"的部分结算+定额释放，当前全回滚+全释放（不漏释放但不精确）| `assetcommit/app.go:321,264-268` |
-| WORK-7 | `AdminUserDetailDTO.spaces[]` 为 `[]map[string]string` 弱类型，非字段级白名单 | `admin/app.go:142-147` |
-| WORK-9 | `business_action` 共 43 码散落字面量，与 PRD 11 模块大体对齐但无中心枚举 | services/business 散落 |
-| WORK-10 | 点赞 `like_count` 用 `GREATEST(...,0)` 保不为负 + 唯一约束防重复，但无防刷频控、无成文不变量 | `work/app.go:945-953` + `0011/0018` |
-| WORK-8 | 管理员不能改用户密码（实现保证：无端点写 password_hash），但红线未成文 | `admin/app.go:285-343` |
-| INFRA-2 | agent 侧第 11 表 safety_evaluations 已入迁移+边界测试；业务侧 14 表白名单未成文、无对标断言 | `repository_integration_test.go` vs `idempotency_integration_test.go` |
-| INFRA-4 | 结构化 logger 仅保证 service/env/trace_id 三字段，其余散落各 payload，无统一强制字段集 | `observability/logger.go:28,36` |
-| INFRA-14 | `ListAssetElementTypes` 默认 50（字典例外正确），但 fixture 未标"默认 50≠通用默认 10"差异 | `tests/contract/fixtures/.../list_asset_element_types_success.json` |
-| ACCT-6 | 无显式未登录访客边界（所有入口要求 auth.UserID）| `accountspace/app.go` 全域 |
-| ACCT-7 | 无"未登录→登录回原意图"承接字段/流程（pending_intent/return_to 缺）| services/business 全域 |
-| TURN-4 | 排序靠 sequence 已确立，但"timestamp 仅展示、不作排序"显式规则未复述 | 草案:244 vs 86-87 |
+| GEN-8 ✅ | commit 端缺"部分 artifact 缺元素"的部分结算+定额释放，当前全回滚+全释放（不漏释放但不精确）| 批 F：artifact 级部分提交与定额释放 |
+| WORK-7 ✅ | `AdminUserDetailDTO.spaces[]` 为 `[]map[string]string` 弱类型，非字段级白名单 | 批 F：强类型空白名单 DTO |
+| WORK-9 ✅ | `business_action` 共 43 码散落字面量，与 PRD 11 模块大体对齐但无中心枚举 | 批 F：`auditlog` 中心枚举 |
+| WORK-10 ✅ | 点赞 `like_count` 用 `GREATEST(...,0)` 保不为负 + 唯一约束防重复，但无防刷频控、无成文不变量 | 批 F：点赞不变量成文 + 测试固化 |
+| WORK-8 ✅ | 管理员不能改用户密码（实现保证：无端点写 password_hash），但红线未成文 | 批 F：红线成文 + 防回归测试 |
+| INFRA-2 ✅ | agent 侧第 11 表 safety_evaluations 已入迁移+边界测试；业务侧 14 表白名单未成文、无对标断言 | 批 A：业务 schema baseline 白名单断言 |
+| INFRA-4 ✅ | 结构化 logger 仅保证 service/env/trace_id 三字段，其余散落各 payload，无统一强制字段集 | 批 E：业务 HTTP 日志字段集 |
+| INFRA-14 ✅ | `ListAssetElementTypes` 默认 50（字典例外正确），但 fixture 未标"默认 50≠通用默认 10"差异 | 批 F：fixture 与 RPC 契约标注 |
+| ACCT-6 ✅ | 无显式未登录访客边界（所有入口要求 auth.UserID）| 批 F：401 登录边界 details |
+| ACCT-7 ✅ | 无"未登录→登录回原意图"承接字段/流程（pending_intent/return_to 缺）| 批 F：`return_to` / `pending_intent` 契约 |
+| TURN-4 ✅ | 排序靠 sequence 已确立，但"timestamp 仅展示、不作排序"显式规则未复述 | 批 F：AG-UI 渲染规则固化 |
 
 ---
 
@@ -93,18 +96,18 @@
 
 ## 与后续工作线关联
 
-- **W3 Redis** 直接救 **GEN-6**（异步 worker + 崩溃恢复 + 冻结对账清扫）；GEN-7/ACCT-4 也受益于队列化处置。
-- **W4 测试** 优先覆盖本表 MISSING 项（尤其 P0/P1），并补 runtime/safety、TurnLoop 24 场景、管理端全线的自动化。
+- **W3 Redis** 已补 **GEN-6** Redis worker 第一阶段与提交后自动对账/自动 reconciliation。W1 已完成恢复/对账闭环，不再把 Freeze 后崩溃悬挂风险留到过期释放，也不再把 commit 已开始的任务默认推人工对账。
+- **W4 测试** 不再按本文顶部旧 MISSING 追单；应围绕 W2/W3 新闭环、runtime/safety、TurnLoop 24 场景和管理端全线继续扩面。
 - **W2 闭环** 核对时以本表为断点清单逐域走查。
 
 ## 建议改造批次（每批改造前按改造铁律进 plan 对齐、逐条标注约束）
 
-1. **批 A 数据底座先行**：INFRA-1（公共列+软删基线）→ 改一次触达全库，越早做返工面越小；连带 INFRA-13（审计 append-only）、INFRA-12 已 FIXED 可作范式。
-2. **批 B 安全/越权红线**：GEN-5（评 A 发 B digest 断言）+ ACCT-3/ACCT-1b/ACCT-8（企业越权细则）。
-3. **批 C 确认恢复闭环**：TURN-8（snapshot interrupt 字段）+ TURN-7/TURN-6（确认锁定/回退）。
-4. **批 D 配合 W3**：GEN-6/GEN-7/ACCT-4（崩溃恢复+幂等+active run 处置）。
-5. **批 E 可观测体系**：INFRA-3/5/6/7（指标/trace/错误分类）。
-6. **批 F 收尾**：P2 剩余 + P3。
+1. **批 A 数据底座先行 ✅**：INFRA-1/13、INFRA-2、operator 回填、软删唯一约束复用评估已关闭。
+2. **批 B 安全/越权红线 ✅**：GEN-5、ACCT-3/1b/8、SKILL-2 FP1–FP4 已关闭。
+3. **批 C 确认恢复闭环 ✅**：TURN-8/7/6/10 已关闭。
+4. **批 D 配合 W3 ✅**：GEN-7、ACCT-4、INFRA-9、GEN-4 已关闭；GEN-6 已完成恢复/对账底座、Redis worker 第一阶段与提交后自动对账。
+5. **批 E 可观测体系 ✅**：INFRA-3/4/5/6/7/10 已关闭。
+6. **批 F 收尾 ✅**：WORK-3/4/5/7/8/9/10、SKILL-9/10、ACCT-6/7、GEN-8、TURN-4、INFRA-11/14 已关闭。
 
 > 接缝组无待办。SEAM-3 仅需把设计文档措辞同步为"PERMISSION_DENIED 错误码"，不影响代码。
 
@@ -117,15 +120,23 @@
 
 - **INFRA-1 ✅ 已修**：续号迭代 `0019` 为 53 张可变业务表补 `created_by/updated_by/deleted_at`；model 层 52 个 struct 启用 `gorm.DeletedAt` 自动软删（User/Asset/Work 由裸 `*time.Time` 死字段激活）。
 - **INFRA-13 ✅ 已修**：`0020` 对 **10 张** append-only 审计/流水表加 `BEFORE UPDATE OR DELETE` 触发器（DB 级不可篡改，任何角色含 superuser 都拦）。
+- **created_by/updated_by operator 回填首片 ✅ 已修**：项目/作品主写路径已从 auth context 回填公共列，覆盖 `projects`、`project_assets`、`project_works`、`works`、`work_assets`、`work_public_snapshots`、`work_likes`；管理员下架写入 `updated_by=admin_id`。
+- **created_by/updated_by operator 回填二片 ✅ 已修**：Tool 策略后台写路径从 admin auth 回填公共列，覆盖 `tool_definitions`、`tool_policies`、`tool_pricing_policies`、`tool_whitelist_rules`。
+- **created_by/updated_by operator 回填三片 ✅ 已修**：模型配置后台写路径从 admin auth 回填公共列，覆盖 `model_providers`、`models`、`default_models`（应用层暂无 model_prices 管理写入口）。
+- **created_by/updated_by operator 回填四片 ✅ 已修**：资产上传/生成提交写路径从 user auth 回填公共列，覆盖 `assets`、`asset_storage_objects`、`upload_intents`、`asset_elements`、`generated_asset_object_slots`、`asset_commit_batches`、`asset_commit_items`。
+- **created_by/updated_by operator 回填五片 ✅ 已修**：通知写路径回填公共列，系统创建/失败记录写 `system`，用户读操作写 `updated_by=user_id`，覆盖 `notifications`、`notification_create_failures`。
+- **created_by/updated_by operator 回填六片 ✅ 已修**：Skill 目录/审核写路径回填公共列，用户保存/提交/测试结果写 user_id，管理员发布/驳回/废弃写 admin_id，覆盖 `skills`、`skill_versions`、`skill_output_element_schemas`、`skill_test_runs`、`skill_review_records`。
+- **created_by/updated_by operator 回填七片 ✅ 已修**：积分/兑换码写路径回填公共列，用户预估/冻结/释放/Tool 扣费/兑换写 user_id，管理员发放/兑换码创建与禁用写 admin_id；覆盖 `credit_accounts`(余额变更 `updated_by`)、`credit_batches`、`credit_estimates`、`credit_estimate_items`、`credit_freezes`、`credit_freeze_batch_items`、`credit_tool_charge_batches`、`credit_tool_charge_items`、`redeem_code_batches`、`redeem_codes`，并补 `assetcommit` 生成资产提交的积分扣费旁路。
+- **created_by/updated_by operator 回填八片 ✅ 已修**：账户/空间/企业与平台管理员写路径回填公共列，用户登录/会话/切身份/建企业/邀请/成员移除/owner 转让写 user_id，管理员 bootstrap 写 `system_seed`，admin 登录/登出/轮转/创建/禁用/用户状态调整写 admin_id；覆盖 `business_users`、`auth_sessions`、`business_spaces`、`enterprises`、`enterprise_members`、`enterprise_invites`、`credit_accounts`(注册/建企业创建列)、`platform_admins`、`platform_admin_bootstraps`、`platform_admin_sessions`。
+- **注册幂等 tenant 边界 ✅ 已修**：`RegisterPersonalAccount` 的 `tenant_id='auth:'+64位hash` 超过 `varchar(64)` 已收敛为 64 字符内稳定 tenant，注册成功与同 key replay 已由 accountspace 集成测试覆盖。
 
 范围决策（逐条可追溯）：
 - `tenant_id` 未全表加——沿用 `space_id` 为隔离键，避免冗余。
-- `created_by/updated_by` 仅 schema 加列预留，model **不映射**——与现有领域操作者字段（`CreatedByAdminID` 等）冗余；operator 回填留子切片。
+- `created_by/updated_by` 不做全局 callback；只在已映射且操作者语义明确的写路径回填，避免与现有领域操作者字段（`CreatedByAdminID`、`CreatedByUserID`、`PublishedByUserID` 等）混淆。
 - append-only 10 张表不软删、不映射 DeletedAt；`skill_review_records` 经代码核实为 insert-only 事件流，与 `work_moderation_records` 对称纳入。
 
 遗留（后续子切片，不阻塞）：
-- **created_by/updated_by operator 回填**：贯穿各写路径从 auth context 取操作者。
-- **软删唯一约束复用评估**：`email/account_no/各 _no` 等自然键软删后仍占用，若需"软删后复用"须补 partial unique index（`WHERE deleted_at IS NULL`）。当前业务多用 `status` 而非软删，暂不阻塞。
+- 无应用写入口/种子型表（如部分字典/价格快照）暂不硬补 operator；如需后台管理写入口再按领域操作者语义补齐。
 - 明细/价格表已纳入软删（可软删停用），如需改 append-only 另议。
 
 ## 批 B 完成记录（2026-06-28 · 安全/越权红线 + SKILL-2）✅
@@ -137,13 +148,14 @@
 - **ACCT-3 ✅**：企业积分流水按角色分级——owner 看全量、member 仅本人 project 流水（`project.owner_user_id` 关联过滤，无 schema 改动）。
 - **ACCT-1b ✅**：绑定被企业/空间白名单显式禁用 Tool 的 Skill 不可路由；批量两查（deny 规则 + bindings）避免 N+1。
 - **ACCT-8 ✅（成文+固化，不改行为）**：admin 与 user 两套独立鉴权本已结构性隔离，补安全规范对称红线 + `GetUserSummary` 注释 + 测试固化（防回归）。
-- **SKILL-2 🟡 business 侧已落（FP1–FP3a），FP3b/FP4 待**：
+- **SKILL-2 ✅ 已闭环（FP1–FP4）**：
   - FP1 ✅ `assetdict` 字典上限批量读取（复用 `schema_json` 内嵌，无迁移）。
   - FP2 ✅ `0021` per-skill 输出元素结构 schema + `SaveSkill` 写入/字典上限校验。
   - FP3a ✅ thrift 声明 `SkillOutputElementDTO` + `SkillSpecResponse.output_elements`；application `GetPublishedSkillSpec` 装配。
-  - FP3b ⏳ 待 codegen 环境：`kitex` 重新生成 kitex_gen + RPC handler 映射 + contract fixture。
-  - FP4 ⏳ agent 12：按 `output_elements` 组织产物，草稿落 `agent_artifacts`、最终走 `CommitGeneratedAssetAndCharge`。
-  - 设计：`docs/contracts/rpc/SKILL-2-输出元素结构契约设计.md`。
+  - FP3b ✅ `de9ac8e` 重新生成 `kitex_gen`，补 RPC handler 映射与 `GetPublishedSkillSpec.output_elements` contract fixture。
+  - FP3c ✅ `ReviewCandidateSkillSpecResponse.output_elements` 同步补齐，审核态 Skill 测试可直接拿结构声明，与 `expected_elements_json` 并存。
+  - FP4 ✅ `de9ac8e` agent 侧消费 `output_elements` 组织产物，草稿落 `agent_artifacts`、最终走 `CommitGeneratedAssetAndCharge.final_elements`。
+  - 设计归档：`docs/contracts/rpc/SKILL-2-输出元素结构契约设计.md`；当前事实源以 Thrift、migration、实现和 M6 测试报告承接。
 
 范围决策：
 - ACCT-3 用 project 关联过滤而非加 user 维度列（`CreditLedgerEntry` 无 user 维度但有 `project_id`）。
@@ -151,8 +163,7 @@
 - SKILL-2 FP1 经实现期核查退化：字典双态属性已由 `asset_element_types.schema_json` 内嵌承载，取消表列迁移（外科手术式改动）。
 
 遗留（后续，不阻塞）：
-- SKILL-2 FP3b（codegen + RPC 映射 + fixture）、FP4（agent 消费）。
-- `ReviewCandidateSkillSpecResponse` 是否同步补 `output_elements`（设计 §5 待确认 4，建议补）。
+- SKILL-2 当前无阻塞遗留；后续若新增审核态校验规则，以 `api/thrift/business_agent_service.thrift`、contract fixture 和 application 测试为事实源推进。
 
 ## 批 C 完成记录（2026-06-28 · 确认恢复闭环）✅
 
@@ -189,6 +200,18 @@
 
 范围决策：
 - 本切片先打通运行期配置加载链路和版本落库，不解释 `content` 中的策略参数；策略解释器留给后续 W2/W3 功能闭环。
+
+## 批 D 子切片记录（2026-06-28 · ACCT-4）✅
+
+提交：`56aa45e`（ACCT-4）
+验证：`go test ./services/agent/internal/application/workbench ./services/agent/internal/api/http` 通过；`go test ./services/business/internal/application/project` 通过；`go test ./services/agent/internal/infra/repository ./services/agent/internal/domain/state` 通过；`python3 tests/contract/validate_fixtures.py` 通过；`python3 tests/agent/agui/validate_fixtures.py` 通过；`git diff --check` 通过。
+
+- **ACCT-4 ✅ 已修**：Agent active run 在继续输入、确认/拒绝 interrupt、确认后生成/Tool 结算二次权限校验中遇到 `PERMISSION_DENIED` 时，立即落 `cancelled`、写 `PERMISSION_REVOKED`，并 emit `agent.run.cancelled(cancel_reason=permission_revoked)`，释放 active-run 占用。
+- required interrupt 同步置为 `expired`，避免成员被移除后 snapshot 仍恢复确认面板。
+
+范围决策：
+- 本切片不新增 business→agent 主动取消 RPC/事件总线；现有 HTTP 鉴权会在请求入口拒绝 removed member，Agent 服务层补的是长期 active run 与二次权限校验的 fail-closed 收口。
+- `agent_tasks` 当前只有表和模型、无写入/worker 路径；本切片不虚构任务取消框架，后续随 GEN-6/W3 worker 一并处理真实 task cancellation。
 
 ## 批 F 子切片记录（2026-06-28 · WORK-4）✅
 
@@ -300,3 +323,102 @@
 
 范围决策：
 - 本切片先建立业务指标基线和可抓取出口，不引入外部 Prometheus/OTel exporter 配置；跨服务 trace/OTel 仍归 INFRA-5。
+
+## 批 E 子切片记录（2026-06-28 · INFRA-5）✅
+
+提交：`ef26697`（INFRA-5）
+验证：`go test ./internal/tracectx` 通过；`go test ./services/business/internal/transport/http ./services/agent/internal/api/http ./services/business/internal/transport/rpc ./services/business/internal/bootstrap ./services/agent/internal/infra/rpc` 通过；`go test ./services/business/internal/infra/logger ./services/agent/internal/observability` 通过；`git diff --check` 通过。
+
+- **INFRA-5 ✅ 已修**：新增公共 `internal/tracectx`，HTTP 入口优先解析 W3C `traceparent`，兼容旧 `X-Trace-Id`/`X-Request-Id`；响应同时返回 `traceparent` 与 `X-Trace-Id`。
+- Agent→Business Kitex RPC 通过 `metainfo` 注入 `traceparent`，Business Kitex server 通过 `MetainfoServerHandler` + RPC middleware 恢复 trace context；保留 thrift `RequestMeta.trace_id` 作为兼容字段。
+
+范围决策：
+- 本切片只打通 W3C Trace Context 传播和 OTel context 承载，不引入 exporter/backend，也不改现有 `trace_id` 持久化字段。
+
+## 批 E 子切片记录（2026-06-28 · INFRA-10）✅
+
+提交：`959ab65`（INFRA-10）
+验证：`go test -count=1 ./services/internal/envconfig ./services/internal/configsource ./services/business/internal/infra/config ./services/agent/internal/infra/config` 通过；`go test -count=1 ./services/business/internal/bootstrap ./services/agent/internal/infra/rpc` 通过；`git diff --check` 通过。
+
+- **INFRA-10 ✅ 已修**：新增共享 `services/internal/configsource`，配置链从默认/文件/env 扩展为文件 -> etcd 非敏感 overlay -> env 最终覆盖；`DORA_CONFIG_SOURCE=etcd` 时按 `ETCD_NAMESPACE/<service>/<CONFIG_KEY>` 读取 business/agent 服务级配置。
+- business/agent 分别声明 etcd 非敏感配置 allowlist，数据库 URL、AK/SK、Token、密码、secret ref、etcd bootstrap 参数等不允许从普通 etcd 配置路径覆盖；读到非 allowlist key 直接 fail closed。
+- `.env.example` 与本地配置规范新增 `DORA_CONFIG_SOURCE` / `DORA_CONFIG_ETCD_TIMEOUT`，明确本地默认 `env`、etcd key 命名和密钥纪律。
+
+范围决策：
+- `AGENT_CONFIG_SOURCE` 继续表示 Agent runtime config 来源（如 postgres），不复用为服务级配置源；新增全局 `DORA_CONFIG_SOURCE` 专管 business/agent 服务配置 overlay。
+- 本切片只实现启动期读取，不引入动态 watch、审计写入或回滚流程；这些属于配置运营面，不用隐式后台线程冒充。
+
+## 批 D 子切片记录（2026-06-28 · GEN-6 恢复/对账第一阶段）✅
+
+提交：`0f87bd8`（GEN-6 recovery）
+验证：`go test -count=1 ./services/agent/internal/infra/repository ./services/agent/internal/application/workbench ./services/agent/internal/api/http ./services/agent/cmd/agent` 通过；`git diff --check` 通过。
+
+- **GEN-6 ✅ 已补恢复/对账底座**：确认后的生成/扣费流程写入 `agent_tasks(task_type=generation_asset_commit)`，记录 `freeze_requested`、`credits_frozen`、`model_submitted`、`asset_slots_prepared`、`asset_commit_started/completed` 等阶段；snapshot 的 `tasks` 暴露真实持久化任务，不再永远为空。
+- Agent 启动时执行 `RecoverGenerationTasks` 扫描 stale running generation task：对 `credits_frozen` 及 freeze replay 可确认的任务调用 `ReleaseFrozenCredits` 释放冻结并取消 run；对已进入 `asset_commit_started` 的任务标 `NEEDS_RECONCILIATION`，避免业务侧可能已扣费/提交时误释放。
+- repository 补齐 `agent_tasks` 创建、进度更新、状态转换、按 run 查询、stale running 查询；测试覆盖冻结后重启恢复释放、task 状态防回退、snapshot 暴露 task。
+
+范围决策：
+- 本切片先堵“Freeze 后进程崩溃导致冻结悬挂到过期”的资金风险；当时未纳入的 Redis worker 已由下一节第一阶段补齐，提交后自动对账仍归后续 W3，不在本切片假装完成。
+- 对 commit RPC 已开始的任务只进入人工/后续对账状态，不自动释放冻结，避免在业务侧已提交扣费但 Agent 未收到响应时造成反向资金错误。
+
+## 批 D 子切片记录（2026-06-29 · GEN-6 Redis worker 第一阶段）✅
+
+提交：本切片（GEN-6 Redis queue）
+验证：`go test -count=1 ./services/agent/internal/application/workbench` 通过；`go test -count=1 ./services/agent/internal/infra/config ./services/agent/internal/infra/queue ./services/agent/cmd/agent` 通过；`git diff --check` 通过。
+
+- **GEN-6 Redis worker 第一阶段 ✅ 已补**：`AcceptInterrupt` 在配置 `AGENT_GENERATION_QUEUE=redis` 时只完成确认验权、accepted 事件和 Redis 入队，HTTP 请求不再同步执行冻结、模型生成、上传和 `CommitGeneratedAssetAndCharge` 长链路；默认 `inline` 保持本地/测试兼容。
+- Agent 启动时创建 Redis generation queue、重投递 processing list 中的 inflight job，并启动 `AGENT_GENERATION_WORKERS` 个后台 worker 消费队列；worker 复用原 `runM4ConfirmedGeneration` 链路，成功后 ack processing job。
+- Redis 队列采用 ready list + processing list，避免 worker 弹出后进程崩溃导致 job 静默丢失；重投递时若 DB 中已有 running `generation_asset_commit` task，则先进入现有 `RecoverGenerationTasks` 恢复/对账逻辑，避免二次冻结/二次提交。
+
+范围决策：
+- 本切片只把确认后的生成长链路从 HTTP 请求搬到 Redis worker，并补重投递/防重复基础；提交后自动对账由下一节补齐。
+- Redis 密码不进入 etcd 非敏感配置 allowlist；本地默认 `AGENT_GENERATION_QUEUE=inline`，避免开发环境被 Redis 强依赖阻断。
+
+## 批 D 子切片记录（2026-06-29 · GEN-6 提交后自动对账）✅
+
+提交：本切片（GEN-6 automatic reconciliation）
+验证：`go test -count=1 ./services/agent/internal/application/workbench ./services/agent/internal/infra/repository ./services/agent/cmd/agent` 通过；`git diff --check` 通过。
+
+- **GEN-6 提交后自动对账 ✅ 已补**：`asset_commit_started` 阶段持久化完整 `commit_request`；重启恢复或 Redis redelivery 遇到 `asset_commit_started/completed` 陈旧任务时，使用原 `CommitGeneratedAssetAndCharge.IdempotencyKey` replay 业务侧提交/扣费结果，并补齐 Agent 侧 `agent_artifacts`、最终 assistant message、run/task 终态和 accepted interrupt resolved。
+- 恢复 replay 成功后按 `business_ref_id` 与 `generation_task_id` 幂等去重，避免重复创建 asset_ref artifact 或最终消息；run/task 已完成的重复恢复视为 no-op。
+- 缺少 `commit_request` 的历史任务仍走 `NEEDS_RECONCILIATION` 人工保护；业务侧返回 processing 时也不释放冻结，避免 commit 已在业务侧进行中时造成资金反向错误。
+
+范围决策：
+- 不在 commit started 后自动 `ReleaseFrozenCredits`；是否扣费/释放以业务侧 `CommitGeneratedAssetAndCharge` 幂等 replay 结果为准。
+- 本切片只补确认后生成资产提交链路的自动对账，不新增跨服务主动补偿调度器；触发点沿用 Agent 启动恢复和 Redis worker redelivery。
+
+## 批 F 子切片记录（2026-06-28 · GEN-8）✅
+
+提交：`1097044`（GEN-8）
+验证：`go test -count=1 ./services/business/internal/application/assetcommit ./services/business/internal/application/credit ./services/business/internal/transport/rpc` 通过；`git diff --check` 通过。
+
+- **GEN-8 ✅ 已修**：`CommitGeneratedAssetAndCharge` 支持 artifact 级部分提交；单个 artifact 的 generated slot 缺失、slot 不可提交、对象元数据/校验/etag 不匹配时，该 artifact 返回 `charged_line_items.status=skipped` 且扣费 0，不再导致已成功 artifact 全回滚。
+- 成功 artifact 继续创建 asset/storage/project_asset/commit_item 并按 estimate item 扣费；未结算冻结点走 `releaseUnused` 定额释放，batch `commit_status=partial_committed`，idempotency replay 从 ledger metadata 恢复 skipped 明细。
+
+范围决策：
+- 本切片限定在现有“artifact 与 model_generation estimate item 一一匹配”的契约内做部分结算；当前单个 estimate item 承载 quantity 的定价拆分不在本切片隐式改造。
+- 若所有 artifact 均不可提交，仍沿用原失败语义并不生成空 commit batch，避免把全失败包装成成功。
+
+## 批 F 子切片记录（2026-06-28 · GEN-4）✅
+
+提交：`064d578`（GEN-4）
+验证：`go test -count=1 ./services/agent/internal/application/workbench` 通过；`go test -count=1 ./services/agent/internal/infra/repository ./services/agent/internal/api/http ./services/agent/cmd/agent` 通过；`git diff --check` 通过。
+
+- **GEN-4 ✅ 已修**：确认后生成在冻结积分前检查 confirmation payload 中 `safety_evidence.expires_at`；证据过期时复用同一最新 prompt 做安全重评，digest 仍必须匹配，重评通过后用新 evidence 调 `EstimateGenerationCredits` 重新绑定估算，再冻结并提交资产。
+- **fail-closed 仍成立**：prompt digest 不匹配、重评失败、重估失败或积分不足都在模型调用/冻结前终止任务并标记 run failed；业务侧 `CommitGeneratedAssetAndCharge` 仍继续拒绝过期或与 estimate hash 不匹配的 evidence。
+
+范围决策：
+- 本切片不放松业务侧 safety evidence hash 绑定，也不让旧 estimate 接受新 evidence；过期续跑必须通过 Agent 侧重评 + 新 estimate 完成。
+- 仅覆盖确认后生成链路的证据 TTL 续期；独立工具扣费、分享/上传等其他 safety_evidence 场景后续按各自链路单独评估。
+
+## 批 A 子切片记录（2026-06-28 · 软删唯一约束复用评估）✅
+
+提交：`7e0bc9d`（soft-delete unique policy）
+验证：`go test -count=1 ./services/business/internal/infra/repository/businesscore` 通过；`git diff --check` 通过。
+
+- **软删唯一约束复用评估 ✅ 已固化**：业务库不默认把唯一约束改成 `WHERE deleted_at IS NULL` partial unique；现有唯一键按全局身份、密钥/session token、财务轨迹、幂等回放、不可变快照、状态治理关系、互动历史等类别显式冻结。
+- `TestSoftDeleteUniqueConstraintsHaveExplicitReusePolicy` 扫描所有软删表非主键唯一索引，要求新增唯一索引必须进入复用策略清单；若未来出现 `deleted_at` partial unique，必须先把策略显式改为 `partial_active_reuse` 并配套迁移裁决。
+
+范围决策：
+- 本切片不重写任何现有唯一约束，避免释放账号、兑换码、财务、幂等、公开分享等不应复用的历史键。
+- `created_by/updated_by operator 回填` 已启动项目/作品域、Tool 策略域、模型配置域、资产域、通知域、Skill 域、积分/兑换码域与账户/空间/管理员域；GORM 未映射公共列不能用简单 `SetColumn` callback 粗暴补齐，剩余无应用写入口表继续逐域设计。

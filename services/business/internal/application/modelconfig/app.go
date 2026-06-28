@@ -227,7 +227,8 @@ func (a *App) SaveProvider(ctx context.Context, in SaveProviderInput) (ProviderD
 	adminID := in.Auth.AdminID
 	row := businesscore.ModelProvider{
 		ID: id, ProviderCode: code, DisplayName: name, ProviderType: defaultString(in.ProviderType, "openai_compatible"),
-		Status: status, BaseURL: baseURL, ConfigJSON: mustJSON(in.Config), CreatedByAdminID: &adminID, CreatedAt: now, UpdatedAt: now,
+		Status: status, BaseURL: baseURL, ConfigJSON: mustJSON(in.Config), CreatedByAdminID: &adminID,
+		CreatedBy: stringPtr(adminID), UpdatedBy: stringPtr(adminID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := a.repo.DB().WithContext(ctx).Save(&row).Error; err != nil {
 		return ProviderDTO{}, err
@@ -245,6 +246,7 @@ func (a *App) SetProviderStatus(ctx context.Context, auth admin.AdminAuth, provi
 		return ProviderDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "provider not found")
 	}
 	row.Status = status
+	row.UpdatedBy = stringPtr(auth.AdminID)
 	row.UpdatedAt = a.now()
 	if err := a.repo.DB().WithContext(ctx).Save(&row).Error; err != nil {
 		return ProviderDTO{}, err
@@ -330,7 +332,8 @@ func (a *App) SaveModel(ctx context.Context, in SaveModelInput) (ModelAdminDTO, 
 	row := businesscore.Model{
 		ID: id, ProviderID: in.ProviderID, ModelCode: in.ModelCode, DisplayName: defaultString(in.DisplayName, in.ModelCode),
 		ResourceType: in.ResourceType, CapabilityTags: mustJSON(in.CapabilityTags), Status: normalizeStatus(in.Status, activeStatus),
-		CredentialID: credentialID, RouteConfigJSON: mustJSON(in.RouteConfig), CreatedByAdminID: &adminID, CreatedAt: now, UpdatedAt: now,
+		CredentialID: credentialID, RouteConfigJSON: mustJSON(in.RouteConfig), CreatedByAdminID: &adminID,
+		CreatedBy: stringPtr(adminID), UpdatedBy: stringPtr(adminID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := a.repo.DB().WithContext(ctx).Save(&row).Error; err != nil {
 		return ModelAdminDTO{}, err
@@ -354,13 +357,14 @@ func (a *App) SetDefaultModel(ctx context.Context, auth admin.AdminAuth, resourc
 	}
 	now := a.now()
 	tx := a.repo.DB().WithContext(ctx).Begin()
-	if err := tx.Model(&businesscore.DefaultModel{}).Where("resource_type = ? AND scope = ? AND status = ?", resourceType, "global", activeStatus).Updates(map[string]any{"status": "inactive", "updated_at": now}).Error; err != nil {
+	if err := tx.Model(&businesscore.DefaultModel{}).Where("resource_type = ? AND scope = ? AND status = ?", resourceType, "global", activeStatus).Updates(map[string]any{"status": "inactive", "updated_at": now, "updated_by": auth.AdminID}).Error; err != nil {
 		tx.Rollback()
 		return ModelSummaryDTO{}, err
 	}
 	row := businesscore.DefaultModel{
 		ID: security.RandomID("dm_"), ResourceType: resourceType, ModelID: modelID, PricingSnapshotID: pricingSnapshotID,
-		Scope: "global", Status: activeStatus, CreatedByAdminID: &auth.AdminID, CreatedAt: now, UpdatedAt: now,
+		Scope: "global", Status: activeStatus, CreatedByAdminID: &auth.AdminID,
+		CreatedBy: stringPtr(auth.AdminID), UpdatedBy: stringPtr(auth.AdminID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := tx.Create(&row).Error; err != nil {
 		tx.Rollback()
@@ -381,6 +385,7 @@ func (a *App) SetModelStatus(ctx context.Context, auth admin.AdminAuth, modelID,
 		return ModelAdminDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "model not found")
 	}
 	row.Status = normalizeStatus(status, activeStatus)
+	row.UpdatedBy = stringPtr(auth.AdminID)
 	row.UpdatedAt = a.now()
 	if err := a.repo.DB().WithContext(ctx).Save(&row).Error; err != nil {
 		return ModelAdminDTO{}, err
@@ -532,6 +537,14 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(value)
+}
+
+func stringPtr(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func normalizeStatus(value, fallback string) string {

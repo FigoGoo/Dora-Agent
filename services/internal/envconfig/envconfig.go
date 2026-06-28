@@ -12,6 +12,15 @@ import (
 type Values map[string]string
 
 func Load(paths ...string) (Values, error) {
+	values, err := LoadFiles(paths...)
+	if err != nil {
+		return nil, err
+	}
+	values.OverlayEnv()
+	return values, nil
+}
+
+func LoadFiles(paths ...string) (Values, error) {
 	values := Values{}
 	for _, path := range paths {
 		if path == "" {
@@ -21,13 +30,30 @@ func Load(paths ...string) (Values, error) {
 			return nil, err
 		}
 	}
+	return values, nil
+}
+
+func (v Values) Clone() Values {
+	cloned := Values{}
+	for key, value := range v {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func (v Values) Overlay(other Values) {
+	for key, value := range other {
+		v[key] = value
+	}
+}
+
+func (v Values) OverlayEnv() {
 	for _, item := range os.Environ() {
 		key, value, ok := strings.Cut(item, "=")
 		if ok {
-			values[key] = value
+			v[key] = value
 		}
 	}
-	return values, nil
 }
 
 func readFile(values Values, path string) error {

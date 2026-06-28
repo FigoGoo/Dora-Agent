@@ -34,6 +34,8 @@ type User struct {
 	DefaultSpaceID   *string        `gorm:"column:default_space_id"`
 	RegisteredSource string         `gorm:"column:registered_source"`
 	LastLoginAt      *time.Time     `gorm:"column:last_login_at"`
+	CreatedBy        *string        `gorm:"column:created_by"`
+	UpdatedBy        *string        `gorm:"column:updated_by"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -58,6 +60,8 @@ type AuthSession struct {
 	UserAgentDigest       *string        `gorm:"column:user_agent_digest"`
 	ExpiresAt             time.Time      `gorm:"column:expires_at"`
 	LastSeenAt            *time.Time     `gorm:"column:last_seen_at"`
+	CreatedBy             *string        `gorm:"column:created_by"`
+	UpdatedBy             *string        `gorm:"column:updated_by"`
 	CreatedAt             time.Time      `gorm:"column:created_at"`
 	UpdatedAt             time.Time      `gorm:"column:updated_at"`
 	DeletedAt             gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -73,6 +77,8 @@ type Space struct {
 	DisplayName     string         `gorm:"column:display_name"`
 	Status          string         `gorm:"column:status"`
 	CreditAccountID *string        `gorm:"column:credit_account_id"`
+	CreatedBy       *string        `gorm:"column:created_by"`
+	UpdatedBy       *string        `gorm:"column:updated_by"`
 	CreatedAt       time.Time      `gorm:"column:created_at"`
 	UpdatedAt       time.Time      `gorm:"column:updated_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -88,6 +94,8 @@ type Enterprise struct {
 	DefaultSpaceID  *string        `gorm:"column:default_space_id"`
 	CreditAccountID *string        `gorm:"column:credit_account_id"`
 	Status          string         `gorm:"column:status"`
+	CreatedBy       *string        `gorm:"column:created_by"`
+	UpdatedBy       *string        `gorm:"column:updated_by"`
 	CreatedAt       time.Time      `gorm:"column:created_at"`
 	UpdatedAt       time.Time      `gorm:"column:updated_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -106,6 +114,8 @@ type EnterpriseMember struct {
 	RemovedAt       *time.Time     `gorm:"column:removed_at"`
 	RemovedBy       *string        `gorm:"column:removed_by"`
 	RemoveReason    *string        `gorm:"column:remove_reason"`
+	CreatedBy       *string        `gorm:"column:created_by"`
+	UpdatedBy       *string        `gorm:"column:updated_by"`
 	CreatedAt       time.Time      `gorm:"column:created_at"`
 	UpdatedAt       time.Time      `gorm:"column:updated_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -129,6 +139,8 @@ type EnterpriseInvite struct {
 	ExpiresAt        time.Time      `gorm:"column:expires_at"`
 	AcceptedAt       *time.Time     `gorm:"column:accepted_at"`
 	CancelledAt      *time.Time     `gorm:"column:cancelled_at"`
+	CreatedBy        *string        `gorm:"column:created_by"`
+	UpdatedBy        *string        `gorm:"column:updated_by"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -145,6 +157,8 @@ type CreditAccount struct {
 	AvailablePoints   int64          `gorm:"column:available_points"`
 	FrozenPoints      int64          `gorm:"column:frozen_points"`
 	ExpiresSoonPoints int64          `gorm:"column:expires_soon_points"`
+	CreatedBy         *string        `gorm:"column:created_by"`
+	UpdatedBy         *string        `gorm:"column:updated_by"`
 	CreatedAt         time.Time      `gorm:"column:created_at"`
 	UpdatedAt         time.Time      `gorm:"column:updated_at"`
 	DeletedAt         gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -161,6 +175,7 @@ type PlatformAdmin struct {
 	Status             string         `gorm:"column:status"`
 	MustRotatePassword bool           `gorm:"column:must_rotate_password"`
 	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
 	DisabledBy         *string        `gorm:"column:disabled_by"`
 	DisabledReason     *string        `gorm:"column:disabled_reason"`
 	LastLoginAt        *time.Time     `gorm:"column:last_login_at"`
@@ -181,6 +196,8 @@ type PlatformAdminBootstrap struct {
 	Status              string         `gorm:"column:status"`
 	InitializedAt       time.Time      `gorm:"column:initialized_at"`
 	RotatedAt           *time.Time     `gorm:"column:rotated_at"`
+	CreatedBy           *string        `gorm:"column:created_by"`
+	UpdatedBy           *string        `gorm:"column:updated_by"`
 	CreatedAt           time.Time      `gorm:"column:created_at"`
 	UpdatedAt           time.Time      `gorm:"column:updated_at"`
 	DeletedAt           gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -198,6 +215,8 @@ type PlatformAdminSession struct {
 	UserAgentDigest    *string        `gorm:"column:user_agent_digest"`
 	ExpiresAt          time.Time      `gorm:"column:expires_at"`
 	LastSeenAt         *time.Time     `gorm:"column:last_seen_at"`
+	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
 	CreatedAt          time.Time      `gorm:"column:created_at"`
 	UpdatedAt          time.Time      `gorm:"column:updated_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -236,6 +255,8 @@ type Project struct {
 	ArchiveReason   *string        `gorm:"column:archive_reason"`
 	ArchivedBy      *string        `gorm:"column:archived_by"`
 	ArchivedAt      *time.Time     `gorm:"column:archived_at"`
+	CreatedBy       *string        `gorm:"column:created_by"`
+	UpdatedBy       *string        `gorm:"column:updated_by"`
 	CreatedAt       time.Time      `gorm:"column:created_at"`
 	UpdatedAt       time.Time      `gorm:"column:updated_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -256,6 +277,8 @@ type ProjectAsset struct {
 	SourceArtifactID *string        `gorm:"column:source_artifact_id"`
 	SourceType       string         `gorm:"column:source_type"`
 	DisplayOrder     int            `gorm:"column:display_order"`
+	CreatedBy        *string        `gorm:"column:created_by"`
+	UpdatedBy        *string        `gorm:"column:updated_by"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
 }
@@ -269,6 +292,7 @@ type ProjectWork struct {
 	Status              string         `gorm:"column:status"`
 	CreatedFromAssetIDs datatypes.JSON `gorm:"column:created_from_asset_ids;type:jsonb"`
 	CreatedBy           *string        `gorm:"column:created_by"`
+	UpdatedBy           *string        `gorm:"column:updated_by"`
 	CreatedAt           time.Time      `gorm:"column:created_at"`
 	DeletedAt           gorm.DeletedAt `gorm:"column:deleted_at"`
 }

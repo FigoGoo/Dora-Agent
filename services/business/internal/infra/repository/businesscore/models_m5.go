@@ -22,6 +22,8 @@ type Work struct {
 	CurrentSnapshotID      *string        `gorm:"column:current_snapshot_id"`
 	LastModerationRecordID *string        `gorm:"column:last_moderation_record_id"`
 	PrivateResetAt         *time.Time     `gorm:"column:private_reset_at"`
+	CreatedBy              *string        `gorm:"column:created_by"`
+	UpdatedBy              *string        `gorm:"column:updated_by"`
 	CreatedAt              time.Time      `gorm:"column:created_at"`
 	UpdatedAt              time.Time      `gorm:"column:updated_at"`
 	DeletedAt              gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -36,6 +38,8 @@ type WorkAsset struct {
 	AssetID      string         `gorm:"column:asset_id"`
 	Role         string         `gorm:"column:role"`
 	DisplayOrder int            `gorm:"column:display_order"`
+	CreatedBy    *string        `gorm:"column:created_by"`
+	UpdatedBy    *string        `gorm:"column:updated_by"`
 	CreatedAt    time.Time      `gorm:"column:created_at"`
 	UpdatedAt    time.Time      `gorm:"column:updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -73,6 +77,8 @@ type WorkPublicSnapshot struct {
 	TakenDownReason      *string        `gorm:"column:taken_down_reason"`
 	SafetyEvidenceID     *string        `gorm:"column:safety_evidence_id"`
 	SafetyEvidenceDigest *string        `gorm:"column:safety_evidence_digest"`
+	CreatedBy            *string        `gorm:"column:created_by"`
+	UpdatedBy            *string        `gorm:"column:updated_by"`
 	CreatedAt            time.Time      `gorm:"column:created_at"`
 	UpdatedAt            time.Time      `gorm:"column:updated_at"`
 	DeletedAt            gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -89,6 +95,8 @@ type WorkLike struct {
 	UserID       string         `gorm:"column:user_id"`
 	Status       string         `gorm:"column:status"`
 	LikedAt      *time.Time     `gorm:"column:liked_at"`
+	CreatedBy    *string        `gorm:"column:created_by"`
+	UpdatedBy    *string        `gorm:"column:updated_by"`
 	CreatedAt    time.Time      `gorm:"column:created_at"`
 	UpdatedAt    time.Time      `gorm:"column:updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -150,6 +158,8 @@ type Notification struct {
 	ReadAt                *time.Time     `gorm:"column:read_at"`
 	IdempotencyKey        string         `gorm:"column:idempotency_key"`
 	TraceID               string         `gorm:"column:trace_id"`
+	CreatedBy             *string        `gorm:"column:created_by"`
+	UpdatedBy             *string        `gorm:"column:updated_by"`
 	CreatedAt             time.Time      `gorm:"column:created_at"`
 	UpdatedAt             time.Time      `gorm:"column:updated_at"`
 	DeletedAt             gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -173,6 +183,8 @@ type NotificationCreateFailure struct {
 	RetryCount          int            `gorm:"column:retry_count"`
 	NextRetryAt         *time.Time     `gorm:"column:next_retry_at"`
 	TraceID             string         `gorm:"column:trace_id"`
+	CreatedBy           *string        `gorm:"column:created_by"`
+	UpdatedBy           *string        `gorm:"column:updated_by"`
 	CreatedAt           time.Time      `gorm:"column:created_at"`
 	UpdatedAt           time.Time      `gorm:"column:updated_at"`
 	DeletedAt           gorm.DeletedAt `gorm:"column:deleted_at"`

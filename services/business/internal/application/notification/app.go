@@ -18,6 +18,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const systemOperator = "system"
+
 type RequestMeta = accountspace.RequestMeta
 type AuthContext = accountspace.AuthContext
 
@@ -135,7 +137,7 @@ func (a *App) CreateNotification(ctx context.Context, in CreateNotificationInput
 		JumpTargetID: optionalString(relatedID), JumpPayloadJSON: mustJSON(in.NavigationHint), SourceType: defaultString(relatedType, "system"),
 		SourceID: optionalString(relatedID), Status: "unread", RelatedResourceType: optionalString(relatedType), RelatedResourceID: optionalString(relatedID),
 		NavigationHintJSON: mustJSON(in.NavigationHint), IdempotencyKey: in.IdempotencyKey, TraceID: normalizeTrace(in.TraceID),
-		CreatedAt: now, UpdatedAt: now,
+		CreatedBy: optionalString(systemOperator), UpdatedBy: optionalString(systemOperator), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := a.repo.DB().WithContext(ctx).Create(&row).Error; err != nil {
 		return NotificationDTO{}, err
@@ -212,11 +214,12 @@ func (a *App) MarkNotificationRead(ctx context.Context, auth AuthContext, meta R
 		now := a.now()
 		if err := a.repo.DB().WithContext(ctx).Model(&businesscore.Notification{}).
 			Where("notification_id = ? AND recipient_user_id = ?", notificationID, auth.UserID).
-			Updates(map[string]any{"read_at": now, "updated_at": now}).Error; err != nil {
+			Updates(map[string]any{"read_at": now, "updated_at": now, "updated_by": auth.UserID}).Error; err != nil {
 			_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
 			return NotificationDTO{}, err
 		}
 		row.ReadAt = &now
+		row.UpdatedBy = optionalString(auth.UserID)
 		row.UpdatedAt = now
 	}
 	_ = a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "notification", ID: row.NotificationID})
@@ -247,7 +250,7 @@ func (a *App) MarkAllNotificationsRead(ctx context.Context, auth AuthContext, me
 	if strings.TrimSpace(notificationType) != "" {
 		db = db.Where("type = ?", strings.TrimSpace(notificationType))
 	}
-	if err := db.Updates(map[string]any{"read_at": now, "updated_at": now}).Error; err != nil {
+	if err := db.Updates(map[string]any{"read_at": now, "updated_at": now, "updated_by": auth.UserID}).Error; err != nil {
 		_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
 		return UnreadCountDTO{}, err
 	}
@@ -295,7 +298,7 @@ func (a *App) RecordCreateFailure(ctx context.Context, in FailureInput) error {
 		RecipientUserID: optionalString(in.RecipientUserID), Type: defaultString(in.Type, "system"),
 		RelatedResourceType: optionalString(in.RelatedResourceType), RelatedResourceID: optionalString(in.RelatedResourceID),
 		IdempotencyKey: idempotencyKey, FailureCode: errorCode, FailureSummary: optionalString(in.ErrorSummary), ErrorCode: errorCode,
-		TraceID: normalizeTrace(in.TraceID), CreatedAt: now, UpdatedAt: now,
+		TraceID: normalizeTrace(in.TraceID), CreatedBy: optionalString(systemOperator), UpdatedBy: optionalString(systemOperator), CreatedAt: now, UpdatedAt: now,
 	}
 	return a.repo.DB().WithContext(ctx).Create(&row).Error
 }

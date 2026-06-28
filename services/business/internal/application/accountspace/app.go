@@ -234,7 +234,7 @@ func (a *App) RegisterPersonalAccount(ctx context.Context, in RegisterInput) (Au
 		requestHash = security.HashIdentifier(actorKey + ":register")
 	}
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID:       "auth:" + security.HashIdentifier(actorKey),
+		TenantID:       authTenantID(actorKey),
 		Scope:          "auth.register",
 		IdempotencyKey: in.Meta.IdempotencyKey,
 		RequestHash:    requestHash,
@@ -291,6 +291,8 @@ func (a *App) RegisterPersonalAccount(ctx context.Context, in RegisterInput) (Au
 			Status:           StatusActive,
 			DefaultSpaceID:   &spaceID,
 			RegisteredSource: "web",
+			CreatedBy:        optionalString(userID),
+			UpdatedBy:        optionalString(userID),
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		}
@@ -304,6 +306,8 @@ func (a *App) RegisterPersonalAccount(ctx context.Context, in RegisterInput) (Au
 			DisplayName:     strings.TrimSpace(in.DisplayName),
 			Status:          StatusActive,
 			CreditAccountID: &creditAccountID,
+			CreatedBy:       optionalString(userID),
+			UpdatedBy:       optionalString(userID),
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
@@ -316,6 +320,8 @@ func (a *App) RegisterPersonalAccount(ctx context.Context, in RegisterInput) (Au
 			OwnerUserID:     &userID,
 			Status:          StatusActive,
 			AvailablePoints: 0,
+			CreatedBy:       optionalString(userID),
+			UpdatedBy:       optionalString(userID),
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
@@ -407,7 +413,7 @@ func (a *App) Login(ctx context.Context, in LoginInput) (AuthSessionDTO, error) 
 		}
 		session = dto
 		now := a.now()
-		if err := tx.Model(&businesscore.User{}).Where("id = ?", user.ID).Updates(map[string]any{"last_login_at": now, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&businesscore.User{}).Where("id = ?", user.ID).Updates(map[string]any{"last_login_at": now, "updated_by": user.ID, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		audit := auditRecord(in.Meta.TraceID, "user", user.ID, space.ID, auditlog.ActionAuthLogin, "auth_session", dto.UserID, "success")
@@ -427,7 +433,7 @@ func (a *App) Logout(ctx context.Context, auth AuthContext, meta RequestMeta) er
 		now := a.now()
 		if err := tx.Model(&businesscore.AuthSession{}).
 			Where("id = ? AND user_id = ?", auth.SessionID, auth.UserID).
-			Updates(map[string]any{"status": "revoked", "updated_at": now}).Error; err != nil {
+			Updates(map[string]any{"status": "revoked", "updated_by": auth.UserID, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		audit := auditRecord(meta.TraceID, "user", auth.UserID, auth.SpaceID, auditlog.ActionAuthLogout, "auth_session", auth.SessionID, "success")
@@ -540,6 +546,7 @@ func (a *App) SwitchIdentity(ctx context.Context, in SwitchIdentityInput) (AuthS
 		updates := map[string]any{
 			"login_identity_type": target,
 			"current_space_id":    space.ID,
+			"updated_by":          user.ID,
 			"updated_at":          a.now(),
 		}
 		if enterprise != nil {
@@ -612,6 +619,8 @@ func (a *App) CreateEnterprise(ctx context.Context, in CreateEnterpriseInput) (E
 			DefaultSpaceID:  &spaceID,
 			CreditAccountID: &creditID,
 			Status:          StatusActive,
+			CreatedBy:       optionalString(user.ID),
+			UpdatedBy:       optionalString(user.ID),
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
@@ -626,6 +635,8 @@ func (a *App) CreateEnterprise(ctx context.Context, in CreateEnterpriseInput) (E
 			DisplayName:     name,
 			Status:          StatusActive,
 			CreditAccountID: &creditID,
+			CreatedBy:       optionalString(user.ID),
+			UpdatedBy:       optionalString(user.ID),
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
@@ -640,6 +651,8 @@ func (a *App) CreateEnterprise(ctx context.Context, in CreateEnterpriseInput) (E
 			Role:         RoleOwner,
 			Status:       StatusActive,
 			JoinedAt:     &joined,
+			CreatedBy:    optionalString(user.ID),
+			UpdatedBy:    optionalString(user.ID),
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}
@@ -652,6 +665,8 @@ func (a *App) CreateEnterprise(ctx context.Context, in CreateEnterpriseInput) (E
 			EnterpriseID:    &entID,
 			Status:          StatusActive,
 			AvailablePoints: 0,
+			CreatedBy:       optionalString(user.ID),
+			UpdatedBy:       optionalString(user.ID),
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
@@ -786,6 +801,8 @@ func (a *App) CreateMemberInvite(ctx context.Context, in InviteInput) (Enterpris
 			Status:           "pending",
 			InvitedByUserID:  in.Auth.UserID,
 			ExpiresAt:        now.Add(time.Duration(in.ExpiresInDays) * 24 * time.Hour),
+			CreatedBy:        optionalString(in.Auth.UserID),
+			UpdatedBy:        optionalString(in.Auth.UserID),
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		}
@@ -859,7 +876,7 @@ func (a *App) ConfirmRemoveMember(ctx context.Context, in RemoveMemberInput) (En
 		}
 		now := a.now()
 		if err := tx.Model(&businesscore.EnterpriseMember{}).Where("id = ?", member.ID).Updates(map[string]any{
-			"status": StatusRemoved, "removed_at": now, "removed_by": in.Auth.UserID, "remove_reason": in.Reason, "updated_at": now,
+			"status": StatusRemoved, "removed_at": now, "removed_by": in.Auth.UserID, "remove_reason": in.Reason, "updated_by": in.Auth.UserID, "updated_at": now,
 		}).Error; err != nil {
 			return err
 		}
@@ -927,13 +944,13 @@ func (a *App) ConfirmTransferOwner(ctx context.Context, in TransferOwnerInput) (
 			return bizerrors.New(bizerrors.CodeResourceNotFound, "target member not found")
 		}
 		now := a.now()
-		if err := tx.Model(&businesscore.EnterpriseMember{}).Where("enterprise_id = ? AND user_id = ?", in.Auth.EnterpriseID, in.Auth.UserID).Updates(map[string]any{"role": RoleMember, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&businesscore.EnterpriseMember{}).Where("enterprise_id = ? AND user_id = ?", in.Auth.EnterpriseID, in.Auth.UserID).Updates(map[string]any{"role": RoleMember, "updated_by": in.Auth.UserID, "updated_at": now}).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&businesscore.EnterpriseMember{}).Where("id = ?", target.ID).Updates(map[string]any{"role": RoleOwner, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&businesscore.EnterpriseMember{}).Where("id = ?", target.ID).Updates(map[string]any{"role": RoleOwner, "updated_by": in.Auth.UserID, "updated_at": now}).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&businesscore.Enterprise{}).Where("id = ?", in.Auth.EnterpriseID).Updates(map[string]any{"owner_user_id": target.UserID, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&businesscore.Enterprise{}).Where("id = ?", in.Auth.EnterpriseID).Updates(map[string]any{"owner_user_id": target.UserID, "updated_by": in.Auth.UserID, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		var ent businesscore.Enterprise
@@ -1022,6 +1039,8 @@ func (a *App) createUserSession(ctx context.Context, tx *gorm.DB, user businessc
 		CSRFTokenHash:         &csrfHash,
 		Status:                StatusActive,
 		ExpiresAt:             now.Add(24 * time.Hour),
+		CreatedBy:             optionalString(user.ID),
+		UpdatedBy:             optionalString(user.ID),
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
@@ -1192,6 +1211,10 @@ func boolString(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func authTenantID(actorKey string) string {
+	return "auth:" + security.HashIdentifier(actorKey)[:59]
 }
 
 func errorCode(err error) string {

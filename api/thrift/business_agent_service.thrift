@@ -523,6 +523,7 @@ struct ReviewCandidateSkillSpecResponse {
   8: required string confirmation_policy_json,
   9: optional string test_input_json,
   10: optional string expected_elements_json,
+  11: optional list<SkillOutputElementDTO> output_elements,
 }
 
 struct SaveSkillTestResultRequest {

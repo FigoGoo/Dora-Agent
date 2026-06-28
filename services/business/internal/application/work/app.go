@@ -329,17 +329,18 @@ func (a *App) CreateWork(ctx context.Context, in CreateWorkInput) (WorkDetailDTO
 		work := businesscore.Work{
 			ID: workID, WorkNo: "W" + workID[4:], ProjectID: project.ID, OwnerUserID: in.Auth.UserID, SpaceID: in.Auth.SpaceID,
 			Title: title, Description: optionalString(in.Description), Category: optionalString(in.Category), TagsJSON: mustJSON(normalizeTags(in.Tags)),
-			ShareStatus: StatusPrivate, CoverAssetID: optionalString(in.CoverAssetID), CreatedAt: now, UpdatedAt: now,
+			ShareStatus: StatusPrivate, CoverAssetID: optionalString(in.CoverAssetID), CreatedBy: optionalString(in.Auth.UserID),
+			UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&work).Error; err != nil {
 			return err
 		}
-		if err := a.replaceWorkAssetsTx(tx, work.ID, assetIDs, in.CoverAssetID, now); err != nil {
+		if err := a.replaceWorkAssetsTx(tx, work.ID, assetIDs, in.CoverAssetID, in.Auth.UserID, now); err != nil {
 			return err
 		}
 		projectWork := businesscore.ProjectWork{
 			ID: security.RandomID("pw_"), ProjectID: project.ID, WorkID: work.ID, Status: "active",
-			CreatedFromAssetIDs: mustJSON(assetIDs), CreatedBy: optionalString(in.Auth.UserID), CreatedAt: now,
+			CreatedFromAssetIDs: mustJSON(assetIDs), CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now,
 		}
 		if err := tx.Create(&projectWork).Error; err != nil {
 			return err
@@ -393,7 +394,7 @@ func (a *App) UpdateWork(ctx context.Context, in UpdateWorkInput) (WorkDetailDTO
 			return err
 		}
 		now := a.now()
-		updates := map[string]any{"updated_at": now}
+		updates := map[string]any{"updated_at": now, "updated_by": in.Auth.UserID}
 		assetIDs := normalizeIDs(in.AssetIDs)
 		hasChanges, err := a.hasWorkPatchChangesTx(tx, work, in, assetIDs)
 		if err != nil {
@@ -445,7 +446,7 @@ func (a *App) UpdateWork(ctx context.Context, in UpdateWorkInput) (WorkDetailDTO
 			if err := a.validateProjectAssetsTx(tx, project.ID, assetIDs, coverID); err != nil {
 				return err
 			}
-			if err := a.replaceWorkAssetsTx(tx, work.ID, assetIDs, coverID, now); err != nil {
+			if err := a.replaceWorkAssetsTx(tx, work.ID, assetIDs, coverID, in.Auth.UserID, now); err != nil {
 				return err
 			}
 		} else if coverID != "" {
@@ -619,13 +620,14 @@ func (a *App) ConfirmShareWork(ctx context.Context, in ConfirmShareWorkInput) (W
 			SnapshotPayloadJSON: mustJSON(snapshotPayload), PublicMediaRefsJSON: mustJSON(mediaRefs), Status: SnapshotActive,
 			Category: work.Category, ResourceType: optionalString(primaryResourceType(assets)), LikeCount: 0, PublishedBy: in.Auth.UserID, PublishedAt: now,
 			PublishedByUserID: in.Auth.UserID,
-			SafetyEvidenceID:  optionalString(payload.EvidenceID), SafetyEvidenceDigest: optionalString(payload.EvidenceDigest), CreatedAt: now, UpdatedAt: now,
+			SafetyEvidenceID:  optionalString(payload.EvidenceID), SafetyEvidenceDigest: optionalString(payload.EvidenceDigest),
+			CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
 		if err := tx.Model(&businesscore.Work{}).Where("id = ?", work.ID).Updates(map[string]any{
-			"share_status": StatusShared, "current_snapshot_id": snapshotID, "updated_at": now,
+			"share_status": StatusShared, "current_snapshot_id": snapshotID, "updated_at": now, "updated_by": in.Auth.UserID,
 		}).Error; err != nil {
 			return err
 		}
@@ -673,11 +675,11 @@ func (a *App) UnshareWork(ctx context.Context, in UnshareWorkInput) (WorkDetailD
 		now := a.now()
 		if err := tx.Model(&businesscore.WorkPublicSnapshot{}).
 			Where("snapshot_id = ? AND status = ?", *work.CurrentSnapshotID, SnapshotActive).
-			Updates(map[string]any{"status": SnapshotCancelled, "updated_at": now}).Error; err != nil {
+			Updates(map[string]any{"status": SnapshotCancelled, "updated_at": now, "updated_by": in.Auth.UserID}).Error; err != nil {
 			return err
 		}
 		if err := tx.Model(&businesscore.Work{}).Where("id = ?", work.ID).
-			Updates(map[string]any{"share_status": StatusPrivate, "current_snapshot_id": nil, "updated_at": now}).Error; err != nil {
+			Updates(map[string]any{"share_status": StatusPrivate, "current_snapshot_id": nil, "updated_at": now, "updated_by": in.Auth.UserID}).Error; err != nil {
 			return err
 		}
 		work.ShareStatus = StatusPrivate
@@ -830,11 +832,12 @@ func (a *App) ConfirmTakeDownWork(ctx context.Context, in ConfirmTakeDownWorkInp
 		if err := tx.Model(&businesscore.WorkPublicSnapshot{}).Where("public_work_id = ?", snapshot.PublicWorkID).Updates(map[string]any{
 			"status": StatusTakenDown, "taken_down_by": in.Auth.AdminID, "taken_down_by_admin_id": in.Auth.AdminID,
 			"taken_down_at": now, "taken_down_reason": in.Reason, "take_down_reason": in.Reason, "updated_at": now,
+			"updated_by": in.Auth.AdminID,
 		}).Error; err != nil {
 			return err
 		}
 		if err := tx.Model(&businesscore.Work{}).Where("id = ?", work.ID).Updates(map[string]any{
-			"share_status": StatusTakenDown, "last_moderation_record_id": recordID, "updated_at": now,
+			"share_status": StatusTakenDown, "last_moderation_record_id": recordID, "updated_at": now, "updated_by": in.Auth.AdminID,
 		}).Error; err != nil {
 			return err
 		}
@@ -927,6 +930,7 @@ func (a *App) setLike(ctx context.Context, in LikePublicWorkInput, liked bool) (
 			existing = businesscore.WorkLike{
 				ID: security.RandomID("wlike_"), LikeID: security.RandomID("wlike_"), PublicWorkID: snapshot.PublicWorkID, WorkID: snapshot.WorkID,
 				SnapshotID: snapshot.SnapshotID, UserID: in.Auth.UserID, Status: targetStatus, CreatedAt: now, UpdatedAt: now,
+				CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID),
 			}
 			if liked {
 				existing.LikedAt = &now
@@ -945,13 +949,15 @@ func (a *App) setLike(ctx context.Context, in LikePublicWorkInput, liked bool) (
 				delta = -1
 				existing.LikedAt = nil
 			}
-			if err := tx.Model(&businesscore.WorkLike{}).Where("id = ?", existing.ID).Updates(map[string]any{"status": targetStatus, "liked_at": existing.LikedAt, "updated_at": now}).Error; err != nil {
+			if err := tx.Model(&businesscore.WorkLike{}).Where("id = ?", existing.ID).Updates(map[string]any{
+				"status": targetStatus, "liked_at": existing.LikedAt, "updated_at": now, "updated_by": in.Auth.UserID,
+			}).Error; err != nil {
 				return err
 			}
 		}
 		if delta != 0 {
 			if err := tx.Model(&businesscore.WorkPublicSnapshot{}).Where("public_work_id = ?", snapshot.PublicWorkID).
-				UpdateColumn("like_count", gorm.Expr("GREATEST(like_count + ?, 0)", delta)).Error; err != nil {
+				Updates(map[string]any{"like_count": gorm.Expr("GREATEST(like_count + ?, 0)", delta), "updated_at": now, "updated_by": in.Auth.UserID}).Error; err != nil {
 				return err
 			}
 			snapshot.LikeCount += delta
@@ -1146,7 +1152,10 @@ func (a *App) validateProjectAssetsTx(tx *gorm.DB, projectID string, assetIDs []
 	return nil
 }
 
-func (a *App) replaceWorkAssetsTx(tx *gorm.DB, workID string, assetIDs []string, coverAssetID string, now time.Time) error {
+func (a *App) replaceWorkAssetsTx(tx *gorm.DB, workID string, assetIDs []string, coverAssetID string, operatorID string, now time.Time) error {
+	if err := tx.Model(&businesscore.WorkAsset{}).Where("work_id = ?", workID).Update("updated_by", operatorID).Error; err != nil {
+		return err
+	}
 	if err := tx.Where("work_id = ?", workID).Delete(&businesscore.WorkAsset{}).Error; err != nil {
 		return err
 	}
@@ -1157,7 +1166,10 @@ func (a *App) replaceWorkAssetsTx(tx *gorm.DB, workID string, assetIDs []string,
 			role = "cover"
 		}
 		id := security.RandomID("wka_")
-		rows = append(rows, businesscore.WorkAsset{ID: id, WorkAssetID: id, WorkID: workID, AssetID: assetID, Role: role, DisplayOrder: i, CreatedAt: now, UpdatedAt: now})
+		rows = append(rows, businesscore.WorkAsset{
+			ID: id, WorkAssetID: id, WorkID: workID, AssetID: assetID, Role: role, DisplayOrder: i,
+			CreatedBy: optionalString(operatorID), UpdatedBy: optionalString(operatorID), CreatedAt: now, UpdatedAt: now,
+		})
 	}
 	if len(rows) == 0 {
 		return nil

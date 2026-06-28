@@ -5,6 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+
+	"github.com/FigoGoo/Dora-Agent/internal/tracectx"
 )
 
 type contextKey string
@@ -29,12 +31,11 @@ const (
 )
 
 func WithTraceID(ctx context.Context, traceID string) context.Context {
-	return context.WithValue(ctx, TraceIDKey, traceID)
+	return tracectx.WithTraceID(ctx, traceID)
 }
 
 func TraceID(ctx context.Context) string {
-	value, _ := ctx.Value(TraceIDKey).(string)
-	return value
+	return tracectx.TraceID(ctx)
 }
 
 func WithRequestID(ctx context.Context, requestID string) context.Context {

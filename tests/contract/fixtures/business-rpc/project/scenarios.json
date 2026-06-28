@@ -115,6 +115,37 @@
         "message": "project not found",
         "retryable": false
       }
+    },
+    {
+      "case_id": "project_enterprise_member_removed_error",
+      "service": "ProjectService",
+      "method": "CheckProjectAccess",
+      "scenario": "enterprise_member_removed_error",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_removed",
+          "login_identity_type": "ENTERPRISE_MEMBER",
+          "space_id": "sp_enterprise_removed",
+          "enterprise_id": "ent_removed",
+          "enterprise_role": "member"
+        },
+        "request_meta": {
+          "request_id": "req_project_enterprise_member_removed_error",
+          "trace_id": "trace_project_enterprise_member_removed_error",
+          "source": "agent_service"
+        },
+        "project_id": "prj_enterprise_removed",
+        "access_purpose": "CONTINUE_CREATION"
+      },
+      "assertions": [
+        "project enterprise_member_removed_error contract is stable",
+        "removed enterprise member cannot continue active agent run for enterprise project"
+      ],
+      "error": {
+        "code": "PERMISSION_DENIED",
+        "message": "enterprise membership is unavailable",
+        "retryable": false
+      }
     }
   ]
 }

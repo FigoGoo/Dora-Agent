@@ -208,7 +208,8 @@ func (a *App) CreateProject(ctx context.Context, in CreateInput) (ProjectDetailD
 		project := businesscore.Project{
 			ID: projectID, ProjectNo: "P" + projectID[4:], OwnerUserID: in.Auth.UserID, SpaceID: spaceID,
 			EnterpriseID: optionalString(in.Auth.EnterpriseID), Title: title, Status: StatusActive, CreativeStatus: "editable",
-			CreativeAllowed: true, LastActivityAt: now, CreatedAt: now, UpdatedAt: now,
+			CreativeAllowed: true, LastActivityAt: now, CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID),
+			CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&project).Error; err != nil {
 			return err
@@ -266,7 +267,7 @@ func (a *App) UpdateProject(ctx context.Context, in UpdateInput) (ProjectDetailD
 			return err
 		}
 		now := a.now()
-		updates := map[string]any{"updated_at": now, "last_activity_at": now}
+		updates := map[string]any{"updated_at": now, "last_activity_at": now, "updated_by": in.Auth.UserID}
 		if in.Title != nil {
 			title := strings.TrimSpace(*in.Title)
 			if title == "" || len(title) > 120 {
@@ -407,11 +408,12 @@ func (a *App) AttachAssetToProject(ctx context.Context, in AttachAssetInput) (Pr
 			ID: security.RandomID("pa_"), ProjectID: project.ID, AssetID: in.AssetID, AssetRole: role,
 			AttachedByUserID: in.Auth.UserID, AttachedBy: optionalString(sourceType), Status: StatusActive,
 			SourceSessionID: optionalString(in.SourceSessionID), SourceRunID: optionalString(in.SourceRunID),
-			SourceArtifactID: optionalString(in.SourceArtifactID), SourceType: sourceType, DisplayOrder: in.DisplayOrder, CreatedAt: now,
+			SourceArtifactID: optionalString(in.SourceArtifactID), SourceType: sourceType, DisplayOrder: in.DisplayOrder,
+			CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now,
 		}
 		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "project_id"}, {Name: "asset_id"}},
-			DoUpdates: clause.Assignments(map[string]any{"status": StatusActive, "asset_role": role, "source_type": sourceType}),
+			Columns:   []clause.Column{{Name: "project_id"}, {Name: "asset_id"}, {Name: "asset_role"}},
+			DoUpdates: clause.Assignments(map[string]any{"status": StatusActive, "asset_role": role, "source_type": sourceType, "updated_by": in.Auth.UserID}),
 		}).Create(&row).Error; err != nil {
 			return err
 		}
@@ -462,6 +464,9 @@ func (a *App) CheckProjectAccess(ctx context.Context, auth AuthContext, projectI
 	if err != nil {
 		return ProjectAccessResult{}, err
 	}
+	if err := a.requireActiveProjectEnterpriseMember(ctx, auth, project); err != nil {
+		return ProjectAccessResult{}, err
+	}
 	actions := allowedActions(project)
 	if project.Status == StatusArchived && purpose != businessagent.ProjectAccessPurpose_VIEW {
 		return ProjectAccessResult{
@@ -473,6 +478,29 @@ func (a *App) CheckProjectAccess(ctx context.Context, auth AuthContext, projectI
 		Allowed: true, ProjectID: project.ID, ProjectStatus: project.Status, CreativeAllowed: project.Status == StatusActive && project.CreativeAllowed,
 		AllowedActions: actions, OwnerUserID: project.OwnerUserID, ProjectSummary: projectSummaryMap(project),
 	}, nil
+}
+
+func (a *App) requireActiveProjectEnterpriseMember(ctx context.Context, auth AuthContext, project businesscore.Project) error {
+	if project.EnterpriseID == nil || *project.EnterpriseID == "" {
+		return nil
+	}
+	if auth.LoginIdentityType != accountspace.IdentityEnterprise {
+		return nil
+	}
+	if auth.EnterpriseID != "" && auth.EnterpriseID != *project.EnterpriseID {
+		return bizerrors.New(bizerrors.CodePermissionDenied, "enterprise identity does not match project")
+	}
+	var count int64
+	err := a.repo.DB().WithContext(ctx).Model(&businesscore.EnterpriseMember{}).
+		Where("enterprise_id = ? AND user_id = ? AND status = ?", *project.EnterpriseID, auth.UserID, accountspace.StatusActive).
+		Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return bizerrors.New(bizerrors.CodePermissionDenied, "enterprise membership is unavailable")
+	}
+	return nil
 }
 
 func (a *App) setArchiveState(ctx context.Context, in ArchiveInput, archived bool) (ProjectDetailDTO, error) {
@@ -521,7 +549,7 @@ func (a *App) setArchiveState(ctx context.Context, in ArchiveInput, archived boo
 		if err := tx.Model(&businesscore.Project{}).Where("id = ?", project.ID).Updates(map[string]any{
 			"status": status, "creative_status": creativeStatus, "creative_allowed": creativeAllowed,
 			"archive_reason": optionalString(in.Reason), "archived_at": archivedAt, "archived_by": archivedBy,
-			"updated_at": now, "last_activity_at": now,
+			"updated_at": now, "last_activity_at": now, "updated_by": in.Auth.UserID,
 		}).Error; err != nil {
 			return err
 		}

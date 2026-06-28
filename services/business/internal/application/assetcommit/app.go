@@ -192,6 +192,22 @@ type CommitDTO struct {
 	ChargedLineItems []ChargedLineItemDTO   `json:"charged_line_items,omitempty"`
 }
 
+type artifactCommitError struct {
+	line ChargedLineItemDTO
+	err  error
+}
+
+func (e artifactCommitError) Error() string {
+	if e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e artifactCommitError) Unwrap() error {
+	return e.err
+}
+
 func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput) (CommitDTO, error) {
 	if in.Auth.UserID == "" || in.Auth.SpaceID == "" {
 		return CommitDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "auth context is required")
@@ -252,30 +268,43 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 		assetRefs := make([]CommittedAssetRefDTO, 0, len(in.Artifacts))
 		lineItems := make([]ChargedLineItemDTO, 0, len(in.Artifacts))
 		var charged int64
+		var firstArtifactErr error
 		for _, artifact := range in.Artifacts {
 			assetRef, line, err := a.commitArtifact(ctx, tx, in, freeze, commitID, artifact, now)
 			if err != nil {
+				if partial, ok := err.(artifactCommitError); ok {
+					if firstArtifactErr == nil {
+						firstArtifactErr = partial.err
+					}
+					lineItems = append(lineItems, partial.line)
+					continue
+				}
 				return err
 			}
 			assetRefs = append(assetRefs, assetRef)
 			lineItems = append(lineItems, line)
 			charged += line.ChargedPoints
 		}
+		if len(assetRefs) == 0 && firstArtifactErr != nil {
+			return firstArtifactErr
+		}
 		unsettled := freeze.FrozenPoints - freeze.ChargedPoints - freeze.ReleasedPoints - charged
 		if unsettled < 0 {
 			return bizerrors.New(bizerrors.CodeStateConflict, "asset commit charge exceeds frozen points")
 		}
-		released, err := a.releaseUnused(tx, &freeze, &account, unsettled, now)
+		released, err := a.releaseUnused(tx, &freeze, &account, unsettled, in.Auth.UserID, now)
 		if err != nil {
 			return err
 		}
 		account.FrozenPoints -= charged
+		account.UpdatedBy = optionalString(in.Auth.UserID)
 		account.UpdatedAt = now
 		freeze.ChargedPoints += charged
 		freeze.ReleasedPoints += released
 		if freeze.ChargedPoints+freeze.ReleasedPoints >= freeze.FrozenPoints {
 			freeze.Status = "charged"
 		}
+		freeze.UpdatedBy = optionalString(in.Auth.UserID)
 		freeze.UpdatedAt = now
 		if err := tx.Save(&account).Error; err != nil {
 			return err
@@ -288,7 +317,7 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 			ID: ledgerID, AccountID: account.ID, EntryType: "asset_commit_charge", PointsDelta: -charged,
 			BalanceAfter: account.AvailablePoints, FrozenAfter: account.FrozenPoints, SourceType: "asset_commit",
 			SourceID: commitID, ProjectID: &in.ProjectID, RunID: &in.RunID, TraceID: optionalString(in.Meta.TraceID),
-			IdempotencyKey: optionalString(in.Meta.IdempotencyKey), MetadataJSON: mustJSON(map[string]any{"asset_count": len(assetRefs)}), CreatedAt: now,
+			IdempotencyKey: optionalString(in.Meta.IdempotencyKey), MetadataJSON: mustJSON(map[string]any{"asset_count": len(assetRefs), "charged_line_items": lineItems}), CreatedAt: now,
 		}).Error; err != nil {
 			return err
 		}
@@ -300,8 +329,9 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 			ID: security.RandomID("acmb_"), CommitID: commitID, ProjectID: in.ProjectID, SessionID: in.SessionID,
 			RunID: in.RunID, FreezeID: in.FreezeID, EstimateID: estimateID, ActorUserID: in.Auth.UserID, SpaceID: in.Auth.SpaceID,
 			SafetyEvidenceID: in.SafetyEvidence.SafetyEvidenceId, SafetyEvidenceHash: safetyDigest(in.SafetyEvidence),
-			ChargedPoints: charged, ReleasedPoints: released, CommitStatus: "committed", LedgerRef: &ledgerID,
-			IdempotencyKey: in.Meta.IdempotencyKey, TraceID: in.Meta.TraceID, CreatedAt: now, UpdatedAt: now,
+			ChargedPoints: charged, ReleasedPoints: released, CommitStatus: commitStatusForSkipped(lineItems), LedgerRef: &ledgerID,
+			IdempotencyKey: in.Meta.IdempotencyKey, TraceID: in.Meta.TraceID,
+			CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&batch).Error; err != nil {
 			return err
@@ -343,29 +373,30 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 	var slot businesscore.GeneratedAssetObjectSlot
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("run_id = ? AND artifact_id = ?", in.RunID, artifact.ArtifactID).First(&slot).Error
 	if err != nil {
-		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "generated object slot not found")
+		return skippedArtifact(artifact, estimateItem, bizerrors.New(bizerrors.CodeStateConflict, "generated object slot not found"))
 	}
 	if slot.ExpiresAt.Before(now) || (slot.Status != "created" && slot.Status != "uploaded") {
-		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "generated object slot is not committable")
+		return skippedArtifact(artifact, estimateItem, bizerrors.New(bizerrors.CodeStateConflict, "generated object slot is not committable"))
 	}
 	if slot.ObjectKey != artifact.StorageObjectRef.ObjectKey || slot.Bucket != artifact.StorageObjectRef.Bucket || slot.ContentType != artifact.StorageObjectRef.ContentType || slot.SizeBytes != artifact.StorageObjectRef.SizeBytes {
-		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "storage object does not match generated slot")
+		return skippedArtifact(artifact, estimateItem, bizerrors.New(bizerrors.CodeStateConflict, "storage object does not match generated slot"))
 	}
 	if slot.Checksum != nil && *slot.Checksum != "" && artifact.StorageObjectRef.Checksum != "" && *slot.Checksum != artifact.StorageObjectRef.Checksum {
-		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "storage checksum does not match generated slot")
+		return skippedArtifact(artifact, estimateItem, bizerrors.New(bizerrors.CodeStateConflict, "storage checksum does not match generated slot"))
 	}
 	verified, err := a.verifier.VerifyGeneratedObject(ctx, ObjectExpectation{
 		Bucket: slot.Bucket, ObjectKey: slot.ObjectKey, ContentType: slot.ContentType,
 		SizeBytes: slot.SizeBytes, Checksum: value(slot.Checksum),
 	}, artifact.StorageObjectRef)
 	if err != nil {
-		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
+		return skippedArtifact(artifact, estimateItem, err)
 	}
 	if verified.Etag == "" {
-		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, bizerrors.New(bizerrors.CodeAssetSaveFailed, "uploaded object is missing etag")
+		return skippedArtifact(artifact, estimateItem, bizerrors.New(bizerrors.CodeAssetSaveFailed, "uploaded object is missing etag"))
 	}
 	slot.Status = "uploaded"
 	slot.Etag = optionalString(verified.Etag)
+	slot.UpdatedBy = optionalString(in.Auth.UserID)
 	slot.UpdatedAt = now
 	if err := tx.Save(&slot).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -376,7 +407,8 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 		ID: assetID, AssetNo: "A" + strings.ToUpper(assetID[4:12]), OwnerUserID: in.Auth.UserID, SpaceID: in.Auth.SpaceID,
 		EnterpriseID: optionalString(in.Auth.EnterpriseID), ProjectID: &in.ProjectID, AssetType: assetTypeFromResource(artifact.ResourceType),
 		Title: optionalString(title), Status: "active", Visibility: "private", SourceType: "agent_commit", SourceRefID: &artifact.ArtifactID,
-		ContentDigest: optionalString(artifact.StorageObjectRef.Checksum), MetadataJSON: mustJSON(artifact.MetadataSummary), CreatedAt: now, UpdatedAt: now,
+		ContentDigest: optionalString(artifact.StorageObjectRef.Checksum), MetadataJSON: mustJSON(artifact.MetadataSummary),
+		CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := tx.Create(&asset).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -386,7 +418,8 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 		ObjectKeyHash: digest(verified.ObjectKey), ObjectURI: "tos://" + verified.Bucket + "/" + verified.ObjectKey,
 		MIMEType: &verified.ContentType, SizeBytes: &verified.SizeBytes, Checksum: &verified.Checksum,
 		Etag: optionalString(verified.Etag), StorageStatus: "available", PreviewURI: optionalString("/api/assets/" + assetID + "/access?access_type=preview"),
-		DownloadPolicy: mustJSON(map[string]any{"access": "business_signed"}), CreatedAt: now, UpdatedAt: now,
+		DownloadPolicy: mustJSON(map[string]any{"access": "business_signed"}),
+		CreatedBy:      optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := tx.Create(&object).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -394,7 +427,8 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 	elementPayload := map[string]any{"artifact_summary": artifact.ArtifactSummary, "storage_object_ref": map[string]string{"bucket": artifact.StorageObjectRef.Bucket, "object_key_digest": digest(artifact.StorageObjectRef.ObjectKey)}}
 	element := businesscore.AssetElement{
 		ID: security.RandomID("asel_"), AssetID: assetID, ElementType: artifact.ElementType, ElementKey: artifact.ArtifactID,
-		ElementSummaryJSON: mustJSON(elementPayload), Status: "active", CreatedAt: now, UpdatedAt: now,
+		ElementSummaryJSON: mustJSON(elementPayload), Status: "active",
+		CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := tx.Create(&element).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -408,7 +442,7 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 		finalElement := businesscore.AssetElement{
 			ID: security.RandomID("asel_"), AssetID: assetID, ElementType: final.ElementType,
 			ElementKey: final.ElementType + "_" + security.RandomID(""), ElementSummaryJSON: mustJSON(payload),
-			Status: "active", CreatedAt: now, UpdatedAt: now,
+			Status: "active", CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&finalElement).Error; err != nil {
 			return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -417,13 +451,15 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 	projectAsset := businesscore.ProjectAsset{
 		ID: security.RandomID("pa_"), ProjectID: in.ProjectID, AssetID: assetID, AssetRole: "generated",
 		AttachedByUserID: in.Auth.UserID, AttachedBy: optionalString("agent"), Status: "active",
-		SourceSessionID: &in.SessionID, SourceRunID: &in.RunID, SourceArtifactID: &artifact.ArtifactID, SourceType: "agent_commit", CreatedAt: now,
+		SourceSessionID: &in.SessionID, SourceRunID: &in.RunID, SourceArtifactID: &artifact.ArtifactID, SourceType: "agent_commit",
+		CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now,
 	}
 	if err := tx.Create(&projectAsset).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
 	}
 	slot.Status = "committed"
 	slot.Etag = optionalString(verified.Etag)
+	slot.UpdatedBy = optionalString(in.Auth.UserID)
 	slot.UpdatedAt = now
 	if err := tx.Save(&slot).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -434,7 +470,8 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 		ResourceType: artifact.ResourceType, ElementType: artifact.ElementType, EstimateItemID: &artifact.EstimateItemID,
 		ToolName: optionalString(artifact.ToolName), ToolType: optionalString(artifact.ToolType), ChargeQuantity: optionalInt64(artifact.ChargeQuantity),
 		ChargedPoints: charged, ContentURIDigest: optionalString(artifact.ContentURIDigest), ArtifactSummaryJSON: mustJSON(artifact.ArtifactSummary),
-		MetadataJSON: mustJSON(artifact.MetadataSummary), Status: "committed", CreatedAt: now,
+		MetadataJSON: mustJSON(artifact.MetadataSummary), Status: "committed",
+		CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now,
 	}
 	if err := tx.Create(&item).Error; err != nil {
 		return CommittedAssetRefDTO{}, ChargedLineItemDTO{}, err
@@ -445,6 +482,25 @@ func (a *App) commitArtifact(ctx context.Context, tx *gorm.DB, in CommitInput, f
 	}
 	line := ChargedLineItemDTO{EstimateItemID: artifact.EstimateItemID, ChargedPoints: charged, Status: "charged", AssetID: assetID, ArtifactID: artifact.ArtifactID}
 	return ref, line, nil
+}
+
+func skippedArtifact(artifact CommitArtifactInput, estimateItem businesscore.CreditEstimateItem, err error) (CommittedAssetRefDTO, ChargedLineItemDTO, error) {
+	line := ChargedLineItemDTO{
+		EstimateItemID: estimateItem.EstimateItemID,
+		ChargedPoints:  0,
+		Status:         "skipped",
+		ArtifactID:     artifact.ArtifactID,
+	}
+	return CommittedAssetRefDTO{}, line, artifactCommitError{line: line, err: err}
+}
+
+func commitStatusForSkipped(items []ChargedLineItemDTO) string {
+	for _, item := range items {
+		if item.Status == "skipped" {
+			return "partial_committed"
+		}
+	}
+	return "committed"
 }
 
 func (a *App) ensureProjectWritable(tx *gorm.DB, auth AuthContext, projectID string) error {
@@ -473,7 +529,7 @@ func (a *App) lockFreezeAndAccount(tx *gorm.DB, freezeID string) (businesscore.C
 	return freeze, account, nil
 }
 
-func (a *App) releaseUnused(tx *gorm.DB, freeze *businesscore.CreditFreeze, account *businesscore.CreditAccount, points int64, now time.Time) (int64, error) {
+func (a *App) releaseUnused(tx *gorm.DB, freeze *businesscore.CreditFreeze, account *businesscore.CreditAccount, points int64, operatorID string, now time.Time) (int64, error) {
 	if points <= 0 {
 		return 0, nil
 	}
@@ -501,6 +557,7 @@ func (a *App) releaseUnused(tx *gorm.DB, freeze *businesscore.CreditFreeze, acco
 		}
 		if batch.ExpiresAt == nil || batch.ExpiresAt.After(now) {
 			batch.RemainingPoints += take
+			batch.UpdatedBy = optionalString(operatorID)
 			batch.UpdatedAt = now
 			if err := tx.Save(&batch).Error; err != nil {
 				return 0, err
@@ -511,6 +568,7 @@ func (a *App) releaseUnused(tx *gorm.DB, freeze *businesscore.CreditFreeze, acco
 		if row.ChargedPoints+row.ReleasedPoints >= row.FrozenPoints {
 			row.Status = "released"
 		}
+		row.UpdatedBy = optionalString(operatorID)
 		row.UpdatedAt = now
 		if err := tx.Save(&row).Error; err != nil {
 			return 0, err
@@ -583,10 +641,37 @@ func (a *App) getCommitDTO(ctx context.Context, ledgerRef string) (CommitDTO, er
 	var items []businesscore.AssetCommitItem
 	_ = a.repo.DB().WithContext(ctx).Where("commit_id = ?", batch.CommitID).Find(&items).Error
 	refs := make([]CommittedAssetRefDTO, 0, len(items))
+	chargedLines := make([]ChargedLineItemDTO, 0, len(items))
 	for _, item := range items {
 		refs = append(refs, CommittedAssetRefDTO{AssetID: item.AssetID, SourceArtifactID: item.ArtifactID, ResourceType: item.ResourceType, Status: item.Status})
+		chargedLines = append(chargedLines, ChargedLineItemDTO{
+			EstimateItemID: value(item.EstimateItemID), ChargedPoints: item.ChargedPoints, Status: item.Status,
+			AssetID: item.AssetID, ArtifactID: item.ArtifactID,
+		})
 	}
-	return CommitDTO{AssetRefs: refs, ChargedPoints: batch.ChargedPoints, ReleasedPoints: batch.ReleasedPoints, CommitStatus: batch.CommitStatus, LedgerRef: value(batch.LedgerRef)}, nil
+	var ledger businesscore.CreditLedgerEntry
+	if err := a.repo.DB().WithContext(ctx).Where("id = ?", value(batch.LedgerRef)).First(&ledger).Error; err == nil {
+		if lines := chargedLineItemsFromMetadata(ledger.MetadataJSON); len(lines) > 0 {
+			chargedLines = lines
+		}
+	}
+	return CommitDTO{
+		AssetRefs: refs, ChargedPoints: batch.ChargedPoints, ReleasedPoints: batch.ReleasedPoints,
+		CommitStatus: batch.CommitStatus, LedgerRef: value(batch.LedgerRef), ChargedLineItems: chargedLines,
+	}, nil
+}
+
+func chargedLineItemsFromMetadata(raw datatypes.JSON) []ChargedLineItemDTO {
+	if len(raw) == 0 {
+		return nil
+	}
+	var data struct {
+		ChargedLineItems []ChargedLineItemDTO `json:"charged_line_items"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil
+	}
+	return data.ChargedLineItems
 }
 
 func assetTypeFromResource(resourceType string) string {
