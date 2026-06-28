@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FigoGoo/Dora-Agent/internal/tracectx"
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent/accountspaceservice"
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent/assetcreditcommitservice"
@@ -20,6 +21,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/config"
 	"github.com/cloudwego/kitex/client"
 	"github.com/cloudwego/kitex/client/callopt"
+	"github.com/cloudwego/kitex/pkg/transmeta"
 	etcd "github.com/kitex-contrib/registry-etcd"
 )
 
@@ -37,7 +39,7 @@ type BusinessGateway struct {
 }
 
 func NewBusinessGateway(cfg config.AgentConfig) (*BusinessGateway, error) {
-	opts := []client.Option{}
+	opts := []client.Option{client.WithMetaHandler(transmeta.MetainfoClientHandler)}
 	if strings.ToLower(strings.TrimSpace(cfg.KitexRegistry)) == "etcd" {
 		resolver, err := etcd.NewEtcdResolver(cfg.EtcdEndpoints)
 		if err != nil {
@@ -87,8 +89,16 @@ func NewBusinessGateway(cfg config.AgentConfig) (*BusinessGateway, error) {
 	}, nil
 }
 
+func (g *BusinessGateway) callContext(ctx context.Context, traceID string) (context.Context, context.CancelFunc) {
+	if tracectx.TraceID(ctx) == "" {
+		ctx = tracectx.WithTraceID(ctx, traceID)
+	}
+	ctx = tracectx.InjectMetainfo(ctx)
+	return context.WithTimeout(ctx, g.timeout)
+}
+
 func (g *BusinessGateway) ResolveAuthContextFromToken(ctx context.Context, authorization string, expectedSpaceID string, traceID string) (workbench.AuthContextDTO, workbench.SpaceContextDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	resp, err := g.account.ResolveAuthContextFromToken(callCtx, &businessagent.ResolveAuthContextFromTokenRequest{
 		Authorization:   authorization,
@@ -102,7 +112,7 @@ func (g *BusinessGateway) ResolveAuthContextFromToken(ctx context.Context, autho
 }
 
 func (g *BusinessGateway) ResolveCurrentSpaceContext(ctx context.Context, auth workbench.AuthContextDTO, expectedSpaceID string, traceID string) (workbench.SpaceContextDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	req := &businessagent.ResolveCurrentSpaceContextRequest{
 		AuthContext:     rpcAuth(auth),
@@ -117,7 +127,7 @@ func (g *BusinessGateway) ResolveCurrentSpaceContext(ctx context.Context, auth w
 }
 
 func (g *BusinessGateway) CheckProjectAccess(ctx context.Context, auth workbench.AuthContextDTO, projectID string, purpose businessagent.ProjectAccessPurpose, traceID string) (workbench.ProjectAccessDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	resp, err := g.project.CheckProjectAccess(callCtx, &businessagent.CheckProjectAccessRequest{
 		AuthContext:   rpcAuth(auth),
@@ -135,7 +145,7 @@ func (g *BusinessGateway) CheckProjectAccess(ctx context.Context, auth workbench
 }
 
 func (g *BusinessGateway) ListRoutableSkills(ctx context.Context, auth workbench.AuthContextDTO, scopeFilter string, limit int, cursor string, traceID string) ([]workbench.SkillSummaryDTO, string, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	var pageSize *int32
 	if limit > 0 {
@@ -159,7 +169,7 @@ func (g *BusinessGateway) ListRoutableSkills(ctx context.Context, auth workbench
 }
 
 func (g *BusinessGateway) GetPublishedSkillSpec(ctx context.Context, auth workbench.AuthContextDTO, skillID string, version string, traceID string) (workbench.SkillSpecDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	resp, err := g.skill.GetPublishedSkillSpec(callCtx, &businessagent.GetPublishedSkillSpecRequest{
 		AuthContext: rpcAuth(auth), RequestMeta: rpcMeta(traceID), SkillId: skillID, Version: optionalString(version),
@@ -175,7 +185,7 @@ func (g *BusinessGateway) GetPublishedSkillSpec(ctx context.Context, auth workbe
 }
 
 func (g *BusinessGateway) GetReviewCandidateSkillSpec(ctx context.Context, auth workbench.AuthContextDTO, skillID string, versionID string, testCaseID string, testRunID string, traceID string) (workbench.ReviewCandidateSkillSpecDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	resp, err := g.skill.GetReviewCandidateSkillSpec(callCtx, &businessagent.GetReviewCandidateSkillSpecRequest{
 		AuthContext: rpcAuth(auth), RequestMeta: rpcMeta(traceID), SkillId: skillID, VersionId: versionID,
@@ -193,7 +203,7 @@ func (g *BusinessGateway) GetReviewCandidateSkillSpec(ctx context.Context, auth 
 }
 
 func (g *BusinessGateway) CheckToolExecutionPolicy(ctx context.Context, auth workbench.AuthContextDTO, toolName string, toolType string, projectID string, riskContext map[string]string, traceID string) (workbench.ToolExecutionPolicyDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	resp, err := g.tool.CheckToolExecutionPolicy(callCtx, &businessagent.CheckToolExecutionPolicyRequest{
 		AuthContext: rpcAuth(auth), RequestMeta: rpcMeta(traceID), ToolName: toolName, ToolType: toolType, ProjectId: projectID, RiskContext: riskContext,
@@ -208,7 +218,7 @@ func (g *BusinessGateway) CheckToolExecutionPolicy(ctx context.Context, auth wor
 }
 
 func (g *BusinessGateway) ListAvailableGenerationModels(ctx context.Context, auth workbench.AuthContextDTO, resourceType string, limit int, cursor string, traceID string) ([]workbench.ModelSummaryDTO, string, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	var pageSize *int32
 	if limit > 0 {
@@ -229,7 +239,7 @@ func (g *BusinessGateway) ListAvailableGenerationModels(ctx context.Context, aut
 }
 
 func (g *BusinessGateway) ResolveDefaultModel(ctx context.Context, auth workbench.AuthContextDTO, resourceType string, traceID string) (workbench.ModelSummaryDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	resp, err := g.model.ResolveDefaultModel(callCtx, &businessagent.ResolveDefaultModelRequest{
 		AuthContext: rpcAuth(auth), RequestMeta: rpcMeta(traceID), ResourceType: resourceType,
@@ -241,7 +251,7 @@ func (g *BusinessGateway) ResolveDefaultModel(ctx context.Context, auth workbenc
 }
 
 func (g *BusinessGateway) ResolveGenerationModelSnapshot(ctx context.Context, auth workbench.AuthContextDTO, resourceType string, modelID string, pricingSnapshotID string, traceID string) (workbench.ModelRuntimeSnapshotDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	resp, err := g.model.ResolveGenerationModelSnapshot(callCtx, &businessagent.ResolveGenerationModelSnapshotRequest{
 		AuthContext: rpcAuth(auth), RequestMeta: rpcMeta(traceID), ResourceType: resourceType, ModelId: modelID, PricingSnapshotId: pricingSnapshotID,
@@ -256,7 +266,7 @@ func (g *BusinessGateway) ResolveGenerationModelSnapshot(ctx context.Context, au
 }
 
 func (g *BusinessGateway) ListAssetElementTypes(ctx context.Context, auth workbench.AuthContextDTO, pageSize int, schemaVersion string, traceID string) ([]workbench.AssetElementTypeDTO, string, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	var size *int32
 	if pageSize > 0 {
@@ -282,7 +292,7 @@ func (g *BusinessGateway) ListAssetElementTypes(ctx context.Context, auth workbe
 }
 
 func (g *BusinessGateway) SaveSkillTestResult(ctx context.Context, auth workbench.AuthContextDTO, req workbench.SkillTestResultRequest, traceID string) (workbench.SkillTestResultDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	meta := rpcMeta(traceID)
 	meta.IdempotencyKey = optionalString(req.IdempotencyKey)
@@ -298,7 +308,7 @@ func (g *BusinessGateway) SaveSkillTestResult(ctx context.Context, auth workbenc
 }
 
 func (g *BusinessGateway) BatchCheckAssetAccess(ctx context.Context, auth workbench.AuthContextDTO, req workbench.BatchCheckAssetAccessRequest, traceID string) ([]workbench.AssetAccessResultDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	resp, err := g.asset.BatchCheckAssetAccess(callCtx, &businessagent.BatchCheckAssetAccessRequest{
 		AuthContext: rpcAuth(auth), RequestMeta: rpcMeta(traceID), ProjectId: req.ProjectID, AssetIds: req.AssetIDs, Purpose: req.Purpose,
@@ -314,7 +324,7 @@ func (g *BusinessGateway) BatchCheckAssetAccess(ctx context.Context, auth workbe
 }
 
 func (g *BusinessGateway) EstimateGenerationCredits(ctx context.Context, auth workbench.AuthContextDTO, req workbench.EstimateGenerationCreditsRequest, traceID string) (workbench.CreditEstimateDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	meta := rpcMeta(traceID)
 	meta.IdempotencyKey = optionalString(req.IdempotencyKey)
@@ -337,7 +347,7 @@ func (g *BusinessGateway) EstimateGenerationCredits(ctx context.Context, auth wo
 }
 
 func (g *BusinessGateway) EstimateToolCredits(ctx context.Context, auth workbench.AuthContextDTO, req workbench.EstimateToolCreditsRequest, traceID string) (workbench.CreditEstimateDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	meta := rpcMeta(traceID)
 	meta.IdempotencyKey = optionalString(req.IdempotencyKey)
@@ -358,7 +368,7 @@ func (g *BusinessGateway) EstimateToolCredits(ctx context.Context, auth workbenc
 }
 
 func (g *BusinessGateway) FreezeCredits(ctx context.Context, auth workbench.AuthContextDTO, req workbench.FreezeCreditsRequest, traceID string) (workbench.FreezeCreditsDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	meta := rpcMeta(traceID)
 	meta.IdempotencyKey = optionalString(req.IdempotencyKey)
@@ -373,7 +383,7 @@ func (g *BusinessGateway) FreezeCredits(ctx context.Context, auth workbench.Auth
 }
 
 func (g *BusinessGateway) ChargeToolUsageCredits(ctx context.Context, auth workbench.AuthContextDTO, req workbench.ChargeToolUsageCreditsRequest, traceID string) (workbench.ToolChargeDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	meta := rpcMeta(traceID)
 	meta.IdempotencyKey = optionalString(req.IdempotencyKey)
@@ -406,7 +416,7 @@ func (g *BusinessGateway) ChargeToolUsageCredits(ctx context.Context, auth workb
 }
 
 func (g *BusinessGateway) ReleaseFrozenCredits(ctx context.Context, auth workbench.AuthContextDTO, req workbench.ReleaseFrozenCreditsRequest, traceID string) (workbench.ReleaseCreditsDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	meta := rpcMeta(traceID)
 	meta.IdempotencyKey = optionalString(req.IdempotencyKey)
@@ -420,7 +430,7 @@ func (g *BusinessGateway) ReleaseFrozenCredits(ctx context.Context, auth workben
 }
 
 func (g *BusinessGateway) PrepareGeneratedAssetObjects(ctx context.Context, auth workbench.AuthContextDTO, req workbench.PrepareGeneratedAssetObjectsRequest, traceID string) ([]workbench.GeneratedUploadSlotDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	meta := rpcMeta(traceID)
 	meta.IdempotencyKey = optionalString(req.IdempotencyKey)
@@ -449,7 +459,7 @@ func (g *BusinessGateway) PrepareGeneratedAssetObjects(ctx context.Context, auth
 }
 
 func (g *BusinessGateway) CommitGeneratedAssetAndCharge(ctx context.Context, auth workbench.AuthContextDTO, req workbench.CommitGeneratedAssetAndChargeRequest, traceID string) (workbench.AssetCommitDTO, error) {
-	callCtx, cancel := context.WithTimeout(ctx, g.timeout)
+	callCtx, cancel := g.callContext(ctx, traceID)
 	defer cancel()
 	meta := rpcMeta(traceID)
 	meta.IdempotencyKey = optionalString(req.IdempotencyKey)

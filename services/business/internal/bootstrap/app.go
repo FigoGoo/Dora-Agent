@@ -31,6 +31,7 @@ import (
 	businesshttp "github.com/FigoGoo/Dora-Agent/services/business/internal/transport/http"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/transport/rpc"
 	"github.com/cloudwego/kitex/pkg/rpcinfo"
+	"github.com/cloudwego/kitex/pkg/transmeta"
 	"github.com/cloudwego/kitex/server"
 	etcd "github.com/kitex-contrib/registry-etcd"
 	"gorm.io/driver/postgres"
@@ -167,6 +168,8 @@ func NewKitexServer(cfg config.BusinessConfig, handler *rpc.Handler) (server.Ser
 	opts := []server.Option{
 		server.WithServiceAddr(addr),
 		server.WithServerBasicInfo(&rpcinfo.EndpointBasicInfo{ServiceName: cfg.ServiceName}),
+		server.WithMetaHandler(transmeta.MetainfoServerHandler),
+		server.WithMiddleware(rpc.TraceContextMiddleware),
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.KitexRegistry)) {
 	case "", "none":

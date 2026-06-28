@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FigoGoo/Dora-Agent/internal/tracectx"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/asset"
@@ -94,15 +95,9 @@ func NewRouter(opts RouterOptions) *gin.Engine {
 
 func traceMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		traceID := c.GetHeader("X-Trace-Id")
-		if traceID == "" {
-			traceID = c.GetHeader("X-Request-Id")
-		}
-		if traceID == "" {
-			traceID = "local-" + time.Now().UTC().Format("20060102150405.000000000")
-		}
-		c.Request = c.Request.WithContext(logger.WithTraceID(c.Request.Context(), traceID))
-		c.Header("X-Trace-Id", traceID)
+		ctx := tracectx.FromHTTPHeaders(c.Request.Context(), c.Request.Header)
+		c.Request = c.Request.WithContext(ctx)
+		tracectx.InjectHTTPHeaders(ctx, c.Writer.Header())
 		c.Next()
 	}
 }

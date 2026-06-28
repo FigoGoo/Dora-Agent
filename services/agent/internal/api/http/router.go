@@ -6,6 +6,7 @@ import (
 	nethttp "net/http"
 	"time"
 
+	"github.com/FigoGoo/Dora-Agent/internal/tracectx"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/apperror"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/application/workbench"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/observability"
@@ -53,16 +54,9 @@ func NewRouter(opts RouterOptions) *gin.Engine {
 
 func traceMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		traceID := c.GetHeader("X-Trace-Id")
-		if traceID == "" {
-			traceID = c.GetHeader("X-Request-Id")
-		}
-		if traceID == "" {
-			traceID = "local-" + time.Now().UTC().Format("20060102150405.000000000")
-		}
-		ctx := observability.WithTraceID(c.Request.Context(), traceID)
+		ctx := tracectx.FromHTTPHeaders(c.Request.Context(), c.Request.Header)
 		c.Request = c.Request.WithContext(ctx)
-		c.Header("X-Trace-Id", traceID)
+		tracectx.InjectHTTPHeaders(ctx, c.Writer.Header())
 		c.Next()
 	}
 }
