@@ -127,3 +127,29 @@
 - **created_by/updated_by operator 回填**：贯穿各写路径从 auth context 取操作者。
 - **软删唯一约束复用评估**：`email/account_no/各 _no` 等自然键软删后仍占用，若需"软删后复用"须补 partial unique index（`WHERE deleted_at IS NULL`）。当前业务多用 `status` 而非软删，暂不阻塞。
 - 明细/价格表已纳入软删（可软删停用），如需改 append-only 另议。
+
+## 批 B 完成记录（2026-06-28 · 安全/越权红线 + SKILL-2）✅
+
+提交：`80a35f1`(GEN-5) · `513ae4a`(ACCT-3) · `6892e07`(ACCT-1b) · `04c2b4f`(ACCT-8) · SKILL-2：`9dfe953`/`ea79a91`(设计) + `32c8cce`(FP1) `72750f7`(FP2) `142c2a7`(FP3a)
+验证：各条独立 testcontainer 测试通过；business `go build ./...` 全绿。
+
+- **GEN-5 ✅**：发模型前断言 prompt 与安全证据 `EvaluatedObjectDigest` 一致，不一致 fail-closed（杜绝评 A 发 B）。
+- **ACCT-3 ✅**：企业积分流水按角色分级——owner 看全量、member 仅本人 project 流水（`project.owner_user_id` 关联过滤，无 schema 改动）。
+- **ACCT-1b ✅**：绑定被企业/空间白名单显式禁用 Tool 的 Skill 不可路由；批量两查（deny 规则 + bindings）避免 N+1。
+- **ACCT-8 ✅（成文+固化，不改行为）**：admin 与 user 两套独立鉴权本已结构性隔离，补安全规范对称红线 + `GetUserSummary` 注释 + 测试固化（防回归）。
+- **SKILL-2 🟡 business 侧已落（FP1–FP3a），FP3b/FP4 待**：
+  - FP1 ✅ `assetdict` 字典上限批量读取（复用 `schema_json` 内嵌，无迁移）。
+  - FP2 ✅ `0021` per-skill 输出元素结构 schema + `SaveSkill` 写入/字典上限校验。
+  - FP3a ✅ thrift 声明 `SkillOutputElementDTO` + `SkillSpecResponse.output_elements`；application `GetPublishedSkillSpec` 装配。
+  - FP3b ⏳ 待 codegen 环境：`kitex` 重新生成 kitex_gen + RPC handler 映射 + contract fixture。
+  - FP4 ⏳ agent 12：按 `output_elements` 组织产物，草稿落 `agent_artifacts`、最终走 `CommitGeneratedAssetAndCharge`。
+  - 设计：`docs/contracts/rpc/SKILL-2-输出元素结构契约设计.md`。
+
+范围决策：
+- ACCT-3 用 project 关联过滤而非加 user 维度列（`CreditLedgerEntry` 无 user 维度但有 `project_id`）。
+- ACCT-8 现状无 bug、与承重墙一致，故只成文+固化，不新增 admin 跨入通道（未来受控跨入留待裁决）。
+- SKILL-2 FP1 经实现期核查退化：字典双态属性已由 `asset_element_types.schema_json` 内嵌承载，取消表列迁移（外科手术式改动）。
+
+遗留（后续，不阻塞）：
+- SKILL-2 FP3b（codegen + RPC 映射 + fixture）、FP4（agent 消费）。
+- `ReviewCandidateSkillSpecResponse` 是否同步补 `output_elements`（设计 §5 待确认 4，建议补）。
