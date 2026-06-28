@@ -29,6 +29,9 @@ func TestShareWorkPreviewConfirmCreatesSanitizedPublicSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create work: %v", err)
 	}
+	requireOperatorColumns(t, app, "works", "id = ?", auth.UserID, auth.UserID, created.Work.WorkID)
+	requireOperatorColumns(t, app, "work_assets", "work_id = ? AND asset_id = ?", auth.UserID, auth.UserID, created.Work.WorkID, "ast_generated_1001")
+	requireOperatorColumns(t, app, "project_works", "work_id = ?", auth.UserID, auth.UserID, created.Work.WorkID)
 
 	preview, err := app.PreviewShareWork(t.Context(), PreviewShareWorkInput{
 		Auth: auth, WorkID: created.Work.WorkID, PublicTitle: "Public title", PublicDescription: "Public desc", Tags: []string{"safe"},
@@ -46,6 +49,8 @@ func TestShareWorkPreviewConfirmCreatesSanitizedPublicSnapshot(t *testing.T) {
 	if shared.PublicWorkID == "" || !strings.Contains(shared.ShareURL, "/share/") {
 		t.Fatalf("unexpected share result: %#v", shared)
 	}
+	requireOperatorColumns(t, app, "works", "id = ?", auth.UserID, auth.UserID, created.Work.WorkID)
+	requireOperatorColumns(t, app, "work_public_snapshots", "snapshot_id = ?", auth.UserID, auth.UserID, shared.SnapshotID)
 
 	publicDetail, err := app.GetPublicWork(t.Context(), GetPublicWorkInput{PublicWorkID: shared.PublicWorkID})
 	if err != nil {
@@ -65,6 +70,8 @@ func TestShareWorkPreviewConfirmCreatesSanitizedPublicSnapshot(t *testing.T) {
 	if err != nil || !liked.Liked || liked.LikeCount == 0 {
 		t.Fatalf("like public work: %#v err=%v", liked, err)
 	}
+	requireOperatorColumns(t, app, "work_likes", "public_work_id = ? AND user_id = ?", auth.UserID, auth.UserID, shared.PublicWorkID, auth.UserID)
+	requireOperatorColumns(t, app, "work_public_snapshots", "snapshot_id = ?", auth.UserID, auth.UserID, shared.SnapshotID)
 	likeReplay, err := app.LikePublicWork(t.Context(), LikePublicWorkInput{Auth: auth, Meta: workMeta("trace-like", "idem-like"), PublicWorkID: shared.PublicWorkID})
 	if err != nil || !likeReplay.Liked || likeReplay.PublicWorkID != shared.PublicWorkID {
 		t.Fatalf("expected like replay: %#v err=%v", likeReplay, err)
@@ -73,6 +80,7 @@ func TestShareWorkPreviewConfirmCreatesSanitizedPublicSnapshot(t *testing.T) {
 	if err != nil || unliked.Liked {
 		t.Fatalf("unlike public work: %#v err=%v", unliked, err)
 	}
+	requireOperatorColumns(t, app, "work_likes", "public_work_id = ? AND user_id = ?", auth.UserID, auth.UserID, shared.PublicWorkID, auth.UserID)
 	unlikeReplay, err := app.UnlikePublicWork(t.Context(), LikePublicWorkInput{Auth: auth, Meta: workMeta("trace-unlike", "idem-unlike"), PublicWorkID: shared.PublicWorkID})
 	if err != nil || unlikeReplay.Liked {
 		t.Fatalf("expected unlike replay: %#v err=%v", unlikeReplay, err)
@@ -82,6 +90,8 @@ func TestShareWorkPreviewConfirmCreatesSanitizedPublicSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unshare work: %v", err)
 	}
+	requireOperatorColumns(t, app, "works", "id = ?", auth.UserID, auth.UserID, created.Work.WorkID)
+	requireOperatorColumns(t, app, "work_public_snapshots", "snapshot_id = ?", auth.UserID, auth.UserID, shared.SnapshotID)
 	replayedUnshare, err := app.UnshareWork(t.Context(), UnshareWorkInput{Auth: auth, Meta: workMeta("trace-work-unshare", "idem-work-unshare"), WorkID: created.Work.WorkID, Reason: "owner request"})
 	if err != nil || replayedUnshare.Work.WorkID != unshared.Work.WorkID || replayedUnshare.Work.ShareStatus != StatusPrivate {
 		t.Fatalf("expected unshare replay: %#v err=%v", replayedUnshare, err)
@@ -232,6 +242,8 @@ func TestTakeDownDoesNotRollbackWhenNotificationFailsAndRecordsCompensation(t *t
 	if takenDown.NotificationStatus != "failed" {
 		t.Fatalf("expected failed notification status, got %#v", takenDown)
 	}
+	requireOperatorColumns(t, app, "works", "id = ?", auth.UserID, adminAuth.AdminID, created.Work.WorkID)
+	requireOperatorColumns(t, app, "work_public_snapshots", "public_work_id = ?", auth.UserID, adminAuth.AdminID, shared.PublicWorkID)
 	replayedTakeDown, err := app.ConfirmTakeDownWork(t.Context(), ConfirmTakeDownWorkInput{
 		Auth: adminAuth, Meta: adminMeta("trace-takedown", "idem-takedown"), PublicWorkID: shared.PublicWorkID,
 		PreviewToken: takedownPreview.PreviewToken, Reason: "policy risk", NotifyAuthor: true,
@@ -275,6 +287,7 @@ func TestTakeDownDoesNotRollbackWhenNotificationFailsAndRecordsCompensation(t *t
 	if edited.Work.ShareStatus != StatusPrivate || edited.ShareSummary["share_status"] != StatusPrivate {
 		t.Fatalf("expected real edit to reset taken_down work to private, got %#v", edited)
 	}
+	requireOperatorColumns(t, app, "works", "id = ?", auth.UserID, auth.UserID, created.Work.WorkID)
 }
 
 func TestEnterpriseRemovedMemberCannotManageWorks(t *testing.T) {
@@ -344,6 +357,24 @@ func workMeta(traceID, idem string) accountspace.RequestMeta {
 
 func adminMeta(traceID, idem string) accountspace.RequestMeta {
 	return accountspace.RequestMeta{RequestID: "req-" + idem, TraceID: traceID, IdempotencyKey: idem, Source: "test", RequestHash: "hash-" + idem}
+}
+
+func requireOperatorColumns(t *testing.T, app *App, table string, where string, wantCreatedBy string, wantUpdatedBy string, args ...any) {
+	t.Helper()
+	var row struct {
+		CreatedBy *string `gorm:"column:created_by"`
+		UpdatedBy *string `gorm:"column:updated_by"`
+	}
+	tx := app.repo.DB().Raw("SELECT created_by, updated_by FROM "+table+" WHERE "+where, args...).Scan(&row)
+	if tx.Error != nil {
+		t.Fatalf("query operator columns for %s: %v", table, tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		t.Fatalf("expected row in %s where %s", table, where)
+	}
+	if value(row.CreatedBy) != wantCreatedBy || value(row.UpdatedBy) != wantUpdatedBy {
+		t.Fatalf("unexpected operator columns in %s: created_by=%q updated_by=%q", table, value(row.CreatedBy), value(row.UpdatedBy))
+	}
 }
 
 func workShareEvidence(traceID, title, description string, tags []string) *businessagent.SafetyEvidenceDTO {

@@ -236,6 +236,8 @@ type Project struct {
 	ArchiveReason   *string        `gorm:"column:archive_reason"`
 	ArchivedBy      *string        `gorm:"column:archived_by"`
 	ArchivedAt      *time.Time     `gorm:"column:archived_at"`
+	CreatedBy       *string        `gorm:"column:created_by"`
+	UpdatedBy       *string        `gorm:"column:updated_by"`
 	CreatedAt       time.Time      `gorm:"column:created_at"`
 	UpdatedAt       time.Time      `gorm:"column:updated_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -256,6 +258,8 @@ type ProjectAsset struct {
 	SourceArtifactID *string        `gorm:"column:source_artifact_id"`
 	SourceType       string         `gorm:"column:source_type"`
 	DisplayOrder     int            `gorm:"column:display_order"`
+	CreatedBy        *string        `gorm:"column:created_by"`
+	UpdatedBy        *string        `gorm:"column:updated_by"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
 }
@@ -269,6 +273,7 @@ type ProjectWork struct {
 	Status              string         `gorm:"column:status"`
 	CreatedFromAssetIDs datatypes.JSON `gorm:"column:created_from_asset_ids;type:jsonb"`
 	CreatedBy           *string        `gorm:"column:created_by"`
+	UpdatedBy           *string        `gorm:"column:updated_by"`
 	CreatedAt           time.Time      `gorm:"column:created_at"`
 	DeletedAt           gorm.DeletedAt `gorm:"column:deleted_at"`
 }
