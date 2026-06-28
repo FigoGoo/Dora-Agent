@@ -337,3 +337,16 @@
 范围决策：
 - `AGENT_CONFIG_SOURCE` 继续表示 Agent runtime config 来源（如 postgres），不复用为服务级配置源；新增全局 `DORA_CONFIG_SOURCE` 专管 business/agent 服务配置 overlay。
 - 本切片只实现启动期读取，不引入动态 watch、审计写入或回滚流程；这些属于配置运营面，不用隐式后台线程冒充。
+
+## 批 D 子切片记录（2026-06-28 · GEN-6 恢复/对账第一阶段）✅
+
+提交：`0f87bd8`（GEN-6 recovery）
+验证：`go test -count=1 ./services/agent/internal/infra/repository ./services/agent/internal/application/workbench ./services/agent/internal/api/http ./services/agent/cmd/agent` 通过；`git diff --check` 通过。
+
+- **GEN-6 ✅ 已补恢复/对账底座**：确认后的生成/扣费流程写入 `agent_tasks(task_type=generation_asset_commit)`，记录 `freeze_requested`、`credits_frozen`、`model_submitted`、`asset_slots_prepared`、`asset_commit_started/completed` 等阶段；snapshot 的 `tasks` 暴露真实持久化任务，不再永远为空。
+- Agent 启动时执行 `RecoverGenerationTasks` 扫描 stale running generation task：对 `credits_frozen` 及 freeze replay 可确认的任务调用 `ReleaseFrozenCredits` 释放冻结并取消 run；对已进入 `asset_commit_started` 的任务标 `NEEDS_RECONCILIATION`，避免业务侧可能已扣费/提交时误释放。
+- repository 补齐 `agent_tasks` 创建、进度更新、状态转换、按 run 查询、stale running 查询；测试覆盖冻结后重启恢复释放、task 状态防回退、snapshot 暴露 task。
+
+范围决策：
+- 本切片先堵“Freeze 后进程崩溃导致冻结悬挂到过期”的资金风险；完整 Redis 异步 worker、分布式调度和提交后自动对账仍归 W3，不在本切片假装完成。
+- 对 commit RPC 已开始的任务只进入人工/后续对账状态，不自动释放冻结，避免在业务侧已提交扣费但 Agent 未收到响应时造成反向资金错误。
