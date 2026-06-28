@@ -2,6 +2,7 @@ package workbench
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -91,6 +92,74 @@ func TestM6SkillTestConsumesReviewCandidateRPC(t *testing.T) {
 	}
 }
 
+func TestSkillOutputElementsDriveDraftAndFinalArtifacts(t *testing.T) {
+	app, gateway := newM6ServiceApp(t)
+	gateway.StaticGateway.SkillSpec.OutputElements = []SkillOutputElementDTO{
+		{
+			ElementType: "image_ref", ElementName: "草稿图", Required: true, UseDraft: true,
+			UseFinal: false, Editable: true, Referable: true, DisplayOrder: 1, DisplaySlot: "blackboard",
+		},
+		{
+			ElementType: "image_ref", ElementName: "最终图", Required: true, UseDraft: false,
+			UseFinal: true, Editable: false, Referable: true, DisplayOrder: 7, DisplaySlot: "asset_detail",
+		},
+	}
+	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
+	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "skill2", IdempotencyKey: "idem-skill2-session"}, "trace-skill2")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	run, err := app.CreateRun(t.Context(), auth, CreateRunRequest{
+		SessionID: session.SessionID, ProjectID: "prj_active_1001", IdempotencyKey: "idem-skill2-run",
+		UserInput: UserInputDTO{ClientMessageID: "cm_skill2", ContentType: "text", Text: "lookup with web fetch"},
+	}, "trace-skill2")
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	interrupt, err := app.repo.GetRequiredInterrupt(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("get confirmation interrupt: %v", err)
+	}
+	var payload m4ConfirmationPayload
+	if err := json.Unmarshal(interrupt.ConfirmationPayload, &payload); err != nil {
+		t.Fatalf("decode confirmation payload: %v", err)
+	}
+	if len(payload.OutputElements) != 2 {
+		t.Fatalf("confirmation payload should carry output elements, got %#v", payload.OutputElements)
+	}
+	_, err = app.AcceptInterrupt(t.Context(), auth, run.RunID, ConfirmInterruptRequest{
+		RunID: run.RunID, InterruptID: interrupt.ID, Action: "confirm",
+		ConfirmedPayloadDigest: confirmationPayloadDigest(interrupt.ConfirmationPayload),
+		IdempotencyKey:         "idem-skill2-confirm",
+	}, "trace-skill2")
+	if err != nil {
+		t.Fatalf("accept interrupt: %v", err)
+	}
+	if len(gateway.lastCommit.FinalElements) != 1 {
+		t.Fatalf("expected exactly one final element from use_final declaration, got %#v", gateway.lastCommit.FinalElements)
+	}
+	final := gateway.lastCommit.FinalElements[0]
+	if final.ElementType != "image_ref" || final.DisplayOrder != 7 {
+		t.Fatalf("unexpected final element: %#v", final)
+	}
+	artifacts, err := app.repo.ListArtifacts(t.Context(), session.SessionID, 20, 0)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	var sawDraft, sawFinalRef bool
+	for _, artifact := range artifacts {
+		switch {
+		case artifact.ArtifactType == "draft_element" && artifact.Status == "draft" && artifact.ElementType == "image_ref":
+			sawDraft = true
+		case artifact.ArtifactType == "asset_ref" && artifact.Status == "final_ref":
+			sawFinalRef = true
+		}
+	}
+	if !sawDraft || !sawFinalRef {
+		t.Fatalf("expected draft_element and asset_ref artifacts, got %#v", artifacts)
+	}
+}
+
 func newM6ServiceApp(t *testing.T) (*App, *recordingGateway) {
 	t.Helper()
 	db := testdb.StartPostgres(t, "dora_agent_m6_service")
@@ -146,8 +215,9 @@ func newM6ServiceApp(t *testing.T) (*App, *recordingGateway) {
 
 type recordingGateway struct {
 	StaticGateway
-	calls     []string
-	chargeErr error
+	calls      []string
+	lastCommit CommitGeneratedAssetAndChargeRequest
+	chargeErr  error
 }
 
 func (g *recordingGateway) record(call string) {
@@ -190,6 +260,12 @@ func (g *recordingGateway) ChargeToolUsageCredits(ctx context.Context, auth Auth
 		return ToolChargeDTO{}, g.chargeErr
 	}
 	return g.StaticGateway.ChargeToolUsageCredits(ctx, auth, req, traceID)
+}
+
+func (g *recordingGateway) CommitGeneratedAssetAndCharge(ctx context.Context, auth AuthContextDTO, req CommitGeneratedAssetAndChargeRequest, traceID string) (AssetCommitDTO, error) {
+	g.record("CommitGeneratedAssetAndCharge")
+	g.lastCommit = req
+	return g.StaticGateway.CommitGeneratedAssetAndCharge(ctx, auth, req, traceID)
 }
 
 func (g *recordingGateway) ReleaseFrozenCredits(ctx context.Context, auth AuthContextDTO, req ReleaseFrozenCreditsRequest, traceID string) (ReleaseCreditsDTO, error) {

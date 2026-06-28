@@ -120,7 +120,21 @@
         "output_schema_json": "{}",
         "tool_refs": [],
         "confirmation_policy_json": "{}",
-        "execution_policy_summary_json": "{}"
+        "execution_policy_summary_json": "{}",
+        "output_elements": [
+          {
+            "element_type": "image_ref",
+            "element_name": "成图",
+            "required": true,
+            "use_draft": true,
+            "use_final": true,
+            "editable": true,
+            "referable": true,
+            "display_order": 1,
+            "display_slot": "both",
+            "schema_json": "{\"type\":\"object\",\"required\":[\"artifact_id\"]}"
+          }
+        ]
       }
     },
     {

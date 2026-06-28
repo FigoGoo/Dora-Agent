@@ -170,7 +170,7 @@ func (g *BusinessGateway) GetPublishedSkillSpec(ctx context.Context, auth workbe
 	return workbench.SkillSpecDTO{
 		SkillID: resp.SkillId, Version: resp.Version, SkillSpecJSON: resp.SkillSpecJson, OutputSchemaJSON: resp.OutputSchemaJson,
 		ToolRefs: resp.ToolRefs, MemoryPolicyJSON: value(resp.MemoryPolicyJson), ConfirmationPolicyJSON: resp.ConfirmationPolicyJson,
-		ExecutionPolicySummaryJSON: resp.ExecutionPolicySummaryJson,
+		ExecutionPolicySummaryJSON: resp.ExecutionPolicySummaryJson, OutputElements: outputElementsFromRPC(resp.OutputElements),
 	}, nil
 }
 
@@ -536,6 +536,24 @@ func modelSummaryFromRPC(resp *businessagent.ModelSummaryDTO) workbench.ModelSum
 		ModelID: resp.ModelId, DisplayName: resp.DisplayName, IsDefault: resp.IsDefault,
 		PricingSnapshotID: resp.PricingSnapshotId, ResourceType: resp.ResourceType,
 	}
+}
+
+func outputElementsFromRPC(items []*businessagent.SkillOutputElementDTO) []workbench.SkillOutputElementDTO {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]workbench.SkillOutputElementDTO, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		out = append(out, workbench.SkillOutputElementDTO{
+			ElementType: item.ElementType, ElementName: item.ElementName, Required: item.Required,
+			UseDraft: item.UseDraft, UseFinal: item.UseFinal, Editable: item.Editable, Referable: item.Referable,
+			DisplayOrder: item.GetDisplayOrder(), DisplaySlot: item.GetDisplaySlot(), SchemaJSON: item.GetSchemaJson(),
+		})
+	}
+	return out
 }
 
 func estimateFromRPC(resp *businessagent.EstimateGenerationCreditsResponse, pricingSnapshotID string) workbench.CreditEstimateDTO {

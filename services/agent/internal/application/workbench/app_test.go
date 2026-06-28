@@ -40,6 +40,20 @@ func TestEstimateItemsForArtifactsFailsWhenQuantityMissing(t *testing.T) {
 	}
 }
 
+func TestOutputElementPlanKeepsDraftAndFinalDeclarations(t *testing.T) {
+	plan := buildOutputElementPlan([]SkillOutputElementDTO{
+		{ElementType: "image_ref", ElementName: "草稿", UseDraft: true, DisplayOrder: 1},
+		{ElementType: "image_ref", ElementName: "最终", UseFinal: true, DisplayOrder: 7},
+	}, []modeltool.Artifact{{ArtifactID: "art_1", ElementType: "image_ref"}})
+	if !plan.UseDraft("image_ref") || plan.DraftElement("image_ref").ElementName != "草稿" {
+		t.Fatalf("draft declaration lost: %#v", plan.DraftElement("image_ref"))
+	}
+	finals := plan.FinalElementsForArtifact(modeltool.Artifact{ArtifactID: "art_1", ElementType: "image_ref"})
+	if len(finals) != 1 || finals[0].ElementName != "最终" || finals[0].DisplayOrder != 7 {
+		t.Fatalf("final declaration lost: %#v", finals)
+	}
+}
+
 func TestStreamingArtifactUploaderConsumesStream(t *testing.T) {
 	body := []byte("streamed artifact")
 	sum := sha256.Sum256(body)

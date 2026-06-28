@@ -390,6 +390,7 @@ func (h *Handler) GetPublishedSkillSpec(ctx context.Context, req *businessagent.
 		SkillId: out.SkillID, Version: out.Version, SkillSpecJson: out.SkillSpecJSON, OutputSchemaJson: out.OutputSchemaJSON,
 		ToolRefs: out.ToolRefs, MemoryPolicyJson: optionalString(out.MemoryPolicyJSON),
 		ConfirmationPolicyJson: out.ConfirmationPolicyJSON, ExecutionPolicySummaryJson: out.ExecutionPolicySummaryJSON,
+		OutputElements: outputElementsToRPC(out.OutputElements),
 	}, nil
 }
 
@@ -630,8 +631,30 @@ func commitChargedItemsToRPC(items []assetcommit.ChargedLineItemDTO) []*business
 	return out
 }
 
+func outputElementsToRPC(items []skillcatalog.OutputElementDTO) []*businessagent.SkillOutputElementDTO {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*businessagent.SkillOutputElementDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, &businessagent.SkillOutputElementDTO{
+			ElementType: item.ElementType, ElementName: item.ElementName, Required: item.Required,
+			UseDraft: item.UseDraft, UseFinal: item.UseFinal, Editable: item.Editable, Referable: item.Referable,
+			DisplayOrder: optionalInt32(item.DisplayOrder), DisplaySlot: optionalString(item.DisplaySlot), SchemaJson: optionalString(item.SchemaJSON),
+		})
+	}
+	return out
+}
+
 func optionalString(value string) *string {
 	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func optionalInt32(value int32) *int32 {
+	if value == 0 {
 		return nil
 	}
 	return &value

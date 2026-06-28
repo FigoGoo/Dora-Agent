@@ -108,6 +108,10 @@ func (g StaticGateway) GetPublishedSkillSpec(ctx context.Context, auth AuthConte
 		SkillID: skillID, Version: version, SkillSpecJSON: `{"name":"static"}`, OutputSchemaJSON: `{"type":"object"}`,
 		ToolRefs: []string{"image_generate:model_generation"}, MemoryPolicyJSON: `{"enabled":true}`,
 		ConfirmationPolicyJSON: `{"requires_confirmation":false}`, ExecutionPolicySummaryJSON: `{"tool_refs":["image_generate:model_generation"]}`,
+		OutputElements: []SkillOutputElementDTO{{
+			ElementType: "image_ref", ElementName: "生成图片", Required: true, UseDraft: true, UseFinal: true,
+			Editable: true, Referable: true, DisplayOrder: 1, DisplaySlot: "both", SchemaJSON: `{"type":"object"}`,
+		}},
 	}, nil
 }
 

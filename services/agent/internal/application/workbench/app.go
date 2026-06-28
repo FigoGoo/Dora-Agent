@@ -96,6 +96,20 @@ type SkillSpecDTO struct {
 	MemoryPolicyJSON           string
 	ConfirmationPolicyJSON     string
 	ExecutionPolicySummaryJSON string
+	OutputElements             []SkillOutputElementDTO
+}
+
+type SkillOutputElementDTO struct {
+	ElementType  string `json:"element_type"`
+	ElementName  string `json:"element_name"`
+	Required     bool   `json:"required"`
+	UseDraft     bool   `json:"use_draft"`
+	UseFinal     bool   `json:"use_final"`
+	Editable     bool   `json:"editable"`
+	Referable    bool   `json:"referable"`
+	DisplayOrder int32  `json:"display_order"`
+	DisplaySlot  string `json:"display_slot"`
+	SchemaJSON   string `json:"schema_json,omitempty"`
 }
 
 type ReviewCandidateSkillSpecDTO struct {
@@ -1236,6 +1250,7 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 		return err
 	}
 	selectedSkillID := ""
+	var selectedOutputElements []SkillOutputElementDTO
 	skills, _, err := a.gateway.ListRoutableSkills(ctx, auth, "", 10, "", traceID)
 	if err != nil {
 		_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_catalog_unavailable", err.Error())
@@ -1265,9 +1280,12 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 				_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_spec_unavailable", specErr.Error())
 				skillSelectionSnapshot["fallback_reason"] = "skill_spec_unavailable"
 			} else {
+				selectedOutputElements = spec.OutputElements
 				skillSelectionSnapshot["confirmation_policy"] = spec.ConfirmationPolicyJSON
 				skillSelectionSnapshot["tool_refs_digest"] = digestStrings(spec.ToolRefs)
 				skillSelectionSnapshot["tool_refs_count"] = len(spec.ToolRefs)
+				skillSelectionSnapshot["output_elements"] = spec.OutputElements
+				skillSelectionSnapshot["output_elements_count"] = len(spec.OutputElements)
 				if err := a.recordToolPolicyEvents(ctx, auth, run, spec.ToolRefs, safetyEvidence, traceID); err != nil {
 					if errors.Is(err, errToolConfirmationRequired) {
 						return nil
@@ -1334,7 +1352,7 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 				_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "CREDIT_INSUFFICIENT", "credit account has insufficient points")
 				return nil
 			}
-			if err := a.createCreditConfirmationInterrupt(ctx, run, snapshot, estimate, safetyEvidence, prompt, traceID); err != nil {
+			if err := a.createCreditConfirmationInterrupt(ctx, run, snapshot, estimate, safetyEvidence, prompt, selectedOutputElements, traceID); err != nil {
 				return err
 			}
 		}
@@ -1479,7 +1497,7 @@ func (a *App) createSkillConfirmationInterrupt(ctx context.Context, run *model.R
 	}, "Skill 执行确认", "当前 Skill 策略要求确认后继续", risks, expires, traceID)
 }
 
-func (a *App) createCreditConfirmationInterrupt(ctx context.Context, run *model.Run, snapshot ModelRuntimeSnapshotDTO, estimate CreditEstimateDTO, safety *model.SafetyEvaluation, prompt string, traceID string) error {
+func (a *App) createCreditConfirmationInterrupt(ctx context.Context, run *model.Run, snapshot ModelRuntimeSnapshotDTO, estimate CreditEstimateDTO, safety *model.SafetyEvaluation, prompt string, outputElements []SkillOutputElementDTO, traceID string) error {
 	return a.createConfirmationInterrupt(ctx, run, "credit_generation_confirmation", "generation credit charge requires confirmation", map[string]any{
 		"m4_flow":             "generation_asset_commit",
 		"estimate_id":         estimate.EstimateID,
@@ -1492,6 +1510,7 @@ func (a *App) createCreditConfirmationInterrupt(ctx context.Context, run *model.
 		"estimate":            estimate,
 		"safety_evidence":     safetyEvidenceToRPC(safety),
 		"prompt_digest":       digestText(prompt),
+		"output_elements":     outputElements,
 	}, "生成与扣费确认", "确认后将冻结积分，生成完成并保存资产后扣费", []string{"credit_freeze", "asset_commit", "project:" + run.ProjectID}, 15*time.Minute, traceID)
 }
 
@@ -1696,6 +1715,7 @@ type m4ConfirmationPayload struct {
 	Estimate          CreditEstimateDTO               `json:"estimate"`
 	SafetyEvidence    businessagent.SafetyEvidenceDTO `json:"safety_evidence"`
 	PromptDigest      string                          `json:"prompt_digest"`
+	OutputElements    []SkillOutputElementDTO         `json:"output_elements"`
 }
 
 func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO, runID string, interrupt *model.Interrupt, idempotencyKey string, traceID string) error {
@@ -1800,9 +1820,15 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	if err != nil {
 		return a.failM4AfterFreeze(ctx, auth, run, freeze, "estimate_item_unavailable", idempotencyKey, traceID, err)
 	}
+	outputPlan := buildOutputElementPlan(payload.OutputElements, result.Artifacts)
 	commitArtifacts := make([]CommitArtifactDTO, 0, len(result.Artifacts))
 	finalElements := make([]FinalElementDTO, 0, len(result.Artifacts))
 	for i, artifact := range result.Artifacts {
+		if outputPlan.UseDraft(artifact.ElementType) {
+			if err := a.createDraftArtifact(ctx, run, artifact, outputPlan.DraftElement(artifact.ElementType), traceID); err != nil {
+				return a.failM4AfterFreeze(ctx, auth, run, freeze, "agent_draft_artifact_failed", idempotencyKey, traceID, err)
+			}
+		}
 		slot, ok := slotByArtifact[artifact.ArtifactID]
 		if !ok {
 			return a.failM4AfterFreeze(ctx, auth, run, freeze, "missing_upload_slot", idempotencyKey, traceID, apperror.New(apperror.CodeInternal, "generated upload slot missing"))
@@ -1830,8 +1856,13 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 				SizeBytes: uploaded.SizeBytes, Checksum: uploaded.Checksum, Etag: uploaded.Etag,
 			},
 		})
-		elementPayload, _ := json.Marshal(map[string]any{"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType, "elements_summary": artifact.ElementsSummary})
-		finalElements = append(finalElements, FinalElementDTO{ElementType: artifact.ElementType, ElementPayloadJSON: string(elementPayload), DisplayOrder: int32(i + 1)})
+		for _, element := range outputPlan.FinalElementsForArtifact(artifact) {
+			elementPayload, _ := json.Marshal(map[string]any{
+				"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType, "element_name": element.ElementName,
+				"display_slot": element.DisplaySlot, "elements_summary": artifact.ElementsSummary,
+			})
+			finalElements = append(finalElements, FinalElementDTO{ElementType: element.ElementType, ElementPayloadJSON: string(elementPayload), DisplayOrder: displayOrderOrDefault(element, int32(i+1))})
+		}
 	}
 	commit, err := a.gateway.CommitGeneratedAssetAndCharge(ctx, auth, CommitGeneratedAssetAndChargeRequest{
 		ProjectID: run.ProjectID, SessionID: run.SessionID, RunID: run.ID, FreezeID: freeze.FreezeID,
@@ -1848,7 +1879,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	for _, ref := range commit.AssetRefs {
 		if err := a.repo.CreateArtifact(ctx, &model.Artifact{
 			ID: securityID("artref_"), SessionID: run.SessionID, ProjectID: run.ProjectID, RunID: run.ID,
-			ArtifactType: "generated_asset", Status: "saved", ElementType: elementTypeForRef(ref, result.Artifacts),
+			ArtifactType: "asset_ref", Status: "final_ref", ElementType: elementTypeForRef(ref, result.Artifacts),
 			Content: jsonObject(map[string]any{
 				"source_artifact_id": ref.SourceArtifactID, "resource_type": ref.ResourceType, "asset_type": ref.AssetType,
 				"elements_summary_json": ref.ElementsSummaryJSON,
@@ -2134,6 +2165,77 @@ func estimateItemsForArtifacts(estimate CreditEstimateDTO, artifacts []modeltool
 		out[artifact.ArtifactID] = estimate.LineItems[matched].EstimateItemID
 	}
 	return out, nil
+}
+
+type outputElementPlan struct {
+	draftByType   map[string]SkillOutputElementDTO
+	finalByType   map[string][]SkillOutputElementDTO
+	fallbackFinal bool
+}
+
+func buildOutputElementPlan(elements []SkillOutputElementDTO, artifacts []modeltool.Artifact) outputElementPlan {
+	plan := outputElementPlan{draftByType: map[string]SkillOutputElementDTO{}, finalByType: map[string][]SkillOutputElementDTO{}}
+	for _, element := range elements {
+		element.ElementType = strings.TrimSpace(element.ElementType)
+		if element.ElementType == "" {
+			continue
+		}
+		if element.UseDraft {
+			if _, exists := plan.draftByType[element.ElementType]; !exists {
+				plan.draftByType[element.ElementType] = element
+			}
+		}
+		if element.UseFinal {
+			plan.finalByType[element.ElementType] = append(plan.finalByType[element.ElementType], element)
+		}
+	}
+	if len(plan.finalByType) == 0 {
+		plan.fallbackFinal = true
+	}
+	return plan
+}
+
+func (p outputElementPlan) DraftElement(elementType string) SkillOutputElementDTO {
+	return p.draftByType[strings.TrimSpace(elementType)]
+}
+
+func (p outputElementPlan) UseDraft(elementType string) bool {
+	_, ok := p.draftByType[strings.TrimSpace(elementType)]
+	return ok
+}
+
+func (p outputElementPlan) FinalElementsForArtifact(artifact modeltool.Artifact) []SkillOutputElementDTO {
+	elementType := strings.TrimSpace(artifact.ElementType)
+	if items := p.finalByType[elementType]; len(items) > 0 {
+		return items
+	}
+	if !p.fallbackFinal {
+		return nil
+	}
+	return []SkillOutputElementDTO{{ElementType: elementType, UseFinal: true}}
+}
+
+func displayOrderOrDefault(element SkillOutputElementDTO, fallback int32) int32 {
+	if element.DisplayOrder > 0 {
+		return element.DisplayOrder
+	}
+	return fallback
+}
+
+func (a *App) createDraftArtifact(ctx context.Context, run *model.Run, artifact modeltool.Artifact, element SkillOutputElementDTO, traceID string) error {
+	content := map[string]any{
+		"artifact_id": artifact.ArtifactID, "resource_type": artifact.ResourceType, "element_type": artifact.ElementType,
+		"element_name": element.ElementName, "display_order": element.DisplayOrder, "display_slot": element.DisplaySlot,
+		"metadata_summary": artifact.MetadataSummary, "elements_summary": artifact.ElementsSummary,
+	}
+	if element.SchemaJSON != "" {
+		content["schema_json"] = element.SchemaJSON
+	}
+	return a.repo.CreateArtifact(ctx, &model.Artifact{
+		ID: securityID("artdraft_"), SessionID: run.SessionID, ProjectID: run.ProjectID, RunID: run.ID,
+		ArtifactType: "draft_element", Status: "draft", ElementType: artifact.ElementType,
+		Content: jsonObject(content), Visibility: "private", TraceID: traceID,
+	})
 }
 
 func firstArtifactID(artifacts []modeltool.Artifact) string {

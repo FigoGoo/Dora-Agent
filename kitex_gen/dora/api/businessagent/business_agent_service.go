@@ -1327,15 +1327,153 @@ var fieldIDToName_GetPublishedSkillSpecRequest = map[int16]string{
 	4: "version",
 }
 
+type SkillOutputElementDTO struct {
+	ElementType  string  `thrift:"element_type,1,required" frugal:"1,required,string" json:"element_type"`
+	ElementName  string  `thrift:"element_name,2,required" frugal:"2,required,string" json:"element_name"`
+	Required     bool    `thrift:"required,3,required" frugal:"3,required,bool" json:"required"`
+	UseDraft     bool    `thrift:"use_draft,4,required" frugal:"4,required,bool" json:"use_draft"`
+	UseFinal     bool    `thrift:"use_final,5,required" frugal:"5,required,bool" json:"use_final"`
+	Editable     bool    `thrift:"editable,6,required" frugal:"6,required,bool" json:"editable"`
+	Referable    bool    `thrift:"referable,7,required" frugal:"7,required,bool" json:"referable"`
+	DisplayOrder *int32  `thrift:"display_order,8,optional" frugal:"8,optional,i32" json:"display_order,omitempty"`
+	DisplaySlot  *string `thrift:"display_slot,9,optional" frugal:"9,optional,string" json:"display_slot,omitempty"`
+	SchemaJson   *string `thrift:"schema_json,10,optional" frugal:"10,optional,string" json:"schema_json,omitempty"`
+}
+
+func NewSkillOutputElementDTO() *SkillOutputElementDTO {
+	return &SkillOutputElementDTO{}
+}
+
+func (p *SkillOutputElementDTO) InitDefault() {
+}
+
+func (p *SkillOutputElementDTO) GetElementType() (v string) {
+	return p.ElementType
+}
+
+func (p *SkillOutputElementDTO) GetElementName() (v string) {
+	return p.ElementName
+}
+
+func (p *SkillOutputElementDTO) GetRequired() (v bool) {
+	return p.Required
+}
+
+func (p *SkillOutputElementDTO) GetUseDraft() (v bool) {
+	return p.UseDraft
+}
+
+func (p *SkillOutputElementDTO) GetUseFinal() (v bool) {
+	return p.UseFinal
+}
+
+func (p *SkillOutputElementDTO) GetEditable() (v bool) {
+	return p.Editable
+}
+
+func (p *SkillOutputElementDTO) GetReferable() (v bool) {
+	return p.Referable
+}
+
+var SkillOutputElementDTO_DisplayOrder_DEFAULT int32
+
+func (p *SkillOutputElementDTO) GetDisplayOrder() (v int32) {
+	if !p.IsSetDisplayOrder() {
+		return SkillOutputElementDTO_DisplayOrder_DEFAULT
+	}
+	return *p.DisplayOrder
+}
+
+var SkillOutputElementDTO_DisplaySlot_DEFAULT string
+
+func (p *SkillOutputElementDTO) GetDisplaySlot() (v string) {
+	if !p.IsSetDisplaySlot() {
+		return SkillOutputElementDTO_DisplaySlot_DEFAULT
+	}
+	return *p.DisplaySlot
+}
+
+var SkillOutputElementDTO_SchemaJson_DEFAULT string
+
+func (p *SkillOutputElementDTO) GetSchemaJson() (v string) {
+	if !p.IsSetSchemaJson() {
+		return SkillOutputElementDTO_SchemaJson_DEFAULT
+	}
+	return *p.SchemaJson
+}
+func (p *SkillOutputElementDTO) SetElementType(val string) {
+	p.ElementType = val
+}
+func (p *SkillOutputElementDTO) SetElementName(val string) {
+	p.ElementName = val
+}
+func (p *SkillOutputElementDTO) SetRequired(val bool) {
+	p.Required = val
+}
+func (p *SkillOutputElementDTO) SetUseDraft(val bool) {
+	p.UseDraft = val
+}
+func (p *SkillOutputElementDTO) SetUseFinal(val bool) {
+	p.UseFinal = val
+}
+func (p *SkillOutputElementDTO) SetEditable(val bool) {
+	p.Editable = val
+}
+func (p *SkillOutputElementDTO) SetReferable(val bool) {
+	p.Referable = val
+}
+func (p *SkillOutputElementDTO) SetDisplayOrder(val *int32) {
+	p.DisplayOrder = val
+}
+func (p *SkillOutputElementDTO) SetDisplaySlot(val *string) {
+	p.DisplaySlot = val
+}
+func (p *SkillOutputElementDTO) SetSchemaJson(val *string) {
+	p.SchemaJson = val
+}
+
+func (p *SkillOutputElementDTO) IsSetDisplayOrder() bool {
+	return p.DisplayOrder != nil
+}
+
+func (p *SkillOutputElementDTO) IsSetDisplaySlot() bool {
+	return p.DisplaySlot != nil
+}
+
+func (p *SkillOutputElementDTO) IsSetSchemaJson() bool {
+	return p.SchemaJson != nil
+}
+
+func (p *SkillOutputElementDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SkillOutputElementDTO(%+v)", *p)
+}
+
+var fieldIDToName_SkillOutputElementDTO = map[int16]string{
+	1:  "element_type",
+	2:  "element_name",
+	3:  "required",
+	4:  "use_draft",
+	5:  "use_final",
+	6:  "editable",
+	7:  "referable",
+	8:  "display_order",
+	9:  "display_slot",
+	10: "schema_json",
+}
+
 type SkillSpecResponse struct {
-	SkillId                    string   `thrift:"skill_id,1,required" frugal:"1,required,string" json:"skill_id"`
-	Version                    string   `thrift:"version,2,required" frugal:"2,required,string" json:"version"`
-	SkillSpecJson              string   `thrift:"skill_spec_json,3,required" frugal:"3,required,string" json:"skill_spec_json"`
-	OutputSchemaJson           string   `thrift:"output_schema_json,4,required" frugal:"4,required,string" json:"output_schema_json"`
-	ToolRefs                   []string `thrift:"tool_refs,5,required" frugal:"5,required,list<string>" json:"tool_refs"`
-	MemoryPolicyJson           *string  `thrift:"memory_policy_json,6,optional" frugal:"6,optional,string" json:"memory_policy_json,omitempty"`
-	ConfirmationPolicyJson     string   `thrift:"confirmation_policy_json,7,required" frugal:"7,required,string" json:"confirmation_policy_json"`
-	ExecutionPolicySummaryJson string   `thrift:"execution_policy_summary_json,8,required" frugal:"8,required,string" json:"execution_policy_summary_json"`
+	SkillId                    string                   `thrift:"skill_id,1,required" frugal:"1,required,string" json:"skill_id"`
+	Version                    string                   `thrift:"version,2,required" frugal:"2,required,string" json:"version"`
+	SkillSpecJson              string                   `thrift:"skill_spec_json,3,required" frugal:"3,required,string" json:"skill_spec_json"`
+	OutputSchemaJson           string                   `thrift:"output_schema_json,4,required" frugal:"4,required,string" json:"output_schema_json"`
+	ToolRefs                   []string                 `thrift:"tool_refs,5,required" frugal:"5,required,list<string>" json:"tool_refs"`
+	MemoryPolicyJson           *string                  `thrift:"memory_policy_json,6,optional" frugal:"6,optional,string" json:"memory_policy_json,omitempty"`
+	ConfirmationPolicyJson     string                   `thrift:"confirmation_policy_json,7,required" frugal:"7,required,string" json:"confirmation_policy_json"`
+	ExecutionPolicySummaryJson string                   `thrift:"execution_policy_summary_json,8,required" frugal:"8,required,string" json:"execution_policy_summary_json"`
+	OutputElements             []*SkillOutputElementDTO `thrift:"output_elements,9,optional" frugal:"9,optional,list<SkillOutputElementDTO>" json:"output_elements,omitempty"`
 }
 
 func NewSkillSpecResponse() *SkillSpecResponse {
@@ -1381,6 +1519,15 @@ func (p *SkillSpecResponse) GetConfirmationPolicyJson() (v string) {
 func (p *SkillSpecResponse) GetExecutionPolicySummaryJson() (v string) {
 	return p.ExecutionPolicySummaryJson
 }
+
+var SkillSpecResponse_OutputElements_DEFAULT []*SkillOutputElementDTO
+
+func (p *SkillSpecResponse) GetOutputElements() (v []*SkillOutputElementDTO) {
+	if !p.IsSetOutputElements() {
+		return SkillSpecResponse_OutputElements_DEFAULT
+	}
+	return p.OutputElements
+}
 func (p *SkillSpecResponse) SetSkillId(val string) {
 	p.SkillId = val
 }
@@ -1405,9 +1552,16 @@ func (p *SkillSpecResponse) SetConfirmationPolicyJson(val string) {
 func (p *SkillSpecResponse) SetExecutionPolicySummaryJson(val string) {
 	p.ExecutionPolicySummaryJson = val
 }
+func (p *SkillSpecResponse) SetOutputElements(val []*SkillOutputElementDTO) {
+	p.OutputElements = val
+}
 
 func (p *SkillSpecResponse) IsSetMemoryPolicyJson() bool {
 	return p.MemoryPolicyJson != nil
+}
+
+func (p *SkillSpecResponse) IsSetOutputElements() bool {
+	return p.OutputElements != nil
 }
 
 func (p *SkillSpecResponse) String() string {
@@ -1426,6 +1580,7 @@ var fieldIDToName_SkillSpecResponse = map[int16]string{
 	6: "memory_policy_json",
 	7: "confirmation_policy_json",
 	8: "execution_policy_summary_json",
+	9: "output_elements",
 }
 
 type CheckToolExecutionPolicyRequest struct {
