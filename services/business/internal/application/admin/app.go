@@ -14,6 +14,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/security"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type App struct {
@@ -450,12 +451,15 @@ func (a *App) DisableAdmin(ctx context.Context, in DisableAdminInput) (PlatformA
 	var dto PlatformAdminDTO
 	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := a.now()
+		row, err := a.lockDisableTargetAdmin(tx, in.AdminID)
+		if err != nil {
+			return err
+		}
 		if err := tx.Model(&businesscore.PlatformAdmin{}).Where("id = ?", in.AdminID).Updates(map[string]any{
 			"status": "disabled", "disabled_by": in.Auth.AdminID, "disabled_reason": in.Reason, "updated_at": now,
 		}).Error; err != nil {
 			return err
 		}
-		var row businesscore.PlatformAdmin
 		if err := tx.Where("id = ?", in.AdminID).First(&row).Error; err != nil {
 			return err
 		}
@@ -469,6 +473,26 @@ func (a *App) DisableAdmin(ctx context.Context, in DisableAdminInput) (PlatformA
 	}
 	_ = a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "platform_admin", ID: dto.AdminID})
 	return dto, nil
+}
+
+func (a *App) lockDisableTargetAdmin(tx *gorm.DB, adminID string) (businesscore.PlatformAdmin, error) {
+	var row businesscore.PlatformAdmin
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", adminID).First(&row).Error; err != nil {
+		return row, err
+	}
+	if row.Status != accountspace.StatusActive {
+		return row, bizerrors.New(bizerrors.CodeStateConflict, "admin is not active")
+	}
+	var remainingActive int64
+	if err := tx.Model(&businesscore.PlatformAdmin{}).
+		Where("id <> ? AND status = ?", adminID, accountspace.StatusActive).
+		Count(&remainingActive).Error; err != nil {
+		return row, err
+	}
+	if remainingActive == 0 {
+		return row, bizerrors.New(bizerrors.CodeStateConflict, "cannot disable the last active admin")
+	}
+	return row, nil
 }
 
 func (a *App) ListUsers(ctx context.Context, in ListUsersInput) (Page[UserSummaryDTO], error) {

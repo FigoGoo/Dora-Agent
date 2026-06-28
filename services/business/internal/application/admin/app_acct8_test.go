@@ -1,13 +1,17 @@
 package admin
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/idempotency"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/auditlog"
+	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
+	"gorm.io/gorm"
 )
 
 func newAdminTestApp(t *testing.T) *App {
@@ -44,4 +48,59 @@ func TestAdminUserDetailDoesNotExposeBusinessOwnership(t *testing.T) {
 		t.Fatalf("ACCT-8 越权红线：admin 通道不得暴露业务空间归属明细，got spaces=%d members=%d audit=%d",
 			len(detail.Spaces), len(detail.EnterpriseMemberships), len(detail.RecentAuditRefs))
 	}
+}
+
+func TestDisableAdminCannotRemoveLastActiveAdmin(t *testing.T) {
+	app := newAdminTestApp(t)
+	err := app.repo.DB().WithContext(t.Context()).Transaction(func(tx *gorm.DB) error {
+		_, err := app.lockDisableTargetAdmin(tx, "adm_root")
+		return err
+	})
+	if codeOf(err) != bizerrors.CodeStateConflict {
+		t.Fatalf("expected last active admin guard, got %v", err)
+	}
+}
+
+func TestDisableAdminAllowsNonLastActiveAdmin(t *testing.T) {
+	app := newAdminTestApp(t)
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.PlatformAdmin{}).
+		Where("id = ?", "adm_root").Update("must_rotate_password", false).Error; err != nil {
+		t.Fatalf("prep admin: %v", err)
+	}
+	auth := AdminAuth{AdminID: "adm_root", Account: "admin@dora.local", SessionID: "admin-session"}
+	created, err := app.CreateAdmin(t.Context(), CreateAdminInput{
+		Auth: auth, Account: "second.admin@dora.local", InitialPassword: "Passw0rd!Second", Reason: "test second admin",
+		Meta: RequestMeta{TraceID: "trace-admin-create", IdempotencyKey: "idem-admin-create-second"},
+	})
+	if err != nil {
+		t.Fatalf("create second admin: %v", err)
+	}
+	disabled, err := app.DisableAdmin(t.Context(), DisableAdminInput{
+		Auth: auth, AdminID: created.AdminID, Reason: "test disable non-last",
+		Meta: RequestMeta{TraceID: "trace-admin-disable", IdempotencyKey: "idem-admin-disable-second"},
+	})
+	if err != nil {
+		t.Fatalf("disable non-last admin: %v", err)
+	}
+	if disabled.Status != "disabled" {
+		t.Fatalf("admin not disabled: %#v", disabled)
+	}
+	var activeCount int64
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.PlatformAdmin{}).Where("status = ?", accountspace.StatusActive).Count(&activeCount).Error; err != nil {
+		t.Fatalf("count active admins: %v", err)
+	}
+	if activeCount != 1 {
+		t.Fatalf("expected exactly one active admin remaining, got %d", activeCount)
+	}
+}
+
+func codeOf(err error) bizerrors.Code {
+	if err == nil {
+		return ""
+	}
+	var businessErr *bizerrors.BusinessError
+	if errors.As(err, &businessErr) {
+		return businessErr.Code
+	}
+	return ""
 }

@@ -189,3 +189,13 @@
 
 范围决策：
 - 本切片先打通运行期配置加载链路和版本落库，不解释 `content` 中的策略参数；策略解释器留给后续 W2/W3 功能闭环。
+
+## 批 F 子切片记录（2026-06-28 · WORK-4）✅
+
+提交：待提交（WORK-4）
+验证：`go test ./services/business/internal/application/admin` 通过。
+
+- **WORK-4 ✅ 已修**：`DisableAdmin` 在事务内锁定目标管理员并检查除目标外仍存在 active 管理员；若目标是最后一个 active 管理员，返回 `STATE_CONFLICT`，避免后台账号全部锁死。
+
+范围决策：
+- 保持“不能禁用当前会话 admin”的原有入口保护；新增最后 active 管理员守护作为领域不变量，覆盖未来批处理或内部调用绕过当前会话保护的风险。
