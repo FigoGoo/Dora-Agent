@@ -126,7 +126,6 @@
 
 遗留（后续子切片，不阻塞）：
 - **created_by/updated_by operator 回填**：贯穿各写路径从 auth context 取操作者。
-- **软删唯一约束复用评估**：`email/account_no/各 _no` 等自然键软删后仍占用，若需"软删后复用"须补 partial unique index（`WHERE deleted_at IS NULL`）。当前业务多用 `status` 而非软删，暂不阻塞。
 - 明细/价格表已纳入软删（可软删停用），如需改 append-only 另议。
 
 ## 批 B 完成记录（2026-06-28 · 安全/越权红线 + SKILL-2）✅
@@ -373,3 +372,15 @@
 范围决策：
 - 本切片不放松业务侧 safety evidence hash 绑定，也不让旧 estimate 接受新 evidence；过期续跑必须通过 Agent 侧重评 + 新 estimate 完成。
 - 仅覆盖确认后生成链路的证据 TTL 续期；独立工具扣费、分享/上传等其他 safety_evidence 场景后续按各自链路单独评估。
+
+## 批 A 子切片记录（2026-06-28 · 软删唯一约束复用评估）✅
+
+提交：`7e0bc9d`（soft-delete unique policy）
+验证：`go test -count=1 ./services/business/internal/infra/repository/businesscore` 通过；`git diff --check` 通过。
+
+- **软删唯一约束复用评估 ✅ 已固化**：业务库不默认把唯一约束改成 `WHERE deleted_at IS NULL` partial unique；现有唯一键按全局身份、密钥/session token、财务轨迹、幂等回放、不可变快照、状态治理关系、互动历史等类别显式冻结。
+- `TestSoftDeleteUniqueConstraintsHaveExplicitReusePolicy` 扫描所有软删表非主键唯一索引，要求新增唯一索引必须进入复用策略清单；若未来出现 `deleted_at` partial unique，必须先把策略显式改为 `partial_active_reuse` 并配套迁移裁决。
+
+范围决策：
+- 本切片不重写任何现有唯一约束，避免释放账号、兑换码、财务、幂等、公开分享等不应复用的历史键。
+- `created_by/updated_by operator 回填` 仍保留为批 A 后续子切片；GORM 未映射公共列不能用简单 `SetColumn` callback 粗暴补齐，需另行设计。
