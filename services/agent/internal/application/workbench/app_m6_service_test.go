@@ -178,6 +178,78 @@ func TestSkillOutputElementsDriveDraftAndFinalArtifacts(t *testing.T) {
 	}
 }
 
+func TestExpiredSafetyEvidenceIsReevaluatedBeforeGenerationFreeze(t *testing.T) {
+	app, gateway := newM6ServiceApp(t)
+	gateway.refreshEstimate = gateway.StaticGateway.Estimate
+	gateway.refreshEstimate.EstimateID = "est_generation_refresh"
+	gateway.refreshEstimate.LineItems = []CreditEstimateLineItemDTO{{
+		EstimateItemID: "est_item_generation_refresh", ItemType: "model_generation",
+		ModelID: "mdl_static_image", ResourceType: "image", BillingUnit: "image", EstimatePoints: 10,
+	}}
+	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
+	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "gen4", IdempotencyKey: "idem-gen4-session"}, "trace-gen4")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	run, err := app.CreateRun(t.Context(), auth, CreateRunRequest{
+		SessionID: session.SessionID, ProjectID: "prj_active_1001", IdempotencyKey: "idem-gen4-run",
+		UserInput: UserInputDTO{ClientMessageID: "cm_gen4", ContentType: "text", Text: "lookup with web fetch"},
+	}, "trace-gen4")
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	interrupt, err := app.repo.GetRequiredInterrupt(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("get confirmation interrupt: %v", err)
+	}
+	var payload m4ConfirmationPayload
+	if err := json.Unmarshal(interrupt.ConfirmationPayload, &payload); err != nil {
+		t.Fatalf("decode confirmation payload: %v", err)
+	}
+	originalEvidenceID := payload.SafetyEvidence.SafetyEvidenceId
+	expiredAt := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+	payload.SafetyEvidence.ExpiresAt = &expiredAt
+	interrupt.ConfirmationPayload = jsonObject(payload)
+	if err := app.repo.DB().WithContext(t.Context()).Model(&model.Interrupt{}).
+		Where("id = ?", interrupt.ID).
+		Update("confirmation_payload", interrupt.ConfirmationPayload).Error; err != nil {
+		t.Fatalf("expire confirmation safety evidence: %v", err)
+	}
+	interrupt, err = app.repo.GetInterrupt(t.Context(), run.RunID, interrupt.ID)
+	if err != nil {
+		t.Fatalf("reload expired confirmation interrupt: %v", err)
+	}
+	gateway.calls = nil
+
+	_, err = app.AcceptInterrupt(t.Context(), auth, run.RunID, ConfirmInterruptRequest{
+		RunID: run.RunID, InterruptID: interrupt.ID, Action: "confirm",
+		ConfirmedPayloadDigest: confirmationPayloadDigest(interrupt.ConfirmationPayload),
+		IdempotencyKey:         "idem-gen4-confirm",
+	}, "trace-gen4")
+	if err != nil {
+		t.Fatalf("accept interrupt with expired evidence: %v", err)
+	}
+	if !containsSubsequence(gateway.calls, []string{"EstimateGenerationCredits", "FreezeCredits", "CommitGeneratedAssetAndCharge"}) {
+		t.Fatalf("expired evidence should be re-estimated before freeze, calls=%v", gateway.calls)
+	}
+	if gateway.lastCommit.EstimateID != "est_generation_refresh" {
+		t.Fatalf("commit should use refreshed estimate, got %s", gateway.lastCommit.EstimateID)
+	}
+	if len(gateway.lastCommit.Artifacts) != 1 || gateway.lastCommit.Artifacts[0].EstimateItemID != "est_item_generation_refresh" {
+		t.Fatalf("commit should map refreshed estimate item, got %#v", gateway.lastCommit.Artifacts)
+	}
+	if gateway.lastCommit.SafetyEvidence == nil || gateway.lastCommit.SafetyEvidence.SafetyEvidenceId == originalEvidenceID {
+		t.Fatalf("commit should use refreshed safety evidence, got %#v", gateway.lastCommit.SafetyEvidence)
+	}
+	if gateway.lastCommit.SafetyEvidence.ExpiresAt == nil {
+		t.Fatal("refreshed safety evidence must carry expires_at")
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, *gateway.lastCommit.SafetyEvidence.ExpiresAt)
+	if err != nil || !expiresAt.After(time.Now().UTC()) {
+		t.Fatalf("refreshed safety evidence should be unexpired, expires_at=%v err=%v", gateway.lastCommit.SafetyEvidence.ExpiresAt, err)
+	}
+}
+
 func TestRecoverGenerationTasksReleasesFrozenTaskAfterRestart(t *testing.T) {
 	app, gateway := newM6ServiceApp(t)
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
@@ -349,10 +421,12 @@ func newM6ServiceApp(t *testing.T) (*App, *recordingGateway) {
 
 type recordingGateway struct {
 	StaticGateway
-	calls      []string
-	lastCommit CommitGeneratedAssetAndChargeRequest
-	chargeErr  error
-	accessErr  error
+	calls                   []string
+	lastCommit              CommitGeneratedAssetAndChargeRequest
+	refreshEstimate         CreditEstimateDTO
+	generationEstimateCalls int
+	chargeErr               error
+	accessErr               error
 }
 
 func (g *recordingGateway) record(call string) {
@@ -390,6 +464,15 @@ func (g *recordingGateway) SaveSkillTestResult(ctx context.Context, auth AuthCon
 func (g *recordingGateway) EstimateToolCredits(ctx context.Context, auth AuthContextDTO, req EstimateToolCreditsRequest, traceID string) (CreditEstimateDTO, error) {
 	g.record("EstimateToolCredits")
 	return g.StaticGateway.EstimateToolCredits(ctx, auth, req, traceID)
+}
+
+func (g *recordingGateway) EstimateGenerationCredits(ctx context.Context, auth AuthContextDTO, req EstimateGenerationCreditsRequest, traceID string) (CreditEstimateDTO, error) {
+	g.record("EstimateGenerationCredits")
+	g.generationEstimateCalls++
+	if g.generationEstimateCalls > 1 && g.refreshEstimate.EstimateID != "" {
+		return g.refreshEstimate, nil
+	}
+	return g.StaticGateway.EstimateGenerationCredits(ctx, auth, req, traceID)
 }
 
 func (g *recordingGateway) FreezeCredits(ctx context.Context, auth AuthContextDTO, req FreezeCreditsRequest, traceID string) (FreezeCreditsDTO, error) {

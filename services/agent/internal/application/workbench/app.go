@@ -3,6 +3,7 @@ package workbench
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1906,6 +1907,33 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	if err != nil {
 		return err
 	}
+	prompt, err := a.latestUserPrompt(ctx, run.SessionID)
+	if err != nil {
+		return a.failGenerationTaskBeforeFreeze(ctx, run, task, "prompt_unavailable", traceID, err)
+	}
+	// GEN-5 fail-closed：实际发往模型的 prompt 必须与已通过安全评估的 prompt 完全一致。
+	if !promptMatchesEvidence(prompt, payload.SafetyEvidence) {
+		_ = a.appendRunEvent(ctx, run, "safety.prompt.failed", traceID, map[string]any{
+			"safety_status": state.SafetyResultFailed, "error_code": "SAFETY_PROMPT_DIGEST_MISMATCH",
+			"user_message": "输入在确认后发生变化，请重新发起生成", "retryable": true, "support_trace_id": traceID,
+		})
+		return a.failGenerationTaskBeforeFreeze(ctx, run, task, "prompt_digest_mismatch", traceID,
+			apperror.New(apperror.CodePermissionDenied, "prompt changed after safety evaluation"))
+	}
+	if refreshed, estimate, err := a.refreshExpiredGenerationSafetyEvidence(ctx, auth, run, payload, prompt, idempotencyKey, traceID); err != nil {
+		return a.failGenerationTaskBeforeFreeze(ctx, run, task, "safety_evidence_refresh_failed", traceID, err)
+	} else if refreshed {
+		payload.SafetyEvidence = *safetyEvidenceToRPC(estimate.safety)
+		payload.Estimate = estimate.estimate
+		payload.EstimateID = estimate.estimate.EstimateID
+		payload.EstimatePoints = estimate.estimate.EstimatePoints
+		payload.CreditAccountID = estimate.estimate.CreditAccountID
+		payload.PricingSnapshotID = estimate.estimate.PricingSnapshotID
+		_ = a.updateGenerationTaskStage(ctx, task, 18, "safety_evidence_refreshed", map[string]any{
+			"safety_evidence_id": payload.SafetyEvidence.SafetyEvidenceId, "estimate_id": payload.EstimateID,
+			"estimate_points": payload.EstimatePoints,
+		})
+	}
 	_ = a.updateGenerationTaskStage(ctx, task, 20, "freeze_requested", map[string]any{
 		"estimate_id": payload.EstimateID, "estimate_points": payload.EstimatePoints,
 		"credit_account_id": payload.CreditAccountID, "confirmation_id": interrupt.ID,
@@ -1938,20 +1966,6 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 		"freeze_id": freeze.FreezeID, "frozen_points": freeze.FrozenPoints, "expires_at": freeze.ExpiresAt,
 		"estimate_id": payload.EstimateID, "credit_account_id": payload.CreditAccountID,
 	})
-	prompt, err := a.latestUserPrompt(ctx, run.SessionID)
-	if err != nil {
-		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "prompt_unavailable", idempotencyKey, traceID, err)
-	}
-	// GEN-5 fail-closed：实际发往模型的 prompt 必须与已通过安全评估的 prompt 完全一致，
-	// 杜绝确认/评估之后输入被改写的"评 A 发 B"旁路；不一致则释放冻结、终止 run，绝不发模型。
-	if !promptMatchesEvidence(prompt, payload.SafetyEvidence) {
-		_ = a.appendRunEvent(ctx, run, "safety.prompt.failed", traceID, map[string]any{
-			"safety_status": state.SafetyResultFailed, "error_code": "SAFETY_PROMPT_DIGEST_MISMATCH",
-			"user_message": "输入在确认后发生变化，请重新发起生成", "retryable": true, "support_trace_id": traceID,
-		})
-		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "prompt_digest_mismatch", idempotencyKey, traceID,
-			apperror.New(apperror.CodePermissionDenied, "prompt changed after safety evaluation"))
-	}
 	_ = a.updateGenerationTaskStage(ctx, task, 35, "model_submitted", nil)
 	_ = a.appendGenerationProgress(ctx, run, traceID, payload.ModelSnapshot.ResourceType, "submitted", 20, false, map[string]any{
 		"model_id": payload.ModelSnapshot.ModelID, "estimate_id": payload.EstimateID, "freeze_id": freeze.FreezeID,
@@ -2126,6 +2140,77 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	_ = a.updateGenerationTaskStage(ctx, task, 100, "completed", map[string]any{"asset_count": len(assets)})
 	_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusCompleted, "")
 	return a.repo.ResolveInterrupt(ctx, interrupt.ID, state.InterruptStatusResolved)
+}
+
+type refreshedGenerationSafetyEvidence struct {
+	safety   *model.SafetyEvaluation
+	estimate CreditEstimateDTO
+}
+
+func (a *App) refreshExpiredGenerationSafetyEvidence(ctx context.Context, auth AuthContextDTO, run *model.Run, payload m4ConfirmationPayload, prompt string, idempotencyKey string, traceID string) (bool, refreshedGenerationSafetyEvidence, error) {
+	if !safetyEvidenceExpired(payload.SafetyEvidence, time.Now().UTC()) {
+		return false, refreshedGenerationSafetyEvidence{}, nil
+	}
+	targetRefID := refreshedSafetyTargetRefID(run.ID, idempotencyKey)
+	safety, err := a.getOrRecordPromptSafetyEvaluation(ctx, run, "generation", "prompt", targetRefID, prompt, traceID)
+	if err != nil {
+		return true, refreshedGenerationSafetyEvidence{}, err
+	}
+	rpcSafety := safetyEvidenceToRPC(safety)
+	estimate, err := a.gateway.EstimateGenerationCredits(ctx, auth, EstimateGenerationCreditsRequest{
+		ProjectID: run.ProjectID, ResourceType: payload.ModelSnapshot.ResourceType, ModelID: payload.ModelSnapshot.ModelID,
+		PricingSnapshotID: payload.ModelSnapshot.PricingSnapshotID, Quantity: 1, SafetyEvidence: rpcSafety,
+		IdempotencyKey: idempotencyKey + ":safety_refresh_estimate",
+	}, traceID)
+	if err != nil {
+		_ = a.appendGenerationProgress(ctx, run, traceID, payload.ModelSnapshot.ResourceType, "credit_estimate_failed", 0, false, map[string]any{"error": err.Error(), "reason": "safety_evidence_refresh"})
+		return true, refreshedGenerationSafetyEvidence{}, mapBusinessError(err)
+	}
+	_ = a.appendRunEvent(ctx, run, "credits.estimated", traceID, map[string]any{
+		"estimate_id": estimate.EstimateID, "estimate_points": estimate.EstimatePoints, "available_points": estimate.AvailablePoints,
+		"expires_soon_points": estimate.ExpiresSoonPoints, "credit_account_scope": estimate.CreditAccountScope,
+		"credit_account_id": estimate.CreditAccountID, "pricing_snapshot_id": estimate.PricingSnapshotID,
+		"line_items": estimate.LineItems, "expires_at": estimate.ExpiresAt, "reason": "safety_evidence_refresh",
+	})
+	if estimate.Insufficient {
+		_ = a.appendRunEvent(ctx, run, "credits.insufficient", traceID, map[string]any{
+			"estimate_points": estimate.EstimatePoints, "available_points": estimate.AvailablePoints,
+			"user_message": "积分不足，请充值或切换空间后重试", "retryable": true,
+			"credit_account_id": estimate.CreditAccountID, "estimate_id": estimate.EstimateID,
+		})
+		return true, refreshedGenerationSafetyEvidence{}, apperror.New(apperror.CodeStateConflict, "credit account has insufficient points")
+	}
+	_ = a.appendRunEvent(ctx, run, "safety.prompt.evaluated", traceID, map[string]any{
+		"safety_status": safety.Result, "safety_evidence_id": safety.SafetyEvidenceID, "policy_version": safety.PolicyVersion,
+		"expires_at": safety.ExpiresAt.Format(time.RFC3339Nano), "reason": "safety_evidence_refresh",
+	})
+	return true, refreshedGenerationSafetyEvidence{safety: safety, estimate: estimate}, nil
+}
+
+func (a *App) getOrRecordPromptSafetyEvaluation(ctx context.Context, run *model.Run, scene, targetType, targetRefID, prompt, traceID string) (*model.SafetyEvaluation, error) {
+	evidenceID := "safety_" + targetRefID
+	if existing, err := a.repo.GetSafetyEvaluation(ctx, evidenceID); err == nil {
+		if existing.Result == state.SafetyResultPassed && existing.EvaluatedObjectDigest == digestText(prompt) && existing.ExpiresAt.After(time.Now().UTC()) {
+			return existing, nil
+		}
+		return nil, apperror.New(apperror.CodePermissionDenied, "refreshed safety evidence is not reusable")
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	return a.recordPromptSafetyEvaluation(ctx, run, scene, targetType, targetRefID, prompt, traceID)
+}
+
+func safetyEvidenceExpired(evidence businessagent.SafetyEvidenceDTO, now time.Time) bool {
+	if evidence.ExpiresAt == nil || strings.TrimSpace(*evidence.ExpiresAt) == "" {
+		return false
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, *evidence.ExpiresAt)
+	return err != nil || !expiresAt.After(now)
+}
+
+func refreshedSafetyTargetRefID(runID, idempotencyKey string) string {
+	sum := sha256.Sum256([]byte(runID + ":" + idempotencyKey + ":safety_refresh"))
+	return "refresh_" + hex.EncodeToString(sum[:])[:16]
 }
 
 func parseM4ConfirmationPayload(interrupt *model.Interrupt) (m4ConfirmationPayload, bool) {
@@ -2310,6 +2395,24 @@ func (a *App) failGenerationTaskAfterFreeze(ctx context.Context, auth AuthContex
 		_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusFailed, strings.ToUpper(reason))
 	}
 	return a.failM4AfterFreeze(ctx, auth, run, freeze, reason, idempotencyKey, traceID, cause)
+}
+
+func (a *App) failGenerationTaskBeforeFreeze(ctx context.Context, run *model.Run, task *model.Task, reason string, traceID string, cause error) error {
+	if task != nil {
+		_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusFailed, strings.ToUpper(reason))
+	}
+	current, err := a.repo.GetRun(ctx, run.ID)
+	if err == nil {
+		switch current.Status {
+		case state.RunStatusPending, state.RunStatusRunning, state.RunStatusWaitingConfirmation, state.RunStatusResuming:
+			_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, strings.ToUpper(reason), cause.Error())
+		}
+	}
+	_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
+		"error_type": "m4_close_loop", "error_code": strings.ToUpper(reason), "user_message": "生成保存流程失败",
+		"retryable": true, "support_trace_id": traceID,
+	})
+	return mapBusinessError(cause)
 }
 
 func (a *App) failM4AfterFreeze(ctx context.Context, auth AuthContextDTO, run *model.Run, freeze FreezeCreditsDTO, reason string, idempotencyKey string, traceID string, cause error) error {
