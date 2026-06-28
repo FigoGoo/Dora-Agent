@@ -71,6 +71,41 @@ func (a *App) ListAssetElementTypes(ctx context.Context, _ accountspace.AuthCont
 	return out, version, nil
 }
 
+// ElementTypeLimit 表达字典对某 element_type 的双态/编辑/引用上限(SKILL-2 FP1)，
+// 供 per-skill 输出元素结构校验「不得超字典上限」复用。上限语义与 elementDTO 一致：
+// schema_json 内嵌字段，未显式声明则默认放开(true)。
+type ElementTypeLimit struct {
+	Active       bool
+	DraftEnabled bool
+	FinalEnabled bool
+	Editable     bool
+	Referable    bool
+}
+
+// ElementTypeLimits 批量读取字典对给定 element_type 的上限(一次 IN 查询，避免 N+1)。
+// 不在字典中的 element_type 不会出现在返回 map 中，调用方据此判定「非平台内置类型」。
+func (a *App) ElementTypeLimits(ctx context.Context, elementTypes []string) (map[string]ElementTypeLimit, error) {
+	out := make(map[string]ElementTypeLimit, len(elementTypes))
+	if len(elementTypes) == 0 {
+		return out, nil
+	}
+	var rows []businesscore.AssetElementType
+	if err := a.repo.DB().WithContext(ctx).Where("element_type IN ?", elementTypes).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		schemaObj := jsonObject(row.SchemaJSON)
+		out[row.ElementType] = ElementTypeLimit{
+			Active:       row.Status == activeStatus,
+			DraftEnabled: boolValue(schemaObj["draft_enabled"], true),
+			FinalEnabled: boolValue(schemaObj["final_enabled"], true),
+			Editable:     boolValue(schemaObj["editable"], true),
+			Referable:    boolValue(schemaObj["referable"], true),
+		}
+	}
+	return out, nil
+}
+
 func (a *App) ListAdminElementTypes(ctx context.Context, _ admin.AdminAuth, status string, limit, offset int) (Page[AssetElementTypeDTO], error) {
 	limit = clampLimit(limit, 20, 100)
 	db := a.repo.DB().WithContext(ctx).Order("element_type ASC").Limit(limit).Offset(nonNegative(offset))
