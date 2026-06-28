@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 type ModelProvider struct {
@@ -17,20 +18,22 @@ type ModelProvider struct {
 	CreatedByAdminID *string        `gorm:"column:created_by_admin_id"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
+	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (ModelProvider) TableName() string { return "model_providers" }
 
 type ModelProviderCredential struct {
-	ID                     string    `gorm:"column:id;primaryKey"`
-	ProviderID             string    `gorm:"column:provider_id"`
-	CredentialName         string    `gorm:"column:credential_name"`
-	SecretRef              string    `gorm:"column:secret_ref"`
-	EncryptedPayloadDigest *string   `gorm:"column:encrypted_payload_digest"`
-	Status                 string    `gorm:"column:status"`
-	CreatedByAdminID       *string   `gorm:"column:created_by_admin_id"`
-	CreatedAt              time.Time `gorm:"column:created_at"`
-	UpdatedAt              time.Time `gorm:"column:updated_at"`
+	ID                     string         `gorm:"column:id;primaryKey"`
+	ProviderID             string         `gorm:"column:provider_id"`
+	CredentialName         string         `gorm:"column:credential_name"`
+	SecretRef              string         `gorm:"column:secret_ref"`
+	EncryptedPayloadDigest *string        `gorm:"column:encrypted_payload_digest"`
+	Status                 string         `gorm:"column:status"`
+	CreatedByAdminID       *string        `gorm:"column:created_by_admin_id"`
+	CreatedAt              time.Time      `gorm:"column:created_at"`
+	UpdatedAt              time.Time      `gorm:"column:updated_at"`
+	DeletedAt              gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (ModelProviderCredential) TableName() string { return "model_provider_credentials" }
@@ -48,37 +51,40 @@ type Model struct {
 	CreatedByAdminID *string        `gorm:"column:created_by_admin_id"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
+	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (Model) TableName() string { return "models" }
 
 type ModelPrice struct {
-	ID                string     `gorm:"column:id;primaryKey"`
-	PricingSnapshotID string     `gorm:"column:pricing_snapshot_id"`
-	ModelID           string     `gorm:"column:model_id"`
-	ResourceType      string     `gorm:"column:resource_type"`
-	BillingUnit       string     `gorm:"column:billing_unit"`
-	UnitPoints        float64    `gorm:"column:unit_points"`
-	MinChargePoints   int64      `gorm:"column:min_charge_points"`
-	Status            string     `gorm:"column:status"`
-	EffectiveAt       time.Time  `gorm:"column:effective_at"`
-	ExpiredAt         *time.Time `gorm:"column:expired_at"`
-	CreatedByAdminID  *string    `gorm:"column:created_by_admin_id"`
-	CreatedAt         time.Time  `gorm:"column:created_at"`
+	ID                string         `gorm:"column:id;primaryKey"`
+	PricingSnapshotID string         `gorm:"column:pricing_snapshot_id"`
+	ModelID           string         `gorm:"column:model_id"`
+	ResourceType      string         `gorm:"column:resource_type"`
+	BillingUnit       string         `gorm:"column:billing_unit"`
+	UnitPoints        float64        `gorm:"column:unit_points"`
+	MinChargePoints   int64          `gorm:"column:min_charge_points"`
+	Status            string         `gorm:"column:status"`
+	EffectiveAt       time.Time      `gorm:"column:effective_at"`
+	ExpiredAt         *time.Time     `gorm:"column:expired_at"`
+	CreatedByAdminID  *string        `gorm:"column:created_by_admin_id"`
+	CreatedAt         time.Time      `gorm:"column:created_at"`
+	DeletedAt         gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (ModelPrice) TableName() string { return "model_prices" }
 
 type DefaultModel struct {
-	ID                string    `gorm:"column:id;primaryKey"`
-	ResourceType      string    `gorm:"column:resource_type"`
-	ModelID           string    `gorm:"column:model_id"`
-	PricingSnapshotID string    `gorm:"column:pricing_snapshot_id"`
-	Scope             string    `gorm:"column:scope"`
-	Status            string    `gorm:"column:status"`
-	CreatedByAdminID  *string   `gorm:"column:created_by_admin_id"`
-	CreatedAt         time.Time `gorm:"column:created_at"`
-	UpdatedAt         time.Time `gorm:"column:updated_at"`
+	ID                string         `gorm:"column:id;primaryKey"`
+	ResourceType      string         `gorm:"column:resource_type"`
+	ModelID           string         `gorm:"column:model_id"`
+	PricingSnapshotID string         `gorm:"column:pricing_snapshot_id"`
+	Scope             string         `gorm:"column:scope"`
+	Status            string         `gorm:"column:status"`
+	CreatedByAdminID  *string        `gorm:"column:created_by_admin_id"`
+	CreatedAt         time.Time      `gorm:"column:created_at"`
+	UpdatedAt         time.Time      `gorm:"column:updated_at"`
+	DeletedAt         gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (DefaultModel) TableName() string { return "default_models" }
@@ -111,6 +117,7 @@ type ToolDefinition struct {
 	CreatedByAdminID *string        `gorm:"column:created_by_admin_id"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
+	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (ToolDefinition) TableName() string { return "tool_definitions" }
@@ -132,6 +139,7 @@ type ToolPolicy struct {
 	ChangedByAdminID     *string        `gorm:"column:changed_by_admin_id"`
 	CreatedAt            time.Time      `gorm:"column:created_at"`
 	UpdatedAt            time.Time      `gorm:"column:updated_at"`
+	DeletedAt            gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (ToolPolicy) TableName() string { return "tool_policies" }
@@ -153,22 +161,24 @@ type ToolPricingPolicy struct {
 	MetadataJSON     datatypes.JSON `gorm:"column:metadata_json;type:jsonb"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
+	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (ToolPricingPolicy) TableName() string { return "tool_pricing_policies" }
 
 type ToolWhitelistRule struct {
-	ID               string    `gorm:"column:id;primaryKey"`
-	ToolName         string    `gorm:"column:tool_name"`
-	ToolType         string    `gorm:"column:tool_type"`
-	ScopeType        string    `gorm:"column:scope_type"`
-	ScopeID          string    `gorm:"column:scope_id"`
-	Allowed          bool      `gorm:"column:allowed"`
-	Reason           *string   `gorm:"column:reason"`
-	Status           string    `gorm:"column:status"`
-	ChangedByAdminID *string   `gorm:"column:changed_by_admin_id"`
-	CreatedAt        time.Time `gorm:"column:created_at"`
-	UpdatedAt        time.Time `gorm:"column:updated_at"`
+	ID               string         `gorm:"column:id;primaryKey"`
+	ToolName         string         `gorm:"column:tool_name"`
+	ToolType         string         `gorm:"column:tool_type"`
+	ScopeType        string         `gorm:"column:scope_type"`
+	ScopeID          string         `gorm:"column:scope_id"`
+	Allowed          bool           `gorm:"column:allowed"`
+	Reason           *string        `gorm:"column:reason"`
+	Status           string         `gorm:"column:status"`
+	ChangedByAdminID *string        `gorm:"column:changed_by_admin_id"`
+	CreatedAt        time.Time      `gorm:"column:created_at"`
+	UpdatedAt        time.Time      `gorm:"column:updated_at"`
+	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (ToolWhitelistRule) TableName() string { return "tool_whitelist_rules" }
@@ -201,6 +211,7 @@ type Skill struct {
 	CreatedByAdminID   *string        `gorm:"column:created_by_admin_id"`
 	CreatedAt          time.Time      `gorm:"column:created_at"`
 	UpdatedAt          time.Time      `gorm:"column:updated_at"`
+	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (Skill) TableName() string { return "skills" }
@@ -224,18 +235,20 @@ type SkillVersion struct {
 	RolledBackFromVersionID *string        `gorm:"column:rolled_back_from_version_id"`
 	CreatedAt               time.Time      `gorm:"column:created_at"`
 	UpdatedAt               time.Time      `gorm:"column:updated_at"`
+	DeletedAt               gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (SkillVersion) TableName() string { return "skill_versions" }
 
 type SkillToolBinding struct {
-	ID        string    `gorm:"column:id;primaryKey"`
-	SkillID   string    `gorm:"column:skill_id"`
-	VersionID string    `gorm:"column:version_id"`
-	ToolName  string    `gorm:"column:tool_name"`
-	ToolType  string    `gorm:"column:tool_type"`
-	Required  bool      `gorm:"column:required"`
-	CreatedAt time.Time `gorm:"column:created_at"`
+	ID        string         `gorm:"column:id;primaryKey"`
+	SkillID   string         `gorm:"column:skill_id"`
+	VersionID string         `gorm:"column:version_id"`
+	ToolName  string         `gorm:"column:tool_name"`
+	ToolType  string         `gorm:"column:tool_type"`
+	Required  bool           `gorm:"column:required"`
+	CreatedAt time.Time      `gorm:"column:created_at"`
+	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (SkillToolBinding) TableName() string { return "skill_tool_bindings" }
@@ -248,6 +261,7 @@ type SkillOutputElementSchema struct {
 	SchemaJSON  datatypes.JSON `gorm:"column:schema_json;type:jsonb"`
 	Required    bool           `gorm:"column:required"`
 	CreatedAt   time.Time      `gorm:"column:created_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (SkillOutputElementSchema) TableName() string { return "skill_output_element_schemas" }
@@ -263,6 +277,7 @@ type SkillTestCase struct {
 	CreatedByUserID      *string        `gorm:"column:created_by_user_id"`
 	CreatedAt            time.Time      `gorm:"column:created_at"`
 	UpdatedAt            time.Time      `gorm:"column:updated_at"`
+	DeletedAt            gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (SkillTestCase) TableName() string { return "skill_test_cases" }
@@ -287,6 +302,7 @@ type SkillTestRun struct {
 	CreatedByUserID    *string        `gorm:"column:created_by_user_id"`
 	CreatedAt          time.Time      `gorm:"column:created_at"`
 	UpdatedAt          time.Time      `gorm:"column:updated_at"`
+	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (SkillTestRun) TableName() string { return "skill_test_runs" }
@@ -315,6 +331,7 @@ type AssetElementType struct {
 	OperatorID    *string        `gorm:"column:operator_id"`
 	CreatedAt     time.Time      `gorm:"column:created_at"`
 	UpdatedAt     time.Time      `gorm:"column:updated_at"`
+	DeletedAt     gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (AssetElementType) TableName() string { return "asset_element_types" }

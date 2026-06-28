@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 type Work struct {
@@ -23,20 +24,21 @@ type Work struct {
 	PrivateResetAt         *time.Time     `gorm:"column:private_reset_at"`
 	CreatedAt              time.Time      `gorm:"column:created_at"`
 	UpdatedAt              time.Time      `gorm:"column:updated_at"`
-	DeletedAt              *time.Time     `gorm:"column:deleted_at"`
+	DeletedAt              gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (Work) TableName() string { return "works" }
 
 type WorkAsset struct {
-	ID           string    `gorm:"column:id;primaryKey"`
-	WorkAssetID  string    `gorm:"column:work_asset_id"`
-	WorkID       string    `gorm:"column:work_id"`
-	AssetID      string    `gorm:"column:asset_id"`
-	Role         string    `gorm:"column:role"`
-	DisplayOrder int       `gorm:"column:display_order"`
-	CreatedAt    time.Time `gorm:"column:created_at"`
-	UpdatedAt    time.Time `gorm:"column:updated_at"`
+	ID           string         `gorm:"column:id;primaryKey"`
+	WorkAssetID  string         `gorm:"column:work_asset_id"`
+	WorkID       string         `gorm:"column:work_id"`
+	AssetID      string         `gorm:"column:asset_id"`
+	Role         string         `gorm:"column:role"`
+	DisplayOrder int            `gorm:"column:display_order"`
+	CreatedAt    time.Time      `gorm:"column:created_at"`
+	UpdatedAt    time.Time      `gorm:"column:updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (WorkAsset) TableName() string { return "work_assets" }
@@ -73,33 +75,36 @@ type WorkPublicSnapshot struct {
 	SafetyEvidenceDigest *string        `gorm:"column:safety_evidence_digest"`
 	CreatedAt            time.Time      `gorm:"column:created_at"`
 	UpdatedAt            time.Time      `gorm:"column:updated_at"`
+	DeletedAt            gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (WorkPublicSnapshot) TableName() string { return "work_public_snapshots" }
 
 type WorkLike struct {
-	ID           string     `gorm:"column:id;primaryKey"`
-	LikeID       string     `gorm:"column:like_id"`
-	PublicWorkID string     `gorm:"column:public_work_id"`
-	WorkID       string     `gorm:"column:work_id"`
-	SnapshotID   string     `gorm:"column:snapshot_id"`
-	UserID       string     `gorm:"column:user_id"`
-	Status       string     `gorm:"column:status"`
-	LikedAt      *time.Time `gorm:"column:liked_at"`
-	CreatedAt    time.Time  `gorm:"column:created_at"`
-	UpdatedAt    time.Time  `gorm:"column:updated_at"`
+	ID           string         `gorm:"column:id;primaryKey"`
+	LikeID       string         `gorm:"column:like_id"`
+	PublicWorkID string         `gorm:"column:public_work_id"`
+	WorkID       string         `gorm:"column:work_id"`
+	SnapshotID   string         `gorm:"column:snapshot_id"`
+	UserID       string         `gorm:"column:user_id"`
+	Status       string         `gorm:"column:status"`
+	LikedAt      *time.Time     `gorm:"column:liked_at"`
+	CreatedAt    time.Time      `gorm:"column:created_at"`
+	UpdatedAt    time.Time      `gorm:"column:updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (WorkLike) TableName() string { return "work_likes" }
 
 type WorkCategory struct {
-	ID          string    `gorm:"column:id;primaryKey"`
-	CategoryKey string    `gorm:"column:category_key"`
-	DisplayName string    `gorm:"column:display_name"`
-	Status      string    `gorm:"column:status"`
-	SortOrder   int       `gorm:"column:sort_order"`
-	CreatedAt   time.Time `gorm:"column:created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at"`
+	ID          string         `gorm:"column:id;primaryKey"`
+	CategoryKey string         `gorm:"column:category_key"`
+	DisplayName string         `gorm:"column:display_name"`
+	Status      string         `gorm:"column:status"`
+	SortOrder   int            `gorm:"column:sort_order"`
+	CreatedAt   time.Time      `gorm:"column:created_at"`
+	UpdatedAt   time.Time      `gorm:"column:updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (WorkCategory) TableName() string { return "work_categories" }
@@ -147,28 +152,30 @@ type Notification struct {
 	TraceID               string         `gorm:"column:trace_id"`
 	CreatedAt             time.Time      `gorm:"column:created_at"`
 	UpdatedAt             time.Time      `gorm:"column:updated_at"`
+	DeletedAt             gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (Notification) TableName() string { return "notifications" }
 
 type NotificationCreateFailure struct {
-	ID                  string     `gorm:"column:id;primaryKey"`
-	FailureID           string     `gorm:"column:failure_id"`
-	SourceType          string     `gorm:"column:source_type"`
-	SourceID            string     `gorm:"column:source_id"`
-	RecipientUserID     *string    `gorm:"column:recipient_user_id"`
-	Type                string     `gorm:"column:type"`
-	RelatedResourceType *string    `gorm:"column:related_resource_type"`
-	RelatedResourceID   *string    `gorm:"column:related_resource_id"`
-	IdempotencyKey      string     `gorm:"column:idempotency_key"`
-	FailureCode         string     `gorm:"column:failure_code"`
-	FailureSummary      *string    `gorm:"column:failure_summary"`
-	ErrorCode           string     `gorm:"column:error_code"`
-	RetryCount          int        `gorm:"column:retry_count"`
-	NextRetryAt         *time.Time `gorm:"column:next_retry_at"`
-	TraceID             string     `gorm:"column:trace_id"`
-	CreatedAt           time.Time  `gorm:"column:created_at"`
-	UpdatedAt           time.Time  `gorm:"column:updated_at"`
+	ID                  string         `gorm:"column:id;primaryKey"`
+	FailureID           string         `gorm:"column:failure_id"`
+	SourceType          string         `gorm:"column:source_type"`
+	SourceID            string         `gorm:"column:source_id"`
+	RecipientUserID     *string        `gorm:"column:recipient_user_id"`
+	Type                string         `gorm:"column:type"`
+	RelatedResourceType *string        `gorm:"column:related_resource_type"`
+	RelatedResourceID   *string        `gorm:"column:related_resource_id"`
+	IdempotencyKey      string         `gorm:"column:idempotency_key"`
+	FailureCode         string         `gorm:"column:failure_code"`
+	FailureSummary      *string        `gorm:"column:failure_summary"`
+	ErrorCode           string         `gorm:"column:error_code"`
+	RetryCount          int            `gorm:"column:retry_count"`
+	NextRetryAt         *time.Time     `gorm:"column:next_retry_at"`
+	TraceID             string         `gorm:"column:trace_id"`
+	CreatedAt           time.Time      `gorm:"column:created_at"`
+	UpdatedAt           time.Time      `gorm:"column:updated_at"`
+	DeletedAt           gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (NotificationCreateFailure) TableName() string { return "notification_create_failures" }
