@@ -1,10 +1,11 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/services/internal/envconfig"
+	"github.com/FigoGoo/Dora-Agent/services/internal/configsource"
 )
 
 var DefaultEnvFiles = []string{".env.example", ".env.local"}
@@ -40,7 +41,16 @@ func Load() (AgentConfig, error) {
 }
 
 func LoadFrom(paths ...string) (AgentConfig, error) {
-	values, err := envconfig.Load(paths...)
+	return loadFromWithEtcdLoader(paths, nil)
+}
+
+func loadFromWithEtcdLoader(paths []string, loader configsource.EtcdLoader) (AgentConfig, error) {
+	values, err := configsource.LoadLayered(context.Background(), paths, configsource.LayeredOptions{
+		ServiceNameKey:     "AGENT_SERVICE_NAME",
+		DefaultServiceName: "dora.agent",
+		AllowedKeys:        agentEtcdConfigKeys,
+		EtcdLoader:         loader,
+	})
 	if err != nil {
 		return AgentConfig{}, err
 	}
@@ -118,4 +128,26 @@ func LoadFrom(paths ...string) (AgentConfig, error) {
 		ToolDefaultTimeout:     toolTimeout,
 		SafetyPolicyVersion:    values.String("AGENT_SAFETY_POLICY_VERSION", "local-v1"),
 	}, nil
+}
+
+var agentEtcdConfigKeys = []string{
+	"APP_ENV",
+	"APP_NAME",
+	"LOG_LEVEL",
+	"AGENT_HTTP_PORT",
+	"AGENT_HTTP_ADDR",
+	"BUSINESS_SERVICE_NAME",
+	"KITEX_REGISTRY",
+	"KITEX_TIMEOUT_MS",
+	"AGENT_SSE_ENABLED",
+	"AGENT_WS_ENABLED",
+	"AGENT_SSE_HEARTBEAT_SECONDS",
+	"AGENT_EVENT_REPLAY_PAGE_SIZE",
+	"AGENT_EVENT_REPLAY_MAX_PAGE_SIZE",
+	"AGENT_CONFIG_SOURCE",
+	"AGENT_DEFAULT_CONFIG_VERSION",
+	"AGENT_TOOL_ALLOWLIST",
+	"AGENT_MEMORY_ENABLED",
+	"AGENT_TOOL_DEFAULT_TIMEOUT_MS",
+	"AGENT_SAFETY_POLICY_VERSION",
 }

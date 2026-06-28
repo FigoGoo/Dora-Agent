@@ -1,10 +1,11 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/services/internal/envconfig"
+	"github.com/FigoGoo/Dora-Agent/services/internal/configsource"
 )
 
 var DefaultEnvFiles = []string{".env.example", ".env.local"}
@@ -59,7 +60,16 @@ func Load() (BusinessConfig, error) {
 }
 
 func LoadFrom(paths ...string) (BusinessConfig, error) {
-	values, err := envconfig.Load(paths...)
+	return loadFromWithEtcdLoader(paths, nil)
+}
+
+func loadFromWithEtcdLoader(paths []string, loader configsource.EtcdLoader) (BusinessConfig, error) {
+	values, err := configsource.LoadLayered(context.Background(), paths, configsource.LayeredOptions{
+		ServiceNameKey:     "BUSINESS_SERVICE_NAME",
+		DefaultServiceName: "dora.business",
+		AllowedKeys:        businessEtcdConfigKeys,
+		EtcdLoader:         loader,
+	})
 	if err != nil {
 		return BusinessConfig{}, err
 	}
@@ -141,4 +151,28 @@ func LoadFrom(paths ...string) (BusinessConfig, error) {
 		SecretEncryptionKeyRef: values.String("SECRET_ENCRYPTION_KEY_REF", ""),
 		CORSAllowedOrigins:     values.CSV("CORS_ALLOWED_ORIGINS"),
 	}, nil
+}
+
+var businessEtcdConfigKeys = []string{
+	"APP_ENV",
+	"APP_NAME",
+	"LOG_LEVEL",
+	"BUSINESS_KITEX_PORT",
+	"BUSINESS_HTTP_ENABLED",
+	"BUSINESS_HTTP_PORT",
+	"BUSINESS_HTTP_ADDR",
+	"PUBLIC_WEB_BASE_URL",
+	"KITEX_REGISTRY",
+	"KITEX_TIMEOUT_MS",
+	"TOS_ENDPOINT",
+	"TOS_BUCKET",
+	"TOS_REGION",
+	"TOS_BASE_URL",
+	"TOS_REQUEST_TIMEOUT",
+	"TOS_CONNECT_TIMEOUT",
+	"VOLC_TLS_ENDPOINT",
+	"VOLC_TLS_REGION",
+	"VOLC_TLS_PROJECT_ID",
+	"VOLC_TLS_TOPIC_ID",
+	"CORS_ALLOWED_ORIGINS",
 }

@@ -1,10 +1,14 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/FigoGoo/Dora-Agent/services/internal/configsource"
+	"github.com/FigoGoo/Dora-Agent/services/internal/envconfig"
 )
 
 func TestLoadFromDefaultsAndLocalOverride(t *testing.T) {
@@ -84,9 +88,53 @@ AGENT_EVENT_REPLAY_PAGE_SIZE=abc
 	}
 }
 
+func TestLoadFromAgentConfigEtcdOverlayAndEnvFinal(t *testing.T) {
+	unsetAgentEnv(t)
+	dir := t.TempDir()
+	example := filepath.Join(dir, ".env.example")
+	writeEnv(t, example, `
+DORA_CONFIG_SOURCE=etcd
+APP_ENV=local
+LOG_LEVEL=info
+AGENT_DATABASE_URL=postgres://example
+AGENT_HTTP_ADDR=0.0.0.0:18080
+AGENT_SERVICE_NAME=dora.agent
+ETCD_ENDPOINTS=http://127.0.0.1:2379
+ETCD_NAMESPACE=/dora/local
+`)
+	t.Setenv("LOG_LEVEL", "error")
+
+	cfg, err := loadFromWithEtcdLoader([]string{example}, func(_ context.Context, opts configsource.EtcdOptions) (envconfig.Values, error) {
+		if opts.ServiceName != "dora.agent" {
+			t.Fatalf("unexpected service name: %s", opts.ServiceName)
+		}
+		if contains(opts.AllowedKeys, "AGENT_DATABASE_URL") || contains(opts.AllowedKeys, "ETCD_ENDPOINTS") {
+			t.Fatal("sensitive or bootstrap agent config must not be allowed from etcd")
+		}
+		return envconfig.Values{
+			"LOG_LEVEL":                    "debug",
+			"AGENT_EVENT_REPLAY_PAGE_SIZE": "20",
+			"AGENT_TOOL_ALLOWLIST":         "image,video",
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.LogLevel != "error" {
+		t.Fatalf("expected env to override etcd log level, got %s", cfg.LogLevel)
+	}
+	if cfg.EventReplayPageSize != 20 {
+		t.Fatalf("expected etcd page size overlay, got %d", cfg.EventReplayPageSize)
+	}
+	if len(cfg.ToolAllowlist) != 2 || cfg.ToolAllowlist[0] != "image" || cfg.ToolAllowlist[1] != "video" {
+		t.Fatalf("unexpected allowlist: %#v", cfg.ToolAllowlist)
+	}
+}
+
 func unsetAgentEnv(t *testing.T) {
 	t.Helper()
 	keys := []string{
+		"DORA_CONFIG_SOURCE", "DORA_CONFIG_ETCD_TIMEOUT",
 		"APP_ENV", "APP_NAME", "LOG_LEVEL", "AGENT_DATABASE_URL", "AGENT_HTTP_ADDR",
 		"AGENT_SERVICE_NAME", "BUSINESS_SERVICE_NAME", "KITEX_REGISTRY", "KITEX_TIMEOUT_MS",
 		"AGENT_SSE_ENABLED", "AGENT_WS_ENABLED", "AGENT_SSE_HEARTBEAT_SECONDS",
@@ -106,6 +154,15 @@ func unsetAgentEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+func contains(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func writeEnv(t *testing.T, path, content string) {

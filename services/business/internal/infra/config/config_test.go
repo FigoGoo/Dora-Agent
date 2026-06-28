@@ -1,10 +1,14 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/FigoGoo/Dora-Agent/services/internal/configsource"
+	"github.com/FigoGoo/Dora-Agent/services/internal/envconfig"
 )
 
 func TestLoadFromBusinessConfig(t *testing.T) {
@@ -89,9 +93,51 @@ BUSINESS_HTTP_ENABLED=maybe
 	}
 }
 
+func TestLoadFromBusinessConfigEtcdOverlayAndEnvFinal(t *testing.T) {
+	unsetBusinessEnv(t)
+	dir := t.TempDir()
+	example := filepath.Join(dir, ".env.example")
+	writeEnv(t, example, `
+DORA_CONFIG_SOURCE=etcd
+APP_ENV=local
+LOG_LEVEL=info
+BUSINESS_DATABASE_URL=postgres://business
+BUSINESS_SERVICE_NAME=dora.business
+BUSINESS_HTTP_ENABLED=true
+BUSINESS_HTTP_ADDR=0.0.0.0:19080
+ETCD_ENDPOINTS=http://127.0.0.1:2379
+ETCD_NAMESPACE=/dora/local
+`)
+	t.Setenv("LOG_LEVEL", "error")
+
+	cfg, err := loadFromWithEtcdLoader([]string{example}, func(_ context.Context, opts configsource.EtcdOptions) (envconfig.Values, error) {
+		if opts.ServiceName != "dora.business" {
+			t.Fatalf("unexpected service name: %s", opts.ServiceName)
+		}
+		if contains(opts.AllowedKeys, "TOS_SECRET_ACCESS_KEY") || contains(opts.AllowedKeys, "BUSINESS_DATABASE_URL") {
+			t.Fatal("sensitive business config must not be allowed from etcd")
+		}
+		return envconfig.Values{
+			"LOG_LEVEL":           "debug",
+			"PUBLIC_WEB_BASE_URL": "https://console.example",
+			"TOS_BUCKET":          "dora-public",
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.LogLevel != "error" {
+		t.Fatalf("expected env to override etcd log level, got %s", cfg.LogLevel)
+	}
+	if cfg.PublicWebBaseURL != "https://console.example" || cfg.TOS.Bucket != "dora-public" {
+		t.Fatalf("expected etcd non-sensitive config overlay, got url=%s bucket=%s", cfg.PublicWebBaseURL, cfg.TOS.Bucket)
+	}
+}
+
 func unsetBusinessEnv(t *testing.T) {
 	t.Helper()
 	keys := []string{
+		"DORA_CONFIG_SOURCE", "DORA_CONFIG_ETCD_TIMEOUT",
 		"APP_ENV", "APP_NAME", "LOG_LEVEL", "BUSINESS_DATABASE_URL", "BUSINESS_KITEX_PORT",
 		"BUSINESS_HTTP_ENABLED", "BUSINESS_HTTP_ADDR", "PUBLIC_WEB_BASE_URL", "BUSINESS_SERVICE_NAME",
 		"KITEX_REGISTRY", "KITEX_TIMEOUT_MS", "ETCD_ENDPOINTS", "ETCD_NAMESPACE",
@@ -113,6 +159,15 @@ func unsetBusinessEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+func contains(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func writeEnv(t *testing.T, path, content string) {
