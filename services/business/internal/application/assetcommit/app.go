@@ -292,17 +292,19 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 		if unsettled < 0 {
 			return bizerrors.New(bizerrors.CodeStateConflict, "asset commit charge exceeds frozen points")
 		}
-		released, err := a.releaseUnused(tx, &freeze, &account, unsettled, now)
+		released, err := a.releaseUnused(tx, &freeze, &account, unsettled, in.Auth.UserID, now)
 		if err != nil {
 			return err
 		}
 		account.FrozenPoints -= charged
+		account.UpdatedBy = optionalString(in.Auth.UserID)
 		account.UpdatedAt = now
 		freeze.ChargedPoints += charged
 		freeze.ReleasedPoints += released
 		if freeze.ChargedPoints+freeze.ReleasedPoints >= freeze.FrozenPoints {
 			freeze.Status = "charged"
 		}
+		freeze.UpdatedBy = optionalString(in.Auth.UserID)
 		freeze.UpdatedAt = now
 		if err := tx.Save(&account).Error; err != nil {
 			return err
@@ -527,7 +529,7 @@ func (a *App) lockFreezeAndAccount(tx *gorm.DB, freezeID string) (businesscore.C
 	return freeze, account, nil
 }
 
-func (a *App) releaseUnused(tx *gorm.DB, freeze *businesscore.CreditFreeze, account *businesscore.CreditAccount, points int64, now time.Time) (int64, error) {
+func (a *App) releaseUnused(tx *gorm.DB, freeze *businesscore.CreditFreeze, account *businesscore.CreditAccount, points int64, operatorID string, now time.Time) (int64, error) {
 	if points <= 0 {
 		return 0, nil
 	}
@@ -555,6 +557,7 @@ func (a *App) releaseUnused(tx *gorm.DB, freeze *businesscore.CreditFreeze, acco
 		}
 		if batch.ExpiresAt == nil || batch.ExpiresAt.After(now) {
 			batch.RemainingPoints += take
+			batch.UpdatedBy = optionalString(operatorID)
 			batch.UpdatedAt = now
 			if err := tx.Save(&batch).Error; err != nil {
 				return 0, err
@@ -565,6 +568,7 @@ func (a *App) releaseUnused(tx *gorm.DB, freeze *businesscore.CreditFreeze, acco
 		if row.ChargedPoints+row.ReleasedPoints >= row.FrozenPoints {
 			row.Status = "released"
 		}
+		row.UpdatedBy = optionalString(operatorID)
 		row.UpdatedAt = now
 		if err := tx.Save(&row).Error; err != nil {
 			return 0, err

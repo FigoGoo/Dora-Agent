@@ -145,6 +145,8 @@ type CreditAccount struct {
 	AvailablePoints   int64          `gorm:"column:available_points"`
 	FrozenPoints      int64          `gorm:"column:frozen_points"`
 	ExpiresSoonPoints int64          `gorm:"column:expires_soon_points"`
+	CreatedBy         *string        `gorm:"column:created_by"`
+	UpdatedBy         *string        `gorm:"column:updated_by"`
 	CreatedAt         time.Time      `gorm:"column:created_at"`
 	UpdatedAt         time.Time      `gorm:"column:updated_at"`
 	DeletedAt         gorm.DeletedAt `gorm:"column:deleted_at"`

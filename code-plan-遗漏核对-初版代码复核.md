@@ -124,6 +124,7 @@
 - **created_by/updated_by operator 回填四片 ✅ 已修**：资产上传/生成提交写路径从 user auth 回填公共列，覆盖 `assets`、`asset_storage_objects`、`upload_intents`、`asset_elements`、`generated_asset_object_slots`、`asset_commit_batches`、`asset_commit_items`。
 - **created_by/updated_by operator 回填五片 ✅ 已修**：通知写路径回填公共列，系统创建/失败记录写 `system`，用户读操作写 `updated_by=user_id`，覆盖 `notifications`、`notification_create_failures`。
 - **created_by/updated_by operator 回填六片 ✅ 已修**：Skill 目录/审核写路径回填公共列，用户保存/提交/测试结果写 user_id，管理员发布/驳回/废弃写 admin_id，覆盖 `skills`、`skill_versions`、`skill_output_element_schemas`、`skill_test_runs`、`skill_review_records`。
+- **created_by/updated_by operator 回填七片 ✅ 已修**：积分/兑换码写路径回填公共列，用户预估/冻结/释放/Tool 扣费/兑换写 user_id，管理员发放/兑换码创建与禁用写 admin_id；覆盖 `credit_accounts`(余额变更 `updated_by`)、`credit_batches`、`credit_estimates`、`credit_estimate_items`、`credit_freezes`、`credit_freeze_batch_items`、`credit_tool_charge_batches`、`credit_tool_charge_items`、`redeem_code_batches`、`redeem_codes`，并补 `assetcommit` 生成资产提交的积分扣费旁路。
 
 范围决策（逐条可追溯）：
 - `tenant_id` 未全表加——沿用 `space_id` 为隔离键，避免冗余。
@@ -131,7 +132,7 @@
 - append-only 10 张表不软删、不映射 DeletedAt；`skill_review_records` 经代码核实为 insert-only 事件流，与 `work_moderation_records` 对称纳入。
 
 遗留（后续子切片，不阻塞）：
-- **created_by/updated_by operator 回填继续逐域推进**：账户/积分等表按领域操作者字段和权限语义单独映射。
+- **created_by/updated_by operator 回填继续逐域推进**：账户/空间等表按领域操作者字段和权限语义单独映射。
 - 明细/价格表已纳入软删（可软删停用），如需改 append-only 另议。
 
 ## 批 B 完成记录（2026-06-28 · 安全/越权红线 + SKILL-2）✅
@@ -390,4 +391,4 @@
 
 范围决策：
 - 本切片不重写任何现有唯一约束，避免释放账号、兑换码、财务、幂等、公开分享等不应复用的历史键。
-- `created_by/updated_by operator 回填` 已启动项目/作品域、Tool 策略域、模型配置域、资产域、通知域与 Skill 域；GORM 未映射公共列不能用简单 `SetColumn` callback 粗暴补齐，剩余表继续逐域设计。
+- `created_by/updated_by operator 回填` 已启动项目/作品域、Tool 策略域、模型配置域、资产域、通知域、Skill 域与积分/兑换码域；GORM 未映射公共列不能用简单 `SetColumn` callback 粗暴补齐，剩余表继续逐域设计。

@@ -17,6 +17,8 @@ type CreditBatch struct {
 	RemainingPoints int64          `gorm:"column:remaining_points"`
 	ExpiresAt       *time.Time     `gorm:"column:expires_at"`
 	Status          string         `gorm:"column:status"`
+	CreatedBy       *string        `gorm:"column:created_by"`
+	UpdatedBy       *string        `gorm:"column:updated_by"`
 	CreatedAt       time.Time      `gorm:"column:created_at"`
 	UpdatedAt       time.Time      `gorm:"column:updated_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -44,6 +46,8 @@ type CreditEstimate struct {
 	RequestMetaJSON    datatypes.JSON `gorm:"column:request_meta_json;type:jsonb"`
 	SafetyEvidenceID   *string        `gorm:"column:safety_evidence_id"`
 	SafetyEvidenceHash *string        `gorm:"column:safety_evidence_digest"`
+	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
 	CreatedAt          time.Time      `gorm:"column:created_at"`
 	UpdatedAt          time.Time      `gorm:"column:updated_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -68,6 +72,8 @@ type CreditEstimateItem struct {
 	FreeReason      *string        `gorm:"column:free_reason"`
 	Status          string         `gorm:"column:status"`
 	MetadataJSON    datatypes.JSON `gorm:"column:metadata_json;type:jsonb"`
+	CreatedBy       *string        `gorm:"column:created_by"`
+	UpdatedBy       *string        `gorm:"column:updated_by"`
 	CreatedAt       time.Time      `gorm:"column:created_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at"`
 }
@@ -89,6 +95,8 @@ type CreditFreeze struct {
 	ExpiresAt      time.Time      `gorm:"column:expires_at"`
 	IdempotencyKey string         `gorm:"column:idempotency_key"`
 	TraceID        string         `gorm:"column:trace_id"`
+	CreatedBy      *string        `gorm:"column:created_by"`
+	UpdatedBy      *string        `gorm:"column:updated_by"`
 	CreatedAt      time.Time      `gorm:"column:created_at"`
 	UpdatedAt      time.Time      `gorm:"column:updated_at"`
 	DeletedAt      gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -105,6 +113,8 @@ type CreditFreezeBatchItem struct {
 	ChargedPoints  int64          `gorm:"column:charged_points"`
 	ReleasedPoints int64          `gorm:"column:released_points"`
 	Status         string         `gorm:"column:status"`
+	CreatedBy      *string        `gorm:"column:created_by"`
+	UpdatedBy      *string        `gorm:"column:updated_by"`
 	CreatedAt      time.Time      `gorm:"column:created_at"`
 	UpdatedAt      time.Time      `gorm:"column:updated_at"`
 	DeletedAt      gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -146,6 +156,8 @@ type CreditToolChargeBatch struct {
 	Status         string         `gorm:"column:status"`
 	IdempotencyKey string         `gorm:"column:idempotency_key"`
 	TraceID        string         `gorm:"column:trace_id"`
+	CreatedBy      *string        `gorm:"column:created_by"`
+	UpdatedBy      *string        `gorm:"column:updated_by"`
 	CreatedAt      time.Time      `gorm:"column:created_at"`
 	UpdatedAt      time.Time      `gorm:"column:updated_at"`
 	DeletedAt      gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -166,6 +178,8 @@ type CreditToolChargeItem struct {
 	ExecutionStatus string         `gorm:"column:execution_status"`
 	Status          string         `gorm:"column:status"`
 	MetadataJSON    datatypes.JSON `gorm:"column:metadata_json;type:jsonb"`
+	CreatedBy       *string        `gorm:"column:created_by"`
+	UpdatedBy       *string        `gorm:"column:updated_by"`
 	CreatedAt       time.Time      `gorm:"column:created_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at"`
 }
@@ -189,6 +203,8 @@ type RedeemCodeBatch struct {
 	Status             string         `gorm:"column:status"`
 	CreatedByAdminID   *string        `gorm:"column:created_by_admin_id"`
 	Reason             *string        `gorm:"column:reason"`
+	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
 	CreatedAt          time.Time      `gorm:"column:created_at"`
 	UpdatedAt          time.Time      `gorm:"column:updated_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -206,6 +222,8 @@ type RedeemCode struct {
 	RedeemedAccountID    *string        `gorm:"column:redeemed_account_id"`
 	RedeemedAt           *time.Time     `gorm:"column:redeemed_at"`
 	ExpiresAt            *time.Time     `gorm:"column:expires_at"`
+	CreatedBy            *string        `gorm:"column:created_by"`
+	UpdatedBy            *string        `gorm:"column:updated_by"`
 	CreatedAt            time.Time      `gorm:"column:created_at"`
 	UpdatedAt            time.Time      `gorm:"column:updated_at"`
 	DeletedAt            gorm.DeletedAt `gorm:"column:deleted_at"`
