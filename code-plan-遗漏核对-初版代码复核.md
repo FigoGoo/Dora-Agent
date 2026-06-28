@@ -12,6 +12,8 @@
 
 真实仍缺集中在 8 个面：**① 业务库数据底座（软删/公共列全库缺，头号）② 安全 digest 一致性（评 A 发 B）③ 崩溃恢复/资金闭环（依赖异步队列，对应 W3 Redis）④ 企业空间越权细则 ⑤ 审计 DB 级不可变 ⑥ 可观测性体系 ⑦ Skill 输出元素双态 ⑧ 断线确认恢复**。
 
+> 2026-06-28 状态回填：上述 8 个面中的 INFRA-1/13、GEN-5、ACCT-3/1b/8、SKILL-2、TURN-8/7/6/10、GEN-7、INFRA-9、INFRA-11、WORK-3/4/8/9、INFRA-4/2/3、ACCT-6/7 等已由后续切片关闭。当前继续推进时以本文下方完成记录、`docs/contracts/**` active 契约和机器可校验事实源为准。
+
 ## 统计
 
 | 结论 | 数量（按判定） | 含义 |
@@ -137,13 +139,13 @@
 - **ACCT-3 ✅**：企业积分流水按角色分级——owner 看全量、member 仅本人 project 流水（`project.owner_user_id` 关联过滤，无 schema 改动）。
 - **ACCT-1b ✅**：绑定被企业/空间白名单显式禁用 Tool 的 Skill 不可路由；批量两查（deny 规则 + bindings）避免 N+1。
 - **ACCT-8 ✅（成文+固化，不改行为）**：admin 与 user 两套独立鉴权本已结构性隔离，补安全规范对称红线 + `GetUserSummary` 注释 + 测试固化（防回归）。
-- **SKILL-2 🟡 business 侧已落（FP1–FP3a），FP3b/FP4 待**：
+- **SKILL-2 ✅ 已闭环（FP1–FP4）**：
   - FP1 ✅ `assetdict` 字典上限批量读取（复用 `schema_json` 内嵌，无迁移）。
   - FP2 ✅ `0021` per-skill 输出元素结构 schema + `SaveSkill` 写入/字典上限校验。
   - FP3a ✅ thrift 声明 `SkillOutputElementDTO` + `SkillSpecResponse.output_elements`；application `GetPublishedSkillSpec` 装配。
-  - FP3b ⏳ 待 codegen 环境：`kitex` 重新生成 kitex_gen + RPC handler 映射 + contract fixture。
-  - FP4 ⏳ agent 12：按 `output_elements` 组织产物，草稿落 `agent_artifacts`、最终走 `CommitGeneratedAssetAndCharge`。
-  - 设计：`docs/contracts/rpc/SKILL-2-输出元素结构契约设计.md`。
+  - FP3b ✅ `de9ac8e` 重新生成 `kitex_gen`，补 RPC handler 映射与 `GetPublishedSkillSpec.output_elements` contract fixture。
+  - FP4 ✅ `de9ac8e` agent 侧消费 `output_elements` 组织产物，草稿落 `agent_artifacts`、最终走 `CommitGeneratedAssetAndCharge.final_elements`。
+  - 设计归档：`docs/contracts/rpc/SKILL-2-输出元素结构契约设计.md`；当前事实源以 Thrift、migration、实现和 M6 测试报告承接。
 
 范围决策：
 - ACCT-3 用 project 关联过滤而非加 user 维度列（`CreditLedgerEntry` 无 user 维度但有 `project_id`）。
@@ -151,8 +153,7 @@
 - SKILL-2 FP1 经实现期核查退化：字典双态属性已由 `asset_element_types.schema_json` 内嵌承载，取消表列迁移（外科手术式改动）。
 
 遗留（后续，不阻塞）：
-- SKILL-2 FP3b（codegen + RPC 映射 + fixture）、FP4（agent 消费）。
-- `ReviewCandidateSkillSpecResponse` 是否同步补 `output_elements`（设计 §5 待确认 4，建议补）。
+- `ReviewCandidateSkillSpecResponse` 是否同步补 `output_elements`（设计 §5 待确认 4，建议补）；不影响已发布 Skill 的 `GetPublishedSkillSpec` 路由和 agent 消费闭环。
 
 ## 批 C 完成记录（2026-06-28 · 确认恢复闭环）✅
 
