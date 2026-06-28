@@ -633,18 +633,19 @@ type MessageDTO struct {
 }
 
 type EventDTO struct {
-	EventID     string         `json:"event_id"`
-	Type        string         `json:"type"`
-	SessionID   string         `json:"session_id"`
-	RunID       string         `json:"run_id"`
-	ProjectID   string         `json:"project_id"`
-	SpaceID     string         `json:"space_id"`
-	ActorUserID string         `json:"actor_user_id"`
-	Sequence    int64          `json:"sequence"`
-	Timestamp   time.Time      `json:"timestamp"`
-	Component   string         `json:"component"`
-	TraceID     string         `json:"trace_id"`
-	Payload     map[string]any `json:"payload"`
+	EventID              string         `json:"event_id"`
+	Type                 string         `json:"type"`
+	SessionID            string         `json:"session_id"`
+	RunID                string         `json:"run_id"`
+	ProjectID            string         `json:"project_id"`
+	SpaceID              string         `json:"space_id"`
+	ActorUserID          string         `json:"actor_user_id"`
+	Sequence             int64          `json:"sequence"`
+	Timestamp            time.Time      `json:"timestamp"`
+	Component            string         `json:"component"`
+	TraceID              string         `json:"trace_id"`
+	PayloadSchemaVersion string         `json:"payload_schema_version,omitempty"`
+	Payload              map[string]any `json:"payload"`
 }
 
 type SnapshotResponse struct {
@@ -654,8 +655,26 @@ type SnapshotResponse struct {
 	Assets            []any          `json:"assets"`
 	Blackboard        map[string]any `json:"blackboard"`
 	Tasks             []any          `json:"tasks"`
+	Interrupt         *InterruptDTO  `json:"interrupt,omitempty"`
 	LastEventSequence int64          `json:"last_event_sequence"`
 	ReadonlyReason    string         `json:"readonly_reason,omitempty"`
+}
+
+type InterruptDTO struct {
+	InterruptID         string         `json:"interrupt_id"`
+	ConfirmationID      string         `json:"confirmation_id"`
+	Type                string         `json:"type"`
+	Status              string         `json:"status"`
+	Reason              string         `json:"reason"`
+	Title               string         `json:"title"`
+	Summary             string         `json:"summary"`
+	Risks               []string       `json:"risks"`
+	Points              int64          `json:"points"`
+	Actions             []string       `json:"actions"`
+	PayloadDigest       string         `json:"payload_digest"`
+	ConfirmationPayload map[string]any `json:"confirmation_payload"`
+	ExpiresAt           string         `json:"expires_at"`
+	TraceID             string         `json:"trace_id"`
 }
 
 type ListMessagesResponse struct {
@@ -810,9 +829,13 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	if err := a.repo.CreateRun(ctx, run); err != nil {
 		return CreateRunResponse{}, err
 	}
+	messageSequence, err := a.repo.NextMessageSequence(ctx, session.ID)
+	if err != nil {
+		return CreateRunResponse{}, err
+	}
 	message := &model.Message{
 		ID: securityID("msg_"), SessionID: session.ID, RunID: run.ID, Role: "user", ContentType: req.UserInput.ContentType,
-		Content: req.UserInput.Text, Sequence: 1, TraceID: traceID, Metadata: jsonObject(map[string]any{
+		Content: req.UserInput.Text, Sequence: messageSequence, TraceID: traceID, Metadata: jsonObject(map[string]any{
 			"client_message_id": req.UserInput.ClientMessageID,
 			"referenced_assets": req.ReferencedAssets,
 			"control_inputs":    req.ControlInputs,
@@ -1015,19 +1038,35 @@ func (a *App) RejectInterrupt(ctx context.Context, auth AuthContextDTO, runID st
 		return RunDTO{}, err
 	}
 	if run.Status == state.RunStatusWaitingConfirmation {
-		if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "INTERRUPT_REJECTED", req.ReasonCode); err != nil {
+		if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusCancelled, "INTERRUPT_REJECTED", req.ReasonCode); err != nil {
 			return RunDTO{}, err
 		}
 	}
-	_ = a.appendRunEvent(ctx, run, "confirmation.rejected", traceID, map[string]any{
+	rejectedAt := time.Now().UTC()
+	if err := a.appendRunEvent(ctx, run, "confirmation.rejected", traceID, map[string]any{
 		"confirmation_id": interrupt.ID,
 		"interrupt_id":    interrupt.ID,
 		"action":          "reject",
-		"rejected_at":     time.Now().UTC().Format(time.RFC3339Nano),
+		"rejected_at":     rejectedAt.Format(time.RFC3339Nano),
 		"reason_code":     req.ReasonCode,
-		"run_status":      state.RunStatusFailed,
+		"run_status":      state.RunStatusCancelled,
 		"idempotency_key": req.IdempotencyKey,
-	})
+		"next_step":       "start_new_run_after_parameter_change",
+	}); err != nil {
+		return RunDTO{}, err
+	}
+	if session, err := a.repo.GetSession(ctx, run.SessionID); err == nil {
+		if err := a.appendRunEvent(ctx, run, "agent.run.cancelled", traceID, map[string]any{
+			"run_status":          state.RunStatusCancelled,
+			"cancel_reason":       req.ReasonCode,
+			"cancelled_at":        rejectedAt.Format(time.RFC3339Nano),
+			"released_points":     0,
+			"last_event_sequence": session.LastEventSequence + 1,
+			"idempotency_key":     req.IdempotencyKey,
+		}); err != nil {
+			return RunDTO{}, err
+		}
+	}
 	updated, err := a.repo.GetRun(ctx, run.ID)
 	if err != nil {
 		return RunDTO{}, err
@@ -1147,9 +1186,18 @@ func (a *App) buildSnapshot(ctx context.Context, auth AuthContextDTO, sessionID 
 		dto := runDTOFromModel(*run)
 		runDTO = &dto
 	}
+	var interruptDTO *InterruptDTO
+	if run != nil {
+		if interrupt, err := a.repo.GetRequiredInterrupt(ctx, run.ID); err == nil {
+			dto := a.interruptSnapshotDTO(ctx, run.ID, interrupt)
+			interruptDTO = &dto
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return SnapshotResponse{}, err
+		}
+	}
 	return SnapshotResponse{
 		Session: sessionDTO(*session), Run: runDTO, Messages: messageDTOs, Assets: []any{}, Blackboard: map[string]any{}, Tasks: []any{},
-		LastEventSequence: session.LastEventSequence, ReadonlyReason: readonly,
+		Interrupt: interruptDTO, LastEventSequence: session.LastEventSequence, ReadonlyReason: readonly,
 	}, nil
 }
 
@@ -2022,10 +2070,19 @@ func (a *App) createConfirmationInterrupt(ctx context.Context, run *model.Run, i
 	if value, ok := confirmationPayload["estimate_points"].(int64); ok {
 		points = value
 	}
-	return a.appendRunEvent(ctx, run, "confirmation.required", traceID, map[string]any{
+	if err := a.appendRunEvent(ctx, run, "confirmation.required", traceID, map[string]any{
 		"confirmation_id": interruptID, "interrupt_id": interruptID, "title": title, "summary": summary,
 		"risks": risks, "points": points, "expires_at": expiresAt.Format(time.RFC3339Nano), "actions": []string{"confirm", "reject"},
 		"confirmation_payload": confirmationPayload, "payload_digest": payloadDigest,
+	}); err != nil {
+		return err
+	}
+	return a.appendRunEvent(ctx, run, "chat.controls.locked", traceID, map[string]any{
+		"locked_fields":   []string{"model_selection", "control_inputs", "referenced_assets"},
+		"locked_reason":   "confirmation_required",
+		"confirmation_id": interruptID,
+		"interrupt_id":    interruptID,
+		"locked_at":       time.Now().UTC().Format(time.RFC3339Nano),
 	})
 }
 
@@ -2545,6 +2602,82 @@ func messageDTO(message model.Message) MessageDTO {
 	return MessageDTO{MessageID: message.ID, SessionID: message.SessionID, RunID: message.RunID, Role: message.Role, ContentType: message.ContentType, Content: message.Content, Sequence: message.Sequence, SafetyStatus: message.SafetyStatus, CreatedAt: message.CreatedAt}
 }
 
+func (a *App) interruptSnapshotDTO(ctx context.Context, runID string, interrupt *model.Interrupt) InterruptDTO {
+	payload := jsonMap(interrupt.ConfirmationPayload)
+	eventPayload := a.latestConfirmationRequiredPayload(ctx, runID, interrupt.ID)
+	confirmationID := stringFromMap(payload, "confirmation_id")
+	if confirmationID == "" {
+		confirmationID = interrupt.ID
+	}
+	dto := InterruptDTO{
+		InterruptID:         interrupt.ID,
+		ConfirmationID:      confirmationID,
+		Type:                interrupt.InterruptType,
+		Status:              interrupt.Status,
+		Reason:              interrupt.Reason,
+		Title:               stringFromMap(eventPayload, "title"),
+		Summary:             stringFromMap(eventPayload, "summary"),
+		Risks:               stringSliceFromMap(eventPayload, "risks"),
+		Points:              int64FromMap(eventPayload, "points"),
+		Actions:             stringSliceFromMap(eventPayload, "actions"),
+		PayloadDigest:       confirmationPayloadDigest(interrupt.ConfirmationPayload),
+		ConfirmationPayload: publicConfirmationPayload(payload),
+		ExpiresAt:           interrupt.ExpiresAt.Format(time.RFC3339Nano),
+		TraceID:             interrupt.TraceID,
+	}
+	if len(dto.Actions) == 0 {
+		dto.Actions = []string{"confirm", "reject"}
+	}
+	if dto.Title == "" {
+		dto.Title = "确认操作"
+	}
+	if dto.Summary == "" {
+		dto.Summary = interrupt.Reason
+	}
+	if dto.Points == 0 {
+		dto.Points = int64FromMap(payload, "points")
+		if dto.Points == 0 {
+			dto.Points = int64FromMap(payload, "estimate_points")
+		}
+	}
+	return dto
+}
+
+func (a *App) latestConfirmationRequiredPayload(ctx context.Context, runID, interruptID string) map[string]any {
+	events, err := a.repo.ListEventsAfterSequence(ctx, runID, 0, 200)
+	if err != nil {
+		return nil
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Type != "confirmation.required" {
+			continue
+		}
+		payload := jsonMap(events[i].Payload)
+		if stringFromMap(payload, "interrupt_id") == interruptID || stringFromMap(payload, "confirmation_id") == interruptID {
+			return payload
+		}
+	}
+	return nil
+}
+
+func publicConfirmationPayload(payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return map[string]any{}
+	}
+	blocked := map[string]bool{
+		"model_snapshot": true, "safety_evidence": true, "estimate": true, "provider_runtime_ref": true,
+		"secret_ref": true, "prompt": true, "system_prompt": true, "raw_prompt": true,
+	}
+	out := make(map[string]any, len(payload))
+	for key, value := range payload {
+		if blocked[key] {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
 func eventDTO(event model.Event) EventDTO {
 	payload := map[string]any{}
 	if len(event.Payload) > 0 {
@@ -2553,7 +2686,65 @@ func eventDTO(event model.Event) EventDTO {
 	return EventDTO{
 		EventID: event.EventID, Type: event.Type, SessionID: event.SessionID, RunID: event.RunID, ProjectID: event.ProjectID,
 		SpaceID: event.SpaceID, ActorUserID: event.ActorUserID, Sequence: event.Sequence, Timestamp: event.CreatedAt,
-		Component: event.Component, TraceID: event.TraceID, Payload: payload,
+		Component: event.Component, TraceID: event.TraceID, PayloadSchemaVersion: event.PayloadSchemaVersion, Payload: payload,
+	}
+}
+
+func jsonMap(raw datatypes.JSON) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func stringFromMap(values map[string]any, key string) string {
+	if values == nil {
+		return ""
+	}
+	value, ok := values[key].(string)
+	if !ok {
+		return ""
+	}
+	return value
+}
+
+func stringSliceFromMap(values map[string]any, key string) []string {
+	if values == nil {
+		return nil
+	}
+	switch raw := values[key].(type) {
+	case []string:
+		return raw
+	case []any:
+		out := make([]string, 0, len(raw))
+		for _, item := range raw {
+			if text, ok := item.(string); ok {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func int64FromMap(values map[string]any, key string) int64 {
+	if values == nil {
+		return 0
+	}
+	switch value := values[key].(type) {
+	case int64:
+		return value
+	case int:
+		return int64(value)
+	case float64:
+		return int64(value)
+	default:
+		return 0
 	}
 }
 

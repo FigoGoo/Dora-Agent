@@ -128,6 +128,7 @@ owner：文档与契约责任域；Agent 服务责任域和前端责任域确认
 
 - API：`GET /api/agent/runs/:run_id/snapshot`
 - snapshot 至少包含 session、run、messages、assets、blackboard、tasks、`last_event_sequence` 和只读原因。
+- run 处于 `waiting_confirmation` 且存在 required interrupt 时，snapshot 必须包含 `interrupt`：`interrupt_id`、`confirmation_id`、`type`、`status`、`reason`、`title`、`summary`、`risks`、`points`、`actions`、`payload_digest`、脱敏后的 `confirmation_payload`、`expires_at`、`trace_id`；不得返回模型快照、安全证据、预估详情、供应商运行引用、Prompt 或密钥引用。
 - 前端收到 `snapshot_required=true` 后必须先查询 snapshot，用 snapshot 覆盖本地工作台状态，再从 `last_event_sequence` 继续补偿或重开 SSE。
 - snapshot 只能包含 Agent Runtime 数据和业务引用，不得包含业务事实副本、私有 TOS 签名、系统 Prompt、供应商原始响应或推理链路。
 
@@ -170,7 +171,7 @@ owner：文档与契约责任域；Agent 服务责任域和前端责任域确认
 
 - loading：创建 session/run 时保持三栏骨架。
 - streaming：SSE 事件驱动 MessageStream、ToolStatus、PreviewStage。
-- interrupt：收到确认事件后锁定模型和关键输入。
+- interrupt：收到 `confirmation.required` / snapshot `interrupt` 后恢复确认面板并锁定模型和关键输入；用户拒绝时当前 run 取消，修改参数后创建新 run 重新预估。
 - resume：优先事件补偿，失败后 snapshot 恢复。
 - error：保留已有消息和资产引用，展示错误卡。
 

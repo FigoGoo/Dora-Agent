@@ -153,3 +153,18 @@
 遗留（后续，不阻塞）：
 - SKILL-2 FP3b（codegen + RPC 映射 + fixture）、FP4（agent 消费）。
 - `ReviewCandidateSkillSpecResponse` 是否同步补 `output_elements`（设计 §5 待确认 4，建议补）。
+
+## 批 C 完成记录（2026-06-28 · 确认恢复闭环）✅
+
+提交：本提交（TURN-8/7/6/10）
+验证：`go test ./services/agent/internal/application/workbench ./services/agent/internal/api/http ./services/agent/internal/runtime/turnloop` 通过；`python3 tests/agent/agui/validate_fixtures.py` 通过。
+
+- **TURN-8 ✅ 已修**：`SnapshotResponse` 增加 `interrupt`，断线恢复时从 `agent_interrupts` 的 required interrupt + 最近 `confirmation.required` 事件恢复确认面板；`confirmation_payload` 仅暴露前端可用字段，过滤模型快照、安全证据、预估详情、供应商运行引用、Prompt 和密钥引用。
+- **TURN-6 ✅ 已修**：创建 `confirmation.required` 后服务端同步 emit `chat.controls.locked`，锁定 `model_selection`、`control_inputs`、`referenced_assets`，明确 required 态即锁控件。
+- **TURN-7 ✅ 已修**：拒绝确认不再把 run 标为 failed；改为 `interrupt -> rejected`、run -> `cancelled`，emit `confirmation.rejected` + `agent.run.cancelled`，释放 active-run 占用，用户改模型/参数后用新 run 重新预估。
+- **TURN-10 ✅ 已修**：AG-UI `EventDTO` 暴露 `payload_schema_version`；schema 将其列为可选信封字段并定义历史缺省 `2026-06-27`，避免旧 fixture/历史事件重放被破坏。
+
+范围决策：
+- snapshot 恢复不回传完整内部确认 payload，仅回传前端重建确认面板所需的脱敏字段。
+- reject 的“重估闭环”采用新 run 重新预估，而不是在同一 run 内新增 waiting_confirmation -> running -> waiting_confirmation 复杂分支；与当前状态机、API 契约和 fixture 的 `cancelled` 语义一致。
+- `payload_schema_version` 先做可选信封字段；新服务事件必带，旧事件缺失按 `2026-06-27` 解析。

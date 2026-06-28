@@ -81,6 +81,26 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 	if !hasAssetElementHints(events) {
 		t.Fatalf("platform dictionary event dropped schema/render hints: %#v", events)
 	}
+	if !hasControlsLocked(events) {
+		t.Fatalf("confirmation did not lock editable controls: %#v", events)
+	}
+	confirmSnapshot := agentJSON(t, router, http.MethodGet, "/api/agent/runs/"+runID+"/snapshot", "", nil)
+	interrupt, ok := confirmSnapshot["interrupt"].(map[string]any)
+	if !ok {
+		t.Fatalf("snapshot missing required interrupt: %#v", confirmSnapshot)
+	}
+	if interrupt["interrupt_id"] == "" || interrupt["confirmation_id"] == "" || interrupt["payload_digest"] == "" {
+		t.Fatalf("snapshot interrupt missing recovery fields: %#v", interrupt)
+	}
+	payload, ok := interrupt["confirmation_payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("snapshot interrupt missing confirmation_payload: %#v", interrupt)
+	}
+	for _, forbidden := range []string{"model_snapshot", "safety_evidence", "estimate"} {
+		if _, exists := payload[forbidden]; exists {
+			t.Fatalf("snapshot interrupt leaked %s: %#v", forbidden, payload)
+		}
+	}
 
 	conflict := httptest.NewRecorder()
 	req := agentRequest(http.MethodPost, "/api/agent/runs", "idem-agent-run-2", map[string]any{
@@ -149,8 +169,21 @@ func TestM2AgentInterruptRoutes(t *testing.T) {
 	rejected := agentJSON(t, router, http.MethodPost, "/api/agent/runs/"+rejectRunID+"/interrupts/"+rejectInterruptID+"/reject", "idem-reject", map[string]any{
 		"run_id": rejectRunID, "interrupt_id": rejectInterruptID, "reason_code": "user_rejected",
 	})
-	if rejected["status"] != "failed" || rejected["error_code"] != "INTERRUPT_REJECTED" {
+	if rejected["status"] != "cancelled" || rejected["error_code"] != "INTERRUPT_REJECTED" {
 		t.Fatalf("reject interrupt response = %#v", rejected)
+	}
+	rejectReplay := agentJSON(t, router, http.MethodGet, "/api/agent/runs/"+rejectRunID+"/events?after_sequence=0&limit=100", "", nil)
+	rejectEvents := rejectReplay["events"].([]any)
+	if countEvent(rejectEvents, "confirmation.rejected") != 1 || countEvent(rejectEvents, "agent.run.cancelled") != 1 {
+		t.Fatalf("reject interrupt did not emit rejected+cancelled events: %#v", rejectEvents)
+	}
+	retryRun := agentJSON(t, router, http.MethodPost, "/api/agent/runs", "idem-run-reject-retry", map[string]any{
+		"session_id": rejected["session_id"],
+		"project_id": "prj_active_1001",
+		"user_input": map[string]any{"client_message_id": "cm_reject_retry", "content_type": "text", "text": "retry with changed model"},
+	})
+	if retryRun["status"] != "waiting_confirmation" {
+		t.Fatalf("reject should release active run for re-estimate, got %#v", retryRun)
 	}
 }
 
@@ -293,7 +326,7 @@ func assertCanonicalAgentEvents(t *testing.T, events []any) {
 		"workspace.assets.updated": true, "workspace.blackboard.updated": true, "process.snapshot.saved": true,
 		"project.archived.blocked": true,
 	}
-	requiredTopLevel := []string{"event_id", "type", "session_id", "run_id", "project_id", "space_id", "actor_user_id", "sequence", "timestamp", "component", "trace_id", "payload"}
+	requiredTopLevel := []string{"event_id", "type", "session_id", "run_id", "project_id", "space_id", "actor_user_id", "sequence", "timestamp", "component", "trace_id", "payload_schema_version", "payload"}
 	for _, raw := range events {
 		event, ok := raw.(map[string]any)
 		if !ok {
@@ -341,6 +374,24 @@ func hasAssetElementHints(events []any) bool {
 		}
 		first, ok := items[0].(map[string]any)
 		if ok && first["schema_hint_json"] != "" && first["render_hint_json"] != "" && first["usage_stage"] != "" && first["resource_type"] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasControlsLocked(events []any) bool {
+	for _, raw := range events {
+		event, ok := raw.(map[string]any)
+		if !ok || event["type"] != "chat.controls.locked" {
+			continue
+		}
+		payload, ok := event["payload"].(map[string]any)
+		if !ok {
+			continue
+		}
+		fields, ok := payload["locked_fields"].([]any)
+		if ok && len(fields) > 0 && payload["locked_reason"] == "confirmation_required" && payload["confirmation_id"] != "" {
 			return true
 		}
 	}
