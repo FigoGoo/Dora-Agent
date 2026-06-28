@@ -128,6 +128,53 @@ func TestReleaseFrozenCreditsReplayReturnsOriginalResult(t *testing.T) {
 	}
 }
 
+func TestEstimateGenerationCreditsIdempotencyReplayDoesNotCreateOrphanEstimate(t *testing.T) {
+	app := newCreditTestApp(t)
+	auth := testAuth()
+	meta := testMeta("trace-estimate-replay", "idem-estimate-replay")
+	input := EstimateGenerationInput{
+		Auth: auth, Meta: meta, ProjectID: "prj_active_1001", ResourceType: "image",
+		ModelID: "mdl_seed_image", PricingSnapshotID: "price_model_image_seed", Quantity: 1,
+		SafetyEvidence: testSafetyEvidence("trace-estimate-replay", "sess_estimate_replay", "run_estimate_replay"),
+	}
+	first, err := app.EstimateGenerationCredits(t.Context(), input)
+	if err != nil {
+		t.Fatalf("estimate first request: %v", err)
+	}
+	replay, err := app.EstimateGenerationCredits(t.Context(), input)
+	if err != nil {
+		t.Fatalf("estimate replay request: %v", err)
+	}
+	if replay.EstimateID != first.EstimateID || replay.EstimatePoints != first.EstimatePoints || len(replay.LineItems) != len(first.LineItems) {
+		t.Fatalf("replay returned different estimate, first=%#v replay=%#v", first, replay)
+	}
+	var count int64
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.CreditEstimate{}).Where("project_id = ?", input.ProjectID).Count(&count).Error; err != nil {
+		t.Fatalf("count estimates: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("idempotent replay created orphan estimates, count=%d", count)
+	}
+}
+
+func TestEstimateGenerationCreditsIdempotencyConflict(t *testing.T) {
+	app := newCreditTestApp(t)
+	auth := testAuth()
+	input := EstimateGenerationInput{
+		Auth: auth, Meta: testMeta("trace-estimate-conflict", "idem-estimate-conflict"), ProjectID: "prj_active_1001", ResourceType: "image",
+		ModelID: "mdl_seed_image", PricingSnapshotID: "price_model_image_seed", Quantity: 1,
+		SafetyEvidence: testSafetyEvidence("trace-estimate-conflict", "sess_estimate_conflict", "run_estimate_conflict"),
+	}
+	if _, err := app.EstimateGenerationCredits(t.Context(), input); err != nil {
+		t.Fatalf("estimate first request: %v", err)
+	}
+	input.Quantity = 2
+	_, err := app.EstimateGenerationCredits(t.Context(), input)
+	if codeOf(err) != bizerrors.CodeIdempotencyConflict {
+		t.Fatalf("expected IDEMPOTENCY_CONFLICT for changed estimate request, got %v", err)
+	}
+}
+
 func newCreditTestApp(t *testing.T) *App {
 	t.Helper()
 	db := testdb.StartPostgres(t, "dora_business_credit_app")

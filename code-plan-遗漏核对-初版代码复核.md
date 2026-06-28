@@ -168,3 +168,14 @@
 - snapshot 恢复不回传完整内部确认 payload，仅回传前端重建确认面板所需的脱敏字段。
 - reject 的“重估闭环”采用新 run 重新预估，而不是在同一 run 内新增 waiting_confirmation -> running -> waiting_confirmation 复杂分支；与当前状态机、API 契约和 fixture 的 `cancelled` 语义一致。
 - `payload_schema_version` 先做可选信封字段；新服务事件必带，旧事件缺失按 `2026-06-27` 解析。
+
+## 批 D 子切片记录（2026-06-28 · GEN-7）✅
+
+提交：待提交（GEN-7）
+验证：`go test ./services/business/internal/application/credit` 通过。
+
+- **GEN-7 ✅ 已修**：`EstimateGenerationCredits` 接入业务幂等卫，scope=`credit.estimate_generation`；同 key 同请求 replay 返回原 `estimate_id`，不再重复插入 `credit_estimates` / 孤儿预估；同 key 不同模型/数量/tool items/安全证据 digest 返回 `IDEMPOTENCY_CONFLICT`。
+
+范围决策：
+- 仅修复核对项点名的生成预估写 RPC；`EstimateToolCredits` 暂不扩大行为面。
+- replay 从 `credit_estimates` + `credit_estimate_items` 还原 DTO，保持第一次预估结果对调用方稳定。

@@ -314,18 +314,40 @@ func (a *App) ListEnterpriseUsage(ctx context.Context, auth AuthContext, limit, 
 }
 
 func (a *App) EstimateGenerationCredits(ctx context.Context, in EstimateGenerationInput) (EstimateDTO, error) {
-	if strings.TrimSpace(in.ProjectID) == "" || strings.TrimSpace(in.ResourceType) == "" || strings.TrimSpace(in.ModelID) == "" || strings.TrimSpace(in.PricingSnapshotID) == "" {
-		return EstimateDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "project_id, resource_type, model_id and pricing_snapshot_id are required")
+	if strings.TrimSpace(in.ProjectID) == "" || strings.TrimSpace(in.ResourceType) == "" || strings.TrimSpace(in.ModelID) == "" || strings.TrimSpace(in.PricingSnapshotID) == "" || strings.TrimSpace(in.Meta.IdempotencyKey) == "" {
+		return EstimateDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "project_id, resource_type, model_id, pricing_snapshot_id and idempotency_key are required")
 	}
 	if err := validateSafetyEvidence(in.SafetyEvidence, "generation", "prompt", in.Meta.TraceID, a.now()); err != nil {
 		return EstimateDTO{}, err
 	}
+	hash := requestHash(in.Meta, in.Auth, map[string]any{
+		"project_id": in.ProjectID, "resource_type": in.ResourceType, "model_id": in.ModelID, "pricing_snapshot_id": in.PricingSnapshotID,
+		"quantity": in.Quantity, "duration_seconds": in.DurationSeconds, "tool_usage_items": in.ToolUsageItems, "safety_evidence_digest": safetyDigest(in.SafetyEvidence),
+	})
+	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.estimate_generation", IdempotencyKey: in.Meta.IdempotencyKey,
+		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
+	})
+	if err != nil {
+		return EstimateDTO{}, err
+	}
+	if decision.Mode == idempotency.DecisionConflict {
+		return EstimateDTO{}, bizerrors.New(bizerrors.CodeIdempotencyConflict, "generation estimate idempotency key conflicts")
+	}
+	if decision.Mode == idempotency.DecisionProcessing {
+		return EstimateDTO{}, bizerrors.New(bizerrors.CodeProcessing, "generation estimate request is processing")
+	}
+	if decision.Mode == idempotency.DecisionReplay && decision.ReplayResult != nil {
+		return a.getEstimateDTO(ctx, decision.ReplayResult.ID)
+	}
 	account, err := a.resolveAccount(ctx, a.repo.DB().WithContext(ctx), in.Auth)
 	if err != nil {
+		_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
 		return EstimateDTO{}, err
 	}
 	price, err := a.activeModelPrice(ctx, in.ModelID, in.ResourceType, in.PricingSnapshotID)
 	if err != nil {
+		_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
 		return EstimateDTO{}, err
 	}
 	quantity := generationQuantity(in.ResourceType, in.Quantity, in.DurationSeconds)
@@ -338,12 +360,21 @@ func (a *App) EstimateGenerationCredits(ctx context.Context, in EstimateGenerati
 	for _, item := range in.ToolUsageItems {
 		toolLine, err := a.estimateToolLine(ctx, item)
 		if err != nil {
+			_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
 			return EstimateDTO{}, err
 		}
 		lineItems = append(lineItems, toolLine)
 		points += toolLine.EstimatePoints
 	}
-	return a.createEstimate(ctx, in.Auth, in.Meta, account, in.ProjectID, in.ResourceType, in.ModelID, in.PricingSnapshotID, points, lineItems, in.SafetyEvidence)
+	dto, err := a.createEstimate(ctx, in.Auth, in.Meta, account, in.ProjectID, in.ResourceType, in.ModelID, in.PricingSnapshotID, points, lineItems, in.SafetyEvidence)
+	if err != nil {
+		_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
+		return EstimateDTO{}, err
+	}
+	if err := a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "credit_estimate", ID: dto.EstimateID}); err != nil {
+		return EstimateDTO{}, err
+	}
+	return dto, nil
 }
 
 func (a *App) EstimateToolCredits(ctx context.Context, in EstimateToolInput) (EstimateDTO, error) {
@@ -1382,6 +1413,40 @@ func (a *App) getFreezeDTO(ctx context.Context, freezeID string) (FreezeDTO, err
 	return FreezeDTO{FreezeID: row.FreezeID, FrozenPoints: row.FrozenPoints, ExpiresAt: row.ExpiresAt}, nil
 }
 
+func (a *App) getEstimateDTO(ctx context.Context, estimateID string) (EstimateDTO, error) {
+	var row businesscore.CreditEstimate
+	if err := a.repo.DB().WithContext(ctx).Where("estimate_id = ?", estimateID).First(&row).Error; err != nil {
+		return EstimateDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "credit estimate not found")
+	}
+	var items []businesscore.CreditEstimateItem
+	if err := a.repo.DB().WithContext(ctx).Where("estimate_id = ?", estimateID).Order("created_at ASC, id ASC").Find(&items).Error; err != nil {
+		return EstimateDTO{}, err
+	}
+	lineItems := make([]EstimateLineItemDTO, 0, len(items))
+	for _, item := range items {
+		lineItems = append(lineItems, EstimateLineItemDTO{
+			EstimateItemID:  item.EstimateItemID,
+			ItemType:        item.ItemType,
+			ToolName:        stringPtrValue(item.ToolName),
+			ToolType:        stringPtrValue(item.ToolType),
+			PricingPolicyID: stringPtrValue(item.PricingPolicyID),
+			ModelID:         stringPtrValue(item.ModelID),
+			ResourceType:    stringPtrValue(item.ResourceType),
+			BillingUnit:     stringPtrValue(item.BillingUnit),
+			Quantity:        floatPtrValue(item.Quantity),
+			UnitPoints:      floatPtrValue(item.UnitPoints),
+			EstimatePoints:  item.EstimatePoints,
+			FreeReason:      stringPtrValue(item.FreeReason),
+			Metadata:        estimateItemMetadata(item.MetadataJSON),
+		})
+	}
+	return EstimateDTO{
+		EstimateID: row.EstimateID, EstimatePoints: row.EstimatePoints, AvailablePoints: row.AvailablePoints,
+		ExpiresSoonPoints: row.ExpiresSoonPoints, CreditAccountScope: row.AccountType, CreditAccountID: row.AccountID,
+		LineItems: lineItems, ExpiresAt: row.ExpiresAt, Insufficient: row.Insufficient,
+	}, nil
+}
+
 func (a *App) getToolChargeDTO(ctx context.Context, chargeID string) (ChargeToolDTO, error) {
 	var row businesscore.CreditToolChargeBatch
 	if err := a.repo.DB().WithContext(ctx).Where("tool_charge_id = ?", chargeID).First(&row).Error; err != nil {
@@ -1442,6 +1507,33 @@ func requestHash(meta RequestMeta, auth AuthContext, extra map[string]any) strin
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+func estimateItemMetadata(raw datatypes.JSON) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var data struct {
+		MetadataSummary map[string]string `json:"metadata_summary"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil
+	}
+	return data.MetadataSummary
+}
+
+func stringPtrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func floatPtrValue(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func safetyDigest(evidence *businessagent.SafetyEvidenceDTO) string {
