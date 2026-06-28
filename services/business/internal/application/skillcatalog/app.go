@@ -120,10 +120,18 @@ func (a *App) ListRoutableSkills(ctx context.Context, auth accountspace.AuthCont
 	if err := db.Find(&rows).Error; err != nil {
 		return nil, "", err
 	}
+	// ACCT-1b：绑定了当前空间/企业白名单显式禁用 Tool 的 Skill 不可路由。
+	blocked, err := a.skillsBlockedByToolWhitelist(ctx, auth, rows)
+	if err != nil {
+		return nil, "", err
+	}
 	out := make([]SkillSummaryDTO, 0, min(len(rows), limit))
 	for i, skill := range rows {
 		if i >= limit {
 			break
+		}
+		if blocked[skill.ID] {
+			continue
 		}
 		version, err := a.versionByID(ctx, value(skill.PublishedVersionID))
 		if err != nil || version.Status != statusPublished {
@@ -139,6 +147,59 @@ func (a *App) ListRoutableSkills(ctx context.Context, auth accountspace.AuthCont
 		nextCursor = encodeCursor(offset + limit)
 	}
 	return out, nextCursor, nil
+}
+
+// skillsBlockedByToolWhitelist 返回因绑定 Tool 被当前空间/企业白名单显式禁用而不可路由的 Skill 集合(ACCT-1b)。
+// 白名单为覆盖语义：仅 allowed=false 的显式禁用规则会拉黑对应 Skill；用 deny 规则 + bindings 两次批量查避免 N+1。
+func (a *App) skillsBlockedByToolWhitelist(ctx context.Context, auth accountspace.AuthContext, skills []businesscore.Skill) (map[string]bool, error) {
+	blocked := map[string]bool{}
+	scopeIDs := make([]string, 0, 2)
+	if auth.SpaceID != "" {
+		scopeIDs = append(scopeIDs, auth.SpaceID)
+	}
+	if auth.EnterpriseID != "" {
+		scopeIDs = append(scopeIDs, auth.EnterpriseID)
+	}
+	if len(scopeIDs) == 0 || len(skills) == 0 {
+		return blocked, nil
+	}
+	var denyRules []businesscore.ToolWhitelistRule
+	if err := a.repo.DB().WithContext(ctx).
+		Where("scope_id IN ? AND allowed = ? AND status = ?", scopeIDs, false, "active").
+		Find(&denyRules).Error; err != nil {
+		return nil, err
+	}
+	if len(denyRules) == 0 {
+		return blocked, nil
+	}
+	denied := make(map[string]bool, len(denyRules))
+	for _, r := range denyRules {
+		denied[r.ToolName+":"+r.ToolType] = true
+	}
+	versionIDs := make([]string, 0, len(skills))
+	versionToSkill := make(map[string]string, len(skills))
+	for _, s := range skills {
+		if s.PublishedVersionID != nil && *s.PublishedVersionID != "" {
+			versionIDs = append(versionIDs, *s.PublishedVersionID)
+			versionToSkill[*s.PublishedVersionID] = s.ID
+		}
+	}
+	if len(versionIDs) == 0 {
+		return blocked, nil
+	}
+	var bindings []businesscore.SkillToolBinding
+	if err := a.repo.DB().WithContext(ctx).
+		Where("version_id IN ?", versionIDs).Find(&bindings).Error; err != nil {
+		return nil, err
+	}
+	for _, b := range bindings {
+		if denied[b.ToolName+":"+b.ToolType] {
+			if sid, ok := versionToSkill[b.VersionID]; ok {
+				blocked[sid] = true
+			}
+		}
+	}
+	return blocked, nil
 }
 
 func (a *App) GetPublishedSkillSpec(ctx context.Context, auth accountspace.AuthContext, skillID, version string) (SkillSpecDTO, error) {
