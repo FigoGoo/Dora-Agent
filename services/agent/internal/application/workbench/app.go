@@ -820,11 +820,15 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	if err := a.ensureReferencedAssetAccess(ctx, auth, req.ProjectID, req.ReferencedAssets, traceID); err != nil {
 		return CreateRunResponse{}, err
 	}
+	runtimeConfigVersion, err := a.activeRuntimeConfigVersion(ctx)
+	if err != nil {
+		return CreateRunResponse{}, err
+	}
 	runID := securityID("run_")
 	run := &model.Run{
 		ID: runID, SessionID: session.ID, ProjectID: session.ProjectID, SpaceID: session.SpaceID, UserID: session.UserID,
 		TurnNo: 1, Status: state.RunStatusPending, InputSummary: jsonObject(runInputSummary(req)),
-		ModelSelectionSnapshot: jsonObject(req.ModelSelection), RuntimeConfigVersion: a.configVersion, IdempotencyKey: req.IdempotencyKey, TraceID: traceID,
+		ModelSelectionSnapshot: jsonObject(req.ModelSelection), RuntimeConfigVersion: runtimeConfigVersion, IdempotencyKey: req.IdempotencyKey, TraceID: traceID,
 	}
 	if err := a.repo.CreateRun(ctx, run); err != nil {
 		return CreateRunResponse{}, err
@@ -863,6 +867,20 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 		return runResponse(*updated), nil
 	}
 	return runResponse(*run), nil
+}
+
+func (a *App) activeRuntimeConfigVersion(ctx context.Context) (string, error) {
+	if a.repo == nil {
+		return a.configVersion, nil
+	}
+	runtimeConfig, err := a.repo.GetActiveRuntimeConfig(ctx, "agent.default")
+	if err == nil && runtimeConfig.Version != "" {
+		return runtimeConfig.Version, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return a.configVersion, nil
+	}
+	return "", err
 }
 
 func (a *App) GetRun(ctx context.Context, auth AuthContextDTO, runID string, traceID string) (RunDTO, error) {

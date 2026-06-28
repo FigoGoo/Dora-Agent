@@ -9,11 +9,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/application/workbench"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
+	"gorm.io/datatypes"
 )
 
 func TestM2AgentSessionRunProjectGate(t *testing.T) {
@@ -22,6 +25,18 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
 
 	repo := repository.New(db.DB)
+	now := time.Now().UTC()
+	if err := repo.UpsertRuntimeConfig(t.Context(), &model.RuntimeConfig{
+		ConfigKey:      "agent.default",
+		Version:        "cfg-active-v2",
+		Status:         "active",
+		Owner:          "m2-test",
+		Content:        datatypes.JSON([]byte(`{"turn_loop":"m2"}`)),
+		SafeConfigRefs: datatypes.JSON([]byte(`[]`)),
+		ActivatedAt:    &now,
+	}); err != nil {
+		t.Fatalf("seed runtime config: %v", err)
+	}
 	app := workbench.New(repo, workbench.StaticGateway{
 		Space:  workbench.SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
 		Access: workbench.ProjectAccessDTO{Allowed: true, ProjectStatus: "active", CreativeAllowed: true, AllowedActions: []string{"view", "continue_creation"}},
@@ -59,6 +74,9 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 	}
 	if inputSummary["referenced_asset_count"] != float64(1) || inputSummary["control_input_count"] != float64(1) {
 		t.Fatalf("run input summary dropped referenced assets or controls: %#v", inputSummary)
+	}
+	if createdRun.RuntimeConfigVersion != "cfg-active-v2" {
+		t.Fatalf("run did not consume active runtime config, got %q", createdRun.RuntimeConfigVersion)
 	}
 	stream := httptest.NewRecorder()
 	router.ServeHTTP(stream, agentRequest(http.MethodGet, "/api/agent/runs/"+runID+"/stream", "", nil))

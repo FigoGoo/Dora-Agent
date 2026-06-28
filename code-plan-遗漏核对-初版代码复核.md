@@ -179,3 +179,13 @@
 范围决策：
 - 仅修复核对项点名的生成预估写 RPC；`EstimateToolCredits` 暂不扩大行为面。
 - replay 从 `credit_estimates` + `credit_estimate_items` 还原 DTO，保持第一次预估结果对调用方稳定。
+
+## 批 D 子切片记录（2026-06-28 · INFRA-9）✅
+
+提交：待提交（INFRA-9）
+验证：`go test ./services/agent/internal/application/workbench ./services/agent/internal/api/http` 通过。
+
+- **INFRA-9 ✅ 已修**：创建 run 时优先读取 `agent_runtime_configs` 中 `config_key=agent.default` 的 active 版本，并写入 `agent_runs.runtime_config_version`；无 active 配置时才回退构造参数 `configVersion`。
+
+范围决策：
+- 本切片先打通运行期配置加载链路和版本落库，不解释 `content` 中的策略参数；策略解释器留给后续 W2/W3 功能闭环。
