@@ -6,7 +6,7 @@ DECLARE
   t text;
   tables text[] := ARRAY[
     'business_audit_logs','credit_ledger_entries','asset_access_logs','admin_login_attempts',
-    'redeem_code_redemptions','work_moderation_records','asset_element_type_change_records',
+    'redeem_code_redemptions','work_moderation_records','skill_review_records','asset_element_type_change_records',
     'tool_policy_change_records','model_connectivity_tests'
   ];
 BEGIN

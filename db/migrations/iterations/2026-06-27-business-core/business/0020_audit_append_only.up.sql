@@ -4,7 +4,7 @@
 -- 约束: 安全规范(审计不可篡改/可取证) / 数据建模规范 / 禁外键。
 -- 机制: BEFORE UPDATE OR DELETE 触发器 RAISE EXCEPTION，任何角色(含 superuser)都拦，不依赖 REVOKE 角色管理。
 --       TRUNCATE 不在拦截范围(DDL，由权限控制)；INSERT 正常放行。
--- 影响表: 9 张纯 append-only 表(写入即终态)。
+-- 影响表: 10 张纯 append-only 表(写入即终态)。skill_review_records 与 work_moderation_records 对称：审/评动作每次 INSERT 新记录、无 UPDATE。
 
 CREATE OR REPLACE FUNCTION business_forbid_mutation() RETURNS trigger AS $$
 BEGIN
@@ -18,7 +18,7 @@ DECLARE
   t text;
   tables text[] := ARRAY[
     'business_audit_logs','credit_ledger_entries','asset_access_logs','admin_login_attempts',
-    'redeem_code_redemptions','work_moderation_records','asset_element_type_change_records',
+    'redeem_code_redemptions','work_moderation_records','skill_review_records','asset_element_type_change_records',
     'tool_policy_change_records','model_connectivity_tests'
   ];
 BEGIN
