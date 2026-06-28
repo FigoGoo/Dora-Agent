@@ -1750,6 +1750,16 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	if err != nil {
 		return a.failM4AfterFreeze(ctx, auth, run, freeze, "prompt_unavailable", idempotencyKey, traceID, err)
 	}
+	// GEN-5 fail-closed：实际发往模型的 prompt 必须与已通过安全评估的 prompt 完全一致，
+	// 杜绝确认/评估之后输入被改写的"评 A 发 B"旁路；不一致则释放冻结、终止 run，绝不发模型。
+	if !promptMatchesEvidence(prompt, payload.SafetyEvidence) {
+		_ = a.appendRunEvent(ctx, run, "safety.prompt.failed", traceID, map[string]any{
+			"safety_status": state.SafetyResultFailed, "error_code": "SAFETY_PROMPT_DIGEST_MISMATCH",
+			"user_message": "输入在确认后发生变化，请重新发起生成", "retryable": true, "support_trace_id": traceID,
+		})
+		return a.failM4AfterFreeze(ctx, auth, run, freeze, "prompt_digest_mismatch", idempotencyKey, traceID,
+			apperror.New(apperror.CodePermissionDenied, "prompt changed after safety evaluation"))
+	}
 	_ = a.appendGenerationProgress(ctx, run, traceID, payload.ModelSnapshot.ResourceType, "submitted", 20, false, map[string]any{
 		"model_id": payload.ModelSnapshot.ModelID, "estimate_id": payload.EstimateID, "freeze_id": freeze.FreezeID,
 	})
@@ -2093,6 +2103,13 @@ func (a *App) latestUserPrompt(ctx context.Context, sessionID string) (string, e
 		}
 	}
 	return "", apperror.New(apperror.CodeResourceNotFound, "user prompt not found")
+}
+
+// promptMatchesEvidence 判定实际发往模型的 prompt 是否与安全证据认证的 prompt 一致(GEN-5 fail-closed 基线)。
+// 证据无 digest 时不在此处拦截(交由上游 safety/确认链路保证)；有 digest 则必须与发送内容逐字节一致。
+func promptMatchesEvidence(prompt string, evidence businessagent.SafetyEvidenceDTO) bool {
+	expected := strings.TrimSpace(evidence.EvaluatedObjectDigest)
+	return expected == "" || digestText(prompt) == expected
 }
 
 func estimateItemsForArtifacts(estimate CreditEstimateDTO, artifacts []modeltool.Artifact) (map[string]string, error) {
