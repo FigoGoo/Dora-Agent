@@ -260,12 +260,14 @@ func (a *App) BootstrapInitialAdmin(ctx context.Context, in BootstrapInput) (Pla
 	adminID := security.RandomID("adm_")
 	admin := businesscore.PlatformAdmin{
 		ID: adminID, AdminAccount: account, PasswordHash: passwordHash, DisplayName: "Dora Root Admin",
-		Role: "super_admin", Status: accountspace.StatusActive, MustRotatePassword: true, CreatedAt: now, UpdatedAt: now,
+		Role: "super_admin", Status: accountspace.StatusActive, MustRotatePassword: true,
+		CreatedBy: optionalString("system_seed"), UpdatedBy: optionalString("system_seed"), CreatedAt: now, UpdatedAt: now,
 	}
 	secretRef := optionalString(in.CredentialSecretRef)
 	bootstrap := businesscore.PlatformAdminBootstrap{
 		ID: security.RandomID("boot_"), AdminID: adminID, BootstrapAccount: account, InitializedBy: "system_seed",
-		CredentialSecretRef: secretRef, Status: "initialized", InitializedAt: now, CreatedAt: now, UpdatedAt: now,
+		CredentialSecretRef: secretRef, Status: "initialized", InitializedAt: now,
+		CreatedBy: optionalString("system_seed"), UpdatedBy: optionalString("system_seed"), CreatedAt: now, UpdatedAt: now,
 	}
 	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&admin).Error; err != nil {
@@ -309,12 +311,13 @@ func (a *App) Login(ctx context.Context, in AdminLoginInput) (AdminSessionDTO, e
 		csrfToken, csrfHash := security.NewOpaqueToken("csrf")
 		session := businesscore.PlatformAdminSession{
 			ID: security.RandomID("asess_"), AdminID: admin.ID, SessionTokenDigest: tokenHash, CSRFTokenHash: &csrfHash,
-			Status: accountspace.StatusActive, ExpiresAt: now.Add(12 * time.Hour), CreatedAt: now, UpdatedAt: now,
+			Status: accountspace.StatusActive, ExpiresAt: now.Add(12 * time.Hour),
+			CreatedBy: optionalString(admin.ID), UpdatedBy: optionalString(admin.ID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&session).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&businesscore.PlatformAdmin{}).Where("id = ?", admin.ID).Updates(map[string]any{"last_login_at": now, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&businesscore.PlatformAdmin{}).Where("id = ?", admin.ID).Updates(map[string]any{"last_login_at": now, "updated_by": admin.ID, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		dto = AdminSessionDTO{
@@ -337,7 +340,7 @@ func (a *App) Logout(ctx context.Context, auth AdminAuth, meta RequestMeta) erro
 	}
 	return a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := a.now()
-		if err := tx.Model(&businesscore.PlatformAdminSession{}).Where("id = ? AND admin_id = ?", auth.SessionID, auth.AdminID).Updates(map[string]any{"status": "revoked", "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&businesscore.PlatformAdminSession{}).Where("id = ? AND admin_id = ?", auth.SessionID, auth.AdminID).Updates(map[string]any{"status": "revoked", "updated_by": auth.AdminID, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		audit := auditRecord(meta.TraceID, auth.AdminID, auditlog.ActionAdminAuthLogout, "platform_admin_session", auth.SessionID, "success")
@@ -381,11 +384,11 @@ func (a *App) RotatePassword(ctx context.Context, in RotatePasswordInput) (Admin
 		}
 		now := a.now()
 		if err := tx.Model(&businesscore.PlatformAdmin{}).Where("id = ?", row.ID).Updates(map[string]any{
-			"password_hash": newHash, "must_rotate_password": false, "password_rotated_at": now, "updated_at": now,
+			"password_hash": newHash, "must_rotate_password": false, "password_rotated_at": now, "updated_by": row.ID, "updated_at": now,
 		}).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&businesscore.PlatformAdminBootstrap{}).Where("admin_id = ?", row.ID).Updates(map[string]any{"status": "rotated", "rotated_at": now, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&businesscore.PlatformAdminBootstrap{}).Where("admin_id = ?", row.ID).Updates(map[string]any{"status": "rotated", "rotated_at": now, "updated_by": row.ID, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		audit := auditRecord(in.Meta.TraceID, row.ID, auditlog.ActionAdminPasswordRotate, "platform_admin", row.ID, "success")
@@ -472,7 +475,7 @@ func (a *App) CreateAdmin(ctx context.Context, in CreateAdminInput) (PlatformAdm
 		row := businesscore.PlatformAdmin{
 			ID: security.RandomID("adm_"), AdminAccount: strings.TrimSpace(in.Account), PasswordHash: passwordHash,
 			DisplayName: strings.TrimSpace(in.Account), Role: "super_admin", Status: accountspace.StatusActive, MustRotatePassword: true,
-			CreatedBy: &in.Auth.AdminID, CreatedAt: now, UpdatedAt: now,
+			CreatedBy: optionalString(in.Auth.AdminID), UpdatedBy: optionalString(in.Auth.AdminID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
@@ -518,7 +521,7 @@ func (a *App) DisableAdmin(ctx context.Context, in DisableAdminInput) (PlatformA
 			return err
 		}
 		if err := tx.Model(&businesscore.PlatformAdmin{}).Where("id = ?", in.AdminID).Updates(map[string]any{
-			"status": "disabled", "disabled_by": in.Auth.AdminID, "disabled_reason": in.Reason, "updated_at": now,
+			"status": "disabled", "disabled_by": in.Auth.AdminID, "disabled_reason": in.Reason, "updated_by": in.Auth.AdminID, "updated_at": now,
 		}).Error; err != nil {
 			return err
 		}
@@ -650,7 +653,7 @@ func (a *App) ConfirmSetUserStatus(ctx context.Context, in UserStatusInput) (Use
 		}
 		before := user.Status
 		now := a.now()
-		if err := tx.Model(&businesscore.User{}).Where("id = ?", user.ID).Updates(map[string]any{"status": in.TargetStatus, "disabled_reason": in.Reason, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&businesscore.User{}).Where("id = ?", user.ID).Updates(map[string]any{"status": in.TargetStatus, "disabled_reason": in.Reason, "updated_by": in.Auth.AdminID, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		user.Status = in.TargetStatus
