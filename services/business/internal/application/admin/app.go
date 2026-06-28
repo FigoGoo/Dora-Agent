@@ -503,6 +503,10 @@ func (a *App) GetUserSummary(ctx context.Context, auth AdminAuth, userID string)
 	if err := a.repo.DB().WithContext(ctx).Where("id = ? AND deleted_at IS NULL", userID).First(&user).Error; err != nil {
 		return UserDetailDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "user not found")
 	}
+	// ACCT-8 管理员越权红线：平台管理通道只读用户平台级元数据，不展开业务空间归属明细
+	// (空间 / 企业成员 / 归属审计)。这些字段保持空占位是有意为之，不是待补 TODO——如需查看
+	// 用户业务空间内容须走独立留痕的只读通道并单独鉴权，不得在此复用 admin 身份跨入业务归属。
+	// 见 docs/standards/安全规范.md「管理员越权红线」。
 	return UserDetailDTO{Summary: userDTO(user), Spaces: []map[string]string{}, EnterpriseMemberships: []map[string]string{}, RecentAuditRefs: []map[string]string{}}, nil
 }
 
