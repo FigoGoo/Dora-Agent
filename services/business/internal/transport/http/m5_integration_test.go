@@ -57,7 +57,7 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 	userToken := loginUser(t, router, "user1001@dora.local", "local-user-change-me")
 	created := requestJSON(t, router, http.MethodPost, "/api/works", userToken, "idem-http-work-create", map[string]any{
 		"project_id": "prj_active_1001", "title": "HTTP Work", "asset_ids": []string{"ast_generated_1001"},
-		"cover_asset_id": "ast_generated_1001", "category": "image", "tags": []string{"http"}, "request_hash": "hash-http-work-create",
+		"cover_asset_id": "ast_generated_1001", "category": "storyboard", "tags": []string{"http"}, "request_hash": "hash-http-work-create",
 	})
 	workID := created["data"].(map[string]any)["work"].(map[string]any)["work_id"].(string)
 	title := "HTTP Public Work"
