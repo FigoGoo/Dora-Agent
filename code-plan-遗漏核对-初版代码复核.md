@@ -262,10 +262,20 @@
 
 ## 批 E 子切片记录（2026-06-28 · INFRA-4）✅
 
-提交：随本切片提交（INFRA-4）
+提交：`de013df`（INFRA-4）
 验证：`go test ./services/business/internal/infra/logger ./services/business/internal/transport/http` 通过；`git diff --check` 通过。
 
 - **INFRA-4 ✅ 已固化**：业务结构化日志字段集收敛到 `services/business/internal/infra/logger` 常量与字段清单，基础字段为 `service/env`，HTTP 请求日志必带 `trace_id/request_id/method/path/status/latency_ms`；请求中间件将 `request_id` 放入 context，router 测试解析 JSON 日志验证字段全集。
 
 范围决策：
 - 本切片先固化业务 HTTP 入口公共字段，不展开全链路 OTel/W3C traceparent；后者仍归 INFRA-5。
+
+## 批 A 子切片记录（2026-06-28 · INFRA-2）✅
+
+提交：随本切片提交（INFRA-2）
+验证：`go test ./services/business/internal/infra/repository/businesscore` 通过；`git diff --check` 通过。
+
+- **INFRA-2 ✅ 已固化**：业务 schema baseline 增加 testcontainer 迁移断言，53 张公共列表白名单必须存在 `created_by/updated_by/deleted_at`，10 张 append-only 表白名单必须存在 `trg_append_only` 触发器；测试同时锁定白名单数量，防止新增表绕过公共列/不可变性口径。
+
+范围决策：
+- `skill_review_records` 是唯一显式重叠例外：迁移事实为公共列已补齐，且按 `0020` 作为 Skill 审核事件流禁止 UPDATE/DELETE。
