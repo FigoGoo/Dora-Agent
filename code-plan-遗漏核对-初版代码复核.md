@@ -71,7 +71,6 @@
 
 | ID | 缺口 | 证据 |
 |---|---|---|
-| GEN-4 | safety evidence 过期只硬失败+全额释放，无重评续跑（fail-closed 成立，缺可用性）| `assetcommit/app.go:566-573` + `agent app.go:1922-1937` |
 | GEN-8 | commit 端缺"部分 artifact 缺元素"的部分结算+定额释放，当前全回滚+全释放（不漏释放但不精确）| `assetcommit/app.go:321,264-268` |
 | WORK-7 | `AdminUserDetailDTO.spaces[]` 为 `[]map[string]string` 弱类型，非字段级白名单 | `admin/app.go:142-147` |
 | WORK-9 | `business_action` 共 43 码散落字面量，与 PRD 11 模块大体对齐但无中心枚举 | services/business 散落 |
@@ -362,3 +361,15 @@
 范围决策：
 - 本切片限定在现有“artifact 与 model_generation estimate item 一一匹配”的契约内做部分结算；当前单个 estimate item 承载 quantity 的定价拆分不在本切片隐式改造。
 - 若所有 artifact 均不可提交，仍沿用原失败语义并不生成空 commit batch，避免把全失败包装成成功。
+
+## 批 F 子切片记录（2026-06-28 · GEN-4）✅
+
+提交：`064d578`（GEN-4）
+验证：`go test -count=1 ./services/agent/internal/application/workbench` 通过；`go test -count=1 ./services/agent/internal/infra/repository ./services/agent/internal/api/http ./services/agent/cmd/agent` 通过；`git diff --check` 通过。
+
+- **GEN-4 ✅ 已修**：确认后生成在冻结积分前检查 confirmation payload 中 `safety_evidence.expires_at`；证据过期时复用同一最新 prompt 做安全重评，digest 仍必须匹配，重评通过后用新 evidence 调 `EstimateGenerationCredits` 重新绑定估算，再冻结并提交资产。
+- **fail-closed 仍成立**：prompt digest 不匹配、重评失败、重估失败或积分不足都在模型调用/冻结前终止任务并标记 run failed；业务侧 `CommitGeneratedAssetAndCharge` 仍继续拒绝过期或与 estimate hash 不匹配的 evidence。
+
+范围决策：
+- 本切片不放松业务侧 safety evidence hash 绑定，也不让旧 estimate 接受新 evidence；过期续跑必须通过 Agent 侧重评 + 新 estimate 完成。
+- 仅覆盖确认后生成链路的证据 TTL 续期；独立工具扣费、分享/上传等其他 safety_evidence 场景后续按各自链路单独评估。
