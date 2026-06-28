@@ -16,6 +16,8 @@ type ModelProvider struct {
 	BaseURL          *string        `gorm:"column:base_url"`
 	ConfigJSON       datatypes.JSON `gorm:"column:config_json;type:jsonb"`
 	CreatedByAdminID *string        `gorm:"column:created_by_admin_id"`
+	CreatedBy        *string        `gorm:"column:created_by"`
+	UpdatedBy        *string        `gorm:"column:updated_by"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -31,6 +33,8 @@ type ModelProviderCredential struct {
 	EncryptedPayloadDigest *string        `gorm:"column:encrypted_payload_digest"`
 	Status                 string         `gorm:"column:status"`
 	CreatedByAdminID       *string        `gorm:"column:created_by_admin_id"`
+	CreatedBy              *string        `gorm:"column:created_by"`
+	UpdatedBy              *string        `gorm:"column:updated_by"`
 	CreatedAt              time.Time      `gorm:"column:created_at"`
 	UpdatedAt              time.Time      `gorm:"column:updated_at"`
 	DeletedAt              gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -49,6 +53,8 @@ type Model struct {
 	CredentialID     *string        `gorm:"column:credential_id"`
 	RouteConfigJSON  datatypes.JSON `gorm:"column:route_config_json;type:jsonb"`
 	CreatedByAdminID *string        `gorm:"column:created_by_admin_id"`
+	CreatedBy        *string        `gorm:"column:created_by"`
+	UpdatedBy        *string        `gorm:"column:updated_by"`
 	CreatedAt        time.Time      `gorm:"column:created_at"`
 	UpdatedAt        time.Time      `gorm:"column:updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -68,6 +74,8 @@ type ModelPrice struct {
 	EffectiveAt       time.Time      `gorm:"column:effective_at"`
 	ExpiredAt         *time.Time     `gorm:"column:expired_at"`
 	CreatedByAdminID  *string        `gorm:"column:created_by_admin_id"`
+	CreatedBy         *string        `gorm:"column:created_by"`
+	UpdatedBy         *string        `gorm:"column:updated_by"`
 	CreatedAt         time.Time      `gorm:"column:created_at"`
 	DeletedAt         gorm.DeletedAt `gorm:"column:deleted_at"`
 }
@@ -82,6 +90,8 @@ type DefaultModel struct {
 	Scope             string         `gorm:"column:scope"`
 	Status            string         `gorm:"column:status"`
 	CreatedByAdminID  *string        `gorm:"column:created_by_admin_id"`
+	CreatedBy         *string        `gorm:"column:created_by"`
+	UpdatedBy         *string        `gorm:"column:updated_by"`
 	CreatedAt         time.Time      `gorm:"column:created_at"`
 	UpdatedAt         time.Time      `gorm:"column:updated_at"`
 	DeletedAt         gorm.DeletedAt `gorm:"column:deleted_at"`
