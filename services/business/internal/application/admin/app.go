@@ -274,7 +274,7 @@ func (a *App) BootstrapInitialAdmin(ctx context.Context, in BootstrapInput) (Pla
 		if err := tx.Create(&bootstrap).Error; err != nil {
 			return err
 		}
-		audit := auditRecord(in.TraceID, admin.ID, "admin.bootstrap", "platform_admin", admin.ID, "success")
+		audit := auditRecord(in.TraceID, admin.ID, auditlog.ActionAdminBootstrap, "platform_admin", admin.ID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
@@ -321,7 +321,7 @@ func (a *App) Login(ctx context.Context, in AdminLoginInput) (AdminSessionDTO, e
 			AdminID: admin.ID, Account: admin.AdminAccount, Status: admin.Status, MustRotatePassword: admin.MustRotatePassword,
 			CSRFToken: csrfToken, AccessToken: accessToken, ExpiresAt: session.ExpiresAt, BootstrapStatus: bootstrapStatus(admin.MustRotatePassword),
 		}
-		audit := auditRecord(in.Meta.TraceID, admin.ID, "admin.auth.login", "platform_admin", admin.ID, "success")
+		audit := auditRecord(in.Meta.TraceID, admin.ID, auditlog.ActionAdminAuthLogin, "platform_admin", admin.ID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
@@ -340,7 +340,7 @@ func (a *App) Logout(ctx context.Context, auth AdminAuth, meta RequestMeta) erro
 		if err := tx.Model(&businesscore.PlatformAdminSession{}).Where("id = ? AND admin_id = ?", auth.SessionID, auth.AdminID).Updates(map[string]any{"status": "revoked", "updated_at": now}).Error; err != nil {
 			return err
 		}
-		audit := auditRecord(meta.TraceID, auth.AdminID, "admin.auth.logout", "platform_admin_session", auth.SessionID, "success")
+		audit := auditRecord(meta.TraceID, auth.AdminID, auditlog.ActionAdminAuthLogout, "platform_admin_session", auth.SessionID, "success")
 		return tx.Create(audit).Error
 	})
 }
@@ -388,7 +388,7 @@ func (a *App) RotatePassword(ctx context.Context, in RotatePasswordInput) (Admin
 		if err := tx.Model(&businesscore.PlatformAdminBootstrap{}).Where("admin_id = ?", row.ID).Updates(map[string]any{"status": "rotated", "rotated_at": now, "updated_at": now}).Error; err != nil {
 			return err
 		}
-		audit := auditRecord(in.Meta.TraceID, row.ID, "admin.password.rotate", "platform_admin", row.ID, "success")
+		audit := auditRecord(in.Meta.TraceID, row.ID, auditlog.ActionAdminPasswordRotate, "platform_admin", row.ID, "success")
 		if err := tx.Create(audit).Error; err != nil {
 			return err
 		}
@@ -478,7 +478,7 @@ func (a *App) CreateAdmin(ctx context.Context, in CreateAdminInput) (PlatformAdm
 			return err
 		}
 		dto = adminDTO(row)
-		audit := auditRecord(in.Meta.TraceID, in.Auth.AdminID, "admin.create", "platform_admin", row.ID, "success")
+		audit := auditRecord(in.Meta.TraceID, in.Auth.AdminID, auditlog.ActionAdminCreate, "platform_admin", row.ID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
@@ -526,7 +526,7 @@ func (a *App) DisableAdmin(ctx context.Context, in DisableAdminInput) (PlatformA
 			return err
 		}
 		dto = adminDTO(row)
-		audit := auditRecord(in.Meta.TraceID, in.Auth.AdminID, "admin.disable", "platform_admin", row.ID, "success")
+		audit := auditRecord(in.Meta.TraceID, in.Auth.AdminID, auditlog.ActionAdminDisable, "platform_admin", row.ID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
@@ -655,7 +655,7 @@ func (a *App) ConfirmSetUserStatus(ctx context.Context, in UserStatusInput) (Use
 		}
 		user.Status = in.TargetStatus
 		dto = userDTO(user)
-		audit := auditRecord(in.Meta.TraceID, in.Auth.AdminID, "user.status.set", "user", user.ID, "success")
+		audit := auditRecord(in.Meta.TraceID, in.Auth.AdminID, auditlog.ActionUserStatusSet, "user", user.ID, "success")
 		audit.BeforeStatus = &before
 		audit.AfterStatus = &in.TargetStatus
 		audit.Reason = &in.Reason

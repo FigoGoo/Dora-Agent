@@ -344,7 +344,7 @@ func (a *App) CreateWork(ctx context.Context, in CreateWorkInput) (WorkDetailDTO
 		if err := tx.Create(&projectWork).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, "work.create", "work", work.ID, "success")).Error; err != nil {
+		if err := tx.Create(auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, auditlog.ActionWorkCreate, "work", work.ID, "success")).Error; err != nil {
 			return err
 		}
 		detail, err = a.workDetailTx(tx, work)
@@ -456,7 +456,7 @@ func (a *App) UpdateWork(ctx context.Context, in UpdateWorkInput) (WorkDetailDTO
 		if err := tx.Model(&businesscore.Work{}).Where("id = ?", work.ID).Updates(updates).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, "work.update", "work", work.ID, "success")).Error; err != nil {
+		if err := tx.Create(auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, auditlog.ActionWorkUpdate, "work", work.ID, "success")).Error; err != nil {
 			return err
 		}
 		work.UpdatedAt = now
@@ -629,7 +629,7 @@ func (a *App) ConfirmShareWork(ctx context.Context, in ConfirmShareWorkInput) (W
 		}).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, "work.share", "work", work.ID, "success")).Error; err != nil {
+		if err := tx.Create(auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, auditlog.ActionWorkShare, "work", work.ID, "success")).Error; err != nil {
 			return err
 		}
 		result = WorkShareResultDTO{WorkID: work.ID, PublicWorkID: publicWorkID, ShareURL: publicURL, ShareStatus: StatusShared, SnapshotID: snapshotID}
@@ -683,7 +683,7 @@ func (a *App) UnshareWork(ctx context.Context, in UnshareWorkInput) (WorkDetailD
 		work.ShareStatus = StatusPrivate
 		work.CurrentSnapshotID = nil
 		work.UpdatedAt = now
-		if err := tx.Create(auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, "work.unshare", "work", work.ID, "success")).Error; err != nil {
+		if err := tx.Create(auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, auditlog.ActionWorkUnshare, "work", work.ID, "success")).Error; err != nil {
 			return err
 		}
 		detail, err = a.workDetailTx(tx, work)
@@ -838,7 +838,7 @@ func (a *App) ConfirmTakeDownWork(ctx context.Context, in ConfirmTakeDownWorkInp
 		}).Error; err != nil {
 			return err
 		}
-		audit := adminAuditRecord(in.Meta.TraceID, in.Auth.AdminID, "work.public.take_down", "public_work", snapshot.PublicWorkID, "success", in.Reason)
+		audit := adminAuditRecord(in.Meta.TraceID, in.Auth.AdminID, auditlog.ActionWorkPublicTakeDown, "public_work", snapshot.PublicWorkID, "success", in.Reason)
 		if err := tx.Create(audit).Error; err != nil {
 			return err
 		}
@@ -959,7 +959,7 @@ func (a *App) setLike(ctx context.Context, in LikePublicWorkInput, liked bool) (
 				snapshot.LikeCount = 0
 			}
 		}
-		if err := tx.Create(auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, "work.like", "public_work", snapshot.PublicWorkID, "success")).Error; err != nil {
+		if err := tx.Create(auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, auditlog.ActionWorkLike, "public_work", snapshot.PublicWorkID, "success")).Error; err != nil {
 			return err
 		}
 		out = PublicWorkLikeDTO{PublicWorkID: snapshot.PublicWorkID, Liked: liked, LikeCount: snapshot.LikeCount}

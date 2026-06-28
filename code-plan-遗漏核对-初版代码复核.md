@@ -237,7 +237,7 @@
 
 ## 批 F 子切片记录（2026-06-28 · P2 显式化/类型化收口）✅
 
-提交：待提交（WORK-5 / WORK-7 / INFRA-11 / SKILL-9 / SKILL-10）
+提交：`0ff2f65`（WORK-5 / WORK-7 / INFRA-11 / SKILL-9 / SKILL-10）
 验证：`go test ./services/business/internal/application/admin ./services/agent/internal/application/workbench` 通过；`python3 tests/contract/validate_fixtures.py` 通过；`git diff --check` 通过。
 
 - **WORK-5 ✅ 已修**：后台模块 owner 归属收敛为 `AdminModuleOwners` 中心枚举，覆盖平台管理员、用户管理、系统 Skill、Skill 审核、模型供应商、模型、Tool、积分发放、兑换码、精选作品和审计日志，并声明 owner domain 与 audit scope。
@@ -249,3 +249,13 @@
 范围决策：
 - 不新增后台 RBAC；第一版仍是单一平台管理员角色，本切片只声明模块归属，便于审计和后续 RBAC 演进。
 - INFRA-11 先固化矩阵口径，不改业务状态机行为；已存在的状态守卫由各 application 测试继续覆盖。
+
+## 批 F 子切片记录（2026-06-28 · WORK-9）✅
+
+提交：随本切片提交（WORK-9）
+验证：`go test ./services/business/internal/pkg/auditlog ./services/business/internal/application/accountspace ./services/business/internal/application/admin ./services/business/internal/application/project ./services/business/internal/application/work` 通过；`git diff --check` 通过。
+
+- **WORK-9 ✅ 已修**：`business_action` 收敛到 `services/business/internal/pkg/auditlog` 中心枚举，覆盖账号/企业/后台/项目/作品当前写入 `business_audit_logs` 的 action；应用层审计写入点改用常量，测试固化无重复、命名口径和关键 action 覆盖。
+
+范围决策：
+- 仅收敛 `business_audit_logs.business_action`，不把 idempotency `Scope`、Tool policy `change_type` 等相邻字符串混入同一枚举，避免不同语义被中心常量误绑。

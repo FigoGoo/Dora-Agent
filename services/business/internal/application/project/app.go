@@ -214,7 +214,7 @@ func (a *App) CreateProject(ctx context.Context, in CreateInput) (ProjectDetailD
 			return err
 		}
 		dto = detailDTO(project)
-		audit := auditRecord(in.Meta.TraceID, in.Auth.UserID, spaceID, "project.create", "project", project.ID, "success")
+		audit := auditRecord(in.Meta.TraceID, in.Auth.UserID, spaceID, auditlog.ActionProjectCreate, "project", project.ID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
@@ -299,7 +299,7 @@ func (a *App) UpdateProject(ctx context.Context, in UpdateInput) (ProjectDetailD
 		project.UpdatedAt = now
 		project.LastActivityAt = now
 		dto = detailDTO(project)
-		audit := auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, "project.update", "project", project.ID, "success")
+		audit := auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, auditlog.ActionProjectUpdate, "project", project.ID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
@@ -415,7 +415,7 @@ func (a *App) AttachAssetToProject(ctx context.Context, in AttachAssetInput) (Pr
 		}).Create(&row).Error; err != nil {
 			return err
 		}
-		audit := auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, "project.asset.attach", "project_asset", in.AssetID, "success")
+		audit := auditRecord(in.Meta.TraceID, in.Auth.UserID, in.Auth.SpaceID, auditlog.ActionProjectAssetAttach, "project_asset", in.AssetID, "success")
 		if err := tx.Create(audit).Error; err != nil {
 			return err
 		}
@@ -476,10 +476,10 @@ func (a *App) CheckProjectAccess(ctx context.Context, auth AuthContext, projectI
 }
 
 func (a *App) setArchiveState(ctx context.Context, in ArchiveInput, archived bool) (ProjectDetailDTO, error) {
-	action := "project.restore"
+	action := auditlog.ActionProjectRestore
 	scope := "project.restore"
 	if archived {
-		action = "project.archive"
+		action = auditlog.ActionProjectArchive
 		scope = "project.archive"
 	}
 	hash := in.Meta.RequestHash

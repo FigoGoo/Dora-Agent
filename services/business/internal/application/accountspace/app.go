@@ -327,7 +327,7 @@ func (a *App) RegisterPersonalAccount(ctx context.Context, in RegisterInput) (Au
 			return err
 		}
 		sessionDTO = dto
-		audit := auditRecord(in.Meta.TraceID, "user", userID, spaceID, "auth.register", "user", userID, "success")
+		audit := auditRecord(in.Meta.TraceID, "user", userID, spaceID, auditlog.ActionAuthRegister, "user", userID, "success")
 		if err := tx.Create(audit).Error; err != nil {
 			return err
 		}
@@ -410,7 +410,7 @@ func (a *App) Login(ctx context.Context, in LoginInput) (AuthSessionDTO, error) 
 		if err := tx.Model(&businesscore.User{}).Where("id = ?", user.ID).Updates(map[string]any{"last_login_at": now, "updated_at": now}).Error; err != nil {
 			return err
 		}
-		audit := auditRecord(in.Meta.TraceID, "user", user.ID, space.ID, "auth.login", "auth_session", dto.UserID, "success")
+		audit := auditRecord(in.Meta.TraceID, "user", user.ID, space.ID, auditlog.ActionAuthLogin, "auth_session", dto.UserID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
@@ -430,7 +430,7 @@ func (a *App) Logout(ctx context.Context, auth AuthContext, meta RequestMeta) er
 			Updates(map[string]any{"status": "revoked", "updated_at": now}).Error; err != nil {
 			return err
 		}
-		audit := auditRecord(meta.TraceID, "user", auth.UserID, auth.SpaceID, "auth.logout", "auth_session", auth.SessionID, "success")
+		audit := auditRecord(meta.TraceID, "user", auth.UserID, auth.SpaceID, auditlog.ActionAuthLogout, "auth_session", auth.SessionID, "success")
 		return tx.Create(audit).Error
 	})
 	return err
@@ -555,7 +555,7 @@ func (a *App) SwitchIdentity(ctx context.Context, in SwitchIdentityInput) (AuthS
 			return err
 		}
 		dto = a.authSessionDTO(user, space, enterprise, role, in.Auth.AccessToken, "", a.now().Add(24*time.Hour))
-		audit := auditRecord(in.Meta.TraceID, "user", user.ID, space.ID, "account.switch_identity", "auth_session", in.Auth.SessionID, "success")
+		audit := auditRecord(in.Meta.TraceID, "user", user.ID, space.ID, auditlog.ActionAccountSwitchIdentity, "auth_session", in.Auth.SessionID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
@@ -659,7 +659,7 @@ func (a *App) CreateEnterprise(ctx context.Context, in CreateEnterpriseInput) (E
 			return err
 		}
 		summary = EnterpriseSummaryDTO{EnterpriseID: ent.ID, SpaceID: space.ID, Name: ent.Name, OwnerUserID: ent.OwnerUserID, CurrentUserRole: RoleOwner, Status: ent.Status, MemberCount: 1}
-		audit := auditRecord(in.Meta.TraceID, "user", user.ID, space.ID, "enterprise.create", "enterprise", ent.ID, "success")
+		audit := auditRecord(in.Meta.TraceID, "user", user.ID, space.ID, auditlog.ActionEnterpriseCreate, "enterprise", ent.ID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
@@ -793,7 +793,7 @@ func (a *App) CreateMemberInvite(ctx context.Context, in InviteInput) (Enterpris
 			return err
 		}
 		dto = inviteDTO(invite, rawToken)
-		audit := auditRecord(in.Meta.TraceID, "user", in.Auth.UserID, in.Auth.SpaceID, "enterprise.invite.create", "enterprise_invite", invite.ID, "success")
+		audit := auditRecord(in.Meta.TraceID, "user", in.Auth.UserID, in.Auth.SpaceID, auditlog.ActionEnterpriseInviteCreate, "enterprise_invite", invite.ID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
@@ -866,7 +866,7 @@ func (a *App) ConfirmRemoveMember(ctx context.Context, in RemoveMemberInput) (En
 		member.Status = StatusRemoved
 		member.RemovedAt = &now
 		dto = EnterpriseMemberDTO{MemberID: member.ID, EnterpriseID: member.EnterpriseID, UserID: member.UserID, Role: member.Role, Status: member.Status, JoinedAt: now}
-		audit := auditRecord(in.Meta.TraceID, "user", in.Auth.UserID, in.Auth.SpaceID, "enterprise.member.remove", "enterprise_member", member.ID, "success")
+		audit := auditRecord(in.Meta.TraceID, "user", in.Auth.UserID, in.Auth.SpaceID, auditlog.ActionEnterpriseMemberRemove, "enterprise_member", member.ID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
@@ -945,7 +945,7 @@ func (a *App) ConfirmTransferOwner(ctx context.Context, in TransferOwnerInput) (
 			spaceID = *ent.DefaultSpaceID
 		}
 		summary = EnterpriseSummaryDTO{EnterpriseID: ent.ID, SpaceID: spaceID, Name: ent.Name, OwnerUserID: target.UserID, CurrentUserRole: RoleMember, Status: ent.Status, MemberCount: 0}
-		audit := auditRecord(in.Meta.TraceID, "user", in.Auth.UserID, in.Auth.SpaceID, "enterprise.owner.transfer", "enterprise", ent.ID, "success")
+		audit := auditRecord(in.Meta.TraceID, "user", in.Auth.UserID, in.Auth.SpaceID, auditlog.ActionEnterpriseOwnerTransfer, "enterprise", ent.ID, "success")
 		return tx.Create(audit).Error
 	})
 	if err != nil {
