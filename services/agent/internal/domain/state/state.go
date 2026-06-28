@@ -39,7 +39,7 @@ func CanTransitionRun(from, to string) bool {
 	case RunStatusWaitingConfirmation:
 		return to == RunStatusResuming || to == RunStatusCancelled || to == RunStatusFailed
 	case RunStatusResuming:
-		return to == RunStatusRunning || to == RunStatusFailed
+		return to == RunStatusRunning || to == RunStatusFailed || to == RunStatusCancelled
 	case RunStatusCompleted, RunStatusFailed, RunStatusCancelled:
 		return false
 	default:

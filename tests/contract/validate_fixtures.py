@@ -64,6 +64,7 @@ DOMAIN_REQUIREMENTS = {
         "archived_readonly_error",
         "cross_space_permission_denied",
         "project_not_found_error",
+        "enterprise_member_removed_error",
         "create_project_success",
         "update_project_title_success",
         "attach_asset_success",

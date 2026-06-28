@@ -462,6 +462,9 @@ func (a *App) CheckProjectAccess(ctx context.Context, auth AuthContext, projectI
 	if err != nil {
 		return ProjectAccessResult{}, err
 	}
+	if err := a.requireActiveProjectEnterpriseMember(ctx, auth, project); err != nil {
+		return ProjectAccessResult{}, err
+	}
 	actions := allowedActions(project)
 	if project.Status == StatusArchived && purpose != businessagent.ProjectAccessPurpose_VIEW {
 		return ProjectAccessResult{
@@ -473,6 +476,29 @@ func (a *App) CheckProjectAccess(ctx context.Context, auth AuthContext, projectI
 		Allowed: true, ProjectID: project.ID, ProjectStatus: project.Status, CreativeAllowed: project.Status == StatusActive && project.CreativeAllowed,
 		AllowedActions: actions, OwnerUserID: project.OwnerUserID, ProjectSummary: projectSummaryMap(project),
 	}, nil
+}
+
+func (a *App) requireActiveProjectEnterpriseMember(ctx context.Context, auth AuthContext, project businesscore.Project) error {
+	if project.EnterpriseID == nil || *project.EnterpriseID == "" {
+		return nil
+	}
+	if auth.LoginIdentityType != accountspace.IdentityEnterprise {
+		return nil
+	}
+	if auth.EnterpriseID != "" && auth.EnterpriseID != *project.EnterpriseID {
+		return bizerrors.New(bizerrors.CodePermissionDenied, "enterprise identity does not match project")
+	}
+	var count int64
+	err := a.repo.DB().WithContext(ctx).Model(&businesscore.EnterpriseMember{}).
+		Where("enterprise_id = ? AND user_id = ? AND status = ?", *project.EnterpriseID, auth.UserID, accountspace.StatusActive).
+		Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return bizerrors.New(bizerrors.CodePermissionDenied, "enterprise membership is unavailable")
+	}
+	return nil
 }
 
 func (a *App) setArchiveState(ctx context.Context, in ArchiveInput, archived bool) (ProjectDetailDTO, error) {

@@ -918,9 +918,12 @@ func (a *App) AppendUserInput(ctx context.Context, auth AuthContextDTO, runID st
 	}
 	access, err := a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
 	if err != nil {
-		return RunDTO{}, mapBusinessError(err)
+		mapped := mapBusinessError(err)
+		_ = a.cancelRunForPermissionLoss(ctx, run, traceID, err)
+		return RunDTO{}, mapped
 	}
 	if err := ensureCreativeProjectAccess(access); err != nil {
+		_ = a.cancelRunForPermissionLoss(ctx, run, traceID, err)
 		return RunDTO{}, err
 	}
 	sequence, err := a.repo.NextMessageSequence(ctx, session.ID)
@@ -1260,13 +1263,17 @@ func (a *App) requireInterrupt(ctx context.Context, auth AuthContextDTO, runID s
 	}
 	access, err := a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, purpose, traceID)
 	if err != nil {
-		return nil, nil, mapBusinessError(err)
+		mapped := mapBusinessError(err)
+		_ = a.cancelRunForPermissionLoss(ctx, run, traceID, err)
+		return nil, nil, mapped
 	}
 	if purpose == businessagent.ProjectAccessPurpose_CONTINUE_CREATION {
 		if err := ensureCreativeProjectAccess(access); err != nil {
+			_ = a.cancelRunForPermissionLoss(ctx, run, traceID, err)
 			return nil, nil, err
 		}
 	} else if err := ensureViewProjectAccess(access); err != nil {
+		_ = a.cancelRunForPermissionLoss(ctx, run, traceID, err)
 		return nil, nil, err
 	}
 	interrupt, err := a.repo.GetInterrupt(ctx, run.ID, interruptID)
@@ -1291,6 +1298,55 @@ func (a *App) appendRunEvent(ctx context.Context, run *model.Run, eventType stri
 		Payload: jsonObject(payload), PayloadSchemaVersion: "2026-06-27", Visibility: "user", TraceID: traceID,
 	}
 	return a.repo.AppendEvent(ctx, event)
+}
+
+func (a *App) cancelRunForPermissionLoss(ctx context.Context, run *model.Run, traceID string, cause error) error {
+	if run == nil || cause == nil {
+		return nil
+	}
+	if !isRevokedMembershipError(cause) {
+		return nil
+	}
+	current, err := a.repo.GetRun(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	switch current.Status {
+	case state.RunStatusPending, state.RunStatusRunning, state.RunStatusWaitingConfirmation, state.RunStatusResuming:
+	default:
+		return nil
+	}
+	if err := a.repo.UpdateRunStatus(ctx, current.ID, state.RunStatusCancelled, "PERMISSION_REVOKED", "enterprise membership or project permission is unavailable"); err != nil {
+		return err
+	}
+	if interrupt, err := a.repo.GetRequiredInterrupt(ctx, current.ID); err == nil {
+		_ = a.repo.ResolveInterrupt(ctx, interrupt.ID, state.InterruptStatusExpired)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	lastSequence := int64(0)
+	if session, err := a.repo.GetSession(ctx, current.SessionID); err == nil {
+		lastSequence = session.LastEventSequence + 1
+	}
+	cancelledAt := time.Now().UTC().Format(time.RFC3339Nano)
+	return a.appendRunEvent(ctx, current, "agent.run.cancelled", traceID, map[string]any{
+		"run_status":          state.RunStatusCancelled,
+		"cancel_reason":       "permission_revoked",
+		"cancelled_at":        cancelledAt,
+		"released_points":     0,
+		"last_event_sequence": lastSequence,
+		"error_code":          "PERMISSION_REVOKED",
+	})
+}
+
+func isRevokedMembershipError(err error) bool {
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "enterprise membership is unavailable") ||
+		strings.Contains(message, "member has been removed") {
+		return true
+	}
+	return apperror.FromError(err).Code == apperror.CodePermissionDenied &&
+		strings.Contains(message, "permission revoked")
 }
 
 func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, traceID string) error {
@@ -1730,9 +1786,12 @@ func (a *App) runConfirmedIndependentToolCharge(ctx context.Context, auth AuthCo
 	}
 	access, err := a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
 	if err != nil {
-		return mapBusinessError(err)
+		mapped := mapBusinessError(err)
+		_ = a.cancelRunForPermissionLoss(ctx, run, traceID, err)
+		return mapped
 	}
 	if err := ensureCreativeProjectAccess(access); err != nil {
+		_ = a.cancelRunForPermissionLoss(ctx, run, traceID, err)
 		return err
 	}
 	return a.runIndependentToolCharge(ctx, auth, run, independentToolChargeInput{
@@ -1807,9 +1866,12 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	}
 	access, err := a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, businessagent.ProjectAccessPurpose_COMMIT_ASSET, traceID)
 	if err != nil {
-		return mapBusinessError(err)
+		mapped := mapBusinessError(err)
+		_ = a.cancelRunForPermissionLoss(ctx, run, traceID, err)
+		return mapped
 	}
 	if err := ensureCreativeProjectAccess(access); err != nil {
+		_ = a.cancelRunForPermissionLoss(ctx, run, traceID, err)
 		return err
 	}
 	freeze, err := a.gateway.FreezeCredits(ctx, auth, FreezeCreditsRequest{

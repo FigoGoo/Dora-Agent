@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
+	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
 )
 
@@ -160,6 +163,57 @@ func TestSkillOutputElementsDriveDraftAndFinalArtifacts(t *testing.T) {
 	}
 }
 
+func TestPermissionLossCancelsActiveRunBeforeConfirm(t *testing.T) {
+	app, gateway := newM6ServiceApp(t)
+	gateway.StaticGateway.Space = SpaceContextDTO{
+		SpaceID: "sp_enterprise_1001", SpaceType: "enterprise", EnterpriseID: "ent_1001", EnterpriseRole: "member",
+		CreditAccountScope: "enterprise", CreditAccountID: "ca_ent_1001",
+	}
+	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "enterprise_member", SpaceID: "sp_enterprise_1001", EnterpriseID: "ent_1001", EnterpriseRole: "member"}
+	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "acct4", IdempotencyKey: "idem-acct4-session"}, "trace-acct4")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	run, err := app.CreateRun(t.Context(), auth, CreateRunRequest{
+		SessionID: session.SessionID, ProjectID: "prj_active_1001", IdempotencyKey: "idem-acct4-run",
+		UserInput: UserInputDTO{ClientMessageID: "cm_acct4", ContentType: "text", Text: "lookup with web fetch"},
+	}, "trace-acct4")
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	interrupt, err := app.repo.GetRequiredInterrupt(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("get confirmation interrupt: %v", err)
+	}
+
+	gateway.accessErr = errors.New("PERMISSION_DENIED: enterprise membership is unavailable")
+	_, err = app.AcceptInterrupt(t.Context(), auth, run.RunID, ConfirmInterruptRequest{
+		RunID: run.RunID, InterruptID: interrupt.ID, Action: "confirm",
+		ConfirmedPayloadDigest: confirmationPayloadDigest(interrupt.ConfirmationPayload),
+		IdempotencyKey:         "idem-acct4-confirm",
+	}, "trace-acct4")
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("expected permission denied after member removal, got %v", err)
+	}
+	updated, err := app.repo.GetRun(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("get run after permission loss: %v", err)
+	}
+	if updated.Status != state.RunStatusCancelled || updated.ErrorCode != "PERMISSION_REVOKED" {
+		t.Fatalf("active run should be cancelled after permission loss, got status=%s error=%s", updated.Status, updated.ErrorCode)
+	}
+	events, err := app.repo.ListEventsAfterSequence(t.Context(), run.RunID, 0, 100)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if !hasEvent(events, "agent.run.cancelled") {
+		t.Fatalf("permission loss should emit cancellation event: %#v", events)
+	}
+	if _, err := app.repo.GetRequiredInterrupt(t.Context(), run.RunID); err == nil {
+		t.Fatal("permission loss should close required interrupt")
+	}
+}
+
 func newM6ServiceApp(t *testing.T) (*App, *recordingGateway) {
 	t.Helper()
 	db := testdb.StartPostgres(t, "dora_agent_m6_service")
@@ -218,6 +272,7 @@ type recordingGateway struct {
 	calls      []string
 	lastCommit CommitGeneratedAssetAndChargeRequest
 	chargeErr  error
+	accessErr  error
 }
 
 func (g *recordingGateway) record(call string) {
@@ -227,6 +282,14 @@ func (g *recordingGateway) record(call string) {
 func (g *recordingGateway) ListAvailableGenerationModels(ctx context.Context, auth AuthContextDTO, resourceType string, limit int, cursor string, traceID string) ([]ModelSummaryDTO, string, error) {
 	g.record("ListAvailableGenerationModels")
 	return g.StaticGateway.ListAvailableGenerationModels(ctx, auth, resourceType, limit, cursor, traceID)
+}
+
+func (g *recordingGateway) CheckProjectAccess(ctx context.Context, auth AuthContextDTO, projectID string, purpose businessagent.ProjectAccessPurpose, traceID string) (ProjectAccessDTO, error) {
+	g.record("CheckProjectAccess")
+	if g.accessErr != nil {
+		return ProjectAccessDTO{}, g.accessErr
+	}
+	return g.StaticGateway.CheckProjectAccess(ctx, auth, projectID, purpose, traceID)
 }
 
 func (g *recordingGateway) GetReviewCandidateSkillSpec(ctx context.Context, auth AuthContextDTO, skillID string, versionID string, testCaseID string, testRunID string, traceID string) (ReviewCandidateSkillSpecDTO, error) {
