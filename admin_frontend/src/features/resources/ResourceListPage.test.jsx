@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { prepareCreateBody, resolveRowIdentifier } from './ResourceListPage.jsx';
+import { prepareBody, prepareCreateBody, resolveRowIdentifier } from './ResourceListPage.jsx';
 
 describe('ResourceListPage helpers', () => {
   test('resolves row identifiers from either a function or a field name', () => {
@@ -31,5 +31,27 @@ describe('ResourceListPage helpers', () => {
     expect(body.count).toBe(20);
     expect(body.points).toBe(50);
     expect(body.reason).toBe('运营活动');
+  });
+
+  test('normalizes JSON, JSON string, array and checkbox action fields', () => {
+    const body = prepareBody(
+      {
+        route_config: '{"timeout_ms":30000}',
+        skill_spec_json: '{"steps":[]}',
+        capability_tags: 'image\nfast',
+        requires_confirmation: true
+      },
+      [
+        { name: 'route_config', type: 'json' },
+        { name: 'skill_spec_json', type: 'json-string' },
+        { name: 'capability_tags', type: 'array' },
+        { name: 'requires_confirmation', type: 'checkbox' }
+      ]
+    );
+
+    expect(body.route_config).toEqual({ timeout_ms: 30000 });
+    expect(body.skill_spec_json).toBe('{"steps":[]}');
+    expect(body.capability_tags).toEqual(['image', 'fast']);
+    expect(body.requires_confirmation).toBe(true);
   });
 });

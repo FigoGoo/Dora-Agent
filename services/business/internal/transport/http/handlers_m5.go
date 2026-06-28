@@ -252,7 +252,10 @@ func (h m5Handler) adminListPublicWorks(c *gin.Context) {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
 	}
-	out, err := h.work.ListAdminPublicWorks(c.Request.Context(), adminPageLimit(c, 10), adminPageOffset(c))
+	out, err := h.work.ListAdminPublicWorks(c.Request.Context(), work.ListAdminPublicWorksInput{
+		Keyword: c.Query("keyword"), Status: c.Query("status"), Category: c.Query("category"), Tag: c.Query("tag"),
+		ResourceType: c.Query("resource_type"), Limit: adminPageLimit(c, 10), Offset: adminPageOffset(c),
+	})
 	respond(c, out, err)
 }
 

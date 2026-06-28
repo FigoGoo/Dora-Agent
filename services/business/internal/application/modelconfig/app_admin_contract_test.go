@@ -101,3 +101,44 @@ func TestSetDefaultModelInfersActivePricingSnapshotWhenOmitted(t *testing.T) {
 		t.Fatalf("default aliases not set: %#v", *found)
 	}
 }
+
+func TestSaveModelCreatesAndRotatesPricingSnapshot(t *testing.T) {
+	app := newModelConfigContractApp(t)
+	now := time.Date(2026, 6, 29, 9, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return now }
+	auth := admin.AdminAuth{AdminID: "adm_root"}
+
+	created, err := app.SaveModel(t.Context(), SaveModelInput{
+		Auth: auth, ModelID: "mdl_contract_price", ProviderID: "mp_seed", ModelCode: "contract-price",
+		DisplayName: "Contract Price Model", ResourceType: "image", Status: activeStatus,
+		BillingUnit: "image", UnitPoints: 2.5, MinChargePoints: 2,
+	})
+	if err != nil {
+		t.Fatalf("save model with price: %v", err)
+	}
+	if created.PricingSnapshotID == "" {
+		t.Fatalf("expected pricing snapshot id: %#v", created)
+	}
+
+	updated, err := app.SaveModel(t.Context(), SaveModelInput{
+		Auth: auth, ModelID: "mdl_contract_price", ProviderID: "mp_seed", ModelCode: "contract-price",
+		DisplayName: "Contract Price Model", ResourceType: "image", Status: activeStatus,
+		PricingSnapshotID: "price_contract_rotated", BillingUnit: "image", UnitPoints: 3, MinChargePoints: 3,
+	})
+	if err != nil {
+		t.Fatalf("rotate model price: %v", err)
+	}
+	if updated.PricingSnapshotID != "price_contract_rotated" {
+		t.Fatalf("pricing snapshot not rotated: %#v", updated)
+	}
+
+	var activeCount int64
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.ModelPrice{}).
+		Where("model_id = ? AND resource_type = ? AND status = ?", "mdl_contract_price", "image", activeStatus).
+		Count(&activeCount).Error; err != nil {
+		t.Fatalf("count active prices: %v", err)
+	}
+	if activeCount != 1 {
+		t.Fatalf("active price count=%d", activeCount)
+	}
+}

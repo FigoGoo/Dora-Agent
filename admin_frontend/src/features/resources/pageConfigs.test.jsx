@@ -22,10 +22,10 @@ describe('admin resource page configs', () => {
     await pageConfigs.tools.actions[0].preview(tool, '例行检查');
     expect(adminApi.post).toHaveBeenCalledWith('/api/admin/tools/draw:builtin/impact-preview', {
       target_status: 'active',
-      reason: '例行检查'
+      tool_type: 'builtin'
     });
-    expect(pageConfigs.tools.actions[1].confirmPath(tool)).toBe('/api/admin/tools/draw:builtin/status');
-    expect(pageConfigs.tools.actions[1].body({ reason: '例行检查', row: tool })).toEqual({
+    expect(pageConfigs.tools.actions[4].confirmPath(tool)).toBe('/api/admin/tools/draw:builtin/status');
+    expect(pageConfigs.tools.actions[4].body({ reason: '例行检查', row: tool })).toEqual({
       tool_type: 'builtin',
       status: 'disabled',
       reason: '例行检查'
@@ -38,7 +38,7 @@ describe('admin resource page configs', () => {
 
   test('sends fields required by backend confirmations', async () => {
     const model = { model_id: 'mdl_1', resource_type: 'image', pricing_snapshot_id: 'price_1' };
-    expect(pageConfigs.models.actions[0].body({ row: model })).toEqual({
+    expect(pageConfigs.models.actions[1].body({ row: model })).toEqual({
       model_id: 'mdl_1',
       resource_type: 'image',
       pricing_snapshot_id: 'price_1'
@@ -51,5 +51,29 @@ describe('admin resource page configs', () => {
       { reason: '内容风险', preview_token: 'prev_1', notify_author: true },
       '内容风险'
     );
+  });
+
+  test('maps tool policy form fields to backend body', () => {
+    const body = pageConfigs.tools.actions[1].body({
+      values: {
+        tool_type: 'builtin',
+        allowed: true,
+        risk_level: 'high',
+        requires_confirmation: true,
+        timeout_ms: '30000',
+        retry_policy: '{"max":"1"}',
+        cancel_policy: '{}'
+      }
+    });
+
+    expect(body).toEqual({
+      tool_type: 'builtin',
+      allowed: true,
+      risk_level: 'high',
+      requires_confirmation: true,
+      timeout_ms: 30000,
+      retry_policy: { max: '1' },
+      cancel_policy: {}
+    });
   });
 });

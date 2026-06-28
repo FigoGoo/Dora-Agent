@@ -235,6 +235,9 @@ func (h m3Handler) adminSaveModelWithID(c *gin.Context, modelID string) {
 		DisplayName       string         `json:"display_name"`
 		ResourceType      string         `json:"resource_type"`
 		PricingSnapshotID string         `json:"pricing_snapshot_id"`
+		BillingUnit       string         `json:"billing_unit"`
+		UnitPoints        float64        `json:"unit_points"`
+		MinChargePoints   int64          `json:"min_charge_points"`
 		Status            string         `json:"status"`
 		CapabilityTags    []string       `json:"capability_tags"`
 		RouteConfig       map[string]any `json:"route_config"`
@@ -246,7 +249,12 @@ func (h m3Handler) adminSaveModelWithID(c *gin.Context, modelID string) {
 	if req.ModelCode == "" {
 		req.ModelCode = stableCode(req.DisplayName)
 	}
-	out, err := h.model.SaveModel(c.Request.Context(), modelconfig.SaveModelInput{Auth: adminAuth(c), ModelID: modelID, ProviderID: req.ProviderID, ModelCode: req.ModelCode, DisplayName: req.DisplayName, ResourceType: req.ResourceType, Status: req.Status, CapabilityTags: req.CapabilityTags, RouteConfig: req.RouteConfig, CredentialID: req.CredentialID})
+	out, err := h.model.SaveModel(c.Request.Context(), modelconfig.SaveModelInput{
+		Auth: adminAuth(c), ModelID: modelID, ProviderID: req.ProviderID, ModelCode: req.ModelCode,
+		DisplayName: req.DisplayName, ResourceType: req.ResourceType, PricingSnapshotID: req.PricingSnapshotID,
+		BillingUnit: req.BillingUnit, UnitPoints: req.UnitPoints, MinChargePoints: req.MinChargePoints,
+		Status: req.Status, CapabilityTags: req.CapabilityTags, RouteConfig: req.RouteConfig, CredentialID: req.CredentialID,
+	})
 	respond(c, out, err)
 }
 

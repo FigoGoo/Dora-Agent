@@ -26,9 +26,40 @@ function rowActionVariant(action) {
   return action.tone === 'danger' ? 'danger-ghost' : action.tone || 'ghost';
 }
 
-function initialForm(fields = []) {
+function toFormDateTime(value) {
+  if (!value) {
+    return '';
+  }
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) {
+    return '';
+  }
+  return parsed.toISOString().slice(0, 16);
+}
+
+function valueFromSource(field, source = {}) {
+  const raw = source[field.source || field.name] ?? field.defaultValue ?? '';
+  if (field.type === 'checkbox') {
+    return Boolean(raw);
+  }
+  if (field.type === 'datetime-local') {
+    return toFormDateTime(raw);
+  }
+  if (field.type === 'json' || field.type === 'json-string') {
+    if (!raw) {
+      return field.defaultValue ?? '';
+    }
+    return typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+  }
+  if (field.type === 'array') {
+    return Array.isArray(raw) ? raw.join('\n') : raw;
+  }
+  return raw;
+}
+
+function initialForm(fields = [], source = {}) {
   return fields.reduce((acc, field) => {
-    acc[field.name] = field.defaultValue ?? '';
+    acc[field.name] = valueFromSource(field, source);
     return acc;
   }, {});
 }
@@ -43,17 +74,88 @@ export function resolveRowIdentifier(row, rowId) {
   return row[rowId] || row.id || row.key || '';
 }
 
-export function prepareCreateBody(values, config) {
-  const body = { ...values };
-  for (const field of config.create?.fields || []) {
-    if (field.type === 'datetime-local' && body[field.name]) {
-      body[field.name] = toApiDateTime(body[field.name]);
+function parseArrayValue(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  return String(value || '')
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export function prepareBody(values, fields = []) {
+  const body = {};
+  for (const field of fields) {
+    let value = values[field.name];
+    if ((value === '' || value === undefined || value === null) && !field.required && !field.includeEmpty) {
+      continue;
     }
-    if (field.type === 'number' && body[field.name] !== '') {
-      body[field.name] = Number(body[field.name]);
+    if (field.type === 'datetime-local' && value) {
+      value = toApiDateTime(value);
     }
+    if (field.type === 'number' && value !== '') {
+      value = Number(value);
+    }
+    if (field.type === 'checkbox') {
+      value = Boolean(value);
+    }
+    if (field.type === 'json' && value) {
+      value = JSON.parse(value);
+    }
+    if (field.type === 'json-string' && value) {
+      JSON.parse(value);
+      value = String(value);
+    }
+    if (field.type === 'array') {
+      value = parseArrayValue(value);
+    }
+    body[field.name] = value;
   }
   return body;
+}
+
+export function prepareCreateBody(values, config) {
+  return prepareBody(values, config.create?.fields || []);
+}
+
+function initialFilters(config) {
+  const filters = { page_size: 10, page_token: '' };
+  if (config.keywordFilter !== false) {
+    filters.keyword = '';
+  }
+  if (config.statusOptions?.length) {
+    filters.status = '';
+  }
+  for (const field of config.filters || []) {
+    filters[field.name] = field.defaultValue ?? '';
+  }
+  return filters;
+}
+
+function buildQueryParams(filters, config) {
+  const params = {
+    page_size: filters.page_size,
+    page_token: filters.page_token
+  };
+  if (config.keywordFilter !== false && filters.keyword) {
+    params[config.keywordParam || 'keyword'] = filters.keyword;
+  }
+  if (config.statusOptions?.length && filters.status) {
+    params.status = filters.status;
+  }
+  for (const field of config.filters || []) {
+    const value = filters[field.name];
+    if (value !== undefined && value !== null && value !== '') {
+      params[field.queryName || field.name] = value;
+    }
+  }
+  return params;
+}
+
+function apiMethod(method) {
+  const key = method.toLowerCase();
+  return adminApi[key] || adminApi.post;
 }
 
 function isRecord(value) {
@@ -110,10 +212,22 @@ function RowDetails({ row }) {
   );
 }
 
-function ResourceForm({ config, values, setValues }) {
+function ResourceForm({ fields = [], values, setValues }) {
   return (
     <div className="admin-form-grid">
-      {config.create.fields.map((field) => {
+      {fields.map((field) => {
+        if (field.type === 'checkbox') {
+          return (
+            <label key={field.name} className="admin-check-field">
+              <input
+                type="checkbox"
+                checked={Boolean(values[field.name])}
+                onChange={(event) => setValues({ ...values, [field.name]: event.target.checked })}
+              />
+              <span>{field.label}</span>
+            </label>
+          );
+        }
         if (field.secret) {
           return (
             <SecretInput
@@ -121,6 +235,7 @@ function ResourceForm({ config, values, setValues }) {
               label={field.label}
               value={values[field.name] || ''}
               onChange={(event) => setValues({ ...values, [field.name]: event.target.value })}
+              required={field.required}
             />
           );
         }
@@ -139,11 +254,13 @@ function ResourceForm({ config, values, setValues }) {
           <TextField
             key={field.name}
             label={field.label}
-            type={field.type || 'text'}
-            textarea={field.textarea}
-            rows={field.textarea ? 6 : undefined}
+            type={field.type === 'json' || field.type === 'json-string' || field.type === 'array' ? 'text' : field.type || 'text'}
+            textarea={field.textarea || field.type === 'json' || field.type === 'json-string' || field.type === 'array'}
+            rows={field.rows || (field.type === 'json' || field.type === 'json-string' ? 8 : field.type === 'array' ? 4 : field.textarea ? 6 : undefined)}
+            hint={field.hint}
             value={values[field.name] || ''}
             onChange={(event) => setValues({ ...values, [field.name]: event.target.value })}
+            required={field.required}
           />
         );
       })}
@@ -151,25 +268,44 @@ function ResourceForm({ config, values, setValues }) {
   );
 }
 
+function FilterFields({ fields = [], values, setValues }) {
+  return fields.map((field) => {
+    const value = values[field.name] || '';
+    if (field.options) {
+      return (
+        <SelectField
+          key={field.name}
+          label={field.label}
+          value={value}
+          onChange={(event) => setValues({ ...values, [field.name]: event.target.value, page_token: '' })}
+          options={[{ label: field.allLabel || '全部', value: '' }, ...field.options]}
+        />
+      );
+    }
+    return (
+      <TextField
+        key={field.name}
+        label={field.label}
+        type={field.type || 'text'}
+        value={value}
+        onChange={(event) => setValues({ ...values, [field.name]: event.target.value, page_token: '' })}
+      />
+    );
+  });
+}
+
 export function ResourceListPage({ config }) {
-  const [filters, setFilters] = useState({ keyword: '', status: '', page_size: 10, page_token: '' });
+  const [filters, setFilters] = useState(() => initialFilters(config));
   const [selected, setSelected] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
   const [formValues, setFormValues] = useState(() => initialForm(config.create?.fields));
+  const [actionForm, setActionForm] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [notice, setNotice] = useState(null);
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const queryParams = useMemo(
-    () => ({
-      page_size: filters.page_size,
-      page_token: filters.page_token,
-      status: filters.status,
-      keyword: filters.keyword
-    }),
-    [filters]
-  );
+  const queryParams = useMemo(() => buildQueryParams(filters, config), [filters, config]);
 
   const query = useQuery({
     queryKey: ['admin-resource', config.key, queryParams],
@@ -192,15 +328,23 @@ export function ResourceListPage({ config }) {
     onError: (error) => setNotice(error)
   });
   const actionMutation = useMutation({
-    mutationFn: async ({ action, row, reason, previewToken }) => {
+    mutationFn: async ({ action, row, reason, previewToken, values }) => {
       if (action.confirm) {
-        return action.confirm(row, { reason, previewToken, row });
+        return action.confirm(row, { reason, previewToken, row, values });
       }
-      return adminApi.post(action.confirmPath(row), action.body?.({ reason, row }) || {}, { reason: action.reason?.({ reason, row }) || reason });
+      const fields = action.fields || [];
+      const body = action.body?.({ reason, row, values, previewToken }) || prepareBody(values || {}, fields);
+      const requestReason = action.reason?.({ reason, row, values, body }) || reason || values?.reason;
+      const options = {
+        reason: requestReason,
+        idempotencyKey: action.idempotencyKey?.({ row, values, body })
+      };
+      return apiMethod(action.method || 'POST')(action.path?.(row) || action.confirmPath(row), body, options);
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       setConfirm(null);
-      toast?.notify('操作已完成，已记录审计');
+      setActionForm(null);
+      toast?.notify(variables.action.successNotice?.(data) || '操作已完成，已记录审计');
       refresh();
     },
     onError: (error) => setNotice(error)
@@ -208,6 +352,10 @@ export function ResourceListPage({ config }) {
 
   async function openAction(action, row) {
     setNotice(null);
+    if (action.fields?.length) {
+      setActionForm({ action, row, values: initialForm(action.fields, row), error: null });
+      return;
+    }
     if (action.preview) {
       setConfirm({ action, row, previewLoading: true });
       try {
@@ -257,7 +405,20 @@ export function ResourceListPage({ config }) {
 
   function submitCreate(event) {
     event.preventDefault();
-    createMutation.mutate(prepareCreateBody(formValues, config));
+    try {
+      createMutation.mutate(prepareCreateBody(formValues, config));
+    } catch (error) {
+      setNotice(error);
+    }
+  }
+
+  function submitActionForm(event) {
+    event.preventDefault();
+    try {
+      actionMutation.mutate({ action: actionForm.action, row: actionForm.row, values: actionForm.values });
+    } catch (error) {
+      setActionForm({ ...actionForm, error });
+    }
   }
 
   return (
@@ -279,13 +440,16 @@ export function ResourceListPage({ config }) {
         </Alert>
       ) : null}
       <FilterBar
+        showKeyword={config.keywordFilter !== false}
         keyword={filters.keyword}
         onKeywordChange={(keyword) => setFilters({ ...filters, keyword, page_token: '' })}
         status={filters.status}
         onStatusChange={(status) => setFilters({ ...filters, status, page_token: '' })}
         statusOptions={config.statusOptions || []}
-        onClear={() => setFilters({ keyword: '', status: '', page_size: 10, page_token: '' })}
-      />
+        onClear={() => setFilters(initialFilters(config))}
+      >
+        <FilterFields fields={config.filters} values={filters} setValues={setFilters} />
+      </FilterBar>
       <DataTable columns={columns} rows={rows} rowKey={config.rowId} state={tableState} emptyText={config.emptyText} errorText={query.error?.message} />
       <Pagination
         pageSize={filters.page_size}
@@ -323,7 +487,37 @@ export function ResourceListPage({ config }) {
         }
       >
         <form id="admin-resource-form" onSubmit={submitCreate}>
-          <ResourceForm config={config} values={formValues} setValues={setFormValues} />
+          <ResourceForm fields={config.create?.fields || []} values={formValues} setValues={setFormValues} />
+          <AuditHint />
+        </form>
+      </Modal>
+      <Modal
+        open={Boolean(actionForm)}
+        title={actionForm?.action?.formTitle || asLabel(actionForm?.action?.label || '后台操作', actionForm?.row)}
+        onClose={() => setActionForm(null)}
+        size="lg"
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setActionForm(null)}>
+              取消
+            </Button>
+            <Button type="submit" form="admin-action-form" variant={actionForm?.action?.tone === 'danger' ? 'danger' : 'primary'} loading={actionMutation.isPending}>
+              保存
+            </Button>
+          </>
+        }
+      >
+        {actionForm?.error ? (
+          <Alert tone="danger" title="表单格式错误">
+            {actionForm.error.message}
+          </Alert>
+        ) : null}
+        <form id="admin-action-form" onSubmit={submitActionForm}>
+          <ResourceForm
+            fields={actionForm?.action?.fields || []}
+            values={actionForm?.values || {}}
+            setValues={(values) => setActionForm({ ...actionForm, values, error: null })}
+          />
           <AuditHint />
         </form>
       </Modal>
@@ -338,6 +532,7 @@ export function ResourceListPage({ config }) {
             : confirm?.action?.impactItems || ['操作会写入审计日志。']
         }
         previewToken={confirm?.previewToken}
+        requireReason={confirm?.action?.requireReason !== false}
         loading={actionMutation.isPending || confirm?.previewLoading}
         onClose={() => setConfirm(null)}
         onConfirm={({ reason, previewToken }) => actionMutation.mutate({ action: confirm.action, row: confirm.row, reason, previewToken })}

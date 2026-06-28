@@ -93,10 +93,11 @@ type UserStatusInput struct {
 }
 
 type ListUsersInput struct {
-	Auth   AdminAuth
-	Status string
-	Limit  int
-	Offset int
+	Auth    AdminAuth
+	Status  string
+	Keyword string
+	Limit   int
+	Offset  int
 }
 
 type AuditQueryInput struct {
@@ -576,6 +577,13 @@ func (a *App) ListUsers(ctx context.Context, in ListUsersInput) (Page[UserSummar
 	db := a.repo.DB().WithContext(ctx).Model(&businesscore.User{}).Where("deleted_at IS NULL")
 	if in.Status != "" {
 		db = db.Where("status = ?", in.Status)
+	}
+	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
+		like := "%" + strings.ToLower(keyword) + "%"
+		db = db.Where(
+			"LOWER(id) LIKE ? OR LOWER(account_no) LIKE ? OR LOWER(display_name) LIKE ? OR LOWER(COALESCE(email, '')) LIKE ? OR LOWER(COALESCE(phone, '')) LIKE ?",
+			like, like, like, like, like,
+		)
 	}
 	var rows []businesscore.User
 	if err := db.Order("created_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {

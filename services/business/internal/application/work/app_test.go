@@ -290,6 +290,52 @@ func TestTakeDownDoesNotRollbackWhenNotificationFailsAndRecordsCompensation(t *t
 	requireOperatorColumns(t, app, "works", "id = ?", auth.UserID, auth.UserID, created.Work.WorkID)
 }
 
+func TestListAdminPublicWorksFiltersByKeywordStatusResourceAndTag(t *testing.T) {
+	app := newWorkTestApp(t, nil)
+	auth := accountspace.AuthContext{UserID: "usr_1001", SpaceID: "sp_personal_1001", LoginIdentityType: "personal"}
+
+	created, err := app.CreateWork(t.Context(), CreateWorkInput{
+		Auth: auth, Meta: workMeta("trace-admin-work-list-create", "idem-admin-work-list-create"),
+		ProjectID: "prj_active_1001", Title: "Filtered private work", AssetIDs: []string{"ast_generated_1001"},
+		CoverAssetID: "ast_generated_1001", Category: "storyboard", Tags: []string{"draft"},
+	})
+	if err != nil {
+		t.Fatalf("create work: %v", err)
+	}
+	preview, err := app.PreviewShareWork(t.Context(), PreviewShareWorkInput{
+		Auth: auth, WorkID: created.Work.WorkID, PublicTitle: "Admin Gallery Match", Tags: []string{"featured", "safe"},
+		SafetyEvidence: workShareEvidence("trace-admin-work-list-share", "Admin Gallery Match", "", []string{"featured", "safe"}),
+	})
+	if err != nil {
+		t.Fatalf("preview share: %v", err)
+	}
+	shared, err := app.ConfirmShareWork(t.Context(), ConfirmShareWorkInput{
+		Auth: auth, Meta: workMeta("trace-admin-work-list-share", "idem-admin-work-list-share"),
+		WorkID: created.Work.WorkID, PreviewToken: preview.PreviewToken,
+	})
+	if err != nil {
+		t.Fatalf("confirm share: %v", err)
+	}
+
+	page, err := app.ListAdminPublicWorks(t.Context(), ListAdminPublicWorksInput{
+		Keyword: "gallery", Status: SnapshotActive, Category: "storyboard", Tag: "featured", ResourceType: "image", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("list admin public works: %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].PublicWorkID != shared.PublicWorkID {
+		t.Fatalf("expected filtered public work %s, got total=%d items=%#v", shared.PublicWorkID, page.Total, page.Items)
+	}
+
+	empty, err := app.ListAdminPublicWorks(t.Context(), ListAdminPublicWorksInput{Tag: "missing", Limit: 10})
+	if err != nil {
+		t.Fatalf("list admin public works empty: %v", err)
+	}
+	if empty.Total != 0 || len(empty.Items) != 0 {
+		t.Fatalf("expected no public works for missing tag, got total=%d items=%#v", empty.Total, empty.Items)
+	}
+}
+
 func TestEnterpriseRemovedMemberCannotManageWorks(t *testing.T) {
 	app := newWorkTestApp(t, nil)
 	auth := accountspace.AuthContext{UserID: "usr_1001", SpaceID: "sp_enterprise_1001", EnterpriseID: "ent_1001", EnterpriseRole: "owner", LoginIdentityType: "enterprise_member"}

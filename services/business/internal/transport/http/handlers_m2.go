@@ -347,7 +347,7 @@ func (h m2Handler) disableAdmin(c *gin.Context) {
 }
 
 func (h m2Handler) adminUsers(c *gin.Context) {
-	out, err := h.admin.ListUsers(c.Request.Context(), admin.ListUsersInput{Auth: adminAuth(c), Status: c.Query("status"), Limit: adminPageLimit(c, 10), Offset: adminPageOffset(c)})
+	out, err := h.admin.ListUsers(c.Request.Context(), admin.ListUsersInput{Auth: adminAuth(c), Status: c.Query("status"), Keyword: c.Query("keyword"), Limit: adminPageLimit(c, 10), Offset: adminPageOffset(c)})
 	respond(c, out, err)
 }
 

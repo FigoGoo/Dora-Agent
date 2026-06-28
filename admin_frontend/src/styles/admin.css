@@ -502,6 +502,22 @@ a:focus-visible {
   resize: vertical;
 }
 
+.admin-check-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  color: var(--admin-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.admin-check-field input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--admin-text-primary);
+}
+
 .admin-field .is-error,
 .admin-date-input.is-error {
   border-color: var(--admin-danger);

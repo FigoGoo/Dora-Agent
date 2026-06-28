@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import { Modal } from './Modal.jsx';
 import { Button } from './Button.jsx';
@@ -18,6 +18,13 @@ export function ConfirmDialog({
 }) {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setReason('');
+      setError('');
+    }
+  }, [open]);
 
   function submit() {
     if (requireReason && !reason.trim()) {

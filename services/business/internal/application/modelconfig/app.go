@@ -299,16 +299,20 @@ func (a *App) ListModels(ctx context.Context, _ admin.AdminAuth, resourceType, s
 }
 
 type SaveModelInput struct {
-	Auth           admin.AdminAuth
-	ModelID        string
-	ProviderID     string
-	ModelCode      string
-	DisplayName    string
-	ResourceType   string
-	Status         string
-	CapabilityTags []string
-	RouteConfig    map[string]any
-	CredentialID   string
+	Auth              admin.AdminAuth
+	ModelID           string
+	ProviderID        string
+	ModelCode         string
+	DisplayName       string
+	ResourceType      string
+	PricingSnapshotID string
+	BillingUnit       string
+	UnitPoints        float64
+	MinChargePoints   int64
+	Status            string
+	CapabilityTags    []string
+	RouteConfig       map[string]any
+	CredentialID      string
 }
 
 func (a *App) SaveModel(ctx context.Context, in SaveModelInput) (ModelAdminDTO, error) {
@@ -338,7 +342,41 @@ func (a *App) SaveModel(ctx context.Context, in SaveModelInput) (ModelAdminDTO, 
 	if err := a.repo.DB().WithContext(ctx).Save(&row).Error; err != nil {
 		return ModelAdminDTO{}, err
 	}
+	if err := a.saveModelPrice(ctx, in, row.ID, row.ResourceType, now); err != nil {
+		return ModelAdminDTO{}, err
+	}
 	return a.modelAdminDTO(ctx, row), nil
+}
+
+func (a *App) saveModelPrice(ctx context.Context, in SaveModelInput, modelID string, resourceType string, now time.Time) error {
+	if strings.TrimSpace(in.BillingUnit) == "" && in.UnitPoints == 0 && strings.TrimSpace(in.PricingSnapshotID) == "" {
+		return nil
+	}
+	if strings.TrimSpace(in.BillingUnit) == "" {
+		return bizerrors.New(bizerrors.CodeInvalidArgument, "billing_unit is required when saving model price")
+	}
+	if in.UnitPoints <= 0 {
+		return bizerrors.New(bizerrors.CodeInvalidArgument, "unit_points must be greater than 0 when saving model price")
+	}
+	pricingSnapshotID := strings.TrimSpace(in.PricingSnapshotID)
+	if pricingSnapshotID == "" {
+		pricingSnapshotID = security.RandomID("price_")
+	}
+	adminID := in.Auth.AdminID
+	return a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&businesscore.ModelPrice{}).
+			Where("model_id = ? AND resource_type = ? AND status = ? AND expired_at IS NULL", modelID, resourceType, activeStatus).
+			Updates(map[string]any{"status": "expired", "expired_at": now, "updated_by": adminID}).Error; err != nil {
+			return err
+		}
+		row := businesscore.ModelPrice{
+			ID: security.RandomID("mprice_"), PricingSnapshotID: pricingSnapshotID, ModelID: modelID,
+			ResourceType: resourceType, BillingUnit: strings.TrimSpace(in.BillingUnit), UnitPoints: in.UnitPoints,
+			MinChargePoints: in.MinChargePoints, Status: activeStatus, EffectiveAt: now,
+			CreatedByAdminID: &adminID, CreatedBy: stringPtr(adminID), UpdatedBy: stringPtr(adminID), CreatedAt: now,
+		}
+		return tx.Create(&row).Error
+	})
 }
 
 func (a *App) SetDefaultModel(ctx context.Context, auth admin.AdminAuth, resourceType, modelID, pricingSnapshotID string) (ModelSummaryDTO, error) {

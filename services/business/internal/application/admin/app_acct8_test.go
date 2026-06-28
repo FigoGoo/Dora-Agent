@@ -111,6 +111,31 @@ func TestAdminUserDetailUsesTypedOwnershipPlaceholders(t *testing.T) {
 	}
 }
 
+func TestListUsersFiltersByKeyword(t *testing.T) {
+	app := newAdminTestApp(t)
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.PlatformAdmin{}).
+		Where("id = ?", "adm_root").Update("must_rotate_password", false).Error; err != nil {
+		t.Fatalf("prep admin: %v", err)
+	}
+	auth := AdminAuth{AdminID: "adm_root", Account: "admin@dora.local", SessionID: "admin-session"}
+
+	page, err := app.ListUsers(t.Context(), ListUsersInput{Auth: auth, Keyword: "usr_1001", Limit: 10})
+	if err != nil {
+		t.Fatalf("list users by keyword: %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].UserID != "usr_1001" {
+		t.Fatalf("expected usr_1001 keyword match, got total=%d items=%#v", page.Total, page.Items)
+	}
+
+	empty, err := app.ListUsers(t.Context(), ListUsersInput{Auth: auth, Keyword: "not-a-real-user", Limit: 10})
+	if err != nil {
+		t.Fatalf("list users by empty keyword: %v", err)
+	}
+	if empty.Total != 0 || len(empty.Items) != 0 {
+		t.Fatalf("expected no keyword matches, got total=%d items=%#v", empty.Total, empty.Items)
+	}
+}
+
 func TestAdminModuleOwnersCoverFirstVersionBackofficeModules(t *testing.T) {
 	want := []string{
 		AdminModuleAdmins, AdminModuleUsers, AdminModuleSystemSkills, AdminModuleSkillReviews,
