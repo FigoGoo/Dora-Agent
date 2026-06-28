@@ -14,14 +14,14 @@
 
 > 2026-06-29 状态回填：上述 8 个面中的 INFRA-1/13、GEN-5、ACCT-3/1b/8、SKILL-2、TURN-8/7/6/10、GEN-7、INFRA-9、INFRA-11、WORK-3/4/8/9、INFRA-4/2/3/5/6/7/10、ACCT-4/6/7、GEN-4/8、operator 回填、注册幂等 tenant 边界、软删唯一约束复用策略均已由后续切片关闭并推送。当前继续推进时以本文下方完成记录、`docs/contracts/**` active 契约和机器可校验事实源为准。
 >
-> 仍未冒充完成的边界：GEN-6 的完整 Redis 异步 worker、分布式调度和提交后自动对账仍归 W3；W1 已补恢复/对账底座以堵住 Freeze 后进程崩溃导致冻结悬挂到过期的资金风险。
+> 仍未冒充完成的边界：GEN-6 Redis worker 第一阶段已补；提交后自动对账/自动 reconciliation 仍归后续 W3，不在本文假装完成。
 
 ## 统计
 
 | 当前结论 | 数量（按最新完成记录） | 含义 |
 |---|---|---|
 | ✅ CLOSED / FIXED / NA | 原 51 项主体已收口 | P0–P3 已通过代码、契约、文档或测试固化关闭 |
-| 🟡 W3 后续能力边界 | 1 | GEN-6 完整 Redis 异步 worker / 分布式调度 / 提交后自动对账 |
+| 🟡 W3 后续能力边界 | 1 | GEN-6 提交后自动对账 / 自动 reconciliation |
 | 🔴 当前阻塞 MISSING | 0 | W1/P0 承重墙级缺口已清完 |
 
 > 接缝组（SEAM-1~7 + 2 附录）单独结论：**100% 已清**，下表不再展开，仅在末尾备忘。
@@ -44,7 +44,7 @@
 
 | ID | 缺口 | 证据 | 应落 / 关联 |
 |---|---|---|---|
-| **GEN-6 🟡** | 生成全链同步跑在确认 HTTP 请求内，无异步 worker / 重启恢复 / 对账；崩在 Freeze 后 commit 前 → 冻结悬挂至 `expires_at` | `api/http/workbench_handlers.go:146`→`app.go:973`→`1701`(全程同步)；全仓无 worker/recover | W1 已补恢复/对账底座；完整 Redis worker/分布式调度/提交后自动对账仍归 W3 |
+| **GEN-6 🟡** | 生成全链同步跑在确认 HTTP 请求内，无异步 worker / 重启恢复 / 对账；崩在 Freeze 后 commit 前 → 冻结悬挂至 `expires_at` | `api/http/workbench_handlers.go:146`→`app.go:973`→`1701`(全程同步)；全仓无 worker/recover | W1 已补恢复/对账底座；Redis worker 第一阶段已补；提交后自动对账仍归后续 W3 |
 | **TURN-8 ✅** | `SnapshotResponse` 缺 `interrupt` 字段 → 断线在待确认态恢复不出确认面板，run 卡死 | `agent workbench/app.go:636-645,1136-1139` | 批 C：snapshot interrupt 恢复 |
 | **GEN-7 ✅** | `EstimateGenerationCredits` 唯一未用幂等卫的写 RPC，确认前重复预估插孤儿 `credit_estimates` | `credit/app.go:308-339,891`(无 guard.Begin) | 批 D：预估幂等卫 |
 | **INFRA-9 ✅** | Agent 运行期配置加载链断开：`agent_runtime_configs` 表 + `GetActiveRuntimeConfig` 都在，但运行期从不调用，`configVersion` 仅作字符串标签（配置化只有壳）| `config.go` + `main.go:47` + 仅测试调用 loader | 批 D：运行期配置版本落库 |
@@ -96,7 +96,7 @@
 
 ## 与后续工作线关联
 
-- **W3 Redis** 继续推进 **GEN-6** 的完整异步 worker、分布式调度和提交后自动对账；W1 已完成恢复/对账第一阶段，不再把 Freeze 后崩溃悬挂风险留到过期释放。
+- **W3 Redis** 已补 **GEN-6** Redis worker 第一阶段；后续继续推进提交后自动对账/自动 reconciliation。W1 已完成恢复/对账第一阶段，不再把 Freeze 后崩溃悬挂风险留到过期释放。
 - **W4 测试** 不再按本文顶部旧 MISSING 追单；应围绕 W2/W3 新闭环、runtime/safety、TurnLoop 24 场景和管理端全线继续扩面。
 - **W2 闭环** 核对时以本表为断点清单逐域走查。
 
@@ -105,7 +105,7 @@
 1. **批 A 数据底座先行 ✅**：INFRA-1/13、INFRA-2、operator 回填、软删唯一约束复用评估已关闭。
 2. **批 B 安全/越权红线 ✅**：GEN-5、ACCT-3/1b/8、SKILL-2 FP1–FP4 已关闭。
 3. **批 C 确认恢复闭环 ✅**：TURN-8/7/6/10 已关闭。
-4. **批 D 配合 W3 🟡**：GEN-7、ACCT-4、INFRA-9、GEN-4 已关闭；GEN-6 已完成恢复/对账第一阶段，完整 Redis worker 仍归 W3。
+4. **批 D 配合 W3 🟡**：GEN-7、ACCT-4、INFRA-9、GEN-4 已关闭；GEN-6 已完成恢复/对账第一阶段与 Redis worker 第一阶段，提交后自动对账仍归后续 W3。
 5. **批 E 可观测体系 ✅**：INFRA-3/4/5/6/7/10 已关闭。
 6. **批 F 收尾 ✅**：WORK-3/4/5/7/8/9/10、SKILL-9/10、ACCT-6/7、GEN-8、TURN-4、INFRA-11/14 已关闭。
 
@@ -358,8 +358,21 @@
 - repository 补齐 `agent_tasks` 创建、进度更新、状态转换、按 run 查询、stale running 查询；测试覆盖冻结后重启恢复释放、task 状态防回退、snapshot 暴露 task。
 
 范围决策：
-- 本切片先堵“Freeze 后进程崩溃导致冻结悬挂到过期”的资金风险；完整 Redis 异步 worker、分布式调度和提交后自动对账仍归 W3，不在本切片假装完成。
+- 本切片先堵“Freeze 后进程崩溃导致冻结悬挂到过期”的资金风险；当时未纳入的 Redis worker 已由下一节第一阶段补齐，提交后自动对账仍归后续 W3，不在本切片假装完成。
 - 对 commit RPC 已开始的任务只进入人工/后续对账状态，不自动释放冻结，避免在业务侧已提交扣费但 Agent 未收到响应时造成反向资金错误。
+
+## 批 D 子切片记录（2026-06-29 · GEN-6 Redis worker 第一阶段）✅
+
+提交：本切片（GEN-6 Redis queue）
+验证：`go test -count=1 ./services/agent/internal/application/workbench` 通过；`go test -count=1 ./services/agent/internal/infra/config ./services/agent/internal/infra/queue ./services/agent/cmd/agent` 通过；`git diff --check` 通过。
+
+- **GEN-6 Redis worker 第一阶段 ✅ 已补**：`AcceptInterrupt` 在配置 `AGENT_GENERATION_QUEUE=redis` 时只完成确认验权、accepted 事件和 Redis 入队，HTTP 请求不再同步执行冻结、模型生成、上传和 `CommitGeneratedAssetAndCharge` 长链路；默认 `inline` 保持本地/测试兼容。
+- Agent 启动时创建 Redis generation queue、重投递 processing list 中的 inflight job，并启动 `AGENT_GENERATION_WORKERS` 个后台 worker 消费队列；worker 复用原 `runM4ConfirmedGeneration` 链路，成功后 ack processing job。
+- Redis 队列采用 ready list + processing list，避免 worker 弹出后进程崩溃导致 job 静默丢失；重投递时若 DB 中已有 running `generation_asset_commit` task，则先进入现有 `RecoverGenerationTasks` 恢复/对账逻辑，避免二次冻结/二次提交。
+
+范围决策：
+- 本切片只把确认后的生成长链路从 HTTP 请求搬到 Redis worker，并补重投递/防重复基础；提交后自动对账仍沿用第一阶段 `NEEDS_RECONCILIATION`，不在本切片冒充自动 reconciliation。
+- Redis 密码不进入 etcd 非敏感配置 allowlist；本地默认 `AGENT_GENERATION_QUEUE=inline`，避免开发环境被 Redis 强依赖阻断。
 
 ## 批 F 子切片记录（2026-06-28 · GEN-8）✅
 

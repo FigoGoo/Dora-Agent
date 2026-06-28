@@ -34,6 +34,12 @@ AGENT_SAFETY_POLICY_VERSION=local-v1
 LOG_LEVEL=debug
 AGENT_HTTP_ADDR=127.0.0.1:28080
 AGENT_TOOL_ALLOWLIST=image,video
+AGENT_GENERATION_QUEUE=redis
+AGENT_GENERATION_REDIS_ADDR=127.0.0.1:6379
+AGENT_GENERATION_REDIS_DB=2
+AGENT_GENERATION_REDIS_LIST_KEY=dora:test:generation_jobs
+AGENT_GENERATION_WORKERS=3
+AGENT_GENERATION_RECOVERY_STALE_AFTER=30s
 `)
 
 	cfg, err := LoadFrom(example, local)
@@ -51,6 +57,12 @@ AGENT_TOOL_ALLOWLIST=image,video
 	}
 	if len(cfg.ToolAllowlist) != 2 || cfg.ToolAllowlist[0] != "image" || cfg.ToolAllowlist[1] != "video" {
 		t.Fatalf("unexpected allowlist: %#v", cfg.ToolAllowlist)
+	}
+	if cfg.GenerationQueue != "redis" || cfg.GenerationRedisAddress != "127.0.0.1:6379" || cfg.GenerationRedisDB != 2 {
+		t.Fatalf("unexpected generation queue config: %#v", cfg)
+	}
+	if cfg.GenerationRedisListKey != "dora:test:generation_jobs" || cfg.GenerationWorkers != 3 || cfg.GenerationRecoveryAge != 30*time.Second {
+		t.Fatalf("unexpected generation worker config: key=%s workers=%d stale=%s", cfg.GenerationRedisListKey, cfg.GenerationWorkers, cfg.GenerationRecoveryAge)
 	}
 }
 
@@ -111,10 +123,14 @@ ETCD_NAMESPACE=/dora/local
 		if contains(opts.AllowedKeys, "AGENT_DATABASE_URL") || contains(opts.AllowedKeys, "ETCD_ENDPOINTS") {
 			t.Fatal("sensitive or bootstrap agent config must not be allowed from etcd")
 		}
+		if contains(opts.AllowedKeys, "AGENT_GENERATION_REDIS_PASSWORD") {
+			t.Fatal("redis password must not be allowed from etcd")
+		}
 		return envconfig.Values{
 			"LOG_LEVEL":                    "debug",
 			"AGENT_EVENT_REPLAY_PAGE_SIZE": "20",
 			"AGENT_TOOL_ALLOWLIST":         "image,video",
+			"AGENT_GENERATION_QUEUE":       "redis",
 		}, nil
 	})
 	if err != nil {
@@ -129,6 +145,9 @@ ETCD_NAMESPACE=/dora/local
 	if len(cfg.ToolAllowlist) != 2 || cfg.ToolAllowlist[0] != "image" || cfg.ToolAllowlist[1] != "video" {
 		t.Fatalf("unexpected allowlist: %#v", cfg.ToolAllowlist)
 	}
+	if cfg.GenerationQueue != "redis" {
+		t.Fatalf("expected etcd generation queue overlay, got %s", cfg.GenerationQueue)
+	}
 }
 
 func unsetAgentEnv(t *testing.T) {
@@ -140,7 +159,10 @@ func unsetAgentEnv(t *testing.T) {
 		"AGENT_SSE_ENABLED", "AGENT_WS_ENABLED", "AGENT_SSE_HEARTBEAT_SECONDS",
 		"AGENT_EVENT_REPLAY_PAGE_SIZE", "AGENT_EVENT_REPLAY_MAX_PAGE_SIZE", "AGENT_CONFIG_SOURCE",
 		"AGENT_DEFAULT_CONFIG_VERSION", "AGENT_TOOL_ALLOWLIST", "AGENT_MEMORY_ENABLED",
-		"AGENT_TOOL_DEFAULT_TIMEOUT_MS", "AGENT_SAFETY_POLICY_VERSION", "ETCD_ENDPOINTS", "ETCD_NAMESPACE",
+		"AGENT_TOOL_DEFAULT_TIMEOUT_MS", "AGENT_SAFETY_POLICY_VERSION", "AGENT_GENERATION_QUEUE",
+		"AGENT_GENERATION_REDIS_ADDR", "AGENT_GENERATION_REDIS_PASSWORD", "AGENT_GENERATION_REDIS_DB",
+		"AGENT_GENERATION_REDIS_LIST_KEY", "AGENT_GENERATION_WORKERS", "AGENT_GENERATION_RECOVERY_STALE_AFTER",
+		"ETCD_ENDPOINTS", "ETCD_NAMESPACE",
 	}
 	for _, key := range keys {
 		old, ok := os.LookupEnv(key)

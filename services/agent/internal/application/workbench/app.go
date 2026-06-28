@@ -444,6 +444,12 @@ type GenerationRecoveryResult struct {
 	ReleaseFails int
 }
 
+type GenerationWorkerResult struct {
+	Processed int
+	Failed    int
+	LastError error
+}
+
 type App struct {
 	repo             *repository.Repository
 	gateway          BusinessGateway
@@ -454,6 +460,7 @@ type App struct {
 	modelAdapter     modeltool.Adapter
 	artifactUploader ArtifactUploader
 	turnLoop         turnloop.TurnLoop
+	generationQueue  GenerationJobQueue
 }
 
 var errToolConfirmationRequired = errors.New("tool confirmation required")
@@ -479,6 +486,10 @@ func (a *App) SetArtifactUploader(uploader ArtifactUploader) {
 	if uploader != nil {
 		a.artifactUploader = uploader
 	}
+}
+
+func (a *App) SetGenerationQueue(queue GenerationJobQueue) {
+	a.generationQueue = queue
 }
 
 func (a *App) ResolveAuthContextFromToken(ctx context.Context, authorization string, expectedSpaceID string, traceID string) (AuthContextDTO, error) {
@@ -1050,7 +1061,7 @@ func (a *App) AcceptInterrupt(ctx context.Context, auth AuthContextDTO, runID st
 			}
 		}
 	}
-	if err := a.runM4ConfirmedGeneration(ctx, auth, run.ID, interrupt, req.IdempotencyKey, traceID); err != nil {
+	if err := a.dispatchConfirmedGeneration(ctx, auth, run, interrupt, req.IdempotencyKey, traceID); err != nil {
 		return RunDTO{}, err
 	}
 	if err := a.runConfirmedIndependentToolCharge(ctx, auth, run.ID, interrupt, req.IdempotencyKey, traceID); err != nil {
@@ -1061,6 +1072,41 @@ func (a *App) AcceptInterrupt(ctx context.Context, auth AuthContextDTO, runID st
 		return RunDTO{}, err
 	}
 	return runDTO(*updated), nil
+}
+
+func (a *App) dispatchConfirmedGeneration(ctx context.Context, auth AuthContextDTO, run *model.Run, interrupt *model.Interrupt, idempotencyKey string, traceID string) error {
+	if _, ok := parseM4ConfirmationPayload(interrupt); !ok {
+		return nil
+	}
+	if a.generationQueue == nil {
+		return a.runM4ConfirmedGeneration(ctx, auth, run.ID, interrupt, idempotencyKey, traceID)
+	}
+	job := GenerationJob{
+		RunID:          run.ID,
+		InterruptID:    interrupt.ID,
+		IdempotencyKey: idempotencyKey,
+		TraceID:        traceID,
+		Auth:           auth,
+		EnqueuedAt:     time.Now().UTC(),
+	}
+	if err := validateGenerationJob(job); err != nil {
+		return err
+	}
+	if err := a.generationQueue.EnqueueGenerationJob(ctx, job); err != nil {
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "GENERATION_QUEUE_ENQUEUE_FAILED", err.Error())
+		_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
+			"error_type": "queue", "error_code": "GENERATION_QUEUE_ENQUEUE_FAILED", "user_message": "生成任务入队失败",
+			"retryable": true, "support_trace_id": traceID,
+		})
+		return err
+	}
+	_ = a.appendRunEvent(ctx, run, "generation.task.queued", traceID, map[string]any{
+		"run_id": run.ID, "interrupt_id": interrupt.ID, "idempotency_key": idempotencyKey,
+	})
+	_ = a.appendGenerationProgress(ctx, run, traceID, "", "queued", 0, false, map[string]any{
+		"run_id": run.ID, "interrupt_id": interrupt.ID,
+	})
+	return nil
 }
 
 func (a *App) RejectInterrupt(ctx context.Context, auth AuthContextDTO, runID string, req RejectInterruptRequest, traceID string) (RunDTO, error) {
@@ -2317,6 +2363,89 @@ func (a *App) RecoverGenerationTasks(ctx context.Context, staleAfter time.Durati
 		}
 	}
 	return result, nil
+}
+
+func (a *App) RunGenerationWorker(ctx context.Context, maxJobs int) GenerationWorkerResult {
+	result := GenerationWorkerResult{}
+	if a.generationQueue == nil {
+		result.LastError = errors.New("generation queue is not configured")
+		return result
+	}
+	for maxJobs <= 0 || result.Processed < maxJobs {
+		job, err := a.generationQueue.DequeueGenerationJob(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return result
+			}
+			result.Failed++
+			result.LastError = err
+			continue
+		}
+		result.Processed++
+		processErr := a.processGenerationJob(ctx, job)
+		if processErr != nil {
+			result.Failed++
+			result.LastError = processErr
+			if !a.generationJobReachedTerminalRun(ctx, job) {
+				continue
+			}
+		}
+		if err := a.generationQueue.CompleteGenerationJob(ctx, job); err != nil {
+			result.Failed++
+			result.LastError = err
+		}
+	}
+	return result
+}
+
+func (a *App) processGenerationJob(ctx context.Context, job GenerationJob) error {
+	if err := validateGenerationJob(job); err != nil {
+		return err
+	}
+	run, err := a.repo.GetRun(ctx, job.RunID)
+	if err != nil {
+		return err
+	}
+	if isTerminalRunStatus(run.Status) {
+		return nil
+	}
+	if existing, ok := a.runningGenerationTask(ctx, run.ID); ok {
+		result := GenerationRecoveryResult{}
+		return a.recoverGenerationTask(ctx, existing, job.TraceID, &result)
+	}
+	interrupt, err := a.repo.GetInterrupt(ctx, job.RunID, job.InterruptID)
+	if err != nil {
+		return err
+	}
+	if interrupt.Status != state.InterruptStatusAccepted {
+		return apperror.New(apperror.CodeStateConflict, "generation interrupt is not accepted")
+	}
+	_ = a.appendRunEvent(ctx, run, "generation.task.dequeued", job.TraceID, map[string]any{
+		"run_id": job.RunID, "interrupt_id": job.InterruptID, "enqueued_at": job.EnqueuedAt.Format(time.RFC3339Nano),
+	})
+	return a.runM4ConfirmedGeneration(ctx, job.Auth, job.RunID, interrupt, job.IdempotencyKey, job.TraceID)
+}
+
+func (a *App) generationJobReachedTerminalRun(ctx context.Context, job GenerationJob) bool {
+	run, err := a.repo.GetRun(ctx, job.RunID)
+	return err == nil && isTerminalRunStatus(run.Status)
+}
+
+func (a *App) runningGenerationTask(ctx context.Context, runID string) (model.Task, bool) {
+	tasks, err := a.repo.ListTasksByRun(ctx, runID)
+	if err != nil {
+		return model.Task{}, false
+	}
+	for _, task := range tasks {
+		if task.TaskType == "generation_asset_commit" && task.Status == state.TaskStatusRunning {
+			return task, true
+		}
+	}
+	return model.Task{}, false
+}
+
+func isTerminalRunStatus(status string) bool {
+	return status == state.RunStatusCompleted || status == state.RunStatusFailed || status == state.RunStatusCancelled
 }
 
 func (a *App) recoverGenerationTask(ctx context.Context, task model.Task, traceID string, result *GenerationRecoveryResult) error {

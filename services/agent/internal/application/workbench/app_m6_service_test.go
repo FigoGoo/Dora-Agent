@@ -250,6 +250,137 @@ func TestExpiredSafetyEvidenceIsReevaluatedBeforeGenerationFreeze(t *testing.T) 
 	}
 }
 
+func TestQueuedGenerationAcceptReturnsBeforeM4AndWorkerCompletes(t *testing.T) {
+	app, gateway := newM6ServiceApp(t)
+	queue := NewMemoryGenerationJobQueue(1)
+	app.SetGenerationQueue(queue)
+	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
+	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "queued", IdempotencyKey: "idem-queued-session"}, "trace-queued")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	run, err := app.CreateRun(t.Context(), auth, CreateRunRequest{
+		SessionID: session.SessionID, ProjectID: "prj_active_1001", IdempotencyKey: "idem-queued-run",
+		UserInput: UserInputDTO{ClientMessageID: "cm_queued", ContentType: "text", Text: "lookup with web fetch"},
+	}, "trace-queued")
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	interrupt, err := app.repo.GetRequiredInterrupt(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("get confirmation interrupt: %v", err)
+	}
+	gateway.calls = nil
+	accepted, err := app.AcceptInterrupt(t.Context(), auth, run.RunID, ConfirmInterruptRequest{
+		RunID: run.RunID, InterruptID: interrupt.ID, Action: "confirm",
+		ConfirmedPayloadDigest: confirmationPayloadDigest(interrupt.ConfirmationPayload),
+		IdempotencyKey:         "idem-queued-confirm",
+	}, "trace-queued")
+	if err != nil {
+		t.Fatalf("accept interrupt: %v", err)
+	}
+	if accepted.Status != state.RunStatusRunning {
+		t.Fatalf("queued accept should return before generation completes, got status=%s", accepted.Status)
+	}
+	if containsCall(gateway.calls, "FreezeCredits") || containsCall(gateway.calls, "CommitGeneratedAssetAndCharge") {
+		t.Fatalf("accept should not execute M4 chain when queue is enabled, calls=%v", gateway.calls)
+	}
+	if queue.Len() != 1 {
+		t.Fatalf("expected one queued generation job, got %d", queue.Len())
+	}
+	events, err := app.repo.ListEventsAfterSequence(t.Context(), run.RunID, 0, 100)
+	if err != nil {
+		t.Fatalf("list queued events: %v", err)
+	}
+	if !hasEvent(events, "generation.task.queued") {
+		t.Fatalf("queued generation event missing: %#v", events)
+	}
+
+	result := app.RunGenerationWorker(t.Context(), 1)
+	if result.Processed != 1 || result.Failed != 0 || result.LastError != nil {
+		t.Fatalf("unexpected worker result: %#v", result)
+	}
+	if !containsSubsequence(gateway.calls, []string{"FreezeCredits", "PrepareGeneratedAssetObjects", "CommitGeneratedAssetAndCharge"}) {
+		t.Fatalf("worker should execute M4 chain, calls=%v", gateway.calls)
+	}
+	updated, err := app.repo.GetRun(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("get completed run: %v", err)
+	}
+	if updated.Status != state.RunStatusCompleted {
+		t.Fatalf("worker should complete run, got %s", updated.Status)
+	}
+	tasks, err := app.repo.ListTasksByRun(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("list generation tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Status != state.TaskStatusCompleted {
+		t.Fatalf("expected completed worker task, got %#v", tasks)
+	}
+}
+
+func TestQueuedGenerationRedeliveryRecoversRunningTaskWithoutDuplicateM4(t *testing.T) {
+	app, gateway := newM6ServiceApp(t)
+	queue := NewMemoryGenerationJobQueue(1)
+	app.SetGenerationQueue(queue)
+	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
+	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "redelivery", IdempotencyKey: "idem-redelivery-session"}, "trace-redelivery")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	run, err := app.CreateRun(t.Context(), auth, CreateRunRequest{
+		SessionID: session.SessionID, ProjectID: "prj_active_1001", IdempotencyKey: "idem-redelivery-run",
+		UserInput: UserInputDTO{ClientMessageID: "cm_redelivery", ContentType: "text", Text: "lookup with web fetch"},
+	}, "trace-redelivery")
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	interrupt, err := app.repo.GetRequiredInterrupt(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("get confirmation interrupt: %v", err)
+	}
+	_, err = app.AcceptInterrupt(t.Context(), auth, run.RunID, ConfirmInterruptRequest{
+		RunID: run.RunID, InterruptID: interrupt.ID, Action: "confirm",
+		ConfirmedPayloadDigest: confirmationPayloadDigest(interrupt.ConfirmationPayload),
+		IdempotencyKey:         "idem-redelivery-confirm",
+	}, "trace-redelivery")
+	if err != nil {
+		t.Fatalf("accept interrupt: %v", err)
+	}
+	stale := time.Now().UTC().Add(-10 * time.Minute)
+	task := &model.Task{
+		ID: "task_redelivery_generation", RunID: run.RunID, TaskType: "generation_asset_commit", ResourceType: "image",
+		Status: state.TaskStatusRunning, ProgressPercent: 25,
+		ProgressDetail: jsonObject(map[string]any{
+			"stage": "credits_frozen", "freeze_id": "frz_redelivery", "frozen_points": int64(10),
+			"estimate_id": "est_generation_m6", "idempotency_key": "idem-redelivery-confirm",
+			"auth": map[string]any{"actor_user_id": auth.ActorUserID, "login_identity_type": auth.LoginIdentityType, "space_id": auth.SpaceID},
+		}),
+		StartedAt: &stale, UpdatedAt: stale, TraceID: "trace-redelivery",
+	}
+	if err := app.repo.CreateTask(t.Context(), task); err != nil {
+		t.Fatalf("create running task: %v", err)
+	}
+	gateway.calls = nil
+	result := app.RunGenerationWorker(t.Context(), 1)
+	if result.Processed != 1 || result.Failed != 0 || result.LastError != nil {
+		t.Fatalf("unexpected worker result: %#v", result)
+	}
+	if containsCall(gateway.calls, "CommitGeneratedAssetAndCharge") {
+		t.Fatalf("redelivered job must not duplicate asset commit, calls=%v", gateway.calls)
+	}
+	if !containsCall(gateway.calls, "ReleaseFrozenCredits") {
+		t.Fatalf("redelivered running task should recover/release, calls=%v", gateway.calls)
+	}
+	updatedTask, err := app.repo.GetTask(t.Context(), task.ID)
+	if err != nil {
+		t.Fatalf("get recovered task: %v", err)
+	}
+	if updatedTask.Status != state.TaskStatusFailed || updatedTask.ErrorCode != "RESTART_RECOVERED" {
+		t.Fatalf("expected recovered task, got status=%s error=%s", updatedTask.Status, updatedTask.ErrorCode)
+	}
+}
+
 func TestRecoverGenerationTasksReleasesFrozenTaskAfterRestart(t *testing.T) {
 	app, gateway := newM6ServiceApp(t)
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
@@ -486,6 +617,11 @@ func (g *recordingGateway) ChargeToolUsageCredits(ctx context.Context, auth Auth
 		return ToolChargeDTO{}, g.chargeErr
 	}
 	return g.StaticGateway.ChargeToolUsageCredits(ctx, auth, req, traceID)
+}
+
+func (g *recordingGateway) PrepareGeneratedAssetObjects(ctx context.Context, auth AuthContextDTO, req PrepareGeneratedAssetObjectsRequest, traceID string) ([]GeneratedUploadSlotDTO, error) {
+	g.record("PrepareGeneratedAssetObjects")
+	return g.StaticGateway.PrepareGeneratedAssetObjects(ctx, auth, req, traceID)
 }
 
 func (g *recordingGateway) CommitGeneratedAssetAndCharge(ctx context.Context, auth AuthContextDTO, req CommitGeneratedAssetAndChargeRequest, traceID string) (AssetCommitDTO, error) {

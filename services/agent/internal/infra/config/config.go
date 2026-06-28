@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/FigoGoo/Dora-Agent/services/internal/configsource"
@@ -11,29 +12,36 @@ import (
 var DefaultEnvFiles = []string{".env.example", ".env.local"}
 
 type AgentConfig struct {
-	AppEnv                 string
-	AppName                string
-	LogLevel               string
-	HTTPPort               int
-	HTTPAddr               string
-	DatabaseURL            string
-	ServiceName            string
-	BusinessServiceName    string
-	KitexRegistry          string
-	EtcdEndpoints          []string
-	EtcdNamespace          string
-	KitexTimeout           time.Duration
-	SSEEnabled             bool
-	WSEnabled              bool
-	SSEHeartbeatSeconds    int
-	EventReplayPageSize    int
-	EventReplayMaxPageSize int
-	ConfigSource           string
-	DefaultConfigVersion   string
-	ToolAllowlist          []string
-	MemoryEnabled          bool
-	ToolDefaultTimeout     time.Duration
-	SafetyPolicyVersion    string
+	AppEnv                  string
+	AppName                 string
+	LogLevel                string
+	HTTPPort                int
+	HTTPAddr                string
+	DatabaseURL             string
+	ServiceName             string
+	BusinessServiceName     string
+	KitexRegistry           string
+	EtcdEndpoints           []string
+	EtcdNamespace           string
+	KitexTimeout            time.Duration
+	SSEEnabled              bool
+	WSEnabled               bool
+	SSEHeartbeatSeconds     int
+	EventReplayPageSize     int
+	EventReplayMaxPageSize  int
+	ConfigSource            string
+	DefaultConfigVersion    string
+	ToolAllowlist           []string
+	MemoryEnabled           bool
+	ToolDefaultTimeout      time.Duration
+	SafetyPolicyVersion     string
+	GenerationQueue         string
+	GenerationRedisAddress  string
+	GenerationRedisPassword string
+	GenerationRedisDB       int
+	GenerationRedisListKey  string
+	GenerationWorkers       int
+	GenerationRecoveryAge   time.Duration
 }
 
 func Load() (AgentConfig, error) {
@@ -95,6 +103,18 @@ func loadFromWithEtcdLoader(paths []string, loader configsource.EtcdLoader) (Age
 	if err != nil {
 		return AgentConfig{}, err
 	}
+	generationRedisDB, err := values.Int("AGENT_GENERATION_REDIS_DB", 0)
+	if err != nil {
+		return AgentConfig{}, err
+	}
+	generationWorkers, err := values.Int("AGENT_GENERATION_WORKERS", 1)
+	if err != nil {
+		return AgentConfig{}, err
+	}
+	generationRecoveryAge, err := values.Duration("AGENT_GENERATION_RECOVERY_STALE_AFTER", 5*time.Minute)
+	if err != nil {
+		return AgentConfig{}, err
+	}
 	memoryEnabled, err := values.Bool("AGENT_MEMORY_ENABLED", true)
 	if err != nil {
 		return AgentConfig{}, err
@@ -102,31 +122,48 @@ func loadFromWithEtcdLoader(paths []string, loader configsource.EtcdLoader) (Age
 	if replayPageSize <= 0 || replayMaxPageSize < replayPageSize {
 		return AgentConfig{}, fmt.Errorf("invalid agent event replay page size: page=%d max=%d", replayPageSize, replayMaxPageSize)
 	}
+	generationQueue := strings.ToLower(strings.TrimSpace(values.String("AGENT_GENERATION_QUEUE", "inline")))
+	if generationQueue == "" {
+		generationQueue = "inline"
+	}
+	if generationQueue != "inline" && generationQueue != "redis" {
+		return AgentConfig{}, fmt.Errorf("AGENT_GENERATION_QUEUE must be inline or redis")
+	}
+	if generationWorkers <= 0 {
+		generationWorkers = 1
+	}
 
 	return AgentConfig{
-		AppEnv:                 values.String("APP_ENV", "local"),
-		AppName:                values.String("APP_NAME", "dora-agent"),
-		LogLevel:               values.String("LOG_LEVEL", "info"),
-		HTTPPort:               httpPort,
-		HTTPAddr:               httpAddr,
-		DatabaseURL:            databaseURL,
-		ServiceName:            values.String("AGENT_SERVICE_NAME", "dora.agent"),
-		BusinessServiceName:    values.String("BUSINESS_SERVICE_NAME", "dora.business"),
-		KitexRegistry:          values.String("KITEX_REGISTRY", "none"),
-		EtcdEndpoints:          values.CSV("ETCD_ENDPOINTS"),
-		EtcdNamespace:          values.String("ETCD_NAMESPACE", ""),
-		KitexTimeout:           kitexTimeout,
-		SSEEnabled:             sseEnabled,
-		WSEnabled:              wsEnabled,
-		SSEHeartbeatSeconds:    heartbeat,
-		EventReplayPageSize:    replayPageSize,
-		EventReplayMaxPageSize: replayMaxPageSize,
-		ConfigSource:           values.String("AGENT_CONFIG_SOURCE", "postgres"),
-		DefaultConfigVersion:   values.String("AGENT_DEFAULT_CONFIG_VERSION", "local-dev"),
-		ToolAllowlist:          values.CSV("AGENT_TOOL_ALLOWLIST"),
-		MemoryEnabled:          memoryEnabled,
-		ToolDefaultTimeout:     toolTimeout,
-		SafetyPolicyVersion:    values.String("AGENT_SAFETY_POLICY_VERSION", "local-v1"),
+		AppEnv:                  values.String("APP_ENV", "local"),
+		AppName:                 values.String("APP_NAME", "dora-agent"),
+		LogLevel:                values.String("LOG_LEVEL", "info"),
+		HTTPPort:                httpPort,
+		HTTPAddr:                httpAddr,
+		DatabaseURL:             databaseURL,
+		ServiceName:             values.String("AGENT_SERVICE_NAME", "dora.agent"),
+		BusinessServiceName:     values.String("BUSINESS_SERVICE_NAME", "dora.business"),
+		KitexRegistry:           values.String("KITEX_REGISTRY", "none"),
+		EtcdEndpoints:           values.CSV("ETCD_ENDPOINTS"),
+		EtcdNamespace:           values.String("ETCD_NAMESPACE", ""),
+		KitexTimeout:            kitexTimeout,
+		SSEEnabled:              sseEnabled,
+		WSEnabled:               wsEnabled,
+		SSEHeartbeatSeconds:     heartbeat,
+		EventReplayPageSize:     replayPageSize,
+		EventReplayMaxPageSize:  replayMaxPageSize,
+		ConfigSource:            values.String("AGENT_CONFIG_SOURCE", "postgres"),
+		DefaultConfigVersion:    values.String("AGENT_DEFAULT_CONFIG_VERSION", "local-dev"),
+		ToolAllowlist:           values.CSV("AGENT_TOOL_ALLOWLIST"),
+		MemoryEnabled:           memoryEnabled,
+		ToolDefaultTimeout:      toolTimeout,
+		SafetyPolicyVersion:     values.String("AGENT_SAFETY_POLICY_VERSION", "local-v1"),
+		GenerationQueue:         generationQueue,
+		GenerationRedisAddress:  values.String("AGENT_GENERATION_REDIS_ADDR", ""),
+		GenerationRedisPassword: values.String("AGENT_GENERATION_REDIS_PASSWORD", ""),
+		GenerationRedisDB:       generationRedisDB,
+		GenerationRedisListKey:  values.String("AGENT_GENERATION_REDIS_LIST_KEY", "dora:agent:generation_jobs"),
+		GenerationWorkers:       generationWorkers,
+		GenerationRecoveryAge:   generationRecoveryAge,
 	}, nil
 }
 
@@ -150,4 +187,10 @@ var agentEtcdConfigKeys = []string{
 	"AGENT_MEMORY_ENABLED",
 	"AGENT_TOOL_DEFAULT_TIMEOUT_MS",
 	"AGENT_SAFETY_POLICY_VERSION",
+	"AGENT_GENERATION_QUEUE",
+	"AGENT_GENERATION_REDIS_ADDR",
+	"AGENT_GENERATION_REDIS_DB",
+	"AGENT_GENERATION_REDIS_LIST_KEY",
+	"AGENT_GENERATION_WORKERS",
+	"AGENT_GENERATION_RECOVERY_STALE_AFTER",
 }
