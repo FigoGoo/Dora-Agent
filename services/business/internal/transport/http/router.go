@@ -127,6 +127,7 @@ func errorMiddleware() gin.HandlerFunc {
 		c.JSON(err.HTTPStatus(), gin.H{
 			"error": gin.H{
 				"code":      err.Code,
+				"category":  err.Category(),
 				"message":   err.Message,
 				"trace_id":  err.TraceID,
 				"retryable": err.Retryable,

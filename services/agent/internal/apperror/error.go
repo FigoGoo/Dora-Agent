@@ -6,6 +6,7 @@ import (
 )
 
 type Code string
+type Category string
 
 const (
 	CodeInvalidArgument     Code = "INVALID_ARGUMENT"
@@ -18,6 +19,16 @@ const (
 	CodeIdempotencyConflict Code = "IDEMPOTENCY_CONFLICT"
 	CodeInternal            Code = "INTERNAL_ERROR"
 	CodeNotImplemented      Code = "NOT_IMPLEMENTED"
+)
+
+const (
+	CategoryValidation  Category = "validation"
+	CategoryAuth        Category = "auth"
+	CategoryPermission  Category = "permission"
+	CategoryNotFound    Category = "not_found"
+	CategoryState       Category = "state"
+	CategoryIdempotency Category = "idempotency"
+	CategoryInternal    Category = "internal"
 )
 
 type AgentError struct {
@@ -65,6 +76,32 @@ func (e *AgentError) HTTPStatus() int {
 		return http.StatusNotImplemented
 	default:
 		return http.StatusInternalServerError
+	}
+}
+
+func (e *AgentError) Category() Category {
+	if e == nil {
+		return CategoryInternal
+	}
+	return CategoryForCode(e.Code)
+}
+
+func CategoryForCode(code Code) Category {
+	switch code {
+	case CodeInvalidArgument:
+		return CategoryValidation
+	case CodeUnauthenticated:
+		return CategoryAuth
+	case CodePermissionDenied:
+		return CategoryPermission
+	case CodeResourceNotFound, CodeProjectNotFound:
+		return CategoryNotFound
+	case CodeStateConflict, CodeProjectArchived:
+		return CategoryState
+	case CodeIdempotencyConflict:
+		return CategoryIdempotency
+	default:
+		return CategoryInternal
 	}
 }
 

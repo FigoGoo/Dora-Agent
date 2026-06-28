@@ -209,3 +209,14 @@
 
 范围决策：
 - 空 category 仍允许，保持存量作品兼容；第一版 active 字典以 seed/migration 中的 `work_categories` 为准。
+
+## 批 E 子切片记录（2026-06-28 · INFRA-6 / INFRA-7）✅
+
+提交：待提交（INFRA-6/7）
+验证：`go test ./services/business/internal/pkg/errors ./services/agent/internal/apperror ./services/business/internal/transport/http ./services/agent/internal/api/http` 通过；`python3 tests/agent/agui/validate_fixtures.py` 通过。
+
+- **INFRA-6 ✅ 已修**：业务错误模型增加 `Category` 维度与 `CategoryForCode` 映射，覆盖 validation/auth/permission/not_found/state/idempotency/dependency/internal；HTTP 错误响应新增 `error.category`，保留原 `error.code`。
+- **INFRA-7 ✅ 已修**：Agent 错误模型增加同口径 `Category` 维度；HTTP 错误响应新增 `error.category`。
+
+范围决策：
+- 不重命名现有错误码，不改变 HTTP status；分类作为向后兼容新增字段，旧前端继续按 `code` 读取。

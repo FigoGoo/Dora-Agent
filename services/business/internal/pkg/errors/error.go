@@ -6,6 +6,7 @@ import (
 )
 
 type Code string
+type Category string
 
 const (
 	CodeInvalidArgument          Code = "INVALID_ARGUMENT"
@@ -27,6 +28,17 @@ const (
 	CodeAssetSaveFailed          Code = "ASSET_SAVE_FAILED"
 	CodeInternal                 Code = "INTERNAL_ERROR"
 	CodeNotImplemented           Code = "NOT_IMPLEMENTED"
+)
+
+const (
+	CategoryValidation  Category = "validation"
+	CategoryAuth        Category = "auth"
+	CategoryPermission  Category = "permission"
+	CategoryNotFound    Category = "not_found"
+	CategoryState       Category = "state"
+	CategoryIdempotency Category = "idempotency"
+	CategoryDependency  Category = "dependency"
+	CategoryInternal    Category = "internal"
 )
 
 type BusinessError struct {
@@ -87,6 +99,34 @@ func (e *BusinessError) HTTPStatus() int {
 		return http.StatusNotImplemented
 	default:
 		return http.StatusInternalServerError
+	}
+}
+
+func (e *BusinessError) Category() Category {
+	if e == nil {
+		return CategoryInternal
+	}
+	return CategoryForCode(e.Code)
+}
+
+func CategoryForCode(code Code) Category {
+	switch code {
+	case CodeInvalidArgument, CodeSafetyEvidenceInvalid, CodeRedeemCodeInvalid:
+		return CategoryValidation
+	case CodeUnauthenticated:
+		return CategoryAuth
+	case CodePermissionDenied, CodeCrossSpaceDenied, CodeRedeemCodeTargetMismatch:
+		return CategoryPermission
+	case CodeResourceNotFound, CodeProjectNotFound:
+		return CategoryNotFound
+	case CodeStateConflict, CodeProjectArchived, CodeRedeemCodeExpired, CodeRedeemCodeUsed:
+		return CategoryState
+	case CodeIdempotencyConflict, CodeProcessing:
+		return CategoryIdempotency
+	case CodeAssetObjectPrepareFailed, CodeAssetSaveFailed:
+		return CategoryDependency
+	default:
+		return CategoryInternal
 	}
 }
 
