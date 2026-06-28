@@ -191,6 +191,18 @@
 范围决策：
 - 本切片先打通运行期配置加载链路和版本落库，不解释 `content` 中的策略参数；策略解释器留给后续 W2/W3 功能闭环。
 
+## 批 D 子切片记录（2026-06-28 · ACCT-4）✅
+
+提交：`56aa45e`（ACCT-4）
+验证：`go test ./services/agent/internal/application/workbench ./services/agent/internal/api/http` 通过；`go test ./services/business/internal/application/project` 通过；`go test ./services/agent/internal/infra/repository ./services/agent/internal/domain/state` 通过；`python3 tests/contract/validate_fixtures.py` 通过；`python3 tests/agent/agui/validate_fixtures.py` 通过；`git diff --check` 通过。
+
+- **ACCT-4 ✅ 已修**：Agent active run 在继续输入、确认/拒绝 interrupt、确认后生成/Tool 结算二次权限校验中遇到 `PERMISSION_DENIED` 时，立即落 `cancelled`、写 `PERMISSION_REVOKED`，并 emit `agent.run.cancelled(cancel_reason=permission_revoked)`，释放 active-run 占用。
+- required interrupt 同步置为 `expired`，避免成员被移除后 snapshot 仍恢复确认面板。
+
+范围决策：
+- 本切片不新增 business→agent 主动取消 RPC/事件总线；现有 HTTP 鉴权会在请求入口拒绝 removed member，Agent 服务层补的是长期 active run 与二次权限校验的 fail-closed 收口。
+- `agent_tasks` 当前只有表和模型、无写入/worker 路径；本切片不虚构任务取消框架，后续随 GEN-6/W3 worker 一并处理真实 task cancellation。
+
 ## 批 F 子切片记录（2026-06-28 · WORK-4）✅
 
 提交：`1305d44`（WORK-4）
