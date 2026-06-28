@@ -375,7 +375,8 @@ func (a *App) SaveSkillTestResult(ctx context.Context, auth accountspace.AuthCon
 		ExecutionMode: "sandbox", InputJSON: inputJSON, ActualElementsJSON: datatypes.JSON([]byte(actualElementsJSON)),
 		SafetyEvidenceJSON: datatypes.JSON([]byte(evidenceJSON)), ErrorCode: optionalString(errorCode), ErrorSummary: optionalString(errorSummary),
 		AgentTraceID: optionalString(agentTraceID), IdempotencyKey: optionalString(idempotencyKey), RequestHash: optionalString(requestHash),
-		FinishedAt: &now, CreatedByUserID: optionalString(auth.UserID), CreatedAt: now, UpdatedAt: now,
+		FinishedAt: &now, CreatedByUserID: optionalString(auth.UserID),
+		CreatedBy: optionalString(auth.UserID), UpdatedBy: optionalString(auth.UserID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := db.Create(&row).Error; err != nil {
 		return TestResultDTO{}, err
@@ -459,7 +460,8 @@ func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO,
 	userID := in.Auth.UserID
 	skill := businesscore.Skill{
 		ID: skillID, SkillKey: in.SkillKey, SkillName: in.SkillName, SkillScope: scope, OwnerUserID: &userID, EnterpriseID: enterpriseID,
-		Status: statusDraft, RouteHintsJSON: mustJSON(in.RouteHints), CreatedByUserID: &userID, CreatedAt: now, UpdatedAt: now,
+		Status: statusDraft, RouteHintsJSON: mustJSON(in.RouteHints), CreatedByUserID: &userID,
+		CreatedBy: optionalString(userID), UpdatedBy: optionalString(userID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := a.repo.DB().WithContext(ctx).Save(&skill).Error; err != nil {
 		return SkillDetailDTO{}, err
@@ -472,12 +474,12 @@ func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO,
 		ID: versionID, SkillID: skill.ID, Version: version, Status: statusDraft, SkillSpecJSON: datatypes.JSON([]byte(normalizeJSON(in.SkillSpecJSON, "{}"))),
 		InputSchemaJSON: datatypes.JSON([]byte(normalizeJSON(in.InputSchemaJSON, "{}"))), OutputSchemaJSON: datatypes.JSON([]byte(normalizeJSON(in.OutputSchemaJSON, "{}"))),
 		MemoryPolicyJSON: datatypes.JSON([]byte(memory)), ConfirmationPolicyJSON: datatypes.JSON([]byte(confirmation)),
-		SubmittedByUserID: &userID, CreatedAt: now, UpdatedAt: now,
+		SubmittedByUserID: &userID, CreatedBy: optionalString(userID), UpdatedBy: optionalString(userID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := a.repo.DB().WithContext(ctx).Create(&sv).Error; err != nil {
 		return SkillDetailDTO{}, err
 	}
-	if err := a.saveOutputElements(ctx, skill.ID, versionID, now, in.OutputElements); err != nil {
+	if err := a.saveOutputElements(ctx, skill.ID, versionID, userID, now, in.OutputElements); err != nil {
 		return SkillDetailDTO{}, err
 	}
 	return skillDTO(skill), nil
@@ -537,7 +539,7 @@ func (a *App) validateOutputElements(ctx context.Context, elements []OutputEleme
 }
 
 // saveOutputElements 批量持久化输出元素结构(一次 Create，避免逐条写)。校验已在 validateOutputElements 前置完成。
-func (a *App) saveOutputElements(ctx context.Context, skillID, versionID string, now time.Time, elements []OutputElementInput) error {
+func (a *App) saveOutputElements(ctx context.Context, skillID, versionID, operatorID string, now time.Time, elements []OutputElementInput) error {
 	if len(elements) == 0 {
 		return nil
 	}
@@ -553,7 +555,7 @@ func (a *App) saveOutputElements(ctx context.Context, skillID, versionID string,
 			SchemaJSON: datatypes.JSON([]byte(normalizeJSON(el.SchemaJSON, "{}"))), Required: el.Required,
 			DisplayOrder: el.DisplayOrder, DisplaySlot: slot,
 			UseDraft: el.UseDraft, UseFinal: el.UseFinal, Editable: el.Editable, Referable: el.Referable,
-			CreatedAt: now,
+			CreatedBy: optionalString(operatorID), UpdatedBy: optionalString(operatorID), CreatedAt: now,
 		})
 	}
 	return a.repo.DB().WithContext(ctx).Create(&rows).Error
@@ -579,6 +581,7 @@ func (a *App) SubmitReview(ctx context.Context, auth accountspace.AuthContext, s
 	now := a.now()
 	version.Status = statusSubmitted
 	version.SubmittedAt = &now
+	version.UpdatedBy = optionalString(auth.UserID)
 	version.UpdatedAt = now
 	if err := a.repo.DB().WithContext(ctx).Save(&version).Error; err != nil {
 		return nil, err
@@ -595,6 +598,7 @@ func (a *App) Rollback(ctx context.Context, auth accountspace.AuthContext, skill
 		return SkillDetailDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "published version is required")
 	}
 	skill.Status = statusPublished
+	skill.UpdatedBy = optionalString(auth.UserID)
 	skill.UpdatedAt = a.now()
 	if err := a.repo.DB().WithContext(ctx).Save(&skill).Error; err != nil {
 		return SkillDetailDTO{}, err
@@ -640,7 +644,7 @@ func (a *App) Publish(ctx context.Context, auth admin.AdminAuth, skillID, versio
 	}
 	now := a.now()
 	tx := a.repo.DB().WithContext(ctx).Begin()
-	if err := tx.Model(&businesscore.SkillVersion{}).Where("skill_id = ? AND status = ?", skillID, statusPublished).Updates(map[string]any{"status": statusDeprecated, "updated_at": now}).Error; err != nil {
+	if err := tx.Model(&businesscore.SkillVersion{}).Where("skill_id = ? AND status = ?", skillID, statusPublished).Updates(map[string]any{"status": statusDeprecated, "updated_at": now, "updated_by": auth.AdminID}).Error; err != nil {
 		tx.Rollback()
 		return SkillDetailDTO{}, err
 	}
@@ -648,6 +652,7 @@ func (a *App) Publish(ctx context.Context, auth admin.AdminAuth, skillID, versio
 	version.ReviewedByAdminID = &auth.AdminID
 	version.ReviewedAt = &now
 	version.PublishedAt = &now
+	version.UpdatedBy = optionalString(auth.AdminID)
 	version.UpdatedAt = now
 	if err := tx.Save(&version).Error; err != nil {
 		tx.Rollback()
@@ -655,12 +660,13 @@ func (a *App) Publish(ctx context.Context, auth admin.AdminAuth, skillID, versio
 	}
 	skill.Status = statusPublished
 	skill.PublishedVersionID = &version.ID
+	skill.UpdatedBy = optionalString(auth.AdminID)
 	skill.UpdatedAt = now
 	if err := tx.Save(&skill).Error; err != nil {
 		tx.Rollback()
 		return SkillDetailDTO{}, err
 	}
-	if err := tx.Create(&businesscore.SkillReviewRecord{ID: security.RandomID("skr_"), SkillID: skillID, VersionID: versionID, ReviewAction: "publish", ReviewStatus: "approved", ReviewedByAdminID: auth.AdminID, CreatedAt: now}).Error; err != nil {
+	if err := tx.Create(&businesscore.SkillReviewRecord{ID: security.RandomID("skr_"), SkillID: skillID, VersionID: versionID, ReviewAction: "publish", ReviewStatus: "approved", ReviewedByAdminID: auth.AdminID, CreatedBy: optionalString(auth.AdminID), UpdatedBy: optionalString(auth.AdminID), CreatedAt: now}).Error; err != nil {
 		tx.Rollback()
 		return SkillDetailDTO{}, err
 	}
@@ -680,6 +686,7 @@ func (a *App) Deprecate(ctx context.Context, auth admin.AdminAuth, skillID strin
 		return SkillDetailDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "skill not found")
 	}
 	skill.Status = statusDeprecated
+	skill.UpdatedBy = optionalString(auth.AdminID)
 	skill.UpdatedAt = a.now()
 	if err := a.repo.DB().WithContext(ctx).Save(&skill).Error; err != nil {
 		return SkillDetailDTO{}, err
@@ -726,12 +733,13 @@ func (a *App) rejectReview(ctx context.Context, auth admin.AdminAuth, versionID,
 	version.Status = statusDraft
 	version.ReviewedByAdminID = &auth.AdminID
 	version.ReviewedAt = &now
+	version.UpdatedBy = optionalString(auth.AdminID)
 	version.UpdatedAt = now
 	if err := a.repo.DB().WithContext(ctx).Save(&version).Error; err != nil {
 		return SkillDetailDTO{}, err
 	}
 	commentPtr := optionalString(comment)
-	if err := a.repo.DB().WithContext(ctx).Create(&businesscore.SkillReviewRecord{ID: security.RandomID("skr_"), SkillID: version.SkillID, VersionID: version.ID, ReviewAction: "reject", ReviewStatus: "rejected", ReviewComment: commentPtr, ReviewedByAdminID: auth.AdminID, CreatedAt: now}).Error; err != nil {
+	if err := a.repo.DB().WithContext(ctx).Create(&businesscore.SkillReviewRecord{ID: security.RandomID("skr_"), SkillID: version.SkillID, VersionID: version.ID, ReviewAction: "reject", ReviewStatus: "rejected", ReviewComment: commentPtr, ReviewedByAdminID: auth.AdminID, CreatedBy: optionalString(auth.AdminID), UpdatedBy: optionalString(auth.AdminID), CreatedAt: now}).Error; err != nil {
 		return SkillDetailDTO{}, err
 	}
 	var skill businesscore.Skill

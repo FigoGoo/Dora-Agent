@@ -227,6 +227,8 @@ type Skill struct {
 	RouteHintsJSON     datatypes.JSON `gorm:"column:route_hints_json;type:jsonb"`
 	CreatedByUserID    *string        `gorm:"column:created_by_user_id"`
 	CreatedByAdminID   *string        `gorm:"column:created_by_admin_id"`
+	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
 	CreatedAt          time.Time      `gorm:"column:created_at"`
 	UpdatedAt          time.Time      `gorm:"column:updated_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -251,6 +253,8 @@ type SkillVersion struct {
 	ReviewedAt              *time.Time     `gorm:"column:reviewed_at"`
 	PublishedAt             *time.Time     `gorm:"column:published_at"`
 	RolledBackFromVersionID *string        `gorm:"column:rolled_back_from_version_id"`
+	CreatedBy               *string        `gorm:"column:created_by"`
+	UpdatedBy               *string        `gorm:"column:updated_by"`
 	CreatedAt               time.Time      `gorm:"column:created_at"`
 	UpdatedAt               time.Time      `gorm:"column:updated_at"`
 	DeletedAt               gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -265,6 +269,8 @@ type SkillToolBinding struct {
 	ToolName  string         `gorm:"column:tool_name"`
 	ToolType  string         `gorm:"column:tool_type"`
 	Required  bool           `gorm:"column:required"`
+	CreatedBy *string        `gorm:"column:created_by"`
+	UpdatedBy *string        `gorm:"column:updated_by"`
 	CreatedAt time.Time      `gorm:"column:created_at"`
 	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at"`
 }
@@ -285,6 +291,8 @@ type SkillOutputElementSchema struct {
 	UseFinal     bool           `gorm:"column:use_final"`
 	Editable     bool           `gorm:"column:editable"`
 	Referable    bool           `gorm:"column:referable"`
+	CreatedBy    *string        `gorm:"column:created_by"`
+	UpdatedBy    *string        `gorm:"column:updated_by"`
 	CreatedAt    time.Time      `gorm:"column:created_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"column:deleted_at"`
 }
@@ -300,6 +308,8 @@ type SkillTestCase struct {
 	ExpectedElementsJSON datatypes.JSON `gorm:"column:expected_elements_json;type:jsonb"`
 	Status               string         `gorm:"column:status"`
 	CreatedByUserID      *string        `gorm:"column:created_by_user_id"`
+	CreatedBy            *string        `gorm:"column:created_by"`
+	UpdatedBy            *string        `gorm:"column:updated_by"`
 	CreatedAt            time.Time      `gorm:"column:created_at"`
 	UpdatedAt            time.Time      `gorm:"column:updated_at"`
 	DeletedAt            gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -325,6 +335,8 @@ type SkillTestRun struct {
 	StartedAt          *time.Time     `gorm:"column:started_at"`
 	FinishedAt         *time.Time     `gorm:"column:finished_at"`
 	CreatedByUserID    *string        `gorm:"column:created_by_user_id"`
+	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
 	CreatedAt          time.Time      `gorm:"column:created_at"`
 	UpdatedAt          time.Time      `gorm:"column:updated_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -341,6 +353,8 @@ type SkillReviewRecord struct {
 	ReviewComment     *string   `gorm:"column:review_comment"`
 	ReviewedByAdminID string    `gorm:"column:reviewed_by_admin_id"`
 	TraceID           *string   `gorm:"column:trace_id"`
+	CreatedBy         *string   `gorm:"column:created_by"`
+	UpdatedBy         *string   `gorm:"column:updated_by"`
 	CreatedAt         time.Time `gorm:"column:created_at"`
 }
 
