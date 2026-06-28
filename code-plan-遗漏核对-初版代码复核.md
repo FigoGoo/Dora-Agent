@@ -350,3 +350,15 @@
 范围决策：
 - 本切片先堵“Freeze 后进程崩溃导致冻结悬挂到过期”的资金风险；完整 Redis 异步 worker、分布式调度和提交后自动对账仍归 W3，不在本切片假装完成。
 - 对 commit RPC 已开始的任务只进入人工/后续对账状态，不自动释放冻结，避免在业务侧已提交扣费但 Agent 未收到响应时造成反向资金错误。
+
+## 批 F 子切片记录（2026-06-28 · GEN-8）✅
+
+提交：`1097044`（GEN-8）
+验证：`go test -count=1 ./services/business/internal/application/assetcommit ./services/business/internal/application/credit ./services/business/internal/transport/rpc` 通过；`git diff --check` 通过。
+
+- **GEN-8 ✅ 已修**：`CommitGeneratedAssetAndCharge` 支持 artifact 级部分提交；单个 artifact 的 generated slot 缺失、slot 不可提交、对象元数据/校验/etag 不匹配时，该 artifact 返回 `charged_line_items.status=skipped` 且扣费 0，不再导致已成功 artifact 全回滚。
+- 成功 artifact 继续创建 asset/storage/project_asset/commit_item 并按 estimate item 扣费；未结算冻结点走 `releaseUnused` 定额释放，batch `commit_status=partial_committed`，idempotency replay 从 ledger metadata 恢复 skipped 明细。
+
+范围决策：
+- 本切片限定在现有“artifact 与 model_generation estimate item 一一匹配”的契约内做部分结算；当前单个 estimate item 承载 quantity 的定价拆分不在本切片隐式改造。
+- 若所有 artifact 均不可提交，仍沿用原失败语义并不生成空 commit batch，避免把全失败包装成成功。
