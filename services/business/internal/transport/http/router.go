@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	nethttp "net/http"
+	"strings"
 	"time"
 
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
@@ -127,6 +128,10 @@ func errorMiddleware() gin.HandlerFunc {
 		}
 		err := bizerrors.FromError(c.Errors.Last().Err)
 		err.TraceID = logger.TraceID(c.Request.Context())
+		details := err.Details
+		if err.Code == bizerrors.CodeUnauthenticated {
+			details = loginRequiredDetails(c, details)
+		}
 		c.JSON(err.HTTPStatus(), gin.H{
 			"error": gin.H{
 				"code":      err.Code,
@@ -134,8 +139,23 @@ func errorMiddleware() gin.HandlerFunc {
 				"message":   err.Message,
 				"trace_id":  err.TraceID,
 				"retryable": err.Retryable,
-				"details":   err.Details,
+				"details":   details,
 			},
 		})
 	}
+}
+
+func loginRequiredDetails(c *gin.Context, existing map[string]string) map[string]string {
+	details := map[string]string{}
+	for key, value := range existing {
+		details[key] = value
+	}
+	details["login_required"] = "true"
+	details["return_to"] = c.Request.URL.RequestURI()
+	intentPath := c.FullPath()
+	if intentPath == "" {
+		intentPath = c.Request.URL.Path
+	}
+	details["pending_intent"] = strings.ToUpper(c.Request.Method) + " " + intentPath
+	return details
 }

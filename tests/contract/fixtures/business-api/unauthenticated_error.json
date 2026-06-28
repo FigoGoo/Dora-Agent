@@ -11,7 +11,12 @@
     "error": {
       "code": "UNAUTHENTICATED",
       "message": "login required",
-      "retryable": false
+      "retryable": false,
+      "details": {
+        "login_required": "true",
+        "return_to": "/api/projects?page_size=10",
+        "pending_intent": "GET /api/projects"
+      }
     },
     "trace_id": "trace_api_unauthenticated_001"
   },

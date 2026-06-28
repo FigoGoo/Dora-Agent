@@ -272,10 +272,21 @@
 
 ## 批 A 子切片记录（2026-06-28 · INFRA-2）✅
 
-提交：随本切片提交（INFRA-2）
+提交：`3f9a8d9`（INFRA-2）
 验证：`go test ./services/business/internal/infra/repository/businesscore` 通过；`git diff --check` 通过。
 
 - **INFRA-2 ✅ 已固化**：业务 schema baseline 增加 testcontainer 迁移断言，53 张公共列表白名单必须存在 `created_by/updated_by/deleted_at`，10 张 append-only 表白名单必须存在 `trg_append_only` 触发器；测试同时锁定白名单数量，防止新增表绕过公共列/不可变性口径。
 
 范围决策：
 - `skill_review_records` 是唯一显式重叠例外：迁移事实为公共列已补齐，且按 `0020` 作为 Skill 审核事件流禁止 UPDATE/DELETE。
+
+## 批 F 子切片记录（2026-06-28 · ACCT-6 / ACCT-7）✅
+
+提交：随本切片提交（ACCT-6 / ACCT-7）
+验证：`go test ./services/business/internal/transport/http` 通过；`python3 tests/contract/validate_fixtures.py` 通过；`git diff --check` 通过。
+
+- **ACCT-6 ✅ 已固化**：HTTP 入口对 `UNAUTHENTICATED` 统一返回登录边界 details，匿名访问公开读不受影响，匿名点赞等需登录动作保持 401。
+- **ACCT-7 ✅ 已固化**：401 details 增加 `login_required=true`、`return_to` 和 `pending_intent`，匿名点赞集成测试锁定登录后回原路径/原动作的承接字段；business-api fixture 同步字段契约。
+
+范围决策：
+- 本切片只定义业务 API 的登录承接契约，不实现前端 LoginModal 或登录后自动重放动作。

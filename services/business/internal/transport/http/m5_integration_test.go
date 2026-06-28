@@ -53,6 +53,17 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 	if anonymousLike.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous like should require login: status=%d body=%#v", anonymousLike.Code, anonymousLike.Body)
 	}
+	anonymousLikeError := anonymousLike.Body["error"].(map[string]any)
+	anonymousLikeDetails := anonymousLikeError["details"].(map[string]any)
+	if anonymousLikeError["code"] != "UNAUTHENTICATED" || anonymousLikeDetails["login_required"] != "true" {
+		t.Fatalf("anonymous like should return login_required details: %#v", anonymousLike.Body)
+	}
+	if anonymousLikeDetails["return_to"] != "/api/public/works/pubw_seed_storyboard/like" {
+		t.Fatalf("anonymous like should preserve return_to: %#v", anonymousLikeDetails)
+	}
+	if anonymousLikeDetails["pending_intent"] != "POST /api/public/works/:public_work_id/like" {
+		t.Fatalf("anonymous like should preserve pending_intent: %#v", anonymousLikeDetails)
+	}
 
 	userToken := loginUser(t, router, "user1001@dora.local", "local-user-change-me")
 	created := requestJSON(t, router, http.MethodPost, "/api/works", userToken, "idem-http-work-create", map[string]any{
