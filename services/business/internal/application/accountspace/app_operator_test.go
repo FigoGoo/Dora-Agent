@@ -31,6 +31,37 @@ func TestAccountspaceLoginAndLogoutPopulateOperatorColumns(t *testing.T) {
 	requireAccountOperatorColumns(t, app, "auth_sessions", "id = ?", auth.UserID, auth.UserID, auth.SessionID)
 }
 
+func TestAccountspacePersonalRegistrationPopulatesOperatorColumns(t *testing.T) {
+	app := newAccountspaceOperatorTestApp(t)
+	in := RegisterInput{
+		Email: "operator-new@dora.local", Password: "Passw0rd!Operator", DisplayName: "Operator New",
+		Meta: RequestMeta{TraceID: "trace-account-operator-register", IdempotencyKey: "idem-account-operator-register"},
+	}
+	out, err := app.RegisterPersonalAccount(t.Context(), in)
+	if err != nil {
+		t.Fatalf("register personal account: %v", err)
+	}
+	replay, err := app.RegisterPersonalAccount(t.Context(), in)
+	if err != nil {
+		t.Fatalf("register personal account replay: %v", err)
+	}
+	if replay.UserID != out.UserID || replay.CurrentSpaceID != out.CurrentSpaceID {
+		t.Fatalf("registration replay returned different session: first=%#v replay=%#v", out, replay)
+	}
+	requireAccountOperatorColumns(t, app, "business_users", "id = ?", out.UserID, out.UserID, out.UserID)
+	requireAccountOperatorColumns(t, app, "business_spaces", "id = ?", out.UserID, out.UserID, out.CurrentSpaceID)
+	requireAccountOperatorColumns(t, app, "credit_accounts", "id = ?", out.UserID, out.UserID, out.CurrentSpace.CreditAccountID)
+	requireAccountOperatorColumns(t, app, "auth_sessions", "user_id = ? AND current_space_id = ?", out.UserID, out.UserID, out.UserID, out.CurrentSpaceID)
+	emailHash := optionalHash(in.Email)
+	var count int64
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.User{}).Where("email_hash = ?", *emailHash).Count(&count).Error; err != nil {
+		t.Fatalf("count registered user: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("idempotent registration created duplicate users, count=%d", count)
+	}
+}
+
 func TestAccountspaceEnterpriseFlowsPopulateOperatorColumns(t *testing.T) {
 	app := newAccountspaceOperatorTestApp(t)
 	auth := AuthContext{UserID: "usr_1001", SpaceID: "sp_personal_1001", LoginIdentityType: IdentityPersonal, SessionID: "sess_operator_account"}

@@ -234,7 +234,7 @@ func (a *App) RegisterPersonalAccount(ctx context.Context, in RegisterInput) (Au
 		requestHash = security.HashIdentifier(actorKey + ":register")
 	}
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID:       "auth:" + security.HashIdentifier(actorKey),
+		TenantID:       authTenantID(actorKey),
 		Scope:          "auth.register",
 		IdempotencyKey: in.Meta.IdempotencyKey,
 		RequestHash:    requestHash,
@@ -1211,6 +1211,10 @@ func boolString(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func authTenantID(actorKey string) string {
+	return "auth:" + security.HashIdentifier(actorKey)[:59]
 }
 
 func errorCode(err error) string {

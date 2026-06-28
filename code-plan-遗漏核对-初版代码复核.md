@@ -126,6 +126,7 @@
 - **created_by/updated_by operator 回填六片 ✅ 已修**：Skill 目录/审核写路径回填公共列，用户保存/提交/测试结果写 user_id，管理员发布/驳回/废弃写 admin_id，覆盖 `skills`、`skill_versions`、`skill_output_element_schemas`、`skill_test_runs`、`skill_review_records`。
 - **created_by/updated_by operator 回填七片 ✅ 已修**：积分/兑换码写路径回填公共列，用户预估/冻结/释放/Tool 扣费/兑换写 user_id，管理员发放/兑换码创建与禁用写 admin_id；覆盖 `credit_accounts`(余额变更 `updated_by`)、`credit_batches`、`credit_estimates`、`credit_estimate_items`、`credit_freezes`、`credit_freeze_batch_items`、`credit_tool_charge_batches`、`credit_tool_charge_items`、`redeem_code_batches`、`redeem_codes`，并补 `assetcommit` 生成资产提交的积分扣费旁路。
 - **created_by/updated_by operator 回填八片 ✅ 已修**：账户/空间/企业与平台管理员写路径回填公共列，用户登录/会话/切身份/建企业/邀请/成员移除/owner 转让写 user_id，管理员 bootstrap 写 `system_seed`，admin 登录/登出/轮转/创建/禁用/用户状态调整写 admin_id；覆盖 `business_users`、`auth_sessions`、`business_spaces`、`enterprises`、`enterprise_members`、`enterprise_invites`、`credit_accounts`(注册/建企业创建列)、`platform_admins`、`platform_admin_bootstraps`、`platform_admin_sessions`。
+- **注册幂等 tenant 边界 ✅ 已修**：`RegisterPersonalAccount` 的 `tenant_id='auth:'+64位hash` 超过 `varchar(64)` 已收敛为 64 字符内稳定 tenant，注册成功与同 key replay 已由 accountspace 集成测试覆盖。
 
 范围决策（逐条可追溯）：
 - `tenant_id` 未全表加——沿用 `space_id` 为隔离键，避免冗余。
@@ -134,7 +135,6 @@
 
 遗留（后续子切片，不阻塞）：
 - 无应用写入口/种子型表（如部分字典/价格快照）暂不硬补 operator；如需后台管理写入口再按领域操作者语义补齐。
-- `RegisterPersonalAccount` 的注册幂等 `tenant_id='auth:'+64位hash` 超过 `varchar(64)` 是独立既存问题，另行裁决，不混入 operator 回填片。
 - 明细/价格表已纳入软删（可软删停用），如需改 append-only 另议。
 
 ## 批 B 完成记录（2026-06-28 · 安全/越权红线 + SKILL-2）✅
