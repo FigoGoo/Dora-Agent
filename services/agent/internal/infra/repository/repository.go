@@ -137,6 +137,17 @@ func (r *Repository) ListMessages(ctx context.Context, sessionID string, limit, 
 	return messages, err
 }
 
+func (r *Repository) GetAssistantMessageByGenerationTask(ctx context.Context, runID, taskID string) (*model.Message, error) {
+	var message model.Message
+	if err := r.db.WithContext(ctx).
+		Where("run_id = ? AND role = ? AND metadata->>'generation_task_id' = ? AND deleted_at IS NULL", runID, "assistant", taskID).
+		Order("sequence DESC").
+		First(&message).Error; err != nil {
+		return nil, err
+	}
+	return &message, nil
+}
+
 func (r *Repository) UpdateRunStatus(ctx context.Context, id, toStatus, errorCode, errorMessage string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run model.Run
@@ -247,6 +258,16 @@ func (r *Repository) ResolveInterrupt(ctx context.Context, id, toStatus string) 
 func (r *Repository) CreateArtifact(ctx context.Context, artifact *model.Artifact) error {
 	normalizeArtifact(artifact)
 	return r.db.WithContext(ctx).Create(artifact).Error
+}
+
+func (r *Repository) GetArtifactByBusinessRef(ctx context.Context, runID, businessRefID string) (*model.Artifact, error) {
+	var artifact model.Artifact
+	if err := r.db.WithContext(ctx).
+		Where("run_id = ? AND business_ref_id = ? AND deleted_at IS NULL", runID, businessRefID).
+		First(&artifact).Error; err != nil {
+		return nil, err
+	}
+	return &artifact, nil
 }
 
 func (r *Repository) ListArtifacts(ctx context.Context, sessionID string, limit, offset int) ([]model.Artifact, error) {

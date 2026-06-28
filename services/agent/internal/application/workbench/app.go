@@ -2100,12 +2100,15 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 			finalElements = append(finalElements, FinalElementDTO{ElementType: element.ElementType, ElementPayloadJSON: string(elementPayload), DisplayOrder: displayOrderOrDefault(element, int32(i+1))})
 		}
 	}
-	_ = a.updateGenerationTaskStage(ctx, task, 85, "asset_commit_started", map[string]any{"artifact_count": len(commitArtifacts), "final_element_count": len(finalElements)})
-	commit, err := a.gateway.CommitGeneratedAssetAndCharge(ctx, auth, CommitGeneratedAssetAndChargeRequest{
+	commitReq := CommitGeneratedAssetAndChargeRequest{
 		ProjectID: run.ProjectID, SessionID: run.SessionID, RunID: run.ID, FreezeID: freeze.FreezeID,
 		EstimateID: payload.EstimateID, Artifacts: commitArtifacts, FinalElements: finalElements,
 		SafetyEvidence: &payload.SafetyEvidence, IdempotencyKey: idempotencyKey + ":commit",
-	}, traceID)
+	}
+	_ = a.updateGenerationTaskStage(ctx, task, 85, "asset_commit_started", map[string]any{
+		"artifact_count": len(commitArtifacts), "final_element_count": len(finalElements), "commit_request": commitReq,
+	})
+	commit, err := a.gateway.CommitGeneratedAssetAndCharge(ctx, auth, commitReq, traceID)
 	if err != nil {
 		_ = a.appendRunEvent(ctx, run, "asset.save.failed", traceID, map[string]any{
 			"artifact_id": firstArtifactID(result.Artifacts), "resource_type": payload.ModelSnapshot.ResourceType,
@@ -2113,21 +2116,39 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 		})
 		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "asset_commit_failed", idempotencyKey, traceID, err)
 	}
+	if err := a.completeGenerationAfterCommit(ctx, run, task, commit, commitArtifacts, freeze.FreezeID, payload.EstimateID, traceID); err != nil {
+		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "agent_commit_finalize_failed", idempotencyKey, traceID, err)
+	}
+	return a.repo.ResolveInterrupt(ctx, interrupt.ID, state.InterruptStatusResolved)
+}
+
+func (a *App) completeGenerationAfterCommit(ctx context.Context, run *model.Run, task *model.Task, commit AssetCommitDTO, commitArtifacts []CommitArtifactDTO, freezeID, estimateID, traceID string) error {
+	if _, err := a.existingFinalMessageForTask(ctx, run.ID, task.ID); err == nil {
+		return a.completeGenerationTaskStatus(ctx, run.ID, task.ID)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
 	for _, ref := range commit.AssetRefs {
-		if err := a.repo.CreateArtifact(ctx, &model.Artifact{
-			ID: securityID("artref_"), SessionID: run.SessionID, ProjectID: run.ProjectID, RunID: run.ID,
-			ArtifactType: "asset_ref", Status: "final_ref", ElementType: elementTypeForRef(ref, result.Artifacts),
-			Content: jsonObject(map[string]any{
-				"source_artifact_id": ref.SourceArtifactID, "resource_type": ref.ResourceType, "asset_type": ref.AssetType,
-				"elements_summary_json": ref.ElementsSummaryJSON,
-			}),
-			BusinessRefID: ref.AssetID, Visibility: "private", TraceID: traceID,
-		}); err != nil {
-			return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "agent_artifact_ref_failed", idempotencyKey, traceID, err)
+		elementType := elementTypeForCommitRef(ref, commitArtifacts)
+		if _, err := a.repo.GetArtifactByBusinessRef(ctx, run.ID, ref.AssetID); err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err := a.repo.CreateArtifact(ctx, &model.Artifact{
+				ID: securityID("artref_"), SessionID: run.SessionID, ProjectID: run.ProjectID, RunID: run.ID,
+				ArtifactType: "asset_ref", Status: "final_ref", ElementType: elementType,
+				Content: jsonObject(map[string]any{
+					"source_artifact_id": ref.SourceArtifactID, "resource_type": ref.ResourceType, "asset_type": ref.AssetType,
+					"elements_summary_json": ref.ElementsSummaryJSON,
+				}),
+				BusinessRefID: ref.AssetID, Visibility: "private", TraceID: traceID,
+			}); err != nil {
+				return err
+			}
 		}
 		_ = a.appendRunEvent(ctx, run, "asset.save.completed", traceID, map[string]any{
 			"asset_id": ref.AssetID, "artifact_id": ref.SourceArtifactID, "resource_type": ref.ResourceType,
-			"save_status": ref.Status, "elements": []any{map[string]any{"element_type": elementTypeForRef(ref, result.Artifacts)}}, "downloadable": true,
+			"save_status": ref.Status, "elements": []any{map[string]any{"element_type": elementType}}, "downloadable": true,
 			"preview_url": ref.PreviewURL,
 		})
 	}
@@ -2138,7 +2159,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	_ = a.updateGenerationTaskStage(ctx, task, 95, "asset_commit_completed", map[string]any{"charged_points": commit.ChargedPoints, "released_points": commit.ReleasedPoints})
 	if commit.ReleasedPoints > 0 {
 		_ = a.appendRunEvent(ctx, run, "credits.released", traceID, map[string]any{
-			"freeze_id": freeze.FreezeID, "released_points": commit.ReleasedPoints, "reason": "unused_after_asset_commit",
+			"freeze_id": freezeID, "released_points": commit.ReleasedPoints, "reason": "unused_after_asset_commit",
 		})
 	}
 	assets := assetRefsForEvent(commit.AssetRefs)
@@ -2157,7 +2178,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	_ = a.appendRunEvent(ctx, run, "process.snapshot.saved", traceID, map[string]any{
 		"snapshot_id": "snap_" + run.ID, "snapshot_version": time.Now().UTC().Format(time.RFC3339Nano),
 		"last_event_sequence": nextSequence, "messages_count": 1, "assets_count": len(assets), "blackboard_version": "m4",
-		"freeze_id": freeze.FreezeID, "estimate_id": payload.EstimateID,
+		"freeze_id": freezeID, "estimate_id": estimateID,
 	})
 	sequence, err := a.repo.NextMessageSequence(ctx, run.SessionID)
 	if err != nil {
@@ -2166,12 +2187,12 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	finalMessage := &model.Message{
 		ID: securityID("msg_"), SessionID: run.SessionID, RunID: run.ID, Role: "assistant", ContentType: "text/plain",
 		Content: "生成完成，资产已保存。", Sequence: sequence, TraceID: traceID,
-		Metadata: jsonObject(map[string]any{"asset_count": len(assets), "charged_points": commit.ChargedPoints}),
+		Metadata: jsonObject(map[string]any{"asset_count": len(assets), "charged_points": commit.ChargedPoints, "generation_task_id": task.ID}),
 	}
 	if err := a.repo.CreateMessage(ctx, finalMessage); err != nil {
 		return err
 	}
-	if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusCompleted, "", ""); err != nil {
+	if err := a.completeGenerationTaskStatus(ctx, run.ID, task.ID); err != nil {
 		return err
 	}
 	session, _ = a.repo.GetSession(ctx, run.SessionID)
@@ -2185,8 +2206,51 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 		"charged_points": commit.ChargedPoints, "asset_count": len(assets),
 	})
 	_ = a.updateGenerationTaskStage(ctx, task, 100, "completed", map[string]any{"asset_count": len(assets)})
-	_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusCompleted, "")
-	return a.repo.ResolveInterrupt(ctx, interrupt.ID, state.InterruptStatusResolved)
+	return nil
+}
+
+func (a *App) existingFinalMessageForTask(ctx context.Context, runID, taskID string) (*model.Message, error) {
+	return a.repo.GetAssistantMessageByGenerationTask(ctx, runID, taskID)
+}
+
+func (a *App) completeGenerationTaskStatus(ctx context.Context, runID, taskID string) error {
+	current, err := a.repo.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if current.Status == state.RunStatusResuming {
+		if err := a.repo.UpdateRunStatus(ctx, runID, state.RunStatusRunning, "", ""); err != nil {
+			return err
+		}
+		current.Status = state.RunStatusRunning
+	}
+	if current.Status != state.RunStatusCompleted {
+		if err := a.repo.UpdateRunStatus(ctx, runID, state.RunStatusCompleted, "", ""); err != nil {
+			if !errors.Is(err, repository.ErrInvalidStateTransition) {
+				return err
+			}
+			latest, latestErr := a.repo.GetRun(ctx, runID)
+			if latestErr != nil {
+				return latestErr
+			}
+			if latest.Status != state.RunStatusCompleted {
+				return err
+			}
+		}
+	}
+	if err := a.repo.UpdateTaskStatus(ctx, taskID, state.TaskStatusCompleted, ""); err != nil {
+		if !errors.Is(err, repository.ErrInvalidStateTransition) {
+			return err
+		}
+		latest, latestErr := a.repo.GetTask(ctx, taskID)
+		if latestErr != nil {
+			return latestErr
+		}
+		if latest.Status != state.TaskStatusCompleted {
+			return err
+		}
+	}
+	return nil
 }
 
 type refreshedGenerationSafetyEvidence struct {
@@ -2465,6 +2529,12 @@ func (a *App) recoverGenerationTask(ctx context.Context, task model.Task, traceI
 		return nil
 	}
 	if stage == "asset_commit_started" || stage == "asset_commit_completed" {
+		if recovered, err := a.recoverAssetCommitStartedTask(ctx, run, task, detail, traceID); err == nil && recovered {
+			result.Reconcile++
+			return nil
+		} else if err != nil {
+			return err
+		}
 		_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusFailed, "NEEDS_RECONCILIATION")
 		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "NEEDS_RECONCILIATION", "generation task may have reached asset commit before restart")
 		_ = a.appendRunEvent(ctx, run, "generation.task.reconciliation_required", traceID, map[string]any{
@@ -2518,6 +2588,32 @@ func (a *App) recoverGenerationTask(ctx context.Context, task model.Task, traceI
 	})
 	result.Released++
 	return nil
+}
+
+func (a *App) recoverAssetCommitStartedTask(ctx context.Context, run *model.Run, task model.Task, detail map[string]any, traceID string) (bool, error) {
+	req, ok := commitRequestFromTaskDetail(detail)
+	if !ok {
+		return false, nil
+	}
+	auth := authFromGenerationTask(detail, run)
+	commit, err := a.gateway.CommitGeneratedAssetAndCharge(ctx, auth, req, traceID)
+	if err != nil {
+		if isProcessingError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	taskCopy := task
+	if err := a.completeGenerationAfterCommit(ctx, run, &taskCopy, commit, req.Artifacts, req.FreezeID, req.EstimateID, traceID); err != nil {
+		return false, err
+	}
+	if intr, err := a.repo.GetInterrupt(ctx, run.ID, stringFromMap(detail, "confirmation_id")); err == nil && intr.Status == state.InterruptStatusAccepted {
+		_ = a.repo.ResolveInterrupt(ctx, intr.ID, state.InterruptStatusResolved)
+	}
+	_ = a.appendRunEvent(ctx, run, "generation.task.reconciled", traceID, map[string]any{
+		"task_id": task.ID, "stage": stringFromMap(detail, "stage"), "ledger_ref": commit.LedgerRef,
+	})
+	return true, nil
 }
 
 func (a *App) failGenerationTaskAfterFreeze(ctx context.Context, auth AuthContextDTO, run *model.Run, task *model.Task, freeze FreezeCreditsDTO, reason string, idempotencyKey string, traceID string, cause error) error {
@@ -2842,6 +2938,24 @@ func firstArtifactID(artifacts []modeltool.Artifact) string {
 func elementTypeForRef(ref CommittedAssetRefDTO, artifacts []modeltool.Artifact) string {
 	for _, artifact := range artifacts {
 		if artifact.ArtifactID == ref.SourceArtifactID {
+			return artifact.ElementType
+		}
+	}
+	switch ref.ResourceType {
+	case "image":
+		return "image_ref"
+	case "audio", "music":
+		return "audio_ref"
+	case "video":
+		return "video_ref"
+	default:
+		return "file_ref"
+	}
+}
+
+func elementTypeForCommitRef(ref CommittedAssetRefDTO, artifacts []CommitArtifactDTO) string {
+	for _, artifact := range artifacts {
+		if artifact.ArtifactID == ref.SourceArtifactID && artifact.ElementType != "" {
 			return artifact.ElementType
 		}
 	}
@@ -3238,6 +3352,32 @@ func publicConfirmationPayload(payload map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+func commitRequestFromTaskDetail(detail map[string]any) (CommitGeneratedAssetAndChargeRequest, bool) {
+	raw, ok := detail["commit_request"]
+	if !ok || raw == nil {
+		return CommitGeneratedAssetAndChargeRequest{}, false
+	}
+	payload, err := json.Marshal(raw)
+	if err != nil {
+		return CommitGeneratedAssetAndChargeRequest{}, false
+	}
+	var req CommitGeneratedAssetAndChargeRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		return CommitGeneratedAssetAndChargeRequest{}, false
+	}
+	if req.RunID == "" || req.FreezeID == "" || req.IdempotencyKey == "" || len(req.Artifacts) == 0 || req.SafetyEvidence == nil {
+		return CommitGeneratedAssetAndChargeRequest{}, false
+	}
+	return req, true
+}
+
+func isProcessingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToUpper(err.Error()), "PROCESSING")
 }
 
 func eventDTO(event model.Event) EventDTO {

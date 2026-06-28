@@ -14,14 +14,14 @@
 
 > 2026-06-29 状态回填：上述 8 个面中的 INFRA-1/13、GEN-5、ACCT-3/1b/8、SKILL-2、TURN-8/7/6/10、GEN-7、INFRA-9、INFRA-11、WORK-3/4/8/9、INFRA-4/2/3/5/6/7/10、ACCT-4/6/7、GEN-4/8、operator 回填、注册幂等 tenant 边界、软删唯一约束复用策略均已由后续切片关闭并推送。当前继续推进时以本文下方完成记录、`docs/contracts/**` active 契约和机器可校验事实源为准。
 >
-> 仍未冒充完成的边界：GEN-6 Redis worker 第一阶段已补；提交后自动对账/自动 reconciliation 仍归后续 W3，不在本文假装完成。
+> GEN-6 后续回填：Redis worker 第一阶段与提交后自动对账 / automatic reconciliation 已补齐；进入 `asset_commit_started/completed` 的陈旧任务会 replay `CommitGeneratedAssetAndCharge` 幂等键并补齐 Agent 侧 artifact/message/task/run/interrupt 收尾，缺少 `commit_request` 的旧任务仍保留人工对账保护。
 
 ## 统计
 
 | 当前结论 | 数量（按最新完成记录） | 含义 |
 |---|---|---|
 | ✅ CLOSED / FIXED / NA | 原 51 项主体已收口 | P0–P3 已通过代码、契约、文档或测试固化关闭 |
-| 🟡 W3 后续能力边界 | 1 | GEN-6 提交后自动对账 / 自动 reconciliation |
+| 🟡 W3 后续能力边界 | 0 | GEN-6 Redis worker + 提交后自动对账已闭合 |
 | 🔴 当前阻塞 MISSING | 0 | W1/P0 承重墙级缺口已清完 |
 
 > 接缝组（SEAM-1~7 + 2 附录）单独结论：**100% 已清**，下表不再展开，仅在末尾备忘。
@@ -40,11 +40,11 @@
 | **SKILL-2 ✅** | Skill 输出元素 schema 仅 `element_type/schema_json/required`，缺草稿/最终双态（双态只活在字典表，per-skill 约束拿不到，Skill 完整定义被削）| `db/.../0007_skill_catalog_review.up.sql:67-76` | 批 B：FP1–FP4 全链闭环 |
 | **ACCT-8 ✅** | 平台管理员越权红线本域未对称成文/强制（admin 与 user 独立鉴权，无"管理员不得跨入业务空间归属"红线检查）| `accountspace/app.go` + `admin/app.go` | 批 B：成文 + 测试固化 |
 
-## 🟠 P1 — 高危初版缺口（GEN-6 留 W3 能力边界）
+## 🟠 P1 — 高危初版缺口（当前均已闭合）
 
 | ID | 缺口 | 证据 | 应落 / 关联 |
 |---|---|---|---|
-| **GEN-6 🟡** | 生成全链同步跑在确认 HTTP 请求内，无异步 worker / 重启恢复 / 对账；崩在 Freeze 后 commit 前 → 冻结悬挂至 `expires_at` | `api/http/workbench_handlers.go:146`→`app.go:973`→`1701`(全程同步)；全仓无 worker/recover | W1 已补恢复/对账底座；Redis worker 第一阶段已补；提交后自动对账仍归后续 W3 |
+| **GEN-6 ✅** | 生成全链同步跑在确认 HTTP 请求内，无异步 worker / 重启恢复 / 对账；崩在 Freeze 后 commit 前 → 冻结悬挂至 `expires_at` | `api/http/workbench_handlers.go:146`→`app.go:973`→`1701`(全程同步)；全仓无 worker/recover | 批 D：恢复/对账底座 + Redis worker + 提交后自动对账 |
 | **TURN-8 ✅** | `SnapshotResponse` 缺 `interrupt` 字段 → 断线在待确认态恢复不出确认面板，run 卡死 | `agent workbench/app.go:636-645,1136-1139` | 批 C：snapshot interrupt 恢复 |
 | **GEN-7 ✅** | `EstimateGenerationCredits` 唯一未用幂等卫的写 RPC，确认前重复预估插孤儿 `credit_estimates` | `credit/app.go:308-339,891`(无 guard.Begin) | 批 D：预估幂等卫 |
 | **INFRA-9 ✅** | Agent 运行期配置加载链断开：`agent_runtime_configs` 表 + `GetActiveRuntimeConfig` 都在，但运行期从不调用，`configVersion` 仅作字符串标签（配置化只有壳）| `config.go` + `main.go:47` + 仅测试调用 loader | 批 D：运行期配置版本落库 |
@@ -96,7 +96,7 @@
 
 ## 与后续工作线关联
 
-- **W3 Redis** 已补 **GEN-6** Redis worker 第一阶段；后续继续推进提交后自动对账/自动 reconciliation。W1 已完成恢复/对账第一阶段，不再把 Freeze 后崩溃悬挂风险留到过期释放。
+- **W3 Redis** 已补 **GEN-6** Redis worker 第一阶段与提交后自动对账/自动 reconciliation。W1 已完成恢复/对账闭环，不再把 Freeze 后崩溃悬挂风险留到过期释放，也不再把 commit 已开始的任务默认推人工对账。
 - **W4 测试** 不再按本文顶部旧 MISSING 追单；应围绕 W2/W3 新闭环、runtime/safety、TurnLoop 24 场景和管理端全线继续扩面。
 - **W2 闭环** 核对时以本表为断点清单逐域走查。
 
@@ -105,7 +105,7 @@
 1. **批 A 数据底座先行 ✅**：INFRA-1/13、INFRA-2、operator 回填、软删唯一约束复用评估已关闭。
 2. **批 B 安全/越权红线 ✅**：GEN-5、ACCT-3/1b/8、SKILL-2 FP1–FP4 已关闭。
 3. **批 C 确认恢复闭环 ✅**：TURN-8/7/6/10 已关闭。
-4. **批 D 配合 W3 🟡**：GEN-7、ACCT-4、INFRA-9、GEN-4 已关闭；GEN-6 已完成恢复/对账第一阶段与 Redis worker 第一阶段，提交后自动对账仍归后续 W3。
+4. **批 D 配合 W3 ✅**：GEN-7、ACCT-4、INFRA-9、GEN-4 已关闭；GEN-6 已完成恢复/对账底座、Redis worker 第一阶段与提交后自动对账。
 5. **批 E 可观测体系 ✅**：INFRA-3/4/5/6/7/10 已关闭。
 6. **批 F 收尾 ✅**：WORK-3/4/5/7/8/9/10、SKILL-9/10、ACCT-6/7、GEN-8、TURN-4、INFRA-11/14 已关闭。
 
@@ -371,8 +371,21 @@
 - Redis 队列采用 ready list + processing list，避免 worker 弹出后进程崩溃导致 job 静默丢失；重投递时若 DB 中已有 running `generation_asset_commit` task，则先进入现有 `RecoverGenerationTasks` 恢复/对账逻辑，避免二次冻结/二次提交。
 
 范围决策：
-- 本切片只把确认后的生成长链路从 HTTP 请求搬到 Redis worker，并补重投递/防重复基础；提交后自动对账仍沿用第一阶段 `NEEDS_RECONCILIATION`，不在本切片冒充自动 reconciliation。
+- 本切片只把确认后的生成长链路从 HTTP 请求搬到 Redis worker，并补重投递/防重复基础；提交后自动对账由下一节补齐。
 - Redis 密码不进入 etcd 非敏感配置 allowlist；本地默认 `AGENT_GENERATION_QUEUE=inline`，避免开发环境被 Redis 强依赖阻断。
+
+## 批 D 子切片记录（2026-06-29 · GEN-6 提交后自动对账）✅
+
+提交：本切片（GEN-6 automatic reconciliation）
+验证：`go test -count=1 ./services/agent/internal/application/workbench ./services/agent/internal/infra/repository ./services/agent/cmd/agent` 通过；`git diff --check` 通过。
+
+- **GEN-6 提交后自动对账 ✅ 已补**：`asset_commit_started` 阶段持久化完整 `commit_request`；重启恢复或 Redis redelivery 遇到 `asset_commit_started/completed` 陈旧任务时，使用原 `CommitGeneratedAssetAndCharge.IdempotencyKey` replay 业务侧提交/扣费结果，并补齐 Agent 侧 `agent_artifacts`、最终 assistant message、run/task 终态和 accepted interrupt resolved。
+- 恢复 replay 成功后按 `business_ref_id` 与 `generation_task_id` 幂等去重，避免重复创建 asset_ref artifact 或最终消息；run/task 已完成的重复恢复视为 no-op。
+- 缺少 `commit_request` 的历史任务仍走 `NEEDS_RECONCILIATION` 人工保护；业务侧返回 processing 时也不释放冻结，避免 commit 已在业务侧进行中时造成资金反向错误。
+
+范围决策：
+- 不在 commit started 后自动 `ReleaseFrozenCredits`；是否扣费/释放以业务侧 `CommitGeneratedAssetAndCharge` 幂等 replay 结果为准。
+- 本切片只补确认后生成资产提交链路的自动对账，不新增跨服务主动补偿调度器；触发点沿用 Agent 启动恢复和 Redis worker redelivery。
 
 ## 批 F 子切片记录（2026-06-28 · GEN-8）✅
 

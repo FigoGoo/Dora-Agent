@@ -446,6 +446,130 @@ func TestRecoverGenerationTasksReleasesFrozenTaskAfterRestart(t *testing.T) {
 	}
 }
 
+func TestRecoverGenerationTasksReplaysAssetCommitAndCompletesIdempotently(t *testing.T) {
+	app, gateway := newM6ServiceApp(t)
+	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
+	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "recover commit", IdempotencyKey: "idem-recover-commit-session"}, "trace-recover-commit")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	run, err := app.CreateRun(t.Context(), auth, CreateRunRequest{
+		SessionID: session.SessionID, ProjectID: "prj_active_1001", IdempotencyKey: "idem-recover-commit-run",
+		UserInput: UserInputDTO{ClientMessageID: "cm_recover_commit", ContentType: "text", Text: "lookup with web fetch"},
+	}, "trace-recover-commit")
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	interrupt, err := app.repo.GetRequiredInterrupt(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("get required interrupt: %v", err)
+	}
+	if err := app.repo.ResolveInterrupt(t.Context(), interrupt.ID, state.InterruptStatusAccepted); err != nil {
+		t.Fatalf("accept interrupt: %v", err)
+	}
+	if err := app.repo.UpdateRunStatus(t.Context(), run.RunID, state.RunStatusResuming, "", ""); err != nil {
+		t.Fatalf("mark run resuming: %v", err)
+	}
+	stale := time.Now().UTC().Add(-10 * time.Minute)
+	commitReq := CommitGeneratedAssetAndChargeRequest{
+		ProjectID: session.ProjectID, SessionID: session.SessionID, RunID: run.RunID, FreezeID: "frz_recover_commit",
+		EstimateID: "est_generation_m6", IdempotencyKey: "idem-recover-commit-confirm:commit",
+		SafetyEvidence: &businessagent.SafetyEvidenceDTO{
+			SafetyEvidenceId: "se_recover_commit", Scene: "generation", Result_: state.SafetyResultPassed,
+			TargetType: "prompt", EvaluatedObjectDigest: "digest_recover_commit", PolicyVersion: "policy_test",
+			EvidenceVersion: "v1", EvaluatedAt: time.Now().UTC().Format(time.RFC3339Nano), TraceId: "trace-recover-commit",
+		},
+		Artifacts: []CommitArtifactDTO{{
+			ArtifactID: "artifact_recover_commit", ResourceType: "image", ElementType: "image_ref",
+			EstimateItemID: "est_item_generation_m6", ToolName: "model_generation", ToolType: "image", ChargeQuantity: 1,
+			StorageObjectRef: CommitStorageObjectRefDTO{
+				ObjectKey: "local/recover/artifact_recover_commit", Bucket: "dora-public", ContentType: "image/png",
+				SizeBytes: 123, Checksum: "sha256:recover", Etag: "etag-recover",
+			},
+		}},
+		FinalElements: []FinalElementDTO{{ElementType: "image_ref", ElementPayloadJSON: `{"artifact_id":"artifact_recover_commit"}`, DisplayOrder: 1}},
+	}
+	task := &model.Task{
+		ID: "task_recover_commit_generation", RunID: run.RunID, TaskType: "generation_asset_commit", ResourceType: "image",
+		Status: state.TaskStatusRunning, ProgressPercent: 85,
+		ProgressDetail: jsonObject(map[string]any{
+			"stage": "asset_commit_started", "freeze_id": commitReq.FreezeID, "frozen_points": int64(10),
+			"estimate_id": commitReq.EstimateID, "idempotency_key": "idem-recover-commit-confirm",
+			"confirmation_id": interrupt.ID, "commit_request": commitReq,
+			"auth": map[string]any{"actor_user_id": auth.ActorUserID, "login_identity_type": auth.LoginIdentityType, "space_id": auth.SpaceID},
+		}),
+		StartedAt: &stale, UpdatedAt: stale, TraceID: "trace-recover-commit",
+	}
+	if err := app.repo.CreateTask(t.Context(), task); err != nil {
+		t.Fatalf("create stale commit task: %v", err)
+	}
+	gateway.calls = nil
+
+	result, err := app.RecoverGenerationTasks(t.Context(), time.Minute, 10, "trace-recover-commit")
+	if err != nil {
+		t.Fatalf("recover generation tasks: %v", err)
+	}
+	if result.Scanned != 1 || result.Reconcile != 1 || result.Released != 0 || result.ReleaseFails != 0 {
+		t.Fatalf("unexpected recovery result: %#v", result)
+	}
+	if !containsCall(gateway.calls, "CommitGeneratedAssetAndCharge") {
+		t.Fatalf("recovery should replay asset commit, calls=%v", gateway.calls)
+	}
+	if containsCall(gateway.calls, "ReleaseFrozenCredits") {
+		t.Fatalf("recovery after asset commit must not release frozen credits, calls=%v", gateway.calls)
+	}
+	updatedRun, err := app.repo.GetRun(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("get recovered run: %v", err)
+	}
+	if updatedRun.Status != state.RunStatusCompleted {
+		t.Fatalf("expected completed run after replay, got %s", updatedRun.Status)
+	}
+	updatedTask, err := app.repo.GetTask(t.Context(), task.ID)
+	if err != nil {
+		t.Fatalf("get recovered task: %v", err)
+	}
+	if updatedTask.Status != state.TaskStatusCompleted {
+		t.Fatalf("expected completed task after replay, got %s", updatedTask.Status)
+	}
+	updatedInterrupt, err := app.repo.GetInterrupt(t.Context(), run.RunID, interrupt.ID)
+	if err != nil {
+		t.Fatalf("get recovered interrupt: %v", err)
+	}
+	if updatedInterrupt.Status != state.InterruptStatusResolved {
+		t.Fatalf("expected resolved interrupt after replay, got %s", updatedInterrupt.Status)
+	}
+	artifacts, err := app.repo.ListArtifacts(t.Context(), session.SessionID, 20, 0)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	messages, err := app.repo.ListMessages(t.Context(), session.SessionID, 20, 0)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	artifactCount := len(artifacts)
+	messageCount := len(messages)
+
+	gateway.calls = nil
+	if recovered, err := app.recoverAssetCommitStartedTask(t.Context(), updatedRun, *updatedTask, jsonMap(updatedTask.ProgressDetail), "trace-recover-commit-retry"); err != nil || !recovered {
+		t.Fatalf("second replay should be idempotent, recovered=%v err=%v", recovered, err)
+	}
+	artifactsAfter, err := app.repo.ListArtifacts(t.Context(), session.SessionID, 20, 0)
+	if err != nil {
+		t.Fatalf("list artifacts after second replay: %v", err)
+	}
+	messagesAfter, err := app.repo.ListMessages(t.Context(), session.SessionID, 20, 0)
+	if err != nil {
+		t.Fatalf("list messages after second replay: %v", err)
+	}
+	if len(artifactsAfter) != artifactCount || len(messagesAfter) != messageCount {
+		t.Fatalf("second replay duplicated artifacts/messages: artifacts %d -> %d messages %d -> %d", artifactCount, len(artifactsAfter), messageCount, len(messagesAfter))
+	}
+	if containsCall(gateway.calls, "ReleaseFrozenCredits") {
+		t.Fatalf("second replay must not release frozen credits, calls=%v", gateway.calls)
+	}
+}
+
 func TestPermissionLossCancelsActiveRunBeforeConfirm(t *testing.T) {
 	app, gateway := newM6ServiceApp(t)
 	gateway.StaticGateway.Space = SpaceContextDTO{
