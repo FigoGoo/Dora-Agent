@@ -50,6 +50,40 @@ func TestAdminUserDetailDoesNotExposeBusinessOwnership(t *testing.T) {
 	}
 }
 
+func TestAdminUserStatusChangeDoesNotMutateUserPassword(t *testing.T) {
+	app := newAdminTestApp(t)
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.PlatformAdmin{}).
+		Where("id = ?", "adm_root").Update("must_rotate_password", false).Error; err != nil {
+		t.Fatalf("prep admin: %v", err)
+	}
+	auth := AdminAuth{AdminID: "adm_root", Account: "admin@dora.local", SessionID: "admin-session"}
+	var before businesscore.User
+	if err := app.repo.DB().WithContext(t.Context()).Where("id = ?", "usr_1001").First(&before).Error; err != nil {
+		t.Fatalf("load user before status change: %v", err)
+	}
+	preview, err := app.PreviewSetUserStatus(t.Context(), UserStatusInput{
+		Auth: auth, UserID: "usr_1001", TargetStatus: "disabled", Reason: "security review",
+		Meta: RequestMeta{TraceID: "trace-user-status-preview", IdempotencyKey: "idem-user-status-preview"},
+	})
+	if err != nil {
+		t.Fatalf("preview set user status: %v", err)
+	}
+	_, err = app.ConfirmSetUserStatus(t.Context(), UserStatusInput{
+		Auth: auth, UserID: "usr_1001", TargetStatus: "disabled", PreviewToken: preview.PreviewToken, Reason: "security review",
+		Meta: RequestMeta{TraceID: "trace-user-status-confirm", IdempotencyKey: "idem-user-status-confirm"},
+	})
+	if err != nil {
+		t.Fatalf("confirm set user status: %v", err)
+	}
+	var after businesscore.User
+	if err := app.repo.DB().WithContext(t.Context()).Where("id = ?", "usr_1001").First(&after).Error; err != nil {
+		t.Fatalf("load user after status change: %v", err)
+	}
+	if after.PasswordHash != before.PasswordHash {
+		t.Fatalf("WORK-8 redline violated: admin user status flow mutated user password hash")
+	}
+}
+
 func TestDisableAdminCannotRemoveLastActiveAdmin(t *testing.T) {
 	app := newAdminTestApp(t)
 	err := app.repo.DB().WithContext(t.Context()).Transaction(func(tx *gorm.DB) error {

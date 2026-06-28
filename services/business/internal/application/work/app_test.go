@@ -92,6 +92,72 @@ func TestShareWorkPreviewConfirmCreatesSanitizedPublicSnapshot(t *testing.T) {
 	}
 }
 
+func TestPublicWorkLikeInvariantsAreStable(t *testing.T) {
+	app := newWorkTestApp(t, nil)
+	auth := accountspace.AuthContext{UserID: "usr_1001", SpaceID: "sp_personal_1001", LoginIdentityType: "personal"}
+	created, err := app.CreateWork(t.Context(), CreateWorkInput{
+		Auth: auth, Meta: workMeta("trace-like-invariant-create", "idem-like-invariant-create"),
+		ProjectID: "prj_active_1001", Title: "Like invariant work", AssetIDs: []string{"ast_generated_1001"}, CoverAssetID: "ast_generated_1001",
+		Category: "storyboard",
+	})
+	if err != nil {
+		t.Fatalf("create work: %v", err)
+	}
+	preview, err := app.PreviewShareWork(t.Context(), PreviewShareWorkInput{
+		Auth: auth, WorkID: created.Work.WorkID, PublicTitle: "Like invariant public",
+		SafetyEvidence: workShareEvidence("trace-like-invariant-share", "Like invariant public", "", nil),
+	})
+	if err != nil {
+		t.Fatalf("preview share: %v", err)
+	}
+	shared, err := app.ConfirmShareWork(t.Context(), ConfirmShareWorkInput{
+		Auth: auth, Meta: workMeta("trace-like-invariant-share", "idem-like-invariant-share"),
+		WorkID: created.Work.WorkID, PreviewToken: preview.PreviewToken,
+	})
+	if err != nil {
+		t.Fatalf("confirm share: %v", err)
+	}
+
+	unlikeFirst, err := app.UnlikePublicWork(t.Context(), LikePublicWorkInput{
+		Auth: auth, Meta: workMeta("trace-like-invariant-unlike-first", "idem-like-invariant-unlike-first"), PublicWorkID: shared.PublicWorkID,
+	})
+	if err != nil || unlikeFirst.LikeCount != 0 {
+		t.Fatalf("first unlike must keep count non-negative, got %#v err=%v", unlikeFirst, err)
+	}
+	liked, err := app.LikePublicWork(t.Context(), LikePublicWorkInput{
+		Auth: auth, Meta: workMeta("trace-like-invariant-like", "idem-like-invariant-like"), PublicWorkID: shared.PublicWorkID,
+	})
+	if err != nil || !liked.Liked || liked.LikeCount != 1 {
+		t.Fatalf("like must increment once, got %#v err=%v", liked, err)
+	}
+	likedAgain, err := app.LikePublicWork(t.Context(), LikePublicWorkInput{
+		Auth: auth, Meta: workMeta("trace-like-invariant-like-again", "idem-like-invariant-like-again"), PublicWorkID: shared.PublicWorkID,
+	})
+	if err != nil || !likedAgain.Liked || likedAgain.LikeCount != 1 {
+		t.Fatalf("duplicate like must not increment, got %#v err=%v", likedAgain, err)
+	}
+	unliked, err := app.UnlikePublicWork(t.Context(), LikePublicWorkInput{
+		Auth: auth, Meta: workMeta("trace-like-invariant-unlike", "idem-like-invariant-unlike"), PublicWorkID: shared.PublicWorkID,
+	})
+	if err != nil || unliked.Liked || unliked.LikeCount != 0 {
+		t.Fatalf("unlike must decrement once, got %#v err=%v", unliked, err)
+	}
+	unlikedAgain, err := app.UnlikePublicWork(t.Context(), LikePublicWorkInput{
+		Auth: auth, Meta: workMeta("trace-like-invariant-unlike-again", "idem-like-invariant-unlike-again"), PublicWorkID: shared.PublicWorkID,
+	})
+	if err != nil || unlikedAgain.Liked || unlikedAgain.LikeCount != 0 {
+		t.Fatalf("duplicate unlike must keep count at zero, got %#v err=%v", unlikedAgain, err)
+	}
+	var likeRows int64
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.WorkLike{}).
+		Where("public_work_id = ? AND user_id = ?", shared.PublicWorkID, auth.UserID).Count(&likeRows).Error; err != nil {
+		t.Fatalf("count work likes: %v", err)
+	}
+	if likeRows != 1 {
+		t.Fatalf("expected one reaction row per public work/user, got %d", likeRows)
+	}
+}
+
 func TestWorkCategoryMustUseActiveDictionary(t *testing.T) {
 	app := newWorkTestApp(t, nil)
 	auth := accountspace.AuthContext{UserID: "usr_1001", SpaceID: "sp_personal_1001", LoginIdentityType: "personal"}

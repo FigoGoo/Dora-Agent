@@ -13,7 +13,6 @@
       "trace_id": "trace_element_types_001",
       "source": "agent_service"
     },
-    "page_size": 20,
     "schema_version": "2026-06-28"
   },
   "response": {
@@ -37,6 +36,7 @@
   },
   "assertions": [
     "Agent consumes the canonical asset element types through RPC rather than hardcoding them",
-    "schema_hint_json and render_hint_json are present for every type"
+    "schema_hint_json and render_hint_json are present for every type",
+    "ListAssetElementTypes is the dictionary exception to the generic list default: missing page_size defaults to 50, max 100"
   ]
 }

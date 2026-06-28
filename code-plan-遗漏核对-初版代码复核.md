@@ -156,7 +156,7 @@
 
 ## 批 C 完成记录（2026-06-28 · 确认恢复闭环）✅
 
-提交：本提交（TURN-8/7/6/10）
+提交：`7de584c`（TURN-8/7/6/10）
 验证：`go test ./services/agent/internal/application/workbench ./services/agent/internal/api/http ./services/agent/internal/runtime/turnloop` 通过；`python3 tests/agent/agui/validate_fixtures.py` 通过。
 
 - **TURN-8 ✅ 已修**：`SnapshotResponse` 增加 `interrupt`，断线恢复时从 `agent_interrupts` 的 required interrupt + 最近 `confirmation.required` 事件恢复确认面板；`confirmation_payload` 仅暴露前端可用字段，过滤模型快照、安全证据、预估详情、供应商运行引用、Prompt 和密钥引用。
@@ -171,7 +171,7 @@
 
 ## 批 D 子切片记录（2026-06-28 · GEN-7）✅
 
-提交：待提交（GEN-7）
+提交：`33b835e`（GEN-7）
 验证：`go test ./services/business/internal/application/credit` 通过。
 
 - **GEN-7 ✅ 已修**：`EstimateGenerationCredits` 接入业务幂等卫，scope=`credit.estimate_generation`；同 key 同请求 replay 返回原 `estimate_id`，不再重复插入 `credit_estimates` / 孤儿预估；同 key 不同模型/数量/tool items/安全证据 digest 返回 `IDEMPOTENCY_CONFLICT`。
@@ -182,7 +182,7 @@
 
 ## 批 D 子切片记录（2026-06-28 · INFRA-9）✅
 
-提交：待提交（INFRA-9）
+提交：`4607b04`（INFRA-9）
 验证：`go test ./services/agent/internal/application/workbench ./services/agent/internal/api/http` 通过。
 
 - **INFRA-9 ✅ 已修**：创建 run 时优先读取 `agent_runtime_configs` 中 `config_key=agent.default` 的 active 版本，并写入 `agent_runs.runtime_config_version`；无 active 配置时才回退构造参数 `configVersion`。
@@ -192,7 +192,7 @@
 
 ## 批 F 子切片记录（2026-06-28 · WORK-4）✅
 
-提交：待提交（WORK-4）
+提交：`1305d44`（WORK-4）
 验证：`go test ./services/business/internal/application/admin` 通过。
 
 - **WORK-4 ✅ 已修**：`DisableAdmin` 在事务内锁定目标管理员并检查除目标外仍存在 active 管理员；若目标是最后一个 active 管理员，返回 `STATE_CONFLICT`，避免后台账号全部锁死。
@@ -202,7 +202,7 @@
 
 ## 批 F 子切片记录（2026-06-28 · WORK-3）✅
 
-提交：待提交（WORK-3）
+提交：`e168bf4`（WORK-3）· `711a48b`（测试同步）
 验证：`go test ./services/business/internal/application/work` 通过。
 
 - **WORK-3 ✅ 已修**：`CreateWork` / `UpdateWork` 对非空 `category` 校验 `work_categories.category_key` 且必须为 active；非法自由字符串返回 `INVALID_ARGUMENT`。
@@ -212,7 +212,7 @@
 
 ## 批 E 子切片记录（2026-06-28 · INFRA-6 / INFRA-7）✅
 
-提交：待提交（INFRA-6/7）
+提交：`aba4465`（INFRA-6/7）
 验证：`go test ./services/business/internal/pkg/errors ./services/agent/internal/apperror ./services/business/internal/transport/http ./services/agent/internal/api/http` 通过；`python3 tests/agent/agui/validate_fixtures.py` 通过。
 
 - **INFRA-6 ✅ 已修**：业务错误模型增加 `Category` 维度与 `CategoryForCode` 映射，覆盖 validation/auth/permission/not_found/state/idempotency/dependency/internal；HTTP 错误响应新增 `error.category`，保留原 `error.code`。
@@ -220,3 +220,17 @@
 
 范围决策：
 - 不重命名现有错误码，不改变 HTTP status；分类作为向后兼容新增字段，旧前端继续按 `code` 读取。
+
+## 批 F 子切片记录（2026-06-28 · P3 显式化防回归）✅
+
+提交：待提交（TURN-4 / INFRA-14 / WORK-8 / WORK-10）
+验证：`go test ./services/business/internal/application/work ./services/business/internal/application/admin` 通过；`python3 tests/contract/validate_fixtures.py` 通过；`git diff --check` 通过。
+
+- **TURN-4 ✅ 已修**：AG-UI 前端渲染规则明确 `timestamp` 仅用于展示和排障，不得作为排序依据、补偿游标或缺口判定条件；排序/合并仍以同一 `run_id` 内的 `sequence` 为准。
+- **INFRA-14 ✅ 已修**：`ListAssetElementTypes` fixture 改为缺省 `page_size`，并在 RPC 契约与 assertion 中标明该字典读取例外默认 50、最大 100，区别于通用列表默认 10。
+- **WORK-8 ✅ 已固化**：安全规范补“管理员不得设置/重置/改写业务用户密码”；`ConfirmSetUserStatus` 防回归测试验证后台用户状态流不改写 `business_users.password_hash`。
+- **WORK-10 ✅ 已固化**：业务数据模型成文“同公开作品同用户唯一反应行、重复点赞/取消点赞幂等、`like_count` 不为负”；应用测试覆盖先取消、重复点赞、重复取消和唯一行不变量。
+
+范围决策：
+- 本切片不引入防刷频控；WORK-10 原缺口中的频控属于产品/风控策略，不用隐式限流冒充闭环。
+- 不新增管理员改用户密码入口；WORK-8 只固化红线并验证现有状态治理流程不会误触密码字段。

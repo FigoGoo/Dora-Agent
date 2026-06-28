@@ -244,6 +244,7 @@ process.snapshot.saved
 
 - `event_id` 去重，重复事件忽略。
 - 同一 `run_id` 内按 `sequence` 合并，发现缺口后触发补偿查询。
+- `timestamp` 仅用于展示和排障，不得作为排序依据、补偿游标或缺口判定条件。
 - 未知事件忽略并记录 debug 日志，不崩溃。
 - Thinking 只展示公开处理状态，不展示模型内部推理链路。
 - payload 不得包含 API Key、供应商原始密钥、内部成本、系统 Prompt、完整推理链路。
