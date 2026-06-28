@@ -316,7 +316,7 @@
 
 ## 批 E 子切片记录（2026-06-28 · INFRA-5）✅
 
-提交：`TBD`（INFRA-5）
+提交：`ef26697`（INFRA-5）
 验证：`go test ./internal/tracectx` 通过；`go test ./services/business/internal/transport/http ./services/agent/internal/api/http ./services/business/internal/transport/rpc ./services/business/internal/bootstrap ./services/agent/internal/infra/rpc` 通过；`go test ./services/business/internal/infra/logger ./services/agent/internal/observability` 通过；`git diff --check` 通过。
 
 - **INFRA-5 ✅ 已修**：新增公共 `internal/tracectx`，HTTP 入口优先解析 W3C `traceparent`，兼容旧 `X-Trace-Id`/`X-Request-Id`；响应同时返回 `traceparent` 与 `X-Trace-Id`。
