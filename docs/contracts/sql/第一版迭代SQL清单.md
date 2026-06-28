@@ -1,18 +1,20 @@
 # 第一版迭代 SQL 清单
 
-状态：draft
+状态：active
 owner：文档与契约责任域；业务服务责任域和 Agent 服务责任域按数据库边界维护
 更新时间：2026-06-28
 适用范围：Dora-Agent 第一版本地开发 SQL 迭代脚本计划
 
 ## 成熟度复核
 
-当前成熟度：draft，不升 `active`。  
-使用方式：可作为业务库和 Agent 库首批 migration 落脚、脚本分组、schema 策略和验证要求输入；实际脚本以 `db/migrations/iterations/**` 为准。
+当前成熟度：active。
+使用方式：作为业务库和 Agent 库首批 migration 落脚、脚本分组、schema 策略和验证要求事实源；实际脚本以 `db/migrations/iterations/**` 为准。
 
 已补齐项：实际 migration 目录、PostgreSQL schema 策略、up/down 脚本落脚和 SQL lint 要求已在本文冻结。
 
-未冻结项：本地 PostgreSQL up/down 执行证据、服务级验收报告和线上迁移操作记录尚未固化，因此本文仍保持 `draft`。
+运行证据：`tests/reports/m1-technical-baseline-report.md` 已记录 Testcontainers PostgreSQL migration up/down、seed、无外键和 DB 边界通过；`tests/reports/m6-service-acceptance-report.md` 已记录 `scripts/validate-m6.sh` 通过，覆盖 migration up/down 成对、seed 可执行、无数据库级外键、业务库不出现 Agent runtime 表、Agent 库不出现业务事实表。
+
+后续非阻断项：线上 CentOS 8 单机迁移操作记录属于发布阶段证据，后续写入 release 或发布报告，不阻断本地契约 `active` 状态。
 
 ## SQL 规则
 
@@ -30,7 +32,7 @@ db/migrations/iterations/2026-06-27-business-core/
   business/
     0001_common_idempotency_audit.up.sql
     ...
-    0018_work_notification_alignment.down.sql
+    0021_skill_output_element_structure.down.sql
 db/migrations/iterations/20260627_agent_runtime/
   agent/
     001_create_agent_runtime.up.sql
@@ -59,6 +61,9 @@ db/migrations/iterations/20260627_agent_runtime/
 | `0016_credit_asset_close_loop_alignment` | `credit_freeze_batch_items`、`generated_asset_object_slots` | implemented |
 | `0017_redeem_code_account_contract` | 兑换码账户契约补丁 | implemented |
 | `0018_work_notification_alignment` | 作品和通知对齐补丁 | implemented |
+| `0019_common_columns_softdelete` | 业务库公共列基线：53 张可变业务表补 `created_by`、`updated_by`、`deleted_at` | implemented |
+| `0020_audit_append_only` | 审计、流水、日志类 append-only 表触发器 | implemented |
+| `0021_skill_output_element_structure` | `skill_output_element_schemas` 输出元素结构字段补齐 | implemented |
 
 ## Agent 库首批表
 
@@ -84,8 +89,8 @@ db/migrations/iterations/20260627_agent_runtime/
 - Agent DB 边界测试：不得出现积分、业务资产事实、企业成员、作品公开状态。
 - 业务 DB 边界测试：不得出现 Agent run/message/event/tool_call 内部状态。
 
-## 后续证据
+## 运行证据与后续发布记录
 
-- 需要补充本地 PostgreSQL 执行 `business` 和 `agent` up/down 的命令、输出和数据库版本。
-- 需要补充 SQL lint 输出，证明无 `FOREIGN KEY`、`REFERENCES` 和 `CREATE SCHEMA`。
-- 需要补充线上 CentOS 8 单机迁移操作记录。
+- 本地 PostgreSQL up/down：见 `tests/reports/m1-technical-baseline-report.md` 和 `tests/reports/m6-service-acceptance-report.md`。
+- SQL lint / 边界扫描：`scripts/validate-m6.sh` 记录无数据库级外键扫描通过；本清单仍要求禁止 `FOREIGN KEY`、`REFERENCES` 和 `CREATE SCHEMA`。
+- 后续线上 CentOS 8 单机迁移操作记录写入发布报告或 release 文档，不作为当前本地契约激活阻断项。

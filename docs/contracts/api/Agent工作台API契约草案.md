@@ -1,18 +1,18 @@
-# Agent 工作台 API 契约草案
+# Agent 工作台 API 契约
 
-状态：draft
+状态：active
 owner：文档与契约责任域；Agent 服务责任域和前端责任域确认
 更新时间：2026-06-28
 适用范围：前端 -> 智能体微服务，统一 Agent 工作台
 
 ## 成熟度复核
 
-当前成熟度：draft，不升 `active`。  
-使用方式：可作为 Agent 工作台 API 路由方向和错误语义输入；字段级 route、request/response 和 schema 以 `api/openapi/agent-workbench.yaml` 为准，索引见 `docs/contracts/字段级契约索引.md`。
+当前成熟度：active。
+使用方式：作为 Agent 工作台 API 路由方向和错误语义当前事实源；字段级 route、request/response 和 schema 以 `api/openapi/agent-workbench.yaml` 为准，索引见 `docs/contracts/字段级契约索引.md`。
 
 已补齐项：SSE 鉴权、`Last-Event-ID`、event replay 分页、snapshot fallback 和同 session run 并发策略已在本文冻结。
 
-未冻结项：自动化 API contract 执行证据和服务级验收报告尚未固化，因此本文仍保持 `draft`。
+运行证据：`tests/reports/m3-technical-baseline-report.md` 已记录 Agent API token 鉴权、SSE `Last-Event-ID` replay、`GetRun`、`ListMessages`、`ReplayEvents`、`Snapshot` 和 `CancelRun` 权限校验通过；`tests/reports/m6-service-acceptance-report.md` 已记录 HTTP / AG-UI / 服务级验收通过。
 
 ## 字段级事实源
 
@@ -175,7 +175,8 @@ owner：文档与契约责任域；Agent 服务责任域和前端责任域确认
 - resume：优先事件补偿，失败后 snapshot 恢复。
 - error：保留已有消息和资产引用，展示错误卡。
 
-## 后续证据
+## 运行证据
 
-- 需要补充 API contract 覆盖：`/stream` 鉴权、`Last-Event-ID` 重连、`/events` 分页、`snapshot_required=true`、`/snapshot` 恢复。
-- 需要在服务级测试报告中记录同 session active run 冲突、accept/reject/cancel 幂等和项目归档阻断执行证据。
+- Agent API 与 SSE 证据：见 `tests/reports/m3-technical-baseline-report.md` 和 `tests/reports/m6-service-acceptance-report.md`。
+- 字段级事实源验证入口：`api/openapi/agent-workbench.yaml`，由 M0-M6 门禁持续扫描。
+- 新增或调整 API 时必须同步 OpenAPI、服务测试和本文档。

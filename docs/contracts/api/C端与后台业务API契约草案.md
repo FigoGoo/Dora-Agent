@@ -1,18 +1,18 @@
-# C 端与后台业务 API 契约草案
+# C 端与后台业务 API 契约
 
-状态：draft
+状态：active
 owner：文档与契约责任域；业务服务责任域和前端责任域确认
 更新时间：2026-06-28
 适用范围：Dora-Agent Web 前端 -> 业务 API 适配层
 
 ## 成熟度复核
 
-当前成熟度：draft，不升 `active`。  
-使用方式：可作为业务 API 领域拆分、路由和通用规则输入；字段级 route、request/response 和 schema 以 `api/openapi/business-api.yaml` 为准，索引见 `docs/contracts/字段级契约索引.md`。
+当前成熟度：active。
+使用方式：作为业务 API 领域拆分、路由和通用规则当前事实源；字段级 route、request/response 和 schema 以 `api/openapi/business-api.yaml` 为准，索引见 `docs/contracts/字段级契约索引.md`。
 
 已补齐项：公开作品分类、标签来源、固定排序字段、后台高风险操作 preview/confirm 规则已冻结。
 
-未冻结项：业务 API 本地服务级执行报告尚未固化，因此本文仍保持 `draft`。
+运行证据：`tests/reports/m5-technical-baseline-report.md` 已记录业务 API fixture、OpenAPI / Gin route parity、公开作品、分享 preview/confirm、后台下架 preview/confirm 和通知能力通过；`tests/reports/m6-service-acceptance-report.md` 已记录 HTTP 服务级验收通过。
 
 ## 字段级事实源
 
@@ -147,7 +147,8 @@ owner：文档与契约责任域；业务服务责任域和前端责任域确认
 - 未登录访客可看 Shared 公开快照媒体预览和复制公开链接；点赞、创作、作品中心、资产库继续返回 `UNAUTHENTICATED`。
 - 取消分享或后台下架后，公开列表移除，详情页展示不可访问；第一版不做 CDN 缓存失效，已泄露或已缓存 CDN URL 不承诺即时失效；重新公开必须换 object key；源资产和私有作品不删除。
 
-## 后续证据
+## 运行证据与后续事项
 
-- 需要补充业务 API 服务级执行报告，覆盖公开作品筛选、公开详情、点赞、分享 preview/confirm、后台用户状态 preview/confirm 和公开作品下架 preview/confirm。
+- 业务 API 服务级执行报告：见 `tests/reports/m5-technical-baseline-report.md` 和 `tests/reports/m6-service-acceptance-report.md`。
+- Fixture 验证入口：`tests/contract/validate_fixtures.py`，由 `scripts/validate-m6.sh` 串行执行。
 - TOS 已接入 CDN，域名为 `https://tos.doraigc.com`；第一版不做 CDN 缓存失效。

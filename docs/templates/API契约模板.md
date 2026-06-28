@@ -1,6 +1,6 @@
 # API 契约模板
 
-状态：draft  
+状态：active
 owner：  
 更新时间：YYYY-MM-DD  
 适用范围：前端 -> 智能体微服务  

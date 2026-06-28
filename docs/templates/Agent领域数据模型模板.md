@@ -1,6 +1,6 @@
 # Agent 领域数据模型模板
 
-状态：draft  
+状态：active
 owner：Agent 服务责任域
 更新时间：YYYY-MM-DD  
 适用范围：智能体微服务 Agent Runtime 数据库  

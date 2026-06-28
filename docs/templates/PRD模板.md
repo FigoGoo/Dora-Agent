@@ -1,6 +1,6 @@
 # PRD 模板
 
-状态：draft  
+状态：active
 owner：  
 更新时间：YYYY-MM-DD  
 适用范围：  

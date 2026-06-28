@@ -1,10 +1,16 @@
-# SKILL-2 Skill 输出元素结构契约设计（草案）
+# SKILL-2 Skill 输出元素结构契约设计（已归档）
 
-> 状态：draft（待对齐）
+> 状态：archived（已完成，当前事实源见下方归档说明）
 > 关联缺口：`code-plan-遗漏核对-初版代码复核.md` · P0 · SKILL-2
 > 边界：业务微服务（business 08，写入/校验/契约产出） × 智能体微服务（agent 12，消费）
-> 契约优先：本设计先于实现，对齐后再写迁移与代码。
+> 契约优先：本设计曾先于实现，用于关闭 SKILL-2 缺口；当前不再承接新迭代。
 > 修订：v2 — 澄清字典双态属性已由 `schema_json` 内嵌承载，FP1 退化为复用、取消表列迁移。
+
+## 0. 归档说明
+
+SKILL-2 已完成实现并被当前字段级事实源承接：`api/thrift/business_agent_service.thrift` 已包含 `SkillOutputElementDTO` 和 `SkillSpecResponse.output_elements`；`db/migrations/iterations/2026-06-27-business-core/business/0021_skill_output_element_structure.up.sql` 已落 per-skill 输出元素结构字段；业务侧 `services/business/internal/application/skillcatalog/**` 已完成写入、校验和装配；Agent 侧 `services/agent/internal/application/workbench/**` 已消费输出元素结构组织草稿和最终产物。
+
+当前运行证据见 `tests/reports/m3-technical-baseline-report.md`、`tests/reports/m6-service-acceptance-report.md`、`services/business/internal/application/skillcatalog/app_fp2_test.go`、`services/business/internal/application/skillcatalog/app_fp3_test.go` 和 `services/agent/internal/application/workbench/app_m6_service_test.go`。本文仅作为历史缺口设计追溯，不再作为新增契约事实源。
 
 ## 1. 背景与缺口
 

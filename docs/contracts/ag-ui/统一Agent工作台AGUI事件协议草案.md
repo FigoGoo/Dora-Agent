@@ -1,18 +1,18 @@
-# 统一 Agent 工作台 AG-UI 事件协议草案
+# 统一 Agent 工作台 AG-UI 事件协议
 
-状态：draft
+状态：active
 owner：文档与契约责任域；Agent 服务责任域负责生产语义；前端责任域负责消费语义
 更新时间：2026-06-28
 适用范围：智能体微服务 -> Dora-Agent Web 前端统一 Agent 工作台
 
 ## 成熟度复核
 
-当前成熟度：draft，不升 `active`。  
-使用方式：可作为 AG-UI 事件方向、事件命名、安全展示、补偿查询和 snapshot fallback 的设计输入；字段级事件 schema 以 `api/agui/agent-workbench-events.schema.json` 为准，Agent API 路径以 `api/openapi/agent-workbench.yaml` 为准。
+当前成熟度：active。
+使用方式：作为 AG-UI 事件方向、事件命名、安全展示、补偿查询和 snapshot fallback 的当前事实源；字段级事件 schema 以 `api/agui/agent-workbench-events.schema.json` 为准，Agent API 路径以 `api/openapi/agent-workbench.yaml` 为准。
 
 已补齐项：补偿查询 API 路径、分页上限、snapshot fallback 条件、高频 progress 节流、`confirmation.required` 与 Agent `interrupt` 的兼容映射已在本文冻结。
 
-未冻结项：自动化 replay fixture 覆盖报告和服务级执行证据尚未固化，因此本文仍保持 `draft`。
+运行证据：`tests/reports/m0-technical-baseline-report.md` 已记录 AG-UI schema 与 9 个 fixture 通过；`tests/reports/m3-technical-baseline-report.md` 已记录 Agent runtime 只写 canonical AG-UI 事件；`tests/reports/m6-service-acceptance-report.md` 已记录 fixture 验证覆盖 `event_id`、`sequence`、`trace_id`、`Last-Event-ID` replay、gap 补偿、unknown event 和 snapshot fallback。
 
 ## 事件背景
 
@@ -251,7 +251,8 @@ process.snapshot.saved
 - 安全通过事件可静默处理；安全阻断、归档阻断和扣费失败必须展示用户可理解提示。
 - 媒体预览和下载不得依赖 Agent 事件中的长期 URL，必须通过业务 API 获取授权后的 TOS 公共 URL。
 
-## 后续证据
+## 运行证据
 
-- 需要补充 replay fixture 覆盖：正常重连、重复事件、sequence 缺口、窗口过期、snapshot fallback、未知事件兼容。
-- 需要在服务级测试报告中记录 `/stream`、`/events`、`/snapshot` 的执行证据。
+- Replay / snapshot / unknown event：见 `tests/reports/m6-service-acceptance-report.md`。
+- Fixture 验证入口：`tests/agent/agui/validate_fixtures.py`，由 `scripts/validate-m6.sh` 串行执行。
+- 新增或调整事件时必须同步 `api/agui/agent-workbench-events.schema.json`、AG-UI fixture 和本文档。

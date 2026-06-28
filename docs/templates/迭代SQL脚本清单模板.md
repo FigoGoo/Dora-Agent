@@ -1,6 +1,6 @@
 # 迭代 SQL 脚本清单模板
 
-状态：draft  
+状态：active
 owner：  
 更新时间：YYYY-MM-DD  
 迭代名称：  
