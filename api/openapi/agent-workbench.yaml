@@ -1,0 +1,1299 @@
+openapi: 3.0.3
+info:
+  title: Dora Agent Workbench API
+  version: 0.1.0
+  description: Agent 工作台 HTTP/SSE API 契约。
+servers:
+- url: /api/agent
+security:
+- bearerAuth: []
+paths:
+  /sessions:
+    post:
+      operationId: createSession
+      summary: 创建 Agent 会话
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSessionResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /sessions/{session_id}:
+    get:
+      operationId: getSession
+      summary: 查询会话快照
+      parameters:
+      - $ref: '#/components/parameters/SessionID'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /sessions/{session_id}/messages:
+    get:
+      operationId: listMessages
+      summary: 分页查询会话消息
+      parameters:
+      - $ref: '#/components/parameters/SessionID'
+      - $ref: '#/components/parameters/PageSize'
+      - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListMessagesResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs:
+    post:
+      operationId: createRun
+      summary: 创建 Agent Run
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRunResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}:
+    get:
+      operationId: getRun
+      summary: 查询 Run 状态
+      parameters:
+      - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDTO'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/stream:
+    get:
+      operationId: openRunStream
+      summary: 打开 Run SSE 流
+      parameters:
+      - $ref: '#/components/parameters/RunID'
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/events:
+    get:
+      operationId: replayEvents
+      summary: 按 sequence 补偿事件
+      parameters:
+      - $ref: '#/components/parameters/RunID'
+      - name: after_sequence
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 补偿成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventReplayResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/messages:
+    post:
+      operationId: appendUserInput
+      summary: 追加用户输入
+      parameters:
+      - $ref: '#/components/parameters/RunID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppendUserInputRequest'
+      responses:
+        '200':
+          description: 追加成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDTO'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/interrupts/{interrupt_id}/accept:
+    post:
+      operationId: acceptInterrupt
+      summary: 确认中断
+      parameters:
+      - $ref: '#/components/parameters/RunID'
+      - $ref: '#/components/parameters/InterruptID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmInterruptRequest'
+      responses:
+        '200':
+          description: 确认成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDTO'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/interrupts/{interrupt_id}/reject:
+    post:
+      operationId: rejectInterrupt
+      summary: 拒绝中断
+      parameters:
+      - $ref: '#/components/parameters/RunID'
+      - $ref: '#/components/parameters/InterruptID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectInterruptRequest'
+      responses:
+        '200':
+          description: 拒绝成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDTO'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/cancel:
+    post:
+      operationId: cancelRun
+      summary: 取消 Run
+      parameters:
+      - $ref: '#/components/parameters/RunID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRunRequest'
+      responses:
+        '200':
+          description: 取消成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDTO'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{run_id}/snapshot:
+    get:
+      operationId: getRunSnapshot
+      summary: 查询 Run 快照
+      parameters:
+      - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotResponse'
+        default:
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    SessionID:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        type: string
+    RunID:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+    InterruptID:
+      name: interrupt_id
+      in: path
+      required: true
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        maxLength: 160
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema:
+        type: integer
+        default: 10
+        maximum: 100
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+  responses:
+    Error:
+      description: 错误响应
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+      - code
+      - message
+      - retryable
+      - trace_id
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        trace_id:
+          type: string
+        details:
+          $ref: '#/components/schemas/ErrorDetailsDTO'
+    CreateSessionRequest:
+      type: object
+      required:
+      - project_id
+      properties:
+        project_id:
+          type: string
+        initial_title:
+          type: string
+          maxLength: 128
+    CreateSessionResponse:
+      type: object
+      required:
+      - session_id
+      - project_id
+      - status
+      - snapshot
+      properties:
+        session_id:
+          type: string
+        project_id:
+          type: string
+        status:
+          type: string
+          enum:
+          - active
+          - archived
+          - expired
+        snapshot:
+          $ref: '#/components/schemas/SnapshotResponse'
+    CreateRunRequest:
+      type: object
+      required:
+      - session_id
+      - project_id
+      - user_input
+      properties:
+        session_id:
+          type: string
+        project_id:
+          type: string
+        user_input:
+          $ref: '#/components/schemas/UserInputDTO'
+        model_selection:
+          $ref: '#/components/schemas/ModelSelectionDTO'
+        referenced_assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetReferenceDTO'
+        control_inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ControlInputDTO'
+    CreateRunResponse:
+      type: object
+      required:
+      - run_id
+      - session_id
+      - project_id
+      - status
+      - stream_url
+      - snapshot_version
+      properties:
+        run_id:
+          type: string
+        session_id:
+          type: string
+        project_id:
+          type: string
+        status:
+          type: string
+        stream_url:
+          type: string
+        snapshot_version:
+          type: string
+    UserInputDTO:
+      type: object
+      required:
+      - client_message_id
+      - content_type
+      - text
+      properties:
+        client_message_id:
+          type: string
+          maxLength: 64
+        content_type:
+          type: string
+          enum:
+          - text
+          - multimodal_text
+        text:
+          type: string
+          maxLength: 8000
+        language:
+          type: string
+          default: zh-CN
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/InputAttachmentDTO'
+    InputAttachmentDTO:
+      type: object
+      required:
+      - attachment_id
+      - attachment_type
+      - source
+      properties:
+        attachment_id:
+          type: string
+        attachment_type:
+          type: string
+          enum:
+          - asset
+          - upload_intent
+          - external_url
+        source:
+          type: string
+          enum:
+          - project_asset
+          - user_upload
+          - public_reference
+        metadata_digest:
+          type: string
+    AssetReferenceDTO:
+      type: object
+      required:
+      - asset_id
+      - project_id
+      - purpose
+      properties:
+        asset_id:
+          type: string
+        project_id:
+          type: string
+        source:
+          type: string
+          enum:
+          - project_asset
+          - blackboard
+          - user_selected
+        purpose:
+          type: string
+          enum:
+          - agent_input
+          - view
+          - reference
+        metadata_digest:
+          type: string
+    ControlInputDTO:
+      type: object
+      required:
+      - control_id
+      - type
+      - value
+      properties:
+        control_id:
+          type: string
+        type:
+          type: string
+          enum:
+          - text
+          - number
+          - single_select
+          - multi_select
+          - asset_picker
+          - toggle
+        value:
+          $ref: '#/components/schemas/ControlInputValueDTO'
+        display_label:
+          type: string
+        required:
+          type: boolean
+          default: false
+        validation_digest:
+          type: string
+    ModelSelectionDTO:
+      type: object
+      required:
+      - resource_type
+      - model_id
+      - pricing_snapshot_id
+      properties:
+        resource_type:
+          type: string
+          enum:
+          - image
+          - music
+          - video
+          - text
+        model_id:
+          type: string
+        model_display_name:
+          type: string
+        is_default:
+          type: boolean
+        pricing_snapshot_id:
+          type: string
+    ConfirmInterruptRequest:
+      type: object
+      required:
+      - interrupt_id
+      - run_id
+      - action
+      - confirmed_payload_digest
+      properties:
+        interrupt_id:
+          type: string
+        run_id:
+          type: string
+        action:
+          type: string
+          enum:
+          - confirm
+        confirmed_payload_digest:
+          type: string
+    RejectInterruptRequest:
+      type: object
+      required:
+      - interrupt_id
+      - run_id
+      - reason_code
+      properties:
+        interrupt_id:
+          type: string
+        run_id:
+          type: string
+        reason_code:
+          type: string
+    CancelRunRequest:
+      type: object
+      required:
+      - run_id
+      - cancel_reason
+      properties:
+        run_id:
+          type: string
+        cancel_reason:
+          type: string
+    AppendUserInputRequest:
+      type: object
+      required:
+      - user_input
+      properties:
+        user_input:
+          $ref: '#/components/schemas/UserInputDTO'
+    RunDTO:
+      type: object
+      required:
+      - run_id
+      - session_id
+      - project_id
+      - status
+      properties:
+        run_id:
+          type: string
+        session_id:
+          type: string
+        project_id:
+          type: string
+        status:
+          type: string
+        error_code:
+          type: string
+        error_message:
+          type: string
+    ListMessagesResponse:
+      type: object
+      required:
+      - messages
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentMessageDTO'
+        next_cursor:
+          type: string
+    EventReplayResponse:
+      type: object
+      required:
+      - events
+      - next_after_sequence
+      - snapshot_required
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/AGUIEventDTO'
+        next_after_sequence:
+          type: integer
+          format: int64
+        snapshot_required:
+          type: boolean
+    SnapshotResponse:
+      type: object
+      required:
+      - session
+      - run
+      - messages
+      - assets
+      - blackboard
+      - tasks
+      - last_event_sequence
+      properties:
+        session:
+          $ref: '#/components/schemas/SnapshotSessionDTO'
+        run:
+          $ref: '#/components/schemas/SnapshotRunDTO'
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentMessageDTO'
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/SnapshotAssetDTO'
+        blackboard:
+          $ref: '#/components/schemas/SnapshotBlackboardDTO'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/SnapshotTaskDTO'
+        last_event_sequence:
+          type: integer
+          format: int64
+        readonly_reason:
+          type: string
+          enum:
+          - ''
+          - project_archived
+          - permission_lost
+    ErrorDetailsDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - error_id
+      - error_type
+      properties:
+        error_id:
+          type: string
+        error_type:
+          type: string
+          enum:
+          - validation
+          - permission
+          - business
+          - rpc
+          - tool
+          - model
+          - system
+        field_path:
+          type: string
+        support_trace_id:
+          type: string
+    ControlInputValueDTO:
+      oneOf:
+      - type: string
+      - type: integer
+      - type: number
+      - type: boolean
+      - type: array
+        items:
+          type: string
+    AgentMessageDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - message_id
+      - session_id
+      - run_id
+      - role
+      - content_type
+      - content
+      - sequence
+      - created_at
+      properties:
+        message_id:
+          type: string
+        session_id:
+          type: string
+        run_id:
+          type: string
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+          - tool
+          - system
+        content_type:
+          type: string
+          enum:
+          - text
+          - markdown
+          - json_summary
+          - tool_result
+        content:
+          type: string
+        content_digest:
+          type: string
+        sequence:
+          type: integer
+          format: int64
+        final:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    AGUIEventDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - event_id
+      - type
+      - session_id
+      - run_id
+      - project_id
+      - space_id
+      - actor_user_id
+      - sequence
+      - timestamp
+      - component
+      - trace_id
+      - payload
+      properties:
+        event_id:
+          type: string
+        type:
+          type: string
+        session_id:
+          type: string
+        run_id:
+          type: string
+        project_id:
+          type: string
+        space_id:
+          type: string
+        actor_user_id:
+          type: string
+        sequence:
+          type: integer
+          format: int64
+        timestamp:
+          type: string
+          format: date-time
+        component:
+          type: string
+          enum:
+          - agent
+          - message
+          - tool
+          - confirmation
+          - workspace
+          - safety
+          - credit
+          - process
+          - project
+          - chat
+        trace_id:
+          type: string
+        payload:
+          oneOf:
+          - $ref: '#/components/schemas/RunLifecycleEventPayloadDTO'
+          - $ref: '#/components/schemas/ThinkingEventPayloadDTO'
+          - $ref: '#/components/schemas/MessageEventPayloadDTO'
+          - $ref: '#/components/schemas/SkillEventPayloadDTO'
+          - $ref: '#/components/schemas/PlatformTagsEventPayloadDTO'
+          - $ref: '#/components/schemas/ChatControlsEventPayloadDTO'
+          - $ref: '#/components/schemas/SafetyEventPayloadDTO'
+          - $ref: '#/components/schemas/CreditEventPayloadDTO'
+          - $ref: '#/components/schemas/ConfirmationEventPayloadDTO'
+          - $ref: '#/components/schemas/ResumeEventPayloadDTO'
+          - $ref: '#/components/schemas/ToolCallEventPayloadDTO'
+          - $ref: '#/components/schemas/GenerationEventPayloadDTO'
+          - $ref: '#/components/schemas/AssetSaveEventPayloadDTO'
+          - $ref: '#/components/schemas/WorkspaceEventPayloadDTO'
+          - $ref: '#/components/schemas/ProcessSnapshotEventPayloadDTO'
+          - $ref: '#/components/schemas/ProjectArchivedEventPayloadDTO'
+    RunLifecycleEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - run_status
+      properties:
+        run_status:
+          type: string
+        project_id:
+          type: string
+        session_id:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        cancel_reason:
+          type: string
+        cancelled_at:
+          type: string
+          format: date-time
+        released_points:
+          type: integer
+          format: int64
+        last_event_sequence:
+          type: integer
+          format: int64
+        snapshot_version:
+          type: string
+        final_message_id:
+          type: string
+        error_type:
+          type: string
+        error_code:
+          type: string
+        user_message:
+          type: string
+        retryable:
+          type: boolean
+        support_trace_id:
+          type: string
+    ThinkingEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - thinking_id
+      - status
+      properties:
+        thinking_id:
+          type: string
+        status:
+          type: string
+        delta:
+          type: string
+        summary:
+          type: string
+    MessageEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - message_id
+      properties:
+        message_id:
+          type: string
+        role:
+          type: string
+        content_type:
+          type: string
+        delta:
+          type: string
+        final_text:
+          type: string
+        final_text_digest:
+          type: string
+    SkillEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - selection_status
+      properties:
+        selection_status:
+          type: string
+        skill_id:
+          type: string
+        skill_name:
+          type: string
+        version:
+          type: string
+        missing_reason:
+          type: string
+        fallback_allowed:
+          type: boolean
+    PlatformTagsEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - tag_version
+      - tags
+      properties:
+        tag_version:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    ChatControlsEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - controls
+      properties:
+        controls:
+          type: array
+          items:
+            type: string
+        lock_reason:
+          type: string
+        locked:
+          type: boolean
+    SafetyEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - safety_status
+      properties:
+        safety_status:
+          type: string
+        safety_evidence_id:
+          type: string
+        policy_version:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        user_message:
+          type: string
+        retryable:
+          type: boolean
+        support_trace_id:
+          type: string
+        failed_reason:
+          type: string
+    CreditEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - credit_status
+      properties:
+        credit_status:
+          type: string
+        estimate_points:
+          type: integer
+          format: int64
+        available_points:
+          type: integer
+          format: int64
+        expires_soon_points:
+          type: integer
+          format: int64
+        credit_account_scope:
+          type: string
+        credit_account_id:
+          type: string
+        pricing_snapshot_id:
+          type: string
+        freeze_id:
+          type: string
+        frozen_points:
+          type: integer
+          format: int64
+        charged_points:
+          type: integer
+          format: int64
+        released_points:
+          type: integer
+          format: int64
+        reason:
+          type: string
+        user_message:
+          type: string
+        retryable:
+          type: boolean
+    ConfirmationEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - confirmation_id
+      - interrupt_id
+      properties:
+        confirmation_id:
+          type: string
+        interrupt_id:
+          type: string
+        title:
+          type: string
+        summary:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        actions:
+          type: array
+          items:
+            type: string
+        action:
+          type: string
+        accepted_at:
+          type: string
+          format: date-time
+        rejected_at:
+          type: string
+          format: date-time
+        reason_code:
+          type: string
+        run_status:
+          type: string
+    ResumeEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - resume_id
+      - interrupt_id
+      - resume_status
+      properties:
+        resume_id:
+          type: string
+        interrupt_id:
+          type: string
+        resume_status:
+          type: string
+        accepted_at:
+          type: string
+          format: date-time
+    ToolCallEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - tool_call_id
+      - tool_name
+      - status
+      properties:
+        tool_call_id:
+          type: string
+        tool_name:
+          type: string
+        tool_type:
+          type: string
+        status:
+          type: string
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        result_digest:
+          type: string
+        error_code:
+          type: string
+        user_message:
+          type: string
+        retryable:
+          type: boolean
+    GenerationEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - task_id
+      - resource_type
+      - status
+      - progress
+      properties:
+        task_id:
+          type: string
+        resource_type:
+          type: string
+        status:
+          type: string
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        artifact_id:
+          type: string
+        artifact_digest:
+          type: string
+    AssetSaveEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - save_status
+      properties:
+        save_status:
+          type: string
+        asset_id:
+          type: string
+        artifact_id:
+          type: string
+        resource_type:
+          type: string
+        elements:
+          type: array
+          items:
+            type: string
+        downloadable:
+          type: boolean
+        error_code:
+          type: string
+        user_message:
+          type: string
+        released_points:
+          type: integer
+          format: int64
+        retryable:
+          type: boolean
+    WorkspaceEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - workspace_version
+      properties:
+        workspace_version:
+          type: string
+        asset_ids:
+          type: array
+          items:
+            type: string
+        blackboard_version:
+          type: string
+        changed_element_ids:
+          type: array
+          items:
+            type: string
+    ProcessSnapshotEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - snapshot_version
+      - last_event_sequence
+      properties:
+        snapshot_version:
+          type: string
+        last_event_sequence:
+          type: integer
+          format: int64
+        saved_at:
+          type: string
+          format: date-time
+    ProjectArchivedEventPayloadDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - project_status
+      - creative_allowed
+      - read_only_reason
+      - allowed_actions
+      - user_message
+      properties:
+        project_status:
+          type: string
+        creative_allowed:
+          type: boolean
+        read_only_reason:
+          type: string
+        allowed_actions:
+          type: array
+          items:
+            type: string
+        user_message:
+          type: string
+    SnapshotSessionDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - session_id
+      - project_id
+      - status
+      - created_at
+      properties:
+        session_id:
+          type: string
+        project_id:
+          type: string
+        status:
+          type: string
+          enum:
+          - active
+          - archived
+          - expired
+        title:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    SnapshotRunDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - run_id
+      - session_id
+      - project_id
+      - status
+      - last_event_sequence
+      properties:
+        run_id:
+          type: string
+        session_id:
+          type: string
+        project_id:
+          type: string
+        status:
+          type: string
+        skill_id:
+          type: string
+        model_id:
+          type: string
+        last_event_sequence:
+          type: integer
+          format: int64
+        error_code:
+          type: string
+        error_message:
+          type: string
+    SnapshotAssetDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - asset_id
+      - resource_type
+      - status
+      properties:
+        asset_id:
+          type: string
+        artifact_id:
+          type: string
+        resource_type:
+          type: string
+        asset_type:
+          type: string
+        status:
+          type: string
+        preview_url:
+          type: string
+        downloadable:
+          type: boolean
+        elements_summary_digest:
+          type: string
+    SnapshotBlackboardDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - blackboard_version
+      - elements
+      properties:
+        blackboard_version:
+          type: string
+        active_element_id:
+          type: string
+        elements:
+          type: array
+          items:
+            $ref: '#/components/schemas/SnapshotBlackboardElementDTO'
+    SnapshotBlackboardElementDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - element_id
+      - element_type
+      - display_order
+      properties:
+        element_id:
+          type: string
+        element_type:
+          type: string
+        title:
+          type: string
+        source_asset_id:
+          type: string
+        display_order:
+          type: integer
+    SnapshotTaskDTO:
+      type: object
+      additionalProperties: false
+      required:
+      - task_id
+      - task_type
+      - status
+      - progress
+      properties:
+        task_id:
+          type: string
+        task_type:
+          type: string
+        status:
+          type: string
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        current_step:
+          type: string

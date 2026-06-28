@@ -1,0 +1,1775 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/agui/agent-workbench-events.schema.json",
+  "title": "Dora Agent Workbench AG-UI Event",
+  "type": "object",
+  "required": [
+    "event_id",
+    "type",
+    "session_id",
+    "run_id",
+    "project_id",
+    "space_id",
+    "actor_user_id",
+    "sequence",
+    "timestamp",
+    "component",
+    "trace_id",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "pattern": "^evt_[A-Za-z0-9_\\-]+$"
+    },
+    "type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "space_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actor_user_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "component": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.run.started"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_agent_run_started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.run.completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_agent_run_completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.run.cancelled"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_agent_run_cancelled"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.thinking.started"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_agent_thinking_started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.thinking.delta"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_agent_thinking_delta"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.thinking.completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_agent_thinking_completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.message.delta"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_agent_message_delta"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.message.completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_agent_message_completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.skill.selected"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_agent_skill_selected"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.skill.missing"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_agent_skill_missing"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "platform.tags.updated"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_platform_tags_updated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "chat.controls.requested"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_chat_controls_requested"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "chat.controls.locked"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_chat_controls_locked"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "safety.prompt.evaluating"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_safety_prompt_evaluating"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "safety.prompt.evaluated"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_safety_prompt_evaluated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "safety.prompt.blocked"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_safety_prompt_blocked"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "safety.prompt.failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_safety_prompt_failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "credits.estimated"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_credits_estimated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "confirmation.required"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_confirmation_required"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "confirmation.accepted"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_confirmation_accepted"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "confirmation.rejected"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_confirmation_rejected"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "resume.accepted"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_resume_accepted"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "credits.frozen"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_credits_frozen"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "credits.charged"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_credits_charged"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "credits.released"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_credits_released"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "credits.insufficient"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_credits_insufficient"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "tool.call.started"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_tool_call_started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "tool.call.progress"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_tool_call_progress"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "tool.call.completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_tool_call_completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "tool.call.failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_tool_call_failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "generation.progress"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_generation_progress"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "generation.artifact.completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_generation_artifact_completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "asset.save.started"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_asset_save_started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "asset.save.completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_asset_save_completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "asset.save.failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_asset_save_failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workspace.assets.updated"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_workspace_assets_updated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workspace.blackboard.updated"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_workspace_blackboard_updated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "process.snapshot.saved"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_process_snapshot_saved"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "project.archived.blocked"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_project_archived_blocked"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.run.failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/Payload_agent_run_failed"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "Payload_agent_run_started": {
+      "type": "object",
+      "required": [
+        "run_status",
+        "project_id",
+        "session_id",
+        "started_at"
+      ],
+      "properties": {
+        "run_status": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_agent_run_completed": {
+      "type": "object",
+      "required": [
+        "run_status",
+        "completed_at",
+        "final_message_id",
+        "last_event_sequence",
+        "snapshot_version"
+      ],
+      "properties": {
+        "run_status": {
+          "const": "completed"
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "final_message_id": {
+          "type": "string"
+        },
+        "last_event_sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "snapshot_version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_agent_run_cancelled": {
+      "type": "object",
+      "required": [
+        "run_status",
+        "cancel_reason",
+        "cancelled_at",
+        "released_points",
+        "last_event_sequence"
+      ],
+      "properties": {
+        "run_status": {
+          "const": "cancelled"
+        },
+        "cancel_reason": {
+          "type": "string"
+        },
+        "cancelled_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "released_points": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_event_sequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_agent_thinking_started": {
+      "type": "object",
+      "required": [
+        "thinking_id",
+        "display_mode",
+        "started_at"
+      ],
+      "properties": {
+        "thinking_id": {
+          "type": "string"
+        },
+        "display_mode": {
+          "const": "typewriter"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_agent_thinking_delta": {
+      "type": "object",
+      "required": [
+        "thinking_id",
+        "text_delta",
+        "delta_index"
+      ],
+      "properties": {
+        "thinking_id": {
+          "type": "string"
+        },
+        "text_delta": {
+          "type": "string"
+        },
+        "delta_index": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_agent_thinking_completed": {
+      "type": "object",
+      "required": [
+        "thinking_id",
+        "completed_at",
+        "summary_digest"
+      ],
+      "properties": {
+        "thinking_id": {
+          "type": "string"
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "summary_digest": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_agent_message_delta": {
+      "type": "object",
+      "required": [
+        "message_id",
+        "role",
+        "text_delta",
+        "content_type"
+      ],
+      "properties": {
+        "message_id": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "text_delta": {
+          "type": "string"
+        },
+        "content_type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_agent_message_completed": {
+      "type": "object",
+      "required": [
+        "message_id",
+        "role",
+        "content_type",
+        "final_text_digest",
+        "token_usage_summary"
+      ],
+      "properties": {
+        "message_id": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "final_text_digest": {
+          "type": "string"
+        },
+        "token_usage_summary": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_agent_skill_selected": {
+      "type": "object",
+      "required": [
+        "skill_id",
+        "skill_name",
+        "skill_scope",
+        "skill_version",
+        "matched_reason"
+      ],
+      "properties": {
+        "skill_id": {
+          "type": "string"
+        },
+        "skill_name": {
+          "type": "string"
+        },
+        "skill_scope": {
+          "type": "string"
+        },
+        "skill_version": {
+          "type": "string"
+        },
+        "matched_reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_agent_skill_missing": {
+      "type": "object",
+      "required": [
+        "fallback_mode",
+        "matched_tags",
+        "user_message"
+      ],
+      "properties": {
+        "fallback_mode": {
+          "const": "text_model"
+        },
+        "matched_tags": {
+          "type": "array"
+        },
+        "user_message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_platform_tags_updated": {
+      "type": "object",
+      "required": [
+        "tags"
+      ],
+      "properties": {
+        "tags": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_chat_controls_requested": {
+      "type": "object",
+      "required": [
+        "controls"
+      ],
+      "properties": {
+        "controls": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_chat_controls_locked": {
+      "type": "object",
+      "required": [
+        "locked_fields",
+        "locked_reason",
+        "confirmation_id"
+      ],
+      "properties": {
+        "locked_fields": {
+          "type": "array"
+        },
+        "locked_reason": {
+          "type": "string"
+        },
+        "confirmation_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_safety_prompt_evaluating": {
+      "type": "object",
+      "required": [
+        "scene",
+        "target_type",
+        "target_ref_id",
+        "checked_target"
+      ],
+      "properties": {
+        "scene": {
+          "type": "string"
+        },
+        "target_type": {
+          "type": "string"
+        },
+        "target_ref_id": {
+          "type": "string"
+        },
+        "checked_target": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_safety_prompt_evaluated": {
+      "type": "object",
+      "required": [
+        "safety_status",
+        "safety_evidence_id",
+        "policy_version",
+        "expires_at"
+      ],
+      "properties": {
+        "safety_status": {
+          "const": "passed"
+        },
+        "safety_evidence_id": {
+          "type": "string"
+        },
+        "policy_version": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_safety_prompt_blocked": {
+      "type": "object",
+      "required": [
+        "safety_status",
+        "user_message",
+        "retryable",
+        "support_trace_id"
+      ],
+      "properties": {
+        "safety_status": {
+          "type": "string"
+        },
+        "user_message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "support_trace_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_safety_prompt_failed": {
+      "type": "object",
+      "required": [
+        "safety_status",
+        "error_code",
+        "user_message",
+        "retryable",
+        "support_trace_id"
+      ],
+      "properties": {
+        "safety_status": {
+          "const": "failed"
+        },
+        "error_code": {
+          "type": "string"
+        },
+        "user_message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "support_trace_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_credits_estimated": {
+      "type": "object",
+      "required": [
+        "estimate_points",
+        "available_points",
+        "expires_soon_points",
+        "credit_account_scope",
+        "credit_account_id",
+        "pricing_snapshot_id"
+      ],
+      "properties": {
+        "estimate_points": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "available_points": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expires_soon_points": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "credit_account_scope": {
+          "type": "string"
+        },
+        "credit_account_id": {
+          "type": "string"
+        },
+        "pricing_snapshot_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_confirmation_required": {
+      "type": "object",
+      "required": [
+        "confirmation_id",
+        "interrupt_id",
+        "title",
+        "summary",
+        "risks",
+        "points",
+        "expires_at",
+        "actions"
+      ],
+      "properties": {
+        "confirmation_id": {
+          "type": "string"
+        },
+        "interrupt_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "risks": {
+          "type": "array"
+        },
+        "points": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "actions": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_confirmation_accepted": {
+      "type": "object",
+      "required": [
+        "confirmation_id",
+        "interrupt_id",
+        "action",
+        "accepted_at",
+        "payload_digest",
+        "next_step"
+      ],
+      "properties": {
+        "confirmation_id": {
+          "type": "string"
+        },
+        "interrupt_id": {
+          "type": "string"
+        },
+        "action": {
+          "const": "confirm"
+        },
+        "accepted_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "payload_digest": {
+          "type": "string"
+        },
+        "next_step": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_confirmation_rejected": {
+      "type": "object",
+      "required": [
+        "confirmation_id",
+        "interrupt_id",
+        "action",
+        "rejected_at",
+        "reason_code",
+        "run_status"
+      ],
+      "properties": {
+        "confirmation_id": {
+          "type": "string"
+        },
+        "interrupt_id": {
+          "type": "string"
+        },
+        "action": {
+          "const": "reject"
+        },
+        "rejected_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "run_status": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_resume_accepted": {
+      "type": "object",
+      "required": [
+        "interrupt_id",
+        "resume_action",
+        "accepted_at",
+        "requires_safety_evaluation",
+        "next_step"
+      ],
+      "properties": {
+        "interrupt_id": {
+          "type": "string"
+        },
+        "resume_action": {
+          "type": "string"
+        },
+        "accepted_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "requires_safety_evaluation": {
+          "type": "boolean"
+        },
+        "next_step": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_credits_frozen": {
+      "type": "object",
+      "required": [
+        "freeze_id",
+        "frozen_points",
+        "expires_at"
+      ],
+      "properties": {
+        "freeze_id": {
+          "type": "string"
+        },
+        "frozen_points": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_credits_charged": {
+      "type": "object",
+      "required": [
+        "charged_points",
+        "released_points"
+      ],
+      "properties": {
+        "charged_points": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "released_points": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_credits_released": {
+      "type": "object",
+      "required": [
+        "freeze_id",
+        "released_points",
+        "reason"
+      ],
+      "properties": {
+        "freeze_id": {
+          "type": "string"
+        },
+        "released_points": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_credits_insufficient": {
+      "type": "object",
+      "required": [
+        "estimate_points",
+        "available_points",
+        "user_message",
+        "retryable"
+      ],
+      "properties": {
+        "estimate_points": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "available_points": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "user_message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_tool_call_started": {
+      "type": "object",
+      "required": [
+        "tool_call_id",
+        "tool_name",
+        "tool_type",
+        "risk_level",
+        "timeout_ms"
+      ],
+      "properties": {
+        "tool_call_id": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        },
+        "tool_type": {
+          "type": "string"
+        },
+        "risk_level": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_tool_call_progress": {
+      "type": "object",
+      "required": [
+        "tool_call_id",
+        "status",
+        "progress",
+        "current_step",
+        "partial_summary"
+      ],
+      "properties": {
+        "tool_call_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "current_step": {
+          "type": "string"
+        },
+        "partial_summary": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_tool_call_completed": {
+      "type": "object",
+      "required": [
+        "tool_call_id",
+        "status",
+        "result_summary",
+        "artifact_refs",
+        "charged_estimate_item_ids"
+      ],
+      "properties": {
+        "tool_call_id": {
+          "type": "string"
+        },
+        "status": {
+          "const": "completed"
+        },
+        "result_summary": {
+          "type": "string"
+        },
+        "artifact_refs": {
+          "type": "array"
+        },
+        "charged_estimate_item_ids": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_tool_call_failed": {
+      "type": "object",
+      "required": [
+        "tool_call_id",
+        "error_code",
+        "user_message",
+        "retryable",
+        "support_trace_id"
+      ],
+      "properties": {
+        "tool_call_id": {
+          "type": "string"
+        },
+        "error_code": {
+          "type": "string"
+        },
+        "user_message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "support_trace_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_generation_progress": {
+      "type": "object",
+      "required": [
+        "task_id",
+        "resource_type",
+        "status",
+        "progress",
+        "partial_completed"
+      ],
+      "properties": {
+        "task_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "partial_completed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_generation_artifact_completed": {
+      "type": "object",
+      "required": [
+        "artifact_id",
+        "resource_type",
+        "name",
+        "metadata_summary",
+        "elements_summary"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "metadata_summary": {
+          "type": "object"
+        },
+        "elements_summary": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_asset_save_started": {
+      "type": "object",
+      "required": [
+        "artifact_id",
+        "resource_type",
+        "project_id",
+        "freeze_id",
+        "estimate_id"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "freeze_id": {
+          "type": "string"
+        },
+        "estimate_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_asset_save_completed": {
+      "type": "object",
+      "required": [
+        "asset_id",
+        "artifact_id",
+        "resource_type",
+        "save_status",
+        "elements",
+        "downloadable"
+      ],
+      "properties": {
+        "asset_id": {
+          "type": "string"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "save_status": {
+          "type": "string"
+        },
+        "elements": {
+          "type": "array"
+        },
+        "downloadable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_asset_save_failed": {
+      "type": "object",
+      "required": [
+        "artifact_id",
+        "error_code",
+        "user_message",
+        "released_points",
+        "retryable"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "error_code": {
+          "type": "string"
+        },
+        "user_message": {
+          "type": "string"
+        },
+        "released_points": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_workspace_assets_updated": {
+      "type": "object",
+      "required": [
+        "mode",
+        "assets",
+        "asset_count",
+        "last_asset_id",
+        "version"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "assets": {
+          "type": "array"
+        },
+        "asset_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_asset_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_workspace_blackboard_updated": {
+      "type": "object",
+      "required": [
+        "mode",
+        "elements",
+        "storyline",
+        "active_node_id",
+        "version"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "elements": {
+          "type": "array"
+        },
+        "storyline": {
+          "type": "array"
+        },
+        "active_node_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_process_snapshot_saved": {
+      "type": "object",
+      "required": [
+        "snapshot_id",
+        "snapshot_version",
+        "last_event_sequence",
+        "messages_count",
+        "assets_count",
+        "blackboard_version"
+      ],
+      "properties": {
+        "snapshot_id": {
+          "type": "string"
+        },
+        "snapshot_version": {
+          "type": "string"
+        },
+        "last_event_sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "messages_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assets_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blackboard_version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_project_archived_blocked": {
+      "type": "object",
+      "required": [
+        "project_status",
+        "creative_allowed",
+        "read_only_reason",
+        "allowed_actions",
+        "user_message"
+      ],
+      "properties": {
+        "project_status": {
+          "const": "archived"
+        },
+        "creative_allowed": {
+          "const": false
+        },
+        "read_only_reason": {
+          "type": "string"
+        },
+        "allowed_actions": {
+          "type": "array"
+        },
+        "user_message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload_agent_run_failed": {
+      "type": "object",
+      "required": [
+        "error_type",
+        "error_code",
+        "user_message",
+        "retryable",
+        "support_trace_id"
+      ],
+      "properties": {
+        "error_type": {
+          "type": "string"
+        },
+        "error_code": {
+          "type": "string"
+        },
+        "user_message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "support_trace_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

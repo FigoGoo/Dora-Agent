@@ -1,51 +1,40 @@
 # Dora-Agent 文档索引
 
-## 开发入口
+状态：active  
+owner：文档与契约责任域
+更新时间：2026-06-28  
+适用范围：`docs/**` 文档导航和阶段关注入口
 
-1. 产品体验设计师先产出《产品系统设计》，并确认 `product_status: Done`。
-2. 产品体验设计师将产品系统设计沉淀为 PRD，PRD 入口见 `docs/product/prd/README.md`。
-3. 产品体验设计师使用 `docs/templates/项目开发计划模板.md` 安排开发计划、功能点、owner 和里程碑。
-4. 工程 subagent 阅读 `docs/standards/产品设计交接与开发约束规范.md`，输出需求映射矩阵。
-5. 主控 Codex 按 `AGENTS.md` 调度 subagent，并按功能点推进开发和 GitHub 提交。
+## 当前阅读入口
 
-## 产品文档
+1. 协作和边界规则先读 [`../AGENTS.md`](../AGENTS.md)。
+2. 当前事实源入口读 [`current/README.md`](./current/README.md)。
+3. 技术文档入口读 [`technical/README.md`](./technical/README.md)。
+4. 产品功能和 PRD 读 [`product/README.md`](./product/README.md)。
+5. 跨服务契约读 [`contracts/README.md`](./contracts/README.md)。
+6. 编码、契约、测试、安全和文档规范读 [`standards/README.md`](./standards/README.md)。
+7. 测试用例、测试报告和缺陷记录读 [`test/README.md`](./test/README.md)。
 
-- 产品设计索引：`docs/product/AIGC智能体产品设计索引.md`
-- PRD 套件：`docs/product/prd/README.md`
-- 系统概要与功能大纲：`docs/product/prd/00-系统概要与功能大纲PRD.md`
+## 目录索引
 
-## 设计文档
-
-- UI/UE 设计索引：`docs/design/README.md`
-- UI/UE 设计总纲：`docs/design/00-UIUE设计总纲.md`
-- 信息架构与导航：`docs/design/01-站点信息架构与导航.md`
-- 统一 Agent 工作台：`docs/design/02-统一Agent创作工作台体验设计.md`
-- 首页体验设计：`docs/design/03-首页体验设计.md`
-- 视觉风格与 Token：`docs/design/08-视觉风格与设计Token草案.md`
-
-## 规范
-
-- 开发流程：`docs/standards/开发流程规范.md`
-- 产品交接：`docs/standards/产品设计交接与开发约束规范.md`
-- GitHub 协作：`docs/standards/GitHub仓库协作规范.md`
-- 本地开发配置：`docs/standards/本地开发与配置规范.md`
-- 安全：`docs/standards/安全规范.md`
-- 后端技术栈：`docs/standards/后端技术栈与操作规范.md`
-- CloudWeGo：`docs/standards/CloudWeGo开发操作规范.md`
-- SQL 脚本：`docs/standards/迭代SQL脚本规范.md`
-- 智能体配置化：`docs/standards/智能体配置化规范.md`
-
-## 模板
-
-- 产品：`docs/templates/PRD模板.md`
-- 项目计划：`docs/templates/项目开发计划模板.md`
-- 开发任务：`docs/templates/开发任务模板.md`
-- PR：`.github/PULL_REQUEST_TEMPLATE.md`
-- SQL 清单：`docs/templates/迭代SQL脚本清单模板.md`
-- SQL 脚本：`docs/templates/SQL脚本模板.sql`
+| 目录索引 | 作用 | 当前关注 |
+| --- | --- | --- |
+| [`current/README.md`](./current/README.md) | 当前事实源读取入口，定义 Codex 只读最新文档的规则。 | 关注 |
+| [`technical/README.md`](./technical/README.md) | 技术设计、后端、前端、主题、CI/CD 和功能迭代文档入口。 | 关注 |
+| [`product/README.md`](./product/README.md) | 产品索引、PRD、产品迭代、第一版功能模块清单和前置产品系统设计状态。 | 关注 |
+| [`contracts/README.md`](./contracts/README.md) | RPC、API、AG-UI、Agent 数据模型、SQL 契约入口、字段级事实源和成熟度复核。 | 关注 |
+| [`standards/README.md`](./standards/README.md) | 开发流程、编码、契约、测试、安全、TOS、CloudWeGo 和本地配置规范。 | 关注 |
+| [`test/README.md`](./test/README.md) | 用户端、管理端、后端和 Agent 服务端能力测试用例入口。 | 关注 |
+| [`releases/README.md`](./releases/README.md) | 已完成阶段的交付范围、验收结论和历史设计入口。 | 按需关注 |
+| [`architecture/README.md`](./architecture/README.md) | 早期 Agent 与业务架构草案索引，当前仅作历史追溯。 | 不关注 |
+| [`design/README.md`](./design/README.md) | UI/UE、页面、视觉规范和线框草图索引，当前非前端阶段不主动关注。 | 不关注 |
+| [`templates/README.md`](./templates/README.md) | PRD、ADR、契约、数据模型、开发任务、测试报告和缺陷报告模板。 | 不关注 |
+| [`archive/README.md`](./archive/README.md) | 过期、废弃或仅供追溯的历史文档入口。 | 不关注 |
 
 ## 阶段说明
 
-当前阶段：本地开发，环境为 macOS + Docker。
-线上目标：CentOS 8 单机。
+当前阶段：本地开发，环境为 macOS + Docker。  
+线上目标：CentOS 8 单机。  
 上线后补充：CI/CD、发布回滚、可观测性、告警、SLO、测试环境矩阵和前端设计系统落地流程。
+
+第一阶段服务端开发设计已经归档到 [`releases/phase-01-server/README.md`](./releases/phase-01-server/README.md)。后续任务默认不再读取 `code-plan/**`，除非需要追溯第一阶段历史设计。

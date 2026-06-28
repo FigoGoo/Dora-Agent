@@ -1,0 +1,241 @@
+{
+  "domain": "accountspace",
+  "scenarios": [
+    {
+      "case_id": "accountspace_resolve_auth_context_from_token_success",
+      "service": "AccountSpaceService",
+      "method": "ResolveAuthContextFromToken",
+      "scenario": "resolve_auth_context_from_token_success",
+      "request": {
+        "authorization": "Bearer user_seed_token",
+        "expected_space_id": "sp_personal_1001",
+        "request_meta": {
+          "request_id": "req_accountspace_resolve_auth_context_from_token_success",
+          "trace_id": "trace_accountspace_resolve_auth_context_from_token_success",
+          "source": "agent_service"
+        }
+      },
+      "assertions": [
+        "agent authorization token is resolved by business service",
+        "client identity headers are not trusted by agent"
+      ],
+      "response": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "space_context": {
+          "space_id": "sp_personal_1001",
+          "space_type": "personal",
+          "credit_account_scope": "personal",
+          "credit_account_id": "ca_personal_1001",
+          "skill_scope_keys": [
+            "personal"
+          ]
+        },
+        "session_id": "sess_seed_1001"
+      }
+    },
+    {
+      "case_id": "accountspace_resolve_auth_context_from_token_cross_space_denied",
+      "service": "AccountSpaceService",
+      "method": "ResolveAuthContextFromToken",
+      "scenario": "resolve_auth_context_from_token_cross_space_denied",
+      "request": {
+        "authorization": "Bearer user_seed_token",
+        "expected_space_id": "sp_other_space",
+        "request_meta": {
+          "request_id": "req_accountspace_resolve_auth_context_from_token_cross_space_denied",
+          "trace_id": "trace_accountspace_resolve_auth_context_from_token_cross_space_denied",
+          "source": "agent_service"
+        }
+      },
+      "assertions": [
+        "expected_space_id mismatch is rejected by business service"
+      ],
+      "error": {
+        "code": "CROSS_SPACE_DENIED",
+        "message": "expected space does not match current session space",
+        "retryable": false
+      }
+    },
+    {
+      "case_id": "accountspace_unauthenticated_error",
+      "service": "AccountSpaceService",
+      "method": "ResolveCurrentSpaceContext",
+      "scenario": "unauthenticated_error",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "",
+          "login_identity_type": "PERSONAL"
+        },
+        "request_meta": {
+          "request_id": "req_accountspace_unauthenticated_error",
+          "trace_id": "trace_accountspace_unauthenticated_error",
+          "source": "agent_service"
+        }
+      },
+      "assertions": [
+        "accountspace unauthenticated_error contract is stable"
+      ],
+      "error": {
+        "code": "UNAUTHENTICATED",
+        "message": "login required",
+        "retryable": false
+      }
+    },
+    {
+      "case_id": "accountspace_personal_space_success",
+      "service": "AccountSpaceService",
+      "method": "ResolveCurrentSpaceContext",
+      "scenario": "personal_space_success",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "ENTERPRISE_MEMBER",
+          "space_id": "sp_enterprise_1001",
+          "enterprise_id": "ent_1001",
+          "enterprise_role": "owner"
+        },
+        "request_meta": {
+          "request_id": "req_accountspace_personal_space_success",
+          "trace_id": "trace_accountspace_personal_space_success",
+          "source": "agent_service"
+        }
+      },
+      "assertions": [
+        "accountspace personal_space_success contract is stable"
+      ],
+      "response": {
+        "space_id": "sp_personal_1001",
+        "space_type": "personal",
+        "credit_account_scope": "personal",
+        "credit_account_id": "ca_personal_1001",
+        "skill_scope_keys": [
+          "personal"
+        ]
+      }
+    },
+    {
+      "case_id": "accountspace_enterprise_owner_success",
+      "service": "AccountSpaceService",
+      "method": "ResolveCurrentSpaceContext",
+      "scenario": "enterprise_owner_success",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "request_meta": {
+          "request_id": "req_accountspace_enterprise_owner_success",
+          "trace_id": "trace_accountspace_enterprise_owner_success",
+          "source": "agent_service"
+        }
+      },
+      "assertions": [
+        "accountspace enterprise_owner_success contract is stable"
+      ],
+      "response": {
+        "space_id": "sp_enterprise_1001",
+        "space_type": "enterprise",
+        "enterprise_id": "ent_1001",
+        "enterprise_role": "owner",
+        "credit_account_scope": "enterprise",
+        "credit_account_id": "ca_enterprise_1001",
+        "skill_scope_keys": [
+          "enterprise_runtime"
+        ]
+      }
+    },
+    {
+      "case_id": "accountspace_enterprise_member_success",
+      "service": "AccountSpaceService",
+      "method": "ResolveCurrentSpaceContext",
+      "scenario": "enterprise_member_success",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "ENTERPRISE_MEMBER",
+          "space_id": "sp_enterprise_1001",
+          "enterprise_id": "ent_1001",
+          "enterprise_role": "member"
+        },
+        "request_meta": {
+          "request_id": "req_accountspace_enterprise_member_success",
+          "trace_id": "trace_accountspace_enterprise_member_success",
+          "source": "agent_service"
+        }
+      },
+      "assertions": [
+        "accountspace enterprise_member_success contract is stable"
+      ],
+      "response": {
+        "space_id": "sp_enterprise_1001",
+        "space_type": "enterprise",
+        "enterprise_id": "ent_1001",
+        "enterprise_role": "member",
+        "credit_account_scope": "enterprise",
+        "credit_account_id": "ca_enterprise_1001",
+        "skill_scope_keys": [
+          "enterprise_runtime"
+        ]
+      }
+    },
+    {
+      "case_id": "accountspace_member_removed_error",
+      "service": "AccountSpaceService",
+      "method": "ResolveCurrentSpaceContext",
+      "scenario": "member_removed_error",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "ENTERPRISE_MEMBER",
+          "space_id": "sp_enterprise_removed",
+          "enterprise_id": "ent_removed",
+          "enterprise_role": "member"
+        },
+        "request_meta": {
+          "request_id": "req_accountspace_member_removed_error",
+          "trace_id": "trace_accountspace_member_removed_error",
+          "source": "agent_service"
+        }
+      },
+      "assertions": [
+        "accountspace member_removed_error contract is stable"
+      ],
+      "error": {
+        "code": "PERMISSION_DENIED",
+        "message": "member has been removed",
+        "retryable": false
+      }
+    },
+    {
+      "case_id": "accountspace_disabled_user_error",
+      "service": "AccountSpaceService",
+      "method": "ResolveCurrentSpaceContext",
+      "scenario": "disabled_user_error",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "request_meta": {
+          "request_id": "req_accountspace_disabled_user_error",
+          "trace_id": "trace_accountspace_disabled_user_error",
+          "source": "agent_service"
+        }
+      },
+      "assertions": [
+        "accountspace disabled_user_error contract is stable"
+      ],
+      "error": {
+        "code": "PERMISSION_DENIED",
+        "message": "user disabled",
+        "retryable": false
+      }
+    }
+  ]
+}

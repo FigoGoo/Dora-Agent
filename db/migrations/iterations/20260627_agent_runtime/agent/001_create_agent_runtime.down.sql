@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS agent_runtime_configs;
+DROP TABLE IF EXISTS agent_memories;
+DROP TABLE IF EXISTS agent_safety_evaluations;
+DROP TABLE IF EXISTS agent_artifacts;
+DROP TABLE IF EXISTS agent_interrupts;
+DROP TABLE IF EXISTS agent_tasks;
+DROP TABLE IF EXISTS agent_tool_calls;
+DROP TABLE IF EXISTS agent_events;
+DROP TABLE IF EXISTS agent_messages;
+DROP TABLE IF EXISTS agent_runs;
+DROP TABLE IF EXISTS agent_sessions;

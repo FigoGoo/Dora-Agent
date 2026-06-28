@@ -1,0 +1,156 @@
+{
+  "domain": "model",
+  "scenarios": [
+    {
+      "case_id": "model_default_model_success",
+      "service": "ModelConfigService",
+      "method": "ResolveDefaultModel",
+      "scenario": "default_model_success",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "request_meta": {
+          "request_id": "req_model_default_model_success",
+          "trace_id": "trace_model_default_model_success",
+          "source": "agent_service"
+        },
+        "resource_type": "image"
+      },
+      "assertions": [
+        "model default_model_success contract is stable"
+      ],
+      "response": {
+        "model_id": "mdl_seed_image",
+        "display_name": "Seed Image",
+        "resource_type": "image",
+        "pricing_snapshot_id": "price_1",
+        "provider_runtime_ref": "volcengine.seed-image",
+        "timeout_ms": 120000
+      }
+    },
+    {
+      "case_id": "model_available_models_page_success",
+      "service": "ModelConfigService",
+      "method": "ListAvailableGenerationModels",
+      "scenario": "available_models_page_success",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "request_meta": {
+          "request_id": "req_model_available_models_page_success",
+          "trace_id": "trace_model_available_models_page_success",
+          "source": "agent_service"
+        },
+        "resource_type": "image",
+        "page_size": 10
+      },
+      "assertions": [
+        "model available_models_page_success contract is stable"
+      ],
+      "response": {
+        "models": [
+          {
+            "model_id": "mdl_seed_image",
+            "display_name": "Seed Image",
+            "is_default": true,
+            "pricing_snapshot_id": "price_1",
+            "resource_type": "image"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "model_disabled_model_error",
+      "service": "ModelConfigService",
+      "method": "ResolveGenerationModelSnapshot",
+      "scenario": "disabled_model_error",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "request_meta": {
+          "request_id": "req_model_disabled_model_error",
+          "trace_id": "trace_model_disabled_model_error",
+          "source": "agent_service"
+        },
+        "resource_type": "image",
+        "model_id": "mdl_disabled",
+        "pricing_snapshot_id": "price_disabled"
+      },
+      "assertions": [
+        "model disabled_model_error contract is stable"
+      ],
+      "error": {
+        "code": "MODEL_DISABLED",
+        "message": "model disabled",
+        "retryable": false
+      }
+    },
+    {
+      "case_id": "model_pricing_snapshot_missing_error",
+      "service": "ModelConfigService",
+      "method": "ResolveGenerationModelSnapshot",
+      "scenario": "pricing_snapshot_missing_error",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "request_meta": {
+          "request_id": "req_model_pricing_snapshot_missing_error",
+          "trace_id": "trace_model_pricing_snapshot_missing_error",
+          "source": "agent_service"
+        },
+        "resource_type": "image",
+        "model_id": "mdl_seed_image",
+        "pricing_snapshot_id": "price_missing"
+      },
+      "assertions": [
+        "model pricing_snapshot_missing_error contract is stable"
+      ],
+      "error": {
+        "code": "PRICING_SNAPSHOT_MISSING",
+        "message": "pricing snapshot missing",
+        "retryable": false
+      }
+    },
+    {
+      "case_id": "model_provider_config_missing_error",
+      "service": "ModelConfigService",
+      "method": "ResolveGenerationModelSnapshot",
+      "scenario": "provider_config_missing_error",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "request_meta": {
+          "request_id": "req_model_provider_config_missing_error",
+          "trace_id": "trace_model_provider_config_missing_error",
+          "source": "agent_service"
+        },
+        "resource_type": "image",
+        "model_id": "mdl_seed_image",
+        "pricing_snapshot_id": "price_1"
+      },
+      "assertions": [
+        "model provider_config_missing_error contract is stable"
+      ],
+      "error": {
+        "code": "PROVIDER_CONFIG_MISSING",
+        "message": "provider config missing",
+        "retryable": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "case_id": "business_rpc_estimate_tool_credits_success",
+  "service": "CreditService",
+  "method": "EstimateToolCredits",
+  "request": {
+    "auth_context": {
+      "actor_user_id": "usr_1001",
+      "login_identity_type": "PERSONAL",
+      "space_id": "sp_personal_1001"
+    },
+    "request_meta": {
+      "request_id": "req_est_tool_001",
+      "trace_id": "trace_est_tool_001",
+      "source": "agent_service"
+    },
+    "project_id": "prj_active_1001",
+    "tool_usage_items": [
+      {
+        "tool_name": "web_fetch",
+        "tool_type": "browser",
+        "billing_unit": "call",
+        "quantity": 3,
+        "metadata_summary": {
+          "host_count": "2"
+        }
+      }
+    ],
+    "safety_evidence": {
+      "safety_evidence_id": "safe_est_tool_001",
+      "scene": "tool_execution",
+      "result": "passed",
+      "target_type": "tool_input",
+      "target_ref_id": "tool_call_1001",
+      "evaluated_object_digest": "sha256:tool-input-digest",
+      "policy_version": "safety-policy-2026-06",
+      "evidence_version": "1",
+      "evaluated_at": "2026-06-27T12:00:00Z",
+      "expires_at": "2026-06-27T12:30:00Z",
+      "source_session_id": "sess_1001",
+      "source_run_id": "run_1001",
+      "trace_id": "trace_est_tool_001"
+    }
+  },
+  "response": {
+    "estimate_id": "est_tool_001",
+    "estimate_points": 9,
+    "available_points": 5000,
+    "expires_soon_points": 200,
+    "credit_account_scope": "personal",
+    "credit_account_id": "ca_personal_1001",
+    "line_items": [
+      {
+        "estimate_item_id": "est_item_tool_call_001",
+        "item_type": "tool_usage",
+        "tool_name": "web_fetch",
+        "tool_type": "browser",
+        "pricing_policy_id": "tool_price_web_fetch_call",
+        "billing_unit": "call",
+        "quantity": 3,
+        "unit_points": 3,
+        "estimate_points": 9
+      }
+    ],
+    "expires_at": "2026-06-27T12:10:00Z",
+    "insufficient": false
+  },
+  "assertions": [
+    "EstimateToolCredits is a read RPC and has no idempotency_key",
+    "request.safety_evidence is required before estimating Tool credits",
+    "response.line_items[0].estimate_item_id is required for ChargeToolUsageCredits"
+  ]
+}

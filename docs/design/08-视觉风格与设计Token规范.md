@@ -1,7 +1,7 @@
 # 视觉风格与设计 Token 规范
 
 状态：active
-owner：产品体验设计师
+owner：产品与需求责任域
 更新时间：2026-06-27
 适用范围：Dora-Agent Web 用户端首页、Agent 创作入口、Skill 快捷入口、项目卡片、精选作品展示，以及后续用户端页面的日间/夜间主题基线
 相关代码路径：`docs/design/prototypes/flova-style-homepage.html`；用户端 `frontend/**`
@@ -561,7 +561,7 @@ linear-gradient(
 
 禁用规则：
 
-- 不新增其他 icon 库，除非产品设计师和前端开发工程师共同确认。
+- 不新增其他 icon 库，除非产品设计师和前端责任域共同确认。
 - 不把 emoji 当作功能图标。
 - 不手写内联 SVG 替代 `lucide-react` 已有图标。
 - 不用图片资源承载常规 UI 图标。

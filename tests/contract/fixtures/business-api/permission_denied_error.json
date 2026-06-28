@@ -1,0 +1,24 @@
+{
+  "case_id": "business_api_permission_denied_error",
+  "method": "GET",
+  "path": "/api/enterprise/members?page_size=10",
+  "request_headers": {
+    "Authorization": "Bearer enterprise_member_session"
+  },
+  "response_status": 403,
+  "response_body": {
+    "code": "PERMISSION_DENIED",
+    "message": "enterprise owner role is required",
+    "data": null,
+    "error": {
+      "code": "PERMISSION_DENIED",
+      "message": "enterprise owner role is required",
+      "retryable": false
+    },
+    "trace_id": "trace_api_permission_denied_001"
+  },
+  "assertions": [
+    "business service owns final enterprise permission checks",
+    "frontend can map status 403 to permission_denied"
+  ]
+}

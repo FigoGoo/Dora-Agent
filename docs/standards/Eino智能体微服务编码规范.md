@@ -1,7 +1,7 @@
 # Eino 智能体微服务编码规范
 
 状态：active  
-owner：主控 Codex 汇总维护  
+owner：文档与契约责任域
 更新时间：2026-06-25
 适用范围：`/services/agent/**` 和相关 Agent Runtime 代码  
 
@@ -90,7 +90,7 @@ owner：主控 Codex 汇总维护
 ## event stream
 
 - 事件流支持顺序、幂等、断线重连和失败补偿。
-- message.delta 等增量事件必须能被前端稳定合并。
+- agent.message.delta 等增量事件必须能被前端稳定合并。
 
 ## observability
 

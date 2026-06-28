@@ -1,7 +1,7 @@
 # AG-UI 事件协议模板
 
 状态：draft  
-owner：主控 Codex 汇总维护  
+owner：文档与契约责任域
 更新时间：YYYY-MM-DD  
 适用范围：智能体微服务 -> 前端  
 
@@ -19,18 +19,19 @@ owner：主控 Codex 汇总维护
 
 | 事件类型 | 触发时机 | 生产方 | 消费方行为 |
 | --- | --- | --- | --- |
-| agent.started | Agent 运行开始 | 智能体微服务 | 展示运行中 |
-| message.started | 消息开始 | 智能体微服务 | 创建消息占位 |
-| message.delta | 消息增量 | 智能体微服务 | 增量渲染 |
-| message.completed | 消息完成 | 智能体微服务 | 固化消息 |
-| tool.call | Tool 调用开始 | 智能体微服务 | 展示调用中 |
-| tool.result | Tool 调用完成 | 智能体微服务 | 展示结果 |
-| graph.node.started | Graph 节点开始 | 智能体微服务 | 展示步骤进度 |
-| graph.node.completed | Graph 节点完成 | 智能体微服务 | 更新步骤状态 |
-| interrupt.required | 需要人工确认 | 智能体微服务 | 展示确认 UI |
+| agent.run.started | Agent 运行开始 | 智能体微服务 | 展示运行中 |
+| agent.message.delta | 消息增量 | 智能体微服务 | 增量渲染 |
+| agent.message.completed | 消息完成 | 智能体微服务 | 固化消息 |
+| tool.call.started | Tool 调用开始 | 智能体微服务 | 展示调用中 |
+| tool.call.completed | Tool 调用完成 | 智能体微服务 | 展示结果 |
+| tool.call.failed | Tool 调用失败 | 智能体微服务 | 展示失败状态 |
+| generation.progress | 生成进度 | 智能体微服务 | 更新进度 |
+| confirmation.required | 需要人工确认 | 智能体微服务 | 展示确认 UI |
 | resume.accepted | 恢复已接受 | 智能体微服务 | 展示恢复中 |
-| agent.completed | Agent 完成 | 智能体微服务 | 展示完成 |
-| agent.failed | Agent 失败 | 智能体微服务 | 展示错误 |
+| workspace.assets.updated | 资产更新 | 智能体微服务 | 更新工作区资产 |
+| process.snapshot.saved | 快照保存 | 智能体微服务 | 标记可恢复点 |
+| agent.run.completed | Agent 完成 | 智能体微服务 | 展示完成 |
+| agent.run.failed | Agent 失败 | 智能体微服务 | 展示错误 |
 
 ## 事件顺序
 
@@ -42,7 +43,7 @@ owner：主控 Codex 汇总维护
 ```json
 {
   "event_id": "evt_xxx",
-  "type": "message.delta",
+  "type": "agent.message.delta",
   "session_id": "sess_xxx",
   "run_id": "run_xxx",
   "sequence": 1,

@@ -1,0 +1,25 @@
+{
+  "case_id": "business_api_notification_navigation_success",
+  "method": "GET",
+  "path": "/api/notifications/ntf_skill_review_001/navigation",
+  "request_headers": {
+    "Authorization": "Bearer user_session_token"
+  },
+  "response_status": 200,
+  "response_body": {
+    "code": "OK",
+    "message": "ok",
+    "data": {
+      "notification_id": "ntf_skill_review_001",
+      "allowed": true,
+      "target_route": "/skills/sk_seed_storyboard",
+      "target_resource_id": "sk_seed_storyboard",
+      "target_type": "skill_version"
+    },
+    "trace_id": "trace_api_notification_navigation_001"
+  },
+  "assertions": [
+    "navigation performs permission recheck before returning allowed=true",
+    "navigation response uses target_route and target_resource_id, not stale target_id"
+  ]
+}

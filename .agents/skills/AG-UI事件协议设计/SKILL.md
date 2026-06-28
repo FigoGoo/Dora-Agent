@@ -22,18 +22,28 @@ description: 用于设计智能体微服务到前端的 AG-UI 事件协议和前
 - 前端展示需求和状态规范。
 - 会话、运行、任务和中断状态模型。
 
+## 文档使用规则
+
+- 开始任务先读 `AGENTS.md` 和 `docs/current/README.md`，再按任务读取 `docs/technical/README.md`、`docs/product/README.md`、`docs/contracts/README.md`、`docs/standards/README.md` 或 `docs/test/README.md`。
+- 开发前若缺产品目标、技术设计、契约、数据模型、SQL 或测试口径，先补对应 `draft` 或 `active` 文档，不直接从历史归档派生实现。
+- 开发前需要设计时，按 `docs/templates/` 下对应模板新建或更新 `docs/technical/**`、`docs/product/**`、`docs/contracts/**` 或 `docs/test/**`，状态先用 `draft` 或 `review`；达到当前事实源条件后再改为 `active`。
+- 旧文档不再承接当前迭代、内容被字段级事实源替代、包含已完成阶段计划或与当前代码冲突时，标记为 `archived` 或 `deprecated`，移动到 `docs/archive/**` 或 `docs/releases/**`，并在当前入口写明替代文档。
+- 开发中新增或改变 RPC、API、AG-UI、数据模型、SQL、配置、权限、错误码或测试夹具时，同步更新对应文档和目录 README。
+- 开发完成后，在相关设计、契约或测试报告中记录实现状态、验证命令、证据路径、未执行原因、遗留风险和后续动作。
+- `code-plan/**`、`docs/releases/**`、`docs/archive/**` 默认只用于历史追溯；需要复用其中结论时，先迁移到当前 active 文档。
+
 ## 执行流程
 
 1. 定义 AG-UI 事件边界：只承载前端需要展示或驱动交互的事件。
 2. 映射 Eino 内部事件到 AG-UI：保留语义，不泄露内部实现细节。
 3. 选择承载方式：SSE 适合单向流，WebSocket 适合双向实时交互；HTTP API 用于查询和补偿。
-4. 定义事件类型：至少评估 agent.started、message.started、message.delta、message.completed、tool.call、tool.result、graph.node.started、graph.node.completed、interrupt.required、resume.accepted、agent.completed、agent.failed。
+4. 定义事件类型：至少评估 agent.run.started、agent.message.delta、agent.message.completed、tool.call.started、tool.call.completed、tool.call.failed、generation.progress、confirmation.required、resume.accepted、workspace.assets.updated、agent.run.completed、agent.run.failed。
 5. 定义事件 payload：包含 event_id、session_id、run_id、timestamp、type、payload、sequence。
 6. 定义事件顺序：同一 run 内 sequence 单调递增，前端可按 sequence 合并。
 7. 定义事件幂等：event_id 全局唯一，重复事件前端可忽略。
 8. 设计断线重连：支持 last_event_id 或 run_id + sequence 补偿。
 9. 设计错误事件：区分用户错误、工具错误、RPC 错误、模型错误和系统错误。
-10. 设计人工确认事件：interrupt.required 说明确认项、风险、可选动作和过期时间。
+10. 设计人工确认事件：confirmation.required 说明确认项、风险、可选动作和过期时间。
 11. 设计 Tool 调用事件、消息增量事件和任务完成事件。
 
 ## 输出

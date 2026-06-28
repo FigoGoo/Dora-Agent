@@ -1,0 +1,41 @@
+{
+  "case_id": "business_api_work_share_business_error_safety_digest_mismatch",
+  "method": "POST",
+  "path": "/api/works/wrk_seed_public/share/preview",
+  "request_headers": {
+    "Authorization": "Bearer user_session_token"
+  },
+  "request_body": {
+    "public_title": "Mutated title",
+    "public_description": "A sanitized public description.",
+    "tags": ["demo", "storyboard"],
+    "safety_evidence": {
+      "safety_evidence_id": "safe_work_share_seed",
+      "scene": "work_share",
+      "target_type": "work_share_text",
+      "result": "passed",
+      "evaluated_object_digest": "sha256:original-title-description-tags",
+      "policy_version": "local-m5",
+      "evidence_version": "2026-06-28",
+      "evaluated_at": "2026-06-27T00:00:00Z",
+      "expires_at": "2026-06-27T00:10:00Z",
+      "trace_id": "trace_api_share_safety_001"
+    }
+  },
+  "response_status": 409,
+  "response_body": {
+    "code": "SAFETY_EVIDENCE_INVALID",
+    "message": "work share safety evidence digest does not match public text",
+    "data": null,
+    "error": {
+      "code": "SAFETY_EVIDENCE_INVALID",
+      "message": "work share safety evidence digest does not match public text",
+      "retryable": false
+    },
+    "trace_id": "trace_api_share_safety_001"
+  },
+  "assertions": [
+    "work_share evidence digest binds public title, description and tags",
+    "digest mismatch does not publish a public snapshot"
+  ]
+}

@@ -1,8 +1,8 @@
 # 统一 Agent 产品系统设计
 
-状态：active
-owner：产品体验设计师
-更新时间：2026-06-25
+状态：archived
+owner：产品与需求责任域
+更新时间：2026-06-28
 适用范围：统一 Agent Runtime、意图识别、Skill 路由、Agent 执行边界
 product_status：Done
 

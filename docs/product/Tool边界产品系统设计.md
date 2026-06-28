@@ -1,8 +1,8 @@
 # Tool 边界产品系统设计
 
-状态：active
-owner：产品体验设计师
-更新时间：2026-06-25
+状态：archived
+owner：产品与需求责任域
+更新时间：2026-06-28
 适用范围：平台开放 Tool、Skill 可用 Tool、业务 RPC Tool、Tool 风险等级和人工确认边界
 product_status：Done
 

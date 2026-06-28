@@ -1,7 +1,7 @@
 # Agent 领域数据建模规范
 
 状态：active  
-owner：主控 Codex 汇总维护  
+owner：文档与契约责任域
 更新时间：2026-06-25
 适用范围：智能体微服务 Agent Runtime 数据模型  
 

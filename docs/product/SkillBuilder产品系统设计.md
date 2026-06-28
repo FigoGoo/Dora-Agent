@@ -1,8 +1,8 @@
 # Skill Builder 产品系统设计
 
-状态：active
-owner：产品体验设计师
-更新时间：2026-06-25
+状态：archived
+owner：产品与需求责任域
+更新时间：2026-06-28
 适用范围：系统 Skill、企业 Skill、个人 Skill 的创建、编辑、发布、废弃和测试
 product_status：Done
 

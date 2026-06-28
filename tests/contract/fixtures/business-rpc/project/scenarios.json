@@ -1,0 +1,120 @@
+{
+  "domain": "project",
+  "scenarios": [
+    {
+      "case_id": "project_continue_creation_success",
+      "service": "ProjectService",
+      "method": "CheckProjectAccess",
+      "scenario": "continue_creation_success",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "request_meta": {
+          "request_id": "req_project_continue_creation_success",
+          "trace_id": "trace_project_continue_creation_success",
+          "source": "agent_service"
+        },
+        "project_id": "prj_active_1001",
+        "access_purpose": "CONTINUE_CREATION"
+      },
+      "assertions": [
+        "project continue_creation_success contract is stable"
+      ],
+      "response": {
+        "allowed": true,
+        "project_status": "active",
+        "creative_allowed": true,
+        "allowed_actions": [
+          "continue_creation"
+        ]
+      }
+    },
+    {
+      "case_id": "project_archived_readonly_error",
+      "service": "ProjectService",
+      "method": "CheckProjectAccess",
+      "scenario": "archived_readonly_error",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "request_meta": {
+          "request_id": "req_project_archived_readonly_error",
+          "trace_id": "trace_project_archived_readonly_error",
+          "source": "agent_service"
+        },
+        "project_id": "prj_archived_1001",
+        "access_purpose": "CONTINUE_CREATION"
+      },
+      "assertions": [
+        "project archived_readonly_error contract is stable"
+      ],
+      "error": {
+        "code": "PROJECT_ARCHIVED",
+        "message": "archived project is read only",
+        "retryable": false
+      }
+    },
+    {
+      "case_id": "project_cross_space_permission_denied",
+      "service": "ProjectService",
+      "method": "CheckProjectAccess",
+      "scenario": "cross_space_permission_denied",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "request_meta": {
+          "request_id": "req_project_cross_space_permission_denied",
+          "trace_id": "trace_project_cross_space_permission_denied",
+          "source": "agent_service"
+        },
+        "project_id": "prj_other_space_1002",
+        "access_purpose": "VIEW"
+      },
+      "assertions": [
+        "project cross_space_permission_denied contract is stable"
+      ],
+      "error": {
+        "code": "CROSS_SPACE_DENIED",
+        "message": "cross space access denied",
+        "retryable": false
+      }
+    },
+    {
+      "case_id": "project_project_not_found_error",
+      "service": "ProjectService",
+      "method": "CheckProjectAccess",
+      "scenario": "project_not_found_error",
+      "request": {
+        "auth_context": {
+          "actor_user_id": "usr_1001",
+          "login_identity_type": "PERSONAL",
+          "space_id": "sp_personal_1001"
+        },
+        "request_meta": {
+          "request_id": "req_project_project_not_found_error",
+          "trace_id": "trace_project_project_not_found_error",
+          "source": "agent_service"
+        },
+        "project_id": "prj_missing",
+        "access_purpose": "VIEW"
+      },
+      "assertions": [
+        "project project_not_found_error contract is stable"
+      ],
+      "error": {
+        "code": "PROJECT_NOT_FOUND",
+        "message": "project not found",
+        "retryable": false
+      }
+    }
+  ]
+}

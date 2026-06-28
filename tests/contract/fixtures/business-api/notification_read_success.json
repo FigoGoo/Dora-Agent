@@ -1,0 +1,38 @@
+{
+  "case_id": "business_api_notification_read_success",
+  "method": "POST",
+  "path": "/api/notifications/ntf_skill_review_001/read",
+  "request_headers": {
+    "Authorization": "Bearer user_session_token",
+    "Idempotency-Key": "idem_notification_read_001"
+  },
+  "request_body": {
+    "request_hash": "sha256:m5-notification-read-request"
+  },
+  "response_status": 200,
+  "response_body": {
+    "code": "OK",
+    "message": "ok",
+    "data": {
+      "notification_id": "ntf_skill_review_001",
+      "type": "skill_review_approved",
+      "title": "Skill approved",
+      "summary": "Skill approved",
+      "body": "Your skill has been approved.",
+      "related_resource_type": "skill_version",
+      "related_resource_id": "skv_seed_storyboard_100",
+      "navigation_hint": {
+        "target_route": "/skills/sk_seed_storyboard",
+        "target_resource_id": "sk_seed_storyboard"
+      },
+      "read_at": "2026-06-27T00:05:00Z",
+      "created_at": "2026-06-27T00:00:00Z"
+    },
+    "trace_id": "trace_api_notification_read_001"
+  },
+  "assertions": [
+    "mark read is scoped to the current user",
+    "notification DTO returns title/summary/body/navigation_hint/read_at without stale status",
+    "navigation_hint is returned but navigation still requires a second permission check"
+  ]
+}

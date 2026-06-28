@@ -1,9 +1,18 @@
 # 统一 Agent 工作台 AG-UI 事件协议草案
 
 状态：draft
-owner：主控 Codex 汇总维护；Go Eino 智能体微服务架构工程师负责生产语义；前端开发工程师负责消费语义
-更新时间：2026-06-25
+owner：文档与契约责任域；Agent 服务责任域负责生产语义；前端责任域负责消费语义
+更新时间：2026-06-28
 适用范围：智能体微服务 -> Dora-Agent Web 前端统一 Agent 工作台
+
+## 成熟度复核
+
+当前成熟度：draft，不升 `active`。  
+使用方式：可作为 AG-UI 事件方向、事件命名、安全展示、补偿查询和 snapshot fallback 的设计输入；字段级事件 schema 以 `api/agui/agent-workbench-events.schema.json` 为准，Agent API 路径以 `api/openapi/agent-workbench.yaml` 为准。
+
+已补齐项：补偿查询 API 路径、分页上限、snapshot fallback 条件、高频 progress 节流、`confirmation.required` 与 Agent `interrupt` 的兼容映射已在本文冻结。
+
+未冻结项：自动化 replay fixture 覆盖报告和服务级执行证据尚未固化，因此本文仍保持 `draft`。
 
 ## 事件背景
 
@@ -11,10 +20,58 @@ owner：主控 Codex 汇总维护；Go Eino 智能体微服务架构工程师负
 
 ## 传输方式
 
-- SSE：第一版默认实时通道，路径待 Agent API 契约确认。
+- SSE：第一版默认实时通道，路径为 `GET /api/agent/runs/{run_id}/stream`。
 - WebSocket：第一版不作为默认方案。
-- HTTP 补偿查询：支持 `run_id + after_sequence` 或 `last_event_id` 补偿。
-- 快照恢复：补偿失败时查询 run/session snapshot。
+- HTTP 补偿查询：路径为 `GET /api/agent/runs/{run_id}/events`，支持 `after_sequence` 和 `page_size`。
+- 快照恢复：补偿失败时查询 `GET /api/agent/runs/{run_id}/snapshot`。
+
+## SSE 鉴权和重连
+
+- SSE 使用与 Agent API 一致的 Bearer 登录态鉴权，不单独定义长期 stream token。
+- 前端重连时优先携带 `Last-Event-ID` header，值为最近成功消费的 `event_id`。
+- Agent 服务根据 `Last-Event-ID` 查询对应 `run_id` 内的 `sequence`，再按 `after_sequence=last_sequence` 补偿。
+- `Last-Event-ID` 不存在、过期、跨 run、跨用户或不可见时，服务不得猜测续点，必须返回可恢复错误或引导 snapshot fallback。
+- SSE 断线重连后，前端必须先完成 replay 合并，再继续展示新流；重复 `event_id` 忽略。
+
+## 补偿查询
+
+| 项 | 规则 |
+| --- | --- |
+| API | `GET /api/agent/runs/{run_id}/events?after_sequence={sequence}&page_size={size}` |
+| 鉴权 | 登录态 + session / project 权限 |
+| 默认分页 | `page_size=10` |
+| 最大分页 | `page_size=100`，超过按 `100` 或 `VALIDATION_FAILED` 处理，具体以 OpenAPI 实现为准 |
+| 起点 | 返回 `sequence > after_sequence` 的连续事件 |
+| 响应 | `events`、`next_after_sequence`、`snapshot_required` |
+| 无新事件 | `events=[]`，`next_after_sequence=after_sequence`，`snapshot_required=false` |
+| 不可补偿 | `events=[]`，`snapshot_required=true`，前端必须查询 snapshot |
+
+补偿查询只返回当前用户有权访问的 run 事件；不得通过 event replay 泄露其他项目、空间或用户的事件。
+
+## Snapshot Fallback
+
+出现以下任一情况时必须进入 snapshot fallback：
+
+- `Last-Event-ID` 无法映射到当前 run 的事件。
+- `after_sequence` 小于事件保留窗口下限。
+- 事件存储发现 sequence 缺口，无法返回连续事件。
+- replay 返回 `snapshot_required=true`。
+- run 已完成或取消，但前端本地最后序号落后且事件窗口已清理。
+
+snapshot 查询路径为 `GET /api/agent/runs/{run_id}/snapshot`。快照必须至少返回 session、run、messages、assets、blackboard、tasks、`last_event_sequence` 和只读原因；前端用 snapshot 覆盖本地运行视图后，从 `last_event_sequence` 继续 replay 或重新打开 SSE。
+
+## Progress 节流
+
+以下高频事件必须节流，避免前端和事件表被无意义增量淹没：
+
+| 事件 | 节流规则 | 必发条件 |
+| --- | --- | --- |
+| `tool.call.progress` | 同一 `tool_call_id` 默认每 1000ms 最多 1 条，或 progress 变化不少于 5。 | started、completed、failed、状态变更 |
+| `generation.progress` | 同一 `task_id` 默认每 1000ms 最多 1 条，或 progress 变化不少于 5。 | queued/running/finalizing/completed/failed/cancelled 状态变更 |
+| `agent.thinking.delta` | 同一 `thinking_id` 默认每 200ms 最多 1 条。 | thinking started/completed |
+| `workspace.blackboard.updated` | 同一 run 默认每 1000ms 最多 1 条，或 blackboard_version 变化。 | run completed、snapshot saved |
+
+节流只影响中间进度事件，不允许吞掉终态事件。
 
 ## 公共 payload
 
@@ -66,6 +123,7 @@ owner：主控 Codex 汇总维护；Go Eino 智能体微服务架构工程师负
 | confirmation.required | 需要人工确认 | 智能体微服务 | 展示 ConfirmPanel |
 | confirmation.accepted | 用户确认 | 智能体微服务 | 锁定输入，继续 run |
 | confirmation.rejected | 用户拒绝 | 智能体微服务 | 停止对应操作 |
+| resume.accepted | 追加输入或恢复被接受 | 智能体微服务 | 继续 run 或重新执行安全评估 |
 | tool.call.started | Tool 开始 | 智能体微服务 | 展示 ToolStatus |
 | tool.call.progress | Tool 进度 | 智能体微服务 | 更新进度 |
 | tool.call.completed | Tool 完成 | 智能体微服务 | 展示结果摘要 |
@@ -99,6 +157,20 @@ owner：主控 Codex 汇总维护；Go Eino 智能体微服务架构工程师负
 不得展示给用户：`event_id`、`sequence`、内部 run 调度细节、Eino 节点名、系统 Prompt、完整组装 Prompt、模型推理链路、供应商原始响应、API Key、内部成本、完整 Tool 原始参数、内容安全内部评分和命中规则细节。
 
 ## 关键 payload 约束
+
+### confirmation.* 与 interrupt 映射
+
+AG-UI 对前端的 canonical 确认事件使用 `confirmation.required`、`confirmation.accepted` 和 `confirmation.rejected`。Agent 领域模型内部使用 `interrupt` 记录保存等待确认状态。
+
+| Agent 领域状态 | AG-UI 事件 | API 操作 | 说明 |
+| --- | --- | --- | --- |
+| `interrupt.status=required` | `confirmation.required` | 无 | payload 必须包含 `confirmation_id` 和 `interrupt_id`。 |
+| `interrupt.status=accepted` | `confirmation.accepted` | `POST /api/agent/runs/{run_id}/interrupts/{interrupt_id}/accept` | payload 包含 `payload_digest`，继续 run。 |
+| `interrupt.status=rejected` | `confirmation.rejected` | `POST /api/agent/runs/{run_id}/interrupts/{interrupt_id}/reject` | run 进入 cancelled 或对应分支终止。 |
+| `interrupt.status=expired` | `agent.run.failed` 或 `agent.run.cancelled` | 无 | 错误码使用 `INTERRUPT_EXPIRED`。 |
+| 追加输入恢复 | `resume.accepted` | `POST /api/agent/runs/{run_id}/messages` | 需要重新安全评估时 payload 标记 `requires_safety_evaluation=true`。 |
+
+兼容规则：第一版不生产 `interrupt.required` 作为 AG-UI canonical 事件。若旧客户端或历史 fixture 出现 `interrupt.required`，前端可按 `confirmation.required` 兼容读取，但新事件、schema 和测试以 `confirmation.required` 为准。
 
 ### safety.prompt.*
 
@@ -176,8 +248,7 @@ process.snapshot.saved
 - 安全通过事件可静默处理；安全阻断、归档阻断和扣费失败必须展示用户可理解提示。
 - 媒体预览和下载不得依赖 Agent 事件中的长期 URL，必须通过业务 API 获取授权后的 TOS 公共 URL。
 
-## 待确认
+## 后续证据
 
-- `confirmation.required` 与标准 `interrupt.required` 是否保留映射事件。
-- 补偿查询 API 的路径和分页上限。
-- 高频 progress 事件是否需要节流。
+- 需要补充 replay fixture 覆盖：正常重连、重复事件、sequence 缺口、窗口过期、snapshot fallback、未知事件兼容。
+- 需要在服务级测试报告中记录 `/stream`、`/events`、`/snapshot` 的执行证据。
