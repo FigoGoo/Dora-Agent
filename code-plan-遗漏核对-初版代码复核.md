@@ -282,7 +282,7 @@
 
 ## 批 F 子切片记录（2026-06-28 · ACCT-6 / ACCT-7）✅
 
-提交：随本切片提交（ACCT-6 / ACCT-7）
+提交：`5473e27`（ACCT-6 / ACCT-7）
 验证：`go test ./services/business/internal/transport/http` 通过；`python3 tests/contract/validate_fixtures.py` 通过；`git diff --check` 通过。
 
 - **ACCT-6 ✅ 已固化**：HTTP 入口对 `UNAUTHENTICATED` 统一返回登录边界 details，匿名访问公开读不受影响，匿名点赞等需登录动作保持 401。
@@ -290,3 +290,13 @@
 
 范围决策：
 - 本切片只定义业务 API 的登录承接契约，不实现前端 LoginModal 或登录后自动重放动作。
+
+## 批 E 子切片记录（2026-06-28 · INFRA-3）✅
+
+提交：随本切片提交（INFRA-3）
+验证：`go test ./services/business/internal/infra/metrics ./services/business/internal/transport/http ./services/business/internal/bootstrap` 通过；`git diff --check` 通过。
+
+- **INFRA-3 ✅ 已修**：业务侧新增内置 metrics registry，覆盖 counter/gauge/histogram 三类指标；HTTP 入口记录 `business_http_requests_total`、`business_http_inflight_requests`、`business_http_request_duration_ms` 并暴露 `/metrics` 文本出口；bootstrap 持有共享 registry。
+
+范围决策：
+- 本切片先建立业务指标基线和可抓取出口，不引入外部 Prometheus/OTel exporter 配置；跨服务 trace/OTel 仍归 INFRA-5。

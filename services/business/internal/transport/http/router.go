@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	nethttp "net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/toolpolicy"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/work"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/logger"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/metrics"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
 	"github.com/gin-gonic/gin"
 )
@@ -28,6 +30,7 @@ type ReadyChecker func(context.Context) error
 
 type RouterOptions struct {
 	Logger       *slog.Logger
+	Metrics      *metrics.Registry
 	Ready        ReadyChecker
 	AccountSpace *accountspace.App
 	Admin        *admin.App
@@ -50,10 +53,14 @@ func NewRouter(opts RouterOptions) *gin.Engine {
 	if log == nil {
 		log = slog.Default()
 	}
+	registry := opts.Metrics
+	if registry == nil {
+		registry = metrics.NewRegistry()
+	}
 
 	router.Use(traceMiddleware())
 	router.Use(requestMetaMiddleware())
-	router.Use(requestLogMiddleware(log))
+	router.Use(requestLogMiddleware(log, registry))
 	router.Use(errorMiddleware())
 
 	router.GET("/healthz", func(c *gin.Context) {
@@ -69,6 +76,12 @@ func NewRouter(opts RouterOptions) *gin.Engine {
 			}
 		}
 		c.JSON(nethttp.StatusOK, gin.H{"status": "ready", "service": "business"})
+	})
+	router.GET("/metrics", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain; version=0.0.4")
+		if err := registry.WritePrometheus(c.Writer); err != nil {
+			_ = c.Error(err)
+		}
 	})
 
 	registerM2Routes(router, opts)
@@ -105,17 +118,27 @@ func requestMetaMiddleware() gin.HandlerFunc {
 	}
 }
 
-func requestLogMiddleware(log *slog.Logger) gin.HandlerFunc {
+func requestLogMiddleware(log *slog.Logger, registry *metrics.Registry) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		started := time.Now()
+		registry.AddGauge(metrics.HTTPInflightRequests, nil, 1)
+		defer registry.AddGauge(metrics.HTTPInflightRequests, nil, -1)
 		c.Next()
+		latency := time.Since(started).Milliseconds()
+		labels := map[string]string{
+			"method": c.Request.Method,
+			"path":   c.FullPath(),
+			"status": strconv.Itoa(c.Writer.Status()),
+		}
+		registry.IncCounter(metrics.HTTPRequestsTotal, labels, 1)
+		registry.ObserveHistogram(metrics.HTTPRequestDuration, labels, float64(latency))
 		log.InfoContext(c.Request.Context(), "business_http_request",
 			logger.FieldTraceID, logger.TraceID(c.Request.Context()),
 			logger.FieldRequestID, logger.RequestID(c.Request.Context()),
 			logger.FieldMethod, c.Request.Method,
 			logger.FieldPath, c.FullPath(),
 			logger.FieldStatus, c.Writer.Status(),
-			logger.FieldLatencyMS, time.Since(started).Milliseconds(),
+			logger.FieldLatencyMS, latency,
 		)
 	}
 }

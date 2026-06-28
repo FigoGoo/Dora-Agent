@@ -7,9 +7,11 @@ import (
 	"errors"
 	nethttp "net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/logger"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/metrics"
 )
 
 func TestHealthReadyAndTraceHeader(t *testing.T) {
@@ -71,5 +73,33 @@ func TestRequestLogIncludesRequiredFieldSet(t *testing.T) {
 	}
 	if _, ok := entry[logger.FieldLatencyMS].(float64); !ok {
 		t.Fatalf("unexpected latency field: %#v", entry[logger.FieldLatencyMS])
+	}
+}
+
+func TestMetricsEndpointExposesHTTPRequestCounterGaugeAndHistogram(t *testing.T) {
+	registry := metrics.NewRegistry()
+	router := NewRouter(RouterOptions{Metrics: registry})
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(nethttp.MethodGet, "/healthz", nil)
+	router.ServeHTTP(resp, req)
+	if resp.Code != nethttp.StatusOK {
+		t.Fatalf("health status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	metricsResp := httptest.NewRecorder()
+	metricsReq := httptest.NewRequest(nethttp.MethodGet, "/metrics", nil)
+	router.ServeHTTP(metricsResp, metricsReq)
+	if metricsResp.Code != nethttp.StatusOK {
+		t.Fatalf("metrics status=%d body=%s", metricsResp.Code, metricsResp.Body.String())
+	}
+	body := metricsResp.Body.String()
+	for _, want := range []string{
+		`business_http_requests_total{method="GET",path="/healthz",status="200"} 1`,
+		`business_http_request_duration_ms_count{method="GET",path="/healthz",status="200"} 1`,
+		`business_http_inflight_requests 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected %q in metrics:\n%s", want, body)
+		}
 	}
 }

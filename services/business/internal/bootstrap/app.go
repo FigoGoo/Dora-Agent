@@ -25,6 +25,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/config"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/idempotency"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/logger"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/metrics"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/auditlog"
 	businesshttp "github.com/FigoGoo/Dora-Agent/services/business/internal/transport/http"
@@ -39,6 +40,7 @@ import (
 type App struct {
 	Config       config.BusinessConfig
 	Logger       *slog.Logger
+	Metrics      *metrics.Registry
 	DB           *gorm.DB
 	Account      *accountspace.App
 	Admin        *admin.App
@@ -58,6 +60,7 @@ type App struct {
 
 func New(cfg config.BusinessConfig) (*App, error) {
 	log := logger.New(os.Stdout, "business", cfg.AppEnv, cfg.LogLevel)
+	metricRegistry := metrics.NewRegistry()
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("open business database: %w", err)
@@ -111,6 +114,7 @@ func New(cfg config.BusinessConfig) (*App, error) {
 		}
 		router := businesshttp.NewRouter(businesshttp.RouterOptions{
 			Logger:       log,
+			Metrics:      metricRegistry,
 			Ready:        sqlDB.PingContext,
 			AccountSpace: accountApp,
 			Admin:        adminApp,
@@ -135,6 +139,7 @@ func New(cfg config.BusinessConfig) (*App, error) {
 	return &App{
 		Config:       cfg,
 		Logger:       log,
+		Metrics:      metricRegistry,
 		DB:           db,
 		Account:      accountApp,
 		Admin:        adminApp,
