@@ -488,6 +488,12 @@ func (a *App) SetArtifactUploader(uploader ArtifactUploader) {
 	}
 }
 
+func (a *App) SetModelAdapter(adapter modeltool.Adapter) {
+	if adapter != nil {
+		a.modelAdapter = adapter
+	}
+}
+
 func (a *App) SetGenerationQueue(queue GenerationJobQueue) {
 	a.generationQueue = queue
 }

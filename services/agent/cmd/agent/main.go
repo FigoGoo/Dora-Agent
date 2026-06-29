@@ -17,6 +17,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
 	agentrpc "github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/rpc"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/observability"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/modeltool"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -46,6 +47,17 @@ func main() {
 		os.Exit(1)
 	}
 	app := workbench.New(repository.New(db), gateway, cfg.DefaultConfigVersion)
+	if cfg.DeepSeekAPIKey == "" {
+		logger.Error("deepseek api key is required", "env", "DEEPSEEK_API_KEY")
+		os.Exit(1)
+	}
+	app.SetModelAdapter(modeltool.DeepSeekAdapter{
+		BaseURL:   cfg.DeepSeekBaseURL,
+		APIKey:    cfg.DeepSeekAPIKey,
+		Model:     cfg.DeepSeekModel,
+		MaxTokens: cfg.DeepSeekMaxTokens,
+	})
+	logger.Info("agent_model_adapter_enabled", "provider", "deepseek", "model", cfg.DeepSeekModel, "base_url", cfg.DeepSeekBaseURL)
 	var generationQueue *queue.RedisGenerationQueue
 	if cfg.GenerationQueue == "redis" {
 		generationQueue, err = queue.NewRedisGenerationQueue(queue.RedisGenerationQueueConfig{
