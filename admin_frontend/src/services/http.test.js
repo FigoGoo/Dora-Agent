@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { adminRequest, createRequestHash, parseApiError, safeHeaderValue } from './client.js';
-import { getAdminSession, saveAdminSession } from '../auth/session.js';
+import { adminRequest, createRequestHash, parseApiError, safeHeaderValue } from './http.js';
+import { getAdminSession, saveAdminSession } from './session.js';
 
 describe('admin API client', () => {
   beforeEach(() => {
