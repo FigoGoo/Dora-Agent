@@ -85,6 +85,12 @@ Agent 用户运行层：
 
 结论：通过。后端 `POST /api/admin/tools` 本身可注册 Tool，但管理端 Tool 页面缺少“注册 Tool”入口，导致系统 Skill 编辑器提示“先在 Tool 管理中注册名称和作用说明”时，管理员没有前端路径可走。
 
+## 2026-06-30 后台配置到用户 Agent 全链路复核索引
+
+新增归档：`tests/reports/admin-agent-full-flow-2026-06-30.md`
+
+结论：后端真实消费链路通过，用户前台产品链路未闭环。`scripts/e2e-admin-agent-full-flow.sh` 已覆盖后台新增 Tool、模型供应商、模型、默认模型、系统 Skill、输出元素，并用普通用户 Agent prompt 验证 `agent.skill.selected`、`tool.call.started/completed`、默认模型快照和确认 payload。浏览器核对显示当前 `frontend` 仍停在首页登录意图弹窗，“登录并继续”未接登录/工作台/Agent run，因此用户端 UI 不能完成真实创作链路。
+
 ### 已发现并修复的问题
 
 | 问题 | 表现 / 证据 | 根因 | 解决方案 | 回归保护 |
