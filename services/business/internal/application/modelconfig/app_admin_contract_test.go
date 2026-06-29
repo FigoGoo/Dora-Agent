@@ -45,6 +45,52 @@ func TestAdminProviderDTOExposesOpenAPIAliases(t *testing.T) {
 	}
 }
 
+func TestSaveProviderPatchPreservesExistingFieldsWhenOmitted(t *testing.T) {
+	app := newModelConfigContractApp(t)
+	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return now }
+	auth := admin.AdminAuth{AdminID: "adm_root"}
+
+	created, err := app.SaveProvider(t.Context(), SaveProviderInput{
+		Auth: auth, ProviderID: "mp_contract_patch_preserve", ProviderCode: "provider_patch_preserve",
+		DisplayName: "Provider Patch Preserve", ProviderType: "openai_compatible", Status: "active",
+		BaseURL: "https://example.com/v1", Config: map[string]any{"secret_key_ref": "secret/provider", "timeout_ms": 30000},
+	})
+	if err != nil {
+		t.Fatalf("save provider: %v", err)
+	}
+
+	statusOnly, err := app.SaveProvider(t.Context(), SaveProviderInput{
+		Auth: auth, ProviderID: created.ProviderID, Status: "disabled",
+	})
+	if err != nil {
+		t.Fatalf("patch provider status: %v", err)
+	}
+	if statusOnly.ProviderCode != "provider_patch_preserve" ||
+		statusOnly.ProviderName != "Provider Patch Preserve" ||
+		statusOnly.ProviderType != "openai_compatible" ||
+		statusOnly.BaseURL != "https://example.com/v1" ||
+		statusOnly.SecretRefStatus != "configured" ||
+		statusOnly.Status != "disabled" {
+		t.Fatalf("status patch did not preserve provider fields: %#v", statusOnly)
+	}
+
+	nameOnly, err := app.SaveProvider(t.Context(), SaveProviderInput{
+		Auth: auth, ProviderID: created.ProviderID, DisplayName: "Provider Patch Renamed",
+	})
+	if err != nil {
+		t.Fatalf("patch provider name: %v", err)
+	}
+	if nameOnly.ProviderCode != "provider_patch_preserve" ||
+		nameOnly.ProviderName != "Provider Patch Renamed" ||
+		nameOnly.ProviderType != "openai_compatible" ||
+		nameOnly.BaseURL != "https://example.com/v1" ||
+		nameOnly.SecretRefStatus != "configured" ||
+		nameOnly.Status != "disabled" {
+		t.Fatalf("name patch did not preserve provider fields: %#v", nameOnly)
+	}
+}
+
 func TestSetDefaultModelInfersActivePricingSnapshotWhenOmitted(t *testing.T) {
 	app := newModelConfigContractApp(t)
 	now := time.Date(2026, 6, 29, 8, 0, 0, 0, time.UTC)

@@ -1,3 +1,4 @@
+import { render, screen } from '@testing-library/react';
 import { describe, expect, test } from 'vitest';
 import {
   buildDetailLabels,
@@ -10,6 +11,7 @@ import {
   prepareBody,
   prepareCreateBody,
   resolveRowIdentifier,
+  RowDetails,
   validateRequiredFields,
   visibleRowActions
 } from './ResourceListPage.jsx';
@@ -121,6 +123,26 @@ describe('ResourceListPage helpers', () => {
     expect(labels.reason).toBe('创建原因');
     expect(labels.test_reason).toBe('测试原因');
     expect(labels.trace_id).toBe('Trace ID');
+  });
+
+  test('renders common enum detail values as Chinese labels', () => {
+    render(
+      <RowDetails
+        row={{
+          status: 'active',
+          tool_type: 'model_generation',
+          risk_level: 'medium',
+          charge_mode: 'model_generation',
+          billing_unit: 'asset'
+        }}
+      />
+    );
+
+    expect(screen.getByText('启用')).toBeInTheDocument();
+    expect(screen.getByText('模型生成 Tool')).toBeInTheDocument();
+    expect(screen.getByText('中风险')).toBeInTheDocument();
+    expect(screen.getByText('模型生成')).toBeInTheDocument();
+    expect(screen.getByText('按资产')).toBeInTheDocument();
   });
 
   test('builds grouped resource indexes and filters rows by active group', () => {

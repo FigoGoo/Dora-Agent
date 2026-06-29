@@ -103,16 +103,17 @@ func (h m3Handler) saveSkill(c *gin.Context, skillID string) {
 		return
 	}
 	var req struct {
-		SkillKey               string            `json:"skill_key"`
-		SkillName              string            `json:"skill_name"`
-		SkillScope             string            `json:"skill_scope"`
-		RouteHints             map[string]string `json:"route_hints"`
-		Version                string            `json:"version"`
-		SkillSpecJSON          string            `json:"skill_spec_json"`
-		InputSchemaJSON        string            `json:"input_schema_json"`
-		OutputSchemaJSON       string            `json:"output_schema_json"`
-		MemoryPolicyJSON       string            `json:"memory_policy_json"`
-		ConfirmationPolicyJSON string            `json:"confirmation_policy_json"`
+		SkillKey               string             `json:"skill_key"`
+		SkillName              string             `json:"skill_name"`
+		SkillScope             string             `json:"skill_scope"`
+		RouteHints             map[string]string  `json:"route_hints"`
+		Version                string             `json:"version"`
+		SkillSpecJSON          string             `json:"skill_spec_json"`
+		InputSchemaJSON        string             `json:"input_schema_json"`
+		OutputSchemaJSON       string             `json:"output_schema_json"`
+		MemoryPolicyJSON       string             `json:"memory_policy_json"`
+		ConfirmationPolicyJSON string             `json:"confirmation_policy_json"`
+		OutputElements         []outputElementReq `json:"output_elements"`
 	}
 	if !bindJSON(c, &req) {
 		return
@@ -121,6 +122,7 @@ func (h m3Handler) saveSkill(c *gin.Context, skillID string) {
 		Auth: userAuth(c), SkillID: skillID, SkillKey: req.SkillKey, SkillName: req.SkillName, SkillScope: req.SkillScope,
 		RouteHints: req.RouteHints, Version: req.Version, SkillSpecJSON: req.SkillSpecJSON, InputSchemaJSON: req.InputSchemaJSON,
 		OutputSchemaJSON: req.OutputSchemaJSON, MemoryPolicyJSON: req.MemoryPolicyJSON, ConfirmationPolicyJSON: req.ConfirmationPolicyJSON,
+		OutputElements: outputElementInputs(req.OutputElements),
 	})
 	respond(c, out, err)
 }
@@ -194,13 +196,13 @@ func (h m3Handler) adminSaveProviderWithID(c *gin.Context, providerID string) {
 	if req.DisplayName == "" {
 		req.DisplayName = req.ProviderName
 	}
-	if req.ProviderCode == "" {
+	if req.ProviderCode == "" && providerID == "" {
 		req.ProviderCode = stableCode(req.DisplayName)
 	}
-	if req.Config == nil {
-		req.Config = map[string]any{}
-	}
 	if strings.TrimSpace(req.SecretKeyRef) != "" {
+		if req.Config == nil {
+			req.Config = map[string]any{}
+		}
 		req.Config["secret_key_ref"] = strings.TrimSpace(req.SecretKeyRef)
 	}
 	out, err := h.model.SaveProvider(c.Request.Context(), modelconfig.SaveProviderInput{Auth: adminAuth(c), ProviderID: providerID, ProviderCode: req.ProviderCode, DisplayName: req.DisplayName, ProviderType: req.ProviderType, Status: req.Status, BaseURL: req.BaseURL, Config: req.Config})
@@ -309,6 +311,8 @@ func (h m3Handler) adminRegisterTool(c *gin.Context) {
 		UnitPoints           float64           `json:"unit_points"`
 		FreeQuota            int               `json:"free_quota"`
 		MinChargePoints      int64             `json:"min_charge_points"`
+		Reason               string            `json:"reason"`
+		RequestHash          string            `json:"request_hash"`
 	}
 	if !bindJSON(c, &req) {
 		return
@@ -323,6 +327,7 @@ func (h m3Handler) adminRegisterTool(c *gin.Context) {
 		OutputSchemaJSON: req.OutputSchemaJSON, Allowed: allowed, RiskLevel: req.RiskLevel, RequiresConfirmation: req.RequiresConfirmation,
 		TimeoutMS: req.TimeoutMS, RetryPolicy: req.RetryPolicy, CancelPolicy: req.CancelPolicy, ChargeMode: req.ChargeMode,
 		BillingUnit: req.BillingUnit, UnitPoints: req.UnitPoints, FreeQuota: req.FreeQuota, MinChargePoints: req.MinChargePoints,
+		Reason: req.Reason,
 	})
 	respond(c, out, err)
 }
@@ -404,18 +409,19 @@ func (h m3Handler) adminListSystemSkills(c *gin.Context) {
 
 func (h m3Handler) adminCreateSystemSkill(c *gin.Context) {
 	var req struct {
-		SkillKey               string            `json:"skill_key"`
-		SkillName              string            `json:"skill_name"`
-		SkillTags              []string          `json:"skill_tags"`
-		RouteHints             map[string]string `json:"route_hints"`
-		Version                string            `json:"version"`
-		SkillMarkdown          string            `json:"skill_markdown"`
-		SkillSpecJSON          string            `json:"skill_spec_json"`
-		InputSchemaJSON        string            `json:"input_schema_json"`
-		OutputSchemaJSON       string            `json:"output_schema_json"`
-		ToolRefs               []string          `json:"tool_refs"`
-		MemoryPolicyJSON       string            `json:"memory_policy_json"`
-		ConfirmationPolicyJSON string            `json:"confirmation_policy_json"`
+		SkillKey               string             `json:"skill_key"`
+		SkillName              string             `json:"skill_name"`
+		SkillTags              []string           `json:"skill_tags"`
+		RouteHints             map[string]string  `json:"route_hints"`
+		Version                string             `json:"version"`
+		SkillMarkdown          string             `json:"skill_markdown"`
+		SkillSpecJSON          string             `json:"skill_spec_json"`
+		InputSchemaJSON        string             `json:"input_schema_json"`
+		OutputSchemaJSON       string             `json:"output_schema_json"`
+		ToolRefs               []string           `json:"tool_refs"`
+		MemoryPolicyJSON       string             `json:"memory_policy_json"`
+		ConfirmationPolicyJSON string             `json:"confirmation_policy_json"`
+		OutputElements         []outputElementReq `json:"output_elements"`
 	}
 	if !bindJSON(c, &req) {
 		return
@@ -427,6 +433,7 @@ func (h m3Handler) adminCreateSystemSkill(c *gin.Context) {
 		SkillTags: req.SkillTags, RouteHints: req.RouteHints, Version: req.Version, SkillMarkdown: req.SkillMarkdown,
 		SkillSpecJSON: req.SkillSpecJSON, InputSchemaJSON: req.InputSchemaJSON, OutputSchemaJSON: req.OutputSchemaJSON,
 		ToolRefs: req.ToolRefs, MemoryPolicyJSON: req.MemoryPolicyJSON, ConfirmationPolicyJSON: req.ConfirmationPolicyJSON,
+		OutputElements: outputElementInputs(req.OutputElements),
 	})
 	respond(c, out, err)
 }
@@ -484,6 +491,34 @@ type adminSkillReviewRequest struct {
 	Comment  string `json:"comment"`
 	Decision string `json:"decision"`
 	Reason   string `json:"reason"`
+}
+
+type outputElementReq struct {
+	ElementType  string `json:"element_type"`
+	ElementName  string `json:"element_name"`
+	Required     bool   `json:"required"`
+	UseDraft     bool   `json:"use_draft"`
+	UseFinal     bool   `json:"use_final"`
+	Editable     bool   `json:"editable"`
+	Referable    bool   `json:"referable"`
+	DisplayOrder int32  `json:"display_order"`
+	DisplaySlot  string `json:"display_slot"`
+	SchemaJSON   string `json:"schema_json"`
+}
+
+func outputElementInputs(items []outputElementReq) []skillcatalog.OutputElementInput {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]skillcatalog.OutputElementInput, 0, len(items))
+	for _, item := range items {
+		out = append(out, skillcatalog.OutputElementInput{
+			ElementType: item.ElementType, ElementName: item.ElementName, Required: item.Required,
+			UseDraft: item.UseDraft, UseFinal: item.UseFinal, Editable: item.Editable, Referable: item.Referable,
+			DisplayOrder: item.DisplayOrder, DisplaySlot: item.DisplaySlot, SchemaJSON: item.SchemaJSON,
+		})
+	}
+	return out
 }
 
 func (r adminSkillReviewRequest) normalizedAction() string {

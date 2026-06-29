@@ -78,6 +78,27 @@ func TestM3BusinessConfigHTTPAndRPC(t *testing.T) {
 	} {
 		requestJSON(t, router, http.MethodGet, path, adminToken, "", nil)
 	}
+	createdProvider := requestJSON(t, router, http.MethodPost, "/api/admin/models/providers", adminToken, "idem-m3-provider-create", map[string]any{
+		"provider_code": "m3_patch_provider",
+		"provider_name": "M3 Patch Provider",
+		"provider_type": "openai_compatible",
+		"status":        "active",
+		"base_url":      "https://example.com/v1",
+		"config":        map[string]any{"secret_key_ref": "secret/m3/provider"},
+	})
+	providerID := createdProvider["data"].(map[string]any)["provider_id"].(string)
+	patchedProvider := requestJSON(t, router, http.MethodPatch, "/api/admin/models/providers/"+providerID, adminToken, "idem-m3-provider-status", map[string]any{
+		"status": "disabled",
+	})
+	patchedProviderData := patchedProvider["data"].(map[string]any)
+	if patchedProviderData["provider_code"] != "m3_patch_provider" ||
+		patchedProviderData["provider_name"] != "M3 Patch Provider" ||
+		patchedProviderData["provider_type"] != "openai_compatible" ||
+		patchedProviderData["base_url"] != "https://example.com/v1" ||
+		patchedProviderData["secret_ref_status"] != "configured" ||
+		patchedProviderData["status"] != "disabled" {
+		t.Fatalf("provider PATCH dropped existing fields: %#v", patchedProviderData)
+	}
 
 	handler := rpc.NewHandler(accountApp, projectApp, modelApp, toolApp, skillApp, dictApp)
 	authResp, err := handler.ResolveAuthContextFromToken(t.Context(), &businessagent.ResolveAuthContextFromTokenRequest{

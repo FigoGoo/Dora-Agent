@@ -34,6 +34,14 @@ owner：测试与验收责任域
 | [后端服务级能力测试用例](./后端服务级能力测试用例.md) | 通用 DTO、幂等、错误码、事务、migration、业务 RPC、数据库边界和服务级 E2E | RPC contract、integration、repository、migration、日志 |
 | [Agent服务端能力测试用例](./Agent服务端能力测试用例.md) | Agent API、TurnLoop、AG-UI、SSE 补偿、Agent DB、RPC client、Skill 测试、模型 Tool | Agent API contract、AG-UI replay、Agent DB、RPC fixture |
 
+## 近期验收报告
+
+| 报告 | 覆盖范围 | 结论 |
+| --- | --- | --- |
+| [Skill 路由真实业务场景评估报告](../../tests/reports/skill-routing-scenario-eval-2026-06-30.md) | 9 个真实业务 seed Skill、24 条正反例矩阵、否定语境路由、是否接 DeepSeek 分类器判断 | 通过 |
+| [DeepSeek V4 Flash 真实输出链路验收报告](../../tests/reports/deepseek-v4-flash-real-output-2026-06-30.md) | 真实 DeepSeek ChatCompletions、Skill 命中、确认扣费、草稿产物、最终资产引用 | 通过 |
+| [后台 Skill / 模型 / Tool 到用户 Agent 链路验收报告](../../tests/reports/admin-agent-full-flow-2026-06-30.md) | 后台新增 Tool、模型供应商、模型、系统 Skill 后由用户 Agent 消费 | 通过 |
+
 ## 通用测试数据
 
 | Fixture | 必须包含 |

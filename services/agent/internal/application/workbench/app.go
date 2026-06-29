@@ -145,14 +145,14 @@ type ModelSummaryDTO struct {
 }
 
 type ModelRuntimeSnapshotDTO struct {
-	ModelID            string
-	DisplayName        string
-	ResourceType       string
-	PricingSnapshotID  string
-	ProviderRuntimeRef string
-	TimeoutMS          int32
-	RetryPolicy        map[string]string
-	RuntimeParameters  map[string]string
+	ModelID            string            `json:"model_id"`
+	DisplayName        string            `json:"display_name"`
+	ResourceType       string            `json:"resource_type"`
+	PricingSnapshotID  string            `json:"pricing_snapshot_id"`
+	ProviderRuntimeRef string            `json:"provider_runtime_ref"`
+	TimeoutMS          int32             `json:"timeout_ms"`
+	RetryPolicy        map[string]string `json:"retry_policy,omitempty"`
+	RuntimeParameters  map[string]string `json:"runtime_parameters,omitempty"`
 }
 
 type AssetElementTypeDTO struct {
@@ -485,6 +485,12 @@ func New(repo *repository.Repository, gateway BusinessGateway, configVersion str
 func (a *App) SetArtifactUploader(uploader ArtifactUploader) {
 	if uploader != nil {
 		a.artifactUploader = uploader
+	}
+}
+
+func (a *App) SetModelAdapter(adapter modeltool.Adapter) {
+	if adapter != nil {
+		a.modelAdapter = adapter
 	}
 }
 
@@ -2706,7 +2712,7 @@ func (a *App) createConfirmationInterrupt(ctx context.Context, run *model.Run, i
 	if err := a.appendRunEvent(ctx, run, "confirmation.required", traceID, map[string]any{
 		"confirmation_id": interruptID, "interrupt_id": interruptID, "title": title, "summary": summary,
 		"risks": risks, "points": points, "expires_at": expiresAt.Format(time.RFC3339Nano), "actions": []string{"confirm", "reject"},
-		"confirmation_payload": confirmationPayload, "payload_digest": payloadDigest,
+		"confirmation_payload": publicConfirmationPayload(confirmationPayload), "payload_digest": payloadDigest,
 	}); err != nil {
 		return err
 	}

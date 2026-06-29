@@ -30,7 +30,15 @@ INSERT INTO business_spaces (
   ('sp_personal_1002', 'usr_1002', 'personal', null, 'Other Personal Space', 'active', 'ca_personal_1002'),
   ('sp_personal_admin_actor', 'usr_admin_actor', 'personal', null, 'Admin Actor Space', 'active', null),
   ('sp_enterprise_1001', 'usr_1001', 'enterprise', 'ent_1001', 'Seed Enterprise Space', 'active', 'ca_enterprise_1001')
-ON CONFLICT (owner_user_id, space_type, enterprise_id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  owner_user_id = EXCLUDED.owner_user_id,
+  space_type = EXCLUDED.space_type,
+  enterprise_id = EXCLUDED.enterprise_id,
+  display_name = EXCLUDED.display_name,
+  status = EXCLUDED.status,
+  credit_account_id = EXCLUDED.credit_account_id,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
 
 INSERT INTO enterprises (
   id, enterprise_no, name, owner_user_id, default_space_id, credit_account_id, status
@@ -109,35 +117,123 @@ ON CONFLICT (pricing_policy_id) DO NOTHING;
 
 INSERT INTO skills (
   id, skill_key, skill_name, skill_scope, owner_user_id, enterprise_id, status, published_version_id, route_hints_json, created_by_user_id
-) VALUES (
-  'sk_seed_storyboard', 'storyboard', 'Storyboard', 'public', 'usr_1001', null, 'published', 'skv_seed_storyboard_100', '{"intent":"storyboard"}'::jsonb, 'usr_1001'
-) ON CONFLICT (skill_key) DO NOTHING;
+) VALUES
+  ('sk_seed_storyboard', 'storyboard', 'Storyboard', 'public', 'usr_1001', null, 'published', 'skv_seed_storyboard_100', '{"intent":"storyboard","keywords":"storyboard,故事板,分镜,镜头,广告短片,广告片,视觉方案,主视觉,product launch video","priority":"80","negative_keywords":"邮件,道歉信,合同,发票,提示词,mj,prompt,关键词,seo,报销"}'::jsonb, 'usr_1001'),
+  ('sk_seed_product_copy', 'product_copy', '商品文案', 'public', 'usr_1001', null, 'published', 'skv_seed_product_copy_100', '{"intent":"product_copy","keywords":"商品文案,种草文案,卖点,详情页,短标题,直播间,转化短文案,cta,标题,电商文案,小红书风格","priority":"70","negative_keywords":"分镜,故事板,品牌定位,定位策略,会议纪要,客服,投诉,退款,seo,关键词,数据分析"}'::jsonb, 'usr_1001'),
+  ('sk_seed_brand_strategy', 'brand_strategy', '品牌策略', 'public', 'usr_1001', null, 'published', 'skv_seed_brand_strategy_100', '{"intent":"brand_strategy","keywords":"品牌策略,品牌定位,定位策略,目标人群,差异化,品牌语气,人群,brand positioning,tone of voice,brand strategy","priority":"75","negative_keywords":"分镜,故事板,详情页,短标题,社媒日历,内容日历,会议纪要,客服回复,退款,seo文章"}'::jsonb, 'usr_1001'),
+  ('sk_seed_social_calendar', 'social_calendar', '社媒内容日历', 'public', 'usr_1001', null, 'published', 'skv_seed_social_calendar_100', '{"intent":"social_calendar","keywords":"社媒日历,内容日历,选题日历,抖音,小红书,公众号排期,每周主题,发布计划,social calendar,content calendar","priority":"68","negative_keywords":"品牌定位,目标人群,seo,搜索收录,会议纪要,客服,退款,发票"}'::jsonb, 'usr_1001'),
+  ('sk_seed_seo_article', 'seo_article', 'SEO 长文', 'public', 'usr_1001', null, 'published', 'skv_seed_seo_article_100', '{"intent":"seo_article","keywords":"seo,SEO,搜索收录,关键词,长文结构,文章大纲,小标题,选购指南,搜索排名,search keywords","priority":"72","negative_keywords":"社媒日历,朋友圈,分镜,故事板,投放点击率,转化率,roi,会议纪要,客服"}'::jsonb, 'usr_1001'),
+  ('sk_seed_meeting_summary', 'meeting_summary', '会议纪要整理', 'public', 'usr_1001', null, 'published', 'skv_seed_meeting_summary_100', '{"intent":"meeting_summary","keywords":"会议纪要,会议总结,复盘会议,决议,待办,负责人,行动项,纪要整理,meeting notes,action items","priority":"73","negative_keywords":"回复客户,客服回复,营销文案,分镜,故事板,seo,海报,提示词"}'::jsonb, 'usr_1001'),
+  ('sk_seed_support_reply', 'support_reply', '客服回复', 'public', 'usr_1001', null, 'published', 'skv_seed_support_reply_100', '{"intent":"support_reply","keywords":"客服回复,客服话术,客户投诉,物流延迟,补偿建议,退款,售后,用户投诉,客诉,customer support","priority":"74","negative_keywords":"会议纪要,复盘会议,品牌定位,商品文案,营销文案,seo,分镜,故事板"}'::jsonb, 'usr_1001'),
+  ('sk_seed_data_insight', 'data_insight', '经营数据分析', 'public', 'usr_1001', null, 'published', 'skv_seed_data_insight_100', '{"intent":"data_insight","keywords":"数据分析,经营分析,转化率,客单价,点击率,roi,ROI,投放数据,优化建议,指标解读,data insight","priority":"76","negative_keywords":"seo关键词,搜索收录,会议纪要,客服回复,分镜,故事板,提示词,海报"}'::jsonb, 'usr_1001'),
+  ('sk_seed_image_prompt', 'image_prompt', '出图提示词', 'public', 'usr_1001', null, 'published', 'skv_seed_image_prompt_100', '{"intent":"image_prompt","keywords":"出图提示词,提示词,mj,MJ,midjourney,prompt,海报提示词,构图,光影,材质,风格词,negative prompt","priority":"78","negative_keywords":"分镜,故事板,广告片,剧情,会议纪要,客服,seo文章,品牌定位"}'::jsonb, 'usr_1001')
+ON CONFLICT (skill_key) DO UPDATE SET
+  skill_name = EXCLUDED.skill_name,
+  skill_scope = EXCLUDED.skill_scope,
+  status = EXCLUDED.status,
+  published_version_id = EXCLUDED.published_version_id,
+  route_hints_json = EXCLUDED.route_hints_json,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
 
 INSERT INTO skill_versions (
   id, skill_id, version, status, skill_spec_json, input_schema_json, output_schema_json, memory_policy_json, confirmation_policy_json, submitted_by_user_id, reviewed_by_admin_id, submitted_at, reviewed_at, published_at
-) VALUES (
-  'skv_seed_storyboard_100', 'sk_seed_storyboard', '1.0.0', 'published', '{"name":"storyboard","steps":["parse","compose"]}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, '{"requires_confirmation":false,"required_actions":[],"min_confirm_level":"none","lock_fields":[],"expires_in_seconds":900}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z'
-) ON CONFLICT (skill_id, version) DO NOTHING;
+) VALUES
+  ('skv_seed_storyboard_100', 'sk_seed_storyboard', '1.0.0', 'published', '{"name":"storyboard","steps":["parse","compose"],"business_scenario":"广告短片分镜"}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, '{"requires_confirmation":false,"required_actions":[],"min_confirm_level":"none","lock_fields":[],"expires_in_seconds":900}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z'),
+  ('skv_seed_product_copy_100', 'sk_seed_product_copy', '1.0.0', 'published', '{"name":"product_copy","steps":["extract_selling_points","compose_copy"],"business_scenario":"商品文案生成"}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, '{"requires_confirmation":false,"required_actions":[],"min_confirm_level":"none","lock_fields":[],"expires_in_seconds":900}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z'),
+  ('skv_seed_brand_strategy_100', 'sk_seed_brand_strategy', '1.0.0', 'published', '{"name":"brand_strategy","steps":["define_audience","position_brand","set_tone"],"business_scenario":"品牌定位策略"}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, '{"requires_confirmation":false,"required_actions":[],"min_confirm_level":"none","lock_fields":[],"expires_in_seconds":900}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z'),
+  ('skv_seed_social_calendar_100', 'sk_seed_social_calendar', '1.0.0', 'published', '{"name":"social_calendar","steps":["cluster_topics","schedule_posts"],"business_scenario":"社媒内容排期"}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, '{"requires_confirmation":false,"required_actions":[],"min_confirm_level":"none","lock_fields":[],"expires_in_seconds":900}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z'),
+  ('skv_seed_seo_article_100', 'sk_seed_seo_article', '1.0.0', 'published', '{"name":"seo_article","steps":["extract_keywords","outline_article"],"business_scenario":"SEO 长文规划"}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, '{"requires_confirmation":false,"required_actions":[],"min_confirm_level":"none","lock_fields":[],"expires_in_seconds":900}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z'),
+  ('skv_seed_meeting_summary_100', 'sk_seed_meeting_summary', '1.0.0', 'published', '{"name":"meeting_summary","steps":["summarize_decisions","extract_actions"],"business_scenario":"会议纪要整理"}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, '{"requires_confirmation":false,"required_actions":[],"min_confirm_level":"none","lock_fields":[],"expires_in_seconds":900}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z'),
+  ('skv_seed_support_reply_100', 'sk_seed_support_reply', '1.0.0', 'published', '{"name":"support_reply","steps":["classify_issue","draft_reply"],"business_scenario":"客服售后回复"}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, '{"requires_confirmation":false,"required_actions":[],"min_confirm_level":"none","lock_fields":[],"expires_in_seconds":900}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z'),
+  ('skv_seed_data_insight_100', 'sk_seed_data_insight', '1.0.0', 'published', '{"name":"data_insight","steps":["read_metrics","diagnose_changes","recommend_actions"],"business_scenario":"经营数据洞察"}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, '{"requires_confirmation":false,"required_actions":[],"min_confirm_level":"none","lock_fields":[],"expires_in_seconds":900}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z'),
+  ('skv_seed_image_prompt_100', 'sk_seed_image_prompt', '1.0.0', 'published', '{"name":"image_prompt","steps":["extract_visual_goal","compose_prompt"],"business_scenario":"图片生成提示词"}'::jsonb, '{"type":"object","required":["prompt"]}'::jsonb, '{"type":"object","required":["elements"]}'::jsonb, '{"enabled":true}'::jsonb, '{"requires_confirmation":false,"required_actions":[],"min_confirm_level":"none","lock_fields":[],"expires_in_seconds":900}'::jsonb, 'usr_1001', 'adm_root', '2026-06-27T11:00:00Z', '2026-06-27T11:20:00Z', '2026-06-27T11:30:00Z')
+ON CONFLICT (skill_id, version) DO UPDATE SET
+  status = EXCLUDED.status,
+  skill_spec_json = EXCLUDED.skill_spec_json,
+  input_schema_json = EXCLUDED.input_schema_json,
+  output_schema_json = EXCLUDED.output_schema_json,
+  memory_policy_json = EXCLUDED.memory_policy_json,
+  confirmation_policy_json = EXCLUDED.confirmation_policy_json,
+  submitted_by_user_id = EXCLUDED.submitted_by_user_id,
+  reviewed_by_admin_id = EXCLUDED.reviewed_by_admin_id,
+  submitted_at = EXCLUDED.submitted_at,
+  reviewed_at = EXCLUDED.reviewed_at,
+  published_at = EXCLUDED.published_at,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
 
 INSERT INTO skill_tool_bindings (
   id, skill_id, version_id, tool_name, tool_type, required
 ) VALUES
   ('sktool_storyboard_image', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'image_generate', 'model_generation', true),
-  ('sktool_storyboard_bg', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'remove_background', 'image_edit', false)
+  ('sktool_storyboard_bg', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'remove_background', 'image_edit', false),
+  ('sktool_image_prompt_image', 'sk_seed_image_prompt', 'skv_seed_image_prompt_100', 'image_generate', 'model_generation', false)
 ON CONFLICT (version_id, tool_name, tool_type) DO NOTHING;
 
 INSERT INTO skill_output_element_schemas (
-  id, skill_id, version_id, element_type, schema_json, required
-) VALUES (
-  'skel_storyboard_image', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'image_ref', '{"type":"object"}'::jsonb, true
-) ON CONFLICT (version_id, element_type) DO NOTHING;
+  id, skill_id, version_id, element_type, element_name, schema_json, required, use_draft, use_final, editable, referable, display_order, display_slot
+) VALUES
+  ('skel_storyboard_image', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'image_ref', '故事板参考图', '{"type":"object"}'::jsonb, true, true, true, true, true, 10, 'asset_detail'),
+  ('skel_storyboard_board', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'storyboard', '分镜脚本', '{"type":"object"}'::jsonb, true, true, true, true, true, 20, 'blackboard'),
+  ('skel_product_copy_text', 'sk_seed_product_copy', 'skv_seed_product_copy_100', 'rich_text', '商品文案', '{"type":"object"}'::jsonb, true, true, true, true, true, 10, 'blackboard'),
+  ('skel_product_copy_tags', 'sk_seed_product_copy', 'skv_seed_product_copy_100', 'tag_group', '卖点标签', '{"type":"object"}'::jsonb, false, true, true, true, true, 20, 'blackboard'),
+  ('skel_brand_strategy_doc', 'sk_seed_brand_strategy', 'skv_seed_brand_strategy_100', 'structured_object', '品牌策略卡', '{"type":"object"}'::jsonb, true, true, true, true, true, 10, 'blackboard'),
+  ('skel_brand_strategy_text', 'sk_seed_brand_strategy', 'skv_seed_brand_strategy_100', 'long_text', '策略说明', '{"type":"object"}'::jsonb, false, true, true, true, true, 20, 'blackboard'),
+  ('skel_social_calendar_list', 'sk_seed_social_calendar', 'skv_seed_social_calendar_100', 'list', '内容日历', '{"type":"object"}'::jsonb, true, true, true, true, true, 10, 'blackboard'),
+  ('skel_social_calendar_tags', 'sk_seed_social_calendar', 'skv_seed_social_calendar_100', 'tag_group', '渠道标签', '{"type":"object"}'::jsonb, false, true, true, true, true, 20, 'blackboard'),
+  ('skel_seo_article_outline', 'sk_seed_seo_article', 'skv_seed_seo_article_100', 'rich_text', 'SEO 文章大纲', '{"type":"object"}'::jsonb, true, true, true, true, true, 10, 'blackboard'),
+  ('skel_seo_article_keywords', 'sk_seed_seo_article', 'skv_seed_seo_article_100', 'tag_group', 'SEO 关键词', '{"type":"object"}'::jsonb, true, true, true, true, true, 20, 'blackboard'),
+  ('skel_meeting_summary_text', 'sk_seed_meeting_summary', 'skv_seed_meeting_summary_100', 'rich_text', '会议纪要', '{"type":"object"}'::jsonb, true, true, true, true, true, 10, 'blackboard'),
+  ('skel_meeting_summary_actions', 'sk_seed_meeting_summary', 'skv_seed_meeting_summary_100', 'list', '待办列表', '{"type":"object"}'::jsonb, true, true, true, true, true, 20, 'blackboard'),
+  ('skel_support_reply_text', 'sk_seed_support_reply', 'skv_seed_support_reply_100', 'rich_text', '客服回复', '{"type":"object"}'::jsonb, true, true, true, true, true, 10, 'blackboard'),
+  ('skel_support_reply_policy', 'sk_seed_support_reply', 'skv_seed_support_reply_100', 'structured_object', '补偿建议', '{"type":"object"}'::jsonb, false, true, true, true, true, 20, 'blackboard'),
+  ('skel_data_insight_object', 'sk_seed_data_insight', 'skv_seed_data_insight_100', 'structured_object', '经营分析', '{"type":"object"}'::jsonb, true, true, true, true, true, 10, 'blackboard'),
+  ('skel_data_insight_actions', 'sk_seed_data_insight', 'skv_seed_data_insight_100', 'list', '优化动作', '{"type":"object"}'::jsonb, false, true, true, true, true, 20, 'blackboard'),
+  ('skel_image_prompt_prompt', 'sk_seed_image_prompt', 'skv_seed_image_prompt_100', 'prompt', '出图提示词', '{"type":"object"}'::jsonb, true, true, false, true, true, 10, 'blackboard'),
+  ('skel_image_prompt_params', 'sk_seed_image_prompt', 'skv_seed_image_prompt_100', 'parameter_group', '生成参数', '{"type":"object"}'::jsonb, false, true, false, true, true, 20, 'blackboard')
+ON CONFLICT (version_id, element_type) DO UPDATE SET
+  element_name = EXCLUDED.element_name,
+  schema_json = EXCLUDED.schema_json,
+  required = EXCLUDED.required,
+  use_draft = EXCLUDED.use_draft,
+  use_final = EXCLUDED.use_final,
+  editable = EXCLUDED.editable,
+  referable = EXCLUDED.referable,
+  display_order = EXCLUDED.display_order,
+  display_slot = EXCLUDED.display_slot,
+  updated_by = 'seed:business_core';
 
 INSERT INTO skill_test_cases (
   id, skill_id, version_id, case_name, test_input_json, expected_elements_json, status, created_by_user_id
 ) VALUES
   ('skcase_storyboard_basic', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'basic storyboard', '{"prompt":"make a product storyboard"}'::jsonb, '[{"element_type":"image_ref"}]'::jsonb, 'active', 'usr_1001'),
   ('skcase_storyboard_caption', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'captioned storyboard', '{"prompt":"make a storyboard with captions"}'::jsonb, '[{"element_type":"image_ref"},{"element_type":"short_text"}]'::jsonb, 'active', 'usr_1001'),
-  ('skcase_storyboard_variants', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'variant storyboard', '{"prompt":"make three visual variants"}'::jsonb, '[{"element_type":"storyboard"},{"element_type":"parameter_group"}]'::jsonb, 'active', 'usr_1001')
+  ('skcase_storyboard_variants', 'sk_seed_storyboard', 'skv_seed_storyboard_100', 'variant storyboard', '{"prompt":"make three visual variants"}'::jsonb, '[{"element_type":"storyboard"},{"element_type":"parameter_group"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_product_copy_basic', 'sk_seed_product_copy', 'skv_seed_product_copy_100', 'product copy basic', '{"prompt":"写商品种草文案"}'::jsonb, '[{"element_type":"rich_text"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_product_copy_detail', 'sk_seed_product_copy', 'skv_seed_product_copy_100', 'detail page copy', '{"prompt":"写详情页卖点"}'::jsonb, '[{"element_type":"rich_text"},{"element_type":"tag_group"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_product_copy_live', 'sk_seed_product_copy', 'skv_seed_product_copy_100', 'live copy', '{"prompt":"写直播间转化短文案"}'::jsonb, '[{"element_type":"rich_text"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_brand_strategy_basic', 'sk_seed_brand_strategy', 'skv_seed_brand_strategy_100', 'brand positioning basic', '{"prompt":"做品牌定位策略"}'::jsonb, '[{"element_type":"structured_object"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_brand_strategy_tone', 'sk_seed_brand_strategy', 'skv_seed_brand_strategy_100', 'brand tone', '{"prompt":"定义品牌语气"}'::jsonb, '[{"element_type":"structured_object"},{"element_type":"long_text"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_brand_strategy_audience', 'sk_seed_brand_strategy', 'skv_seed_brand_strategy_100', 'brand audience', '{"prompt":"梳理目标人群和差异化"}'::jsonb, '[{"element_type":"structured_object"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_social_calendar_month', 'sk_seed_social_calendar', 'skv_seed_social_calendar_100', 'monthly content calendar', '{"prompt":"规划下个月社媒日历"}'::jsonb, '[{"element_type":"list"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_social_calendar_channel', 'sk_seed_social_calendar', 'skv_seed_social_calendar_100', 'channel plan', '{"prompt":"安排抖音小红书发布计划"}'::jsonb, '[{"element_type":"list"},{"element_type":"tag_group"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_social_calendar_topics', 'sk_seed_social_calendar', 'skv_seed_social_calendar_100', 'weekly topics', '{"prompt":"按每周主题做内容排期"}'::jsonb, '[{"element_type":"list"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_seo_article_outline', 'sk_seed_seo_article', 'skv_seed_seo_article_100', 'seo outline', '{"prompt":"写SEO文章大纲"}'::jsonb, '[{"element_type":"rich_text"},{"element_type":"tag_group"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_seo_article_keywords', 'sk_seed_seo_article', 'skv_seed_seo_article_100', 'seo keywords', '{"prompt":"整理搜索关键词"}'::jsonb, '[{"element_type":"tag_group"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_seo_article_guide', 'sk_seed_seo_article', 'skv_seed_seo_article_100', 'buying guide', '{"prompt":"写选购指南长文结构"}'::jsonb, '[{"element_type":"rich_text"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_meeting_summary_notes', 'sk_seed_meeting_summary', 'skv_seed_meeting_summary_100', 'meeting notes', '{"prompt":"整理会议纪要"}'::jsonb, '[{"element_type":"rich_text"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_meeting_summary_actions', 'sk_seed_meeting_summary', 'skv_seed_meeting_summary_100', 'action items', '{"prompt":"提取决议待办负责人"}'::jsonb, '[{"element_type":"rich_text"},{"element_type":"list"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_meeting_summary_review', 'sk_seed_meeting_summary', 'skv_seed_meeting_summary_100', 'review meeting', '{"prompt":"整理复盘会议行动项"}'::jsonb, '[{"element_type":"list"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_support_reply_complaint', 'sk_seed_support_reply', 'skv_seed_support_reply_100', 'complaint reply', '{"prompt":"写客户投诉回复"}'::jsonb, '[{"element_type":"rich_text"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_support_reply_refund', 'sk_seed_support_reply', 'skv_seed_support_reply_100', 'refund reply', '{"prompt":"回复要求退款的用户"}'::jsonb, '[{"element_type":"rich_text"},{"element_type":"structured_object"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_support_reply_delay', 'sk_seed_support_reply', 'skv_seed_support_reply_100', 'logistics delay', '{"prompt":"物流延迟补偿建议"}'::jsonb, '[{"element_type":"structured_object"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_data_insight_metrics', 'sk_seed_data_insight', 'skv_seed_data_insight_100', 'metric insight', '{"prompt":"分析转化率和客单价"}'::jsonb, '[{"element_type":"structured_object"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_data_insight_ads', 'sk_seed_data_insight', 'skv_seed_data_insight_100', 'ads insight', '{"prompt":"分析投放点击率 ROI"}'::jsonb, '[{"element_type":"structured_object"},{"element_type":"list"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_data_insight_actions', 'sk_seed_data_insight', 'skv_seed_data_insight_100', 'optimization actions', '{"prompt":"给经营优化建议"}'::jsonb, '[{"element_type":"list"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_image_prompt_basic', 'sk_seed_image_prompt', 'skv_seed_image_prompt_100', 'image prompt basic', '{"prompt":"生成海报出图提示词"}'::jsonb, '[{"element_type":"prompt"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_image_prompt_params', 'sk_seed_image_prompt', 'skv_seed_image_prompt_100', 'image prompt params', '{"prompt":"写MJ提示词和参数"}'::jsonb, '[{"element_type":"prompt"},{"element_type":"parameter_group"}]'::jsonb, 'active', 'usr_1001'),
+  ('skcase_image_prompt_negative', 'sk_seed_image_prompt', 'skv_seed_image_prompt_100', 'image negative prompt', '{"prompt":"补充negative prompt"}'::jsonb, '[{"element_type":"prompt"}]'::jsonb, 'active', 'usr_1001')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO skill_test_runs (
@@ -152,7 +248,16 @@ INSERT INTO credit_accounts (
   ('ca_personal_1001', 'personal', 'usr_1001', null, 'active', 5000, 0, 200),
   ('ca_personal_1002', 'personal', 'usr_1002', null, 'active', 5, 0, 0),
   ('ca_enterprise_1001', 'enterprise', null, 'ent_1001', 'active', 100000, 0, 0)
-ON CONFLICT (account_type, owner_user_id, enterprise_id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  account_type = EXCLUDED.account_type,
+  owner_user_id = EXCLUDED.owner_user_id,
+  enterprise_id = EXCLUDED.enterprise_id,
+  status = EXCLUDED.status,
+  available_points = EXCLUDED.available_points,
+  frozen_points = EXCLUDED.frozen_points,
+  expires_soon_points = EXCLUDED.expires_soon_points,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
 
 INSERT INTO credit_batches (
   id, account_id, batch_type, source_type, source_id, total_points, remaining_points, expires_at, status

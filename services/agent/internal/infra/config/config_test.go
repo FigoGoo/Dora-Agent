@@ -23,6 +23,7 @@ AGENT_DATABASE_URL=postgres://example
 AGENT_HTTP_ADDR=0.0.0.0:18080
 AGENT_SERVICE_NAME=dora.agent
 BUSINESS_SERVICE_NAME=dora.business
+BUSINESS_HOSTPORTS=127.0.0.1:19001,127.0.0.1:29001
 KITEX_TIMEOUT_MS=3000
 AGENT_EVENT_REPLAY_PAGE_SIZE=10
 AGENT_EVENT_REPLAY_MAX_PAGE_SIZE=100
@@ -40,6 +41,9 @@ AGENT_GENERATION_REDIS_DB=2
 AGENT_GENERATION_REDIS_LIST_KEY=dora:test:generation_jobs
 AGENT_GENERATION_WORKERS=3
 AGENT_GENERATION_RECOVERY_STALE_AFTER=30s
+DEEPSEEK_API_KEY=sk-test
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
 `)
 
 	cfg, err := LoadFrom(example, local)
@@ -55,6 +59,9 @@ AGENT_GENERATION_RECOVERY_STALE_AFTER=30s
 	if cfg.KitexTimeout != 3*time.Second || cfg.ToolDefaultTimeout != 120*time.Second {
 		t.Fatalf("unexpected timeouts: kitex=%s tool=%s", cfg.KitexTimeout, cfg.ToolDefaultTimeout)
 	}
+	if len(cfg.BusinessHostPorts) != 2 || cfg.BusinessHostPorts[0] != "127.0.0.1:19001" || cfg.BusinessHostPorts[1] != "127.0.0.1:29001" {
+		t.Fatalf("unexpected business hostports: %#v", cfg.BusinessHostPorts)
+	}
 	if len(cfg.ToolAllowlist) != 2 || cfg.ToolAllowlist[0] != "image" || cfg.ToolAllowlist[1] != "video" {
 		t.Fatalf("unexpected allowlist: %#v", cfg.ToolAllowlist)
 	}
@@ -63,6 +70,9 @@ AGENT_GENERATION_RECOVERY_STALE_AFTER=30s
 	}
 	if cfg.GenerationRedisListKey != "dora:test:generation_jobs" || cfg.GenerationWorkers != 3 || cfg.GenerationRecoveryAge != 30*time.Second {
 		t.Fatalf("unexpected generation worker config: key=%s workers=%d stale=%s", cfg.GenerationRedisListKey, cfg.GenerationWorkers, cfg.GenerationRecoveryAge)
+	}
+	if cfg.DeepSeekAPIKey != "sk-test" || cfg.DeepSeekBaseURL != "https://api.deepseek.com" || cfg.DeepSeekModel != "deepseek-v4-flash" {
+		t.Fatalf("unexpected deepseek config: base=%s model=%s keySet=%t", cfg.DeepSeekBaseURL, cfg.DeepSeekModel, cfg.DeepSeekAPIKey != "")
 	}
 }
 
@@ -126,6 +136,9 @@ ETCD_NAMESPACE=/dora/local
 		if contains(opts.AllowedKeys, "AGENT_GENERATION_REDIS_PASSWORD") {
 			t.Fatal("redis password must not be allowed from etcd")
 		}
+		if contains(opts.AllowedKeys, "DEEPSEEK_API_KEY") {
+			t.Fatal("deepseek api key must not be allowed from etcd")
+		}
 		return envconfig.Values{
 			"LOG_LEVEL":                    "debug",
 			"AGENT_EVENT_REPLAY_PAGE_SIZE": "20",
@@ -155,13 +168,14 @@ func unsetAgentEnv(t *testing.T) {
 	keys := []string{
 		"DORA_CONFIG_SOURCE", "DORA_CONFIG_ETCD_TIMEOUT",
 		"APP_ENV", "APP_NAME", "LOG_LEVEL", "AGENT_DATABASE_URL", "AGENT_HTTP_ADDR",
-		"AGENT_SERVICE_NAME", "BUSINESS_SERVICE_NAME", "KITEX_REGISTRY", "KITEX_TIMEOUT_MS",
+		"AGENT_SERVICE_NAME", "BUSINESS_SERVICE_NAME", "BUSINESS_HOSTPORTS", "KITEX_REGISTRY", "KITEX_TIMEOUT_MS",
 		"AGENT_SSE_ENABLED", "AGENT_WS_ENABLED", "AGENT_SSE_HEARTBEAT_SECONDS",
 		"AGENT_EVENT_REPLAY_PAGE_SIZE", "AGENT_EVENT_REPLAY_MAX_PAGE_SIZE", "AGENT_CONFIG_SOURCE",
 		"AGENT_DEFAULT_CONFIG_VERSION", "AGENT_TOOL_ALLOWLIST", "AGENT_MEMORY_ENABLED",
 		"AGENT_TOOL_DEFAULT_TIMEOUT_MS", "AGENT_SAFETY_POLICY_VERSION", "AGENT_GENERATION_QUEUE",
 		"AGENT_GENERATION_REDIS_ADDR", "AGENT_GENERATION_REDIS_PASSWORD", "AGENT_GENERATION_REDIS_DB",
 		"AGENT_GENERATION_REDIS_LIST_KEY", "AGENT_GENERATION_WORKERS", "AGENT_GENERATION_RECOVERY_STALE_AFTER",
+		"DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL", "DEEPSEEK_MAX_TOKENS",
 		"ETCD_ENDPOINTS", "ETCD_NAMESPACE",
 	}
 	for _, key := range keys {

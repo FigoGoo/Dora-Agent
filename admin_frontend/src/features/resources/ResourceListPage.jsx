@@ -485,6 +485,94 @@ function booleanText(value) {
   return value ? '是' : '否';
 }
 
+const DETAIL_VALUE_LABELS = {
+  status: {
+    active: '启用',
+    disabled: '停用',
+    draft: '草稿',
+    submitted: '待审核',
+    pending_review: '待审核',
+    published: '已发布',
+    deprecated: '废弃',
+    rejected: '已拒绝',
+    passed: '通过',
+    failed: '失败',
+    blocked: '已拦截',
+    taken_down: '已下架',
+    cancelled: '已取消'
+  },
+  resource_type: {
+    image: '图片',
+    music: '音乐',
+    audio: '音频',
+    video: '视频',
+    text: '文本',
+    data: '数据'
+  },
+  tool_type: {
+    builtin: '内置 Tool',
+    http: 'HTTP Tool',
+    rpc: 'RPC Tool',
+    external: '外部 Tool',
+    model_generation: '模型生成 Tool',
+    browser: '浏览器 Tool',
+    image_edit: '图片编辑 Tool'
+  },
+  risk_level: {
+    low: '低风险',
+    medium: '中风险',
+    high: '高风险'
+  },
+  charge_mode: {
+    free: '免费',
+    per_call: '按调用',
+    per_asset: '按资产',
+    model_generation: '模型生成',
+    tool_usage: 'Tool 用量',
+    business_value: '业务价值'
+  },
+  billing_unit: {
+    generation: '按次生成',
+    image: '按图片',
+    video: '按视频',
+    audio: '按音频',
+    call: '按调用',
+    token: '按 Token',
+    asset: '按资产'
+  },
+  provider_type: {
+    openai_compatible: 'OpenAI 兼容',
+    volcengine: '火山引擎',
+    custom: '自定义'
+  },
+  skill_scope: {
+    public: '公开',
+    personal: '个人',
+    enterprise: '企业'
+  },
+  scope_type: {
+    space: '空间',
+    enterprise: '企业',
+    user: '用户'
+  },
+  operator_type: {
+    admin: '管理员',
+    user: '用户',
+    system: '系统'
+  },
+  secret_ref_status: {
+    configured: '已配置',
+    missing: '未配置'
+  }
+};
+
+function detailDisplayValue(key, value) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  return DETAIL_VALUE_LABELS[key]?.[value] || value;
+}
+
 function detailValueClass(value) {
   const valueText = typeof value === 'string' ? value : '';
   return valueText.includes('\n') || valueText.length > 80 ? 'admin-detail-value admin-detail-value--multiline' : 'admin-detail-value';
@@ -526,7 +614,7 @@ function jsonLikeString(value) {
   }
 }
 
-function DetailValue({ value, labels = {} }) {
+function DetailValue({ name = '', value, labels = {} }) {
   if (value === null || value === undefined || value === '') {
     return '-';
   }
@@ -554,21 +642,22 @@ function DetailValue({ value, labels = {} }) {
           <div key={key}>
             <dt>{detailLabel(key, labels)}</dt>
             <dd>
-              <DetailValue value={nestedValue} labels={labels} />
+              <DetailValue name={key} value={nestedValue} labels={labels} />
             </dd>
           </div>
         ))}
       </dl>
     );
   }
+  const displayValue = detailDisplayValue(name, value);
   const formattedJson = jsonLikeString(value);
   if (formattedJson) {
     return <pre className="admin-detail-code">{formattedJson}</pre>;
   }
-  return <span className={detailValueClass(value)}>{String(value)}</span>;
+  return <span className={detailValueClass(displayValue)}>{String(displayValue)}</span>;
 }
 
-function RowDetails({ row, labels = {} }) {
+export function RowDetails({ row, labels = {} }) {
   if (!row) {
     return null;
   }
@@ -578,7 +667,7 @@ function RowDetails({ row, labels = {} }) {
         <div key={key}>
           <dt>{detailLabel(key, labels)}</dt>
           <dd>
-            <DetailValue value={value} labels={labels} />
+            <DetailValue name={key} value={value} labels={labels} />
           </dd>
         </div>
       ))}

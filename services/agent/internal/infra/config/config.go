@@ -20,6 +20,7 @@ type AgentConfig struct {
 	DatabaseURL             string
 	ServiceName             string
 	BusinessServiceName     string
+	BusinessHostPorts       []string
 	KitexRegistry           string
 	EtcdEndpoints           []string
 	EtcdNamespace           string
@@ -42,6 +43,10 @@ type AgentConfig struct {
 	GenerationRedisListKey  string
 	GenerationWorkers       int
 	GenerationRecoveryAge   time.Duration
+	DeepSeekAPIKey          string
+	DeepSeekBaseURL         string
+	DeepSeekModel           string
+	DeepSeekMaxTokens       int
 }
 
 func Load() (AgentConfig, error) {
@@ -115,6 +120,10 @@ func loadFromWithEtcdLoader(paths []string, loader configsource.EtcdLoader) (Age
 	if err != nil {
 		return AgentConfig{}, err
 	}
+	deepSeekMaxTokens, err := values.Int("DEEPSEEK_MAX_TOKENS", 2048)
+	if err != nil {
+		return AgentConfig{}, err
+	}
 	memoryEnabled, err := values.Bool("AGENT_MEMORY_ENABLED", true)
 	if err != nil {
 		return AgentConfig{}, err
@@ -142,6 +151,7 @@ func loadFromWithEtcdLoader(paths []string, loader configsource.EtcdLoader) (Age
 		DatabaseURL:             databaseURL,
 		ServiceName:             values.String("AGENT_SERVICE_NAME", "dora.agent"),
 		BusinessServiceName:     values.String("BUSINESS_SERVICE_NAME", "dora.business"),
+		BusinessHostPorts:       values.CSV("BUSINESS_HOSTPORTS"),
 		KitexRegistry:           values.String("KITEX_REGISTRY", "none"),
 		EtcdEndpoints:           values.CSV("ETCD_ENDPOINTS"),
 		EtcdNamespace:           values.String("ETCD_NAMESPACE", ""),
@@ -164,6 +174,10 @@ func loadFromWithEtcdLoader(paths []string, loader configsource.EtcdLoader) (Age
 		GenerationRedisListKey:  values.String("AGENT_GENERATION_REDIS_LIST_KEY", "dora:agent:generation_jobs"),
 		GenerationWorkers:       generationWorkers,
 		GenerationRecoveryAge:   generationRecoveryAge,
+		DeepSeekAPIKey:          values.String("DEEPSEEK_API_KEY", ""),
+		DeepSeekBaseURL:         values.String("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+		DeepSeekModel:           values.String("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+		DeepSeekMaxTokens:       deepSeekMaxTokens,
 	}, nil
 }
 
@@ -174,6 +188,7 @@ var agentEtcdConfigKeys = []string{
 	"AGENT_HTTP_PORT",
 	"AGENT_HTTP_ADDR",
 	"BUSINESS_SERVICE_NAME",
+	"BUSINESS_HOSTPORTS",
 	"KITEX_REGISTRY",
 	"KITEX_TIMEOUT_MS",
 	"AGENT_SSE_ENABLED",
