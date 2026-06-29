@@ -11,7 +11,7 @@ vi.mock('../../services/adminApi.js', () => ({
 
 import { adminApi } from '../../services/adminApi.js';
 import { prepareCreateBody } from './ResourceListPage.jsx';
-import { pageConfigs } from './pageConfigs.jsx';
+import { pageConfigs, systemSkillTestInitialValues } from './pageConfigs.jsx';
 
 describe('admin resource page configs', () => {
   beforeEach(() => {
@@ -234,12 +234,46 @@ describe('admin resource page configs', () => {
 
     const testAction = pageConfigs['skills/system'].actions[0];
     expect(testAction.modalSize).toBe('wide');
+    expect(testAction.label).toBe('记录测试结果');
+    expect(testAction.formTitle).toBe('记录系统 Skill 测试结果（调试）');
+    expect(testAction.submitLabel).toBe('保存测试记录');
+    expect(testAction.fields.find((field) => field.name === 'version_id')).toMatchObject({
+      source: 'latest_version_id',
+      disabled: true
+    });
+    expect(testAction.fields.find((field) => field.name === 'trace_id')).toMatchObject({
+      virtual: true,
+      disabled: true
+    });
     expect(testAction.fields.find((field) => field.name === 'safety_evidence_json')).toMatchObject({
       group: '测试结果',
       groupLayout: 'split',
       span: 'half',
       rows: 9
     });
+
+    const values = systemSkillTestInitialValues(
+      { skill_id: 'sk_storyboard', latest_version_id: 'skv_storyboard_001' },
+      new Date('2026-06-30T08:09:10.000Z')
+    );
+    const evidence = JSON.parse(values.safety_evidence_json);
+
+    expect(values).toMatchObject({
+      version_id: 'skv_storyboard_001',
+      test_run_id: 'skrun_sk_storyboard_20260630080910',
+      trace_id: 'trace_skrun_sk_storyboard_20260630080910',
+      status: 'passed',
+      actual_elements_json: '[]'
+    });
+    expect(evidence).toMatchObject({
+      scene: 'skill_test',
+      target_type: 'skill_test_prompt',
+      target_ref_id: values.test_run_id,
+      result: 'passed',
+      source_run_id: values.test_run_id,
+      trace_id: values.trace_id
+    });
+    expect(evidence.expires_at).toBe('2026-07-01T08:09:10.000Z');
   });
 
   test('sends system skill markdown as backend contract input', () => {

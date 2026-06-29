@@ -243,11 +243,48 @@ function cleanText(value) {
   return String(value || '').trim();
 }
 
+function compactTimestamp(date) {
+  return date.toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+}
+
+function safeIdentifier(value, fallback = 'skill') {
+  return cleanText(value).replace(/[^a-zA-Z0-9_-]/g, '_') || fallback;
+}
+
 export function systemSkillCreateBody({ values, body }) {
   return {
     ...body,
     version: cleanText(body.version) || '0.1.0',
     skill_markdown: cleanText(values.skill_markdown)
+  };
+}
+
+export function systemSkillTestInitialValues(row, now = new Date()) {
+  const testRunID = `skrun_${safeIdentifier(row?.skill_id)}_${compactTimestamp(now)}`;
+  const traceID = `trace_${testRunID}`;
+  const evidence = {
+    safety_evidence_id: `safe_${testRunID}`,
+    scene: 'skill_test',
+    target_type: 'skill_test_prompt',
+    target_ref_id: testRunID,
+    evaluated_object_digest: `sha256:${testRunID}`,
+    policy_version: 'local-manual',
+    evidence_version: now.toISOString().slice(0, 10),
+    result: 'passed',
+    source_run_id: testRunID,
+    trace_id: traceID,
+    evaluated_at: now.toISOString(),
+    expires_at: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
+  };
+
+  return {
+    version_id: row?.latest_version_id || row?.published_version_id || '',
+    test_run_id: testRunID,
+    trace_id: traceID,
+    test_case_id: '',
+    status: 'passed',
+    actual_elements_json: '[]',
+    safety_evidence_json: JSON.stringify(evidence, null, 2)
   };
 }
 
@@ -366,14 +403,19 @@ export const pageConfigs = {
     },
     actions: [
       {
-        label: '测试结果',
-        formTitle: '保存系统 Skill 测试结果',
+        label: '记录测试结果',
+        formTitle: '记录系统 Skill 测试结果（调试）',
+        descriptionTitle: '临时调试入口',
+        description: '这里用于记录已经完成的测试运行结果，不会自动执行 Skill。正式“运行测试”流程接入前，系统会先自动生成运行 ID、Trace ID 和安全证据模板，你只需要按实际结果调整状态和输出元素。',
+        submitLabel: '保存测试记录',
         modalSize: 'wide',
         path: (row) => `/api/admin/skills/system/${row.skill_id}/test`,
+        initialValues: systemSkillTestInitialValues,
         fields: [
-          { name: 'version_id', label: '版本 ID', group: '测试对象', groupLayout: 'dense', required: true, source: 'published_version_id' },
-          { name: 'test_run_id', label: '测试运行 ID', group: '测试对象', groupLayout: 'dense', required: true },
-          { name: 'test_case_id', label: '测试用例 ID', group: '测试对象', groupLayout: 'dense' },
+          { name: 'version_id', label: '版本 ID', group: '测试对象', groupLayout: 'dense', required: true, disabled: true, source: 'latest_version_id', hint: '自动取最近版本。草稿发布前通常没有发布版本，因此这里不再使用发布版本 ID。' },
+          { name: 'test_run_id', label: '测试运行 ID', group: '测试对象', groupLayout: 'dense', required: true, disabled: true, hint: '自动生成，用于幂等和审计；重新打开弹窗会生成新的运行 ID。' },
+          { name: 'trace_id', label: 'Trace ID', group: '测试对象', groupLayout: 'dense', virtual: true, disabled: true, hint: '自动写入请求头，并同步到安全证据 JSON。' },
+          { name: 'test_case_id', label: '测试用例 ID', group: '测试对象', groupLayout: 'dense', hint: '已有测试用例时填写；为空则记录一次临时测试运行。' },
           {
             name: 'status',
             label: '测试状态',
@@ -386,7 +428,8 @@ export const pageConfigs = {
               { label: '超时', value: 'timeout' },
               { label: '拒绝', value: 'rejected' }
             ],
-            required: true
+            required: true,
+            hint: '选择本次测试的最终结论。通过/阻断状态必须和安全证据 result 保持一致。'
           },
           {
             name: 'actual_elements_json',
@@ -397,7 +440,8 @@ export const pageConfigs = {
             type: 'json-string',
             defaultValue: '[]',
             required: true,
-            rows: 9
+            rows: 9,
+            hint: '按实际输出元素调整；没有结构化输出时保持 []。'
           },
           {
             name: 'safety_evidence_json',
@@ -408,10 +452,13 @@ export const pageConfigs = {
             type: 'json-string',
             defaultValue: '{}',
             required: true,
-            rows: 9
+            rows: 9,
+            hint: '已自动生成可提交模板；若修改 test_case_id 或状态，需要同步 target_ref_id 和 result。'
           }
         ],
-        idempotencyKey: ({ values }) => `skill_test:${values.test_run_id}`
+        idempotencyKey: ({ values }) => `skill_test:${values.test_run_id}`,
+        headers: ({ values }) => ({ 'X-Trace-Id': values.trace_id }),
+        successNotice: () => '测试结果已记录'
       },
 	      {
 	        label: '发布',

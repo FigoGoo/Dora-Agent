@@ -978,7 +978,8 @@ export function ResourceListPage({ config }) {
       const fields = action.fields || [];
       const body = action.body?.({ reason, row, values, previewToken }) || prepareBody(values || {}, fields);
       const options = {
-        idempotencyKey: action.idempotencyKey?.({ row, values, body })
+        idempotencyKey: action.idempotencyKey?.({ row, values, body }),
+        headers: action.headers?.({ row, values, body })
       };
       return apiMethod(action.method || 'POST')(action.path?.(row) || action.confirmPath(row), body, options);
     },
@@ -993,7 +994,7 @@ export function ResourceListPage({ config }) {
 
   async function openAction(action, row) {
     if (action.fields?.length) {
-      setActionForm({ action, row, values: initialForm(action.fields, row), error: null, errors: {} });
+      setActionForm({ action, row, values: action.initialValues?.(row) || initialForm(action.fields, row), error: null, errors: {} });
       return;
     }
     if (action.preview) {
@@ -1278,7 +1279,7 @@ export function ResourceListPage({ config }) {
               取消
             </Button>
             <Button type="submit" form="admin-action-form" variant={actionForm?.action?.tone === 'danger' ? 'danger' : 'primary'} loading={actionMutation.isPending}>
-              保存
+              {actionForm?.action?.submitLabel || '保存'}
             </Button>
           </>
         }
@@ -1286,6 +1287,11 @@ export function ResourceListPage({ config }) {
         {actionForm?.error ? (
           <Alert tone="danger" title="表单格式错误">
             {actionForm.error.message}
+          </Alert>
+        ) : null}
+        {actionForm?.action?.description ? (
+          <Alert tone="info" title={actionForm.action.descriptionTitle || '操作说明'}>
+            {actionForm.action.description}
           </Alert>
         ) : null}
         <form id="admin-action-form" onSubmit={submitActionForm} noValidate>
