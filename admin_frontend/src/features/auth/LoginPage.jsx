@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Clock3, FileCheck2, LogIn, ShieldCheck } from 'lucide-react';
-import { adminApi } from '../../lib/api/admin.js';
-import { saveAdminSession } from '../../lib/auth/session.js';
+import { adminApi } from '../../services/adminApi.js';
+import { saveAdminSession } from '../../services/session.js';
 import { getAdminEntryPath } from '../../app/auth.js';
 import { Alert } from '../../components/admin/Alert.jsx';
 import { Button } from '../../components/admin/Button.jsx';

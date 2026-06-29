@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-vi.mock('../../lib/api/admin.js', () => ({
+vi.mock('../../services/adminApi.js', () => ({
   adminApi: {
     list: vi.fn(() =>
       Promise.resolve({
@@ -23,7 +23,7 @@ vi.mock('../../lib/api/admin.js', () => ({
   }
 }));
 
-import { adminApi } from '../../lib/api/admin.js';
+import { adminApi } from '../../services/adminApi.js';
 import { SystemSkillEditorPage } from './SystemSkillEditorPage.jsx';
 
 function renderEditor() {

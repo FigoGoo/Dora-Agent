@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Send } from 'lucide-react';
-import { adminApi } from '../../lib/api/admin.js';
-import { readListPayload, toApiDateTime } from '../../lib/format.js';
+import { adminApi } from '../../services/adminApi.js';
+import { readListPayload, toApiDateTime } from '../../utils/format.js';
 import { AuditHint } from '../../components/admin/AuditHint.jsx';
 import { Badge } from '../../components/admin/Badge.jsx';
 import { Button } from '../../components/admin/Button.jsx';

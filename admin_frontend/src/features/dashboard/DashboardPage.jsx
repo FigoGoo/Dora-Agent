@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, BookOpenCheck, ClipboardList, Users } from 'lucide-react';
-import { adminApi } from '../../lib/api/admin.js';
+import { adminApi } from '../../services/adminApi.js';
 import { PageHeader } from '../../components/admin/PageHeader.jsx';
 import { ErrorState } from '../../components/admin/ErrorState.jsx';
 import { SkeletonBlock } from '../../components/admin/Skeleton.jsx';

@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { getAdminSession } from '../lib/auth/session.js';
+import { getAdminSession } from '../services/session.js';
 
 export function getAdminEntryPath(session) {
   if (!session?.admin_id) {

@@ -6,8 +6,8 @@ import { AuditHint } from '../../components/admin/AuditHint.jsx';
 import { Button } from '../../components/admin/Button.jsx';
 import { PageHeader } from '../../components/admin/PageHeader.jsx';
 import { useToast } from '../../components/admin/Toast.jsx';
-import { adminApi } from '../../lib/api/admin.js';
-import { readListPayload } from '../../lib/format.js';
+import { adminApi } from '../../services/adminApi.js';
+import { readListPayload } from '../../utils/format.js';
 import { initialForm, prepareCreateBody, ResourceForm, validateRequiredFields } from './ResourceListPage.jsx';
 import { pageConfigs } from './pageConfigs.jsx';
 

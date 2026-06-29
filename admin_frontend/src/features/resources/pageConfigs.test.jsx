@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-vi.mock('../../lib/api/admin.js', () => ({
+vi.mock('../../services/adminApi.js', () => ({
   adminApi: {
     post: vi.fn(() => Promise.resolve({})),
     previewTakeDownWork: vi.fn(() => Promise.resolve({})),
@@ -9,7 +9,7 @@ vi.mock('../../lib/api/admin.js', () => ({
   }
 }));
 
-import { adminApi } from '../../lib/api/admin.js';
+import { adminApi } from '../../services/adminApi.js';
 import { prepareCreateBody } from './ResourceListPage.jsx';
 import { pageConfigs } from './pageConfigs.jsx';
 

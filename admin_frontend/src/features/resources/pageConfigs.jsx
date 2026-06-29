@@ -1,7 +1,7 @@
 import { Badge } from '../../components/admin/Badge.jsx';
 import { TraceIdCopy } from '../../components/admin/TraceIdCopy.jsx';
-import { adminApi } from '../../lib/api/admin.js';
-import { formatDateTime } from '../../lib/format.js';
+import { adminApi } from '../../services/adminApi.js';
+import { formatDateTime } from '../../utils/format.js';
 
 const statusOptions = [
   { label: '启用', value: 'active' },

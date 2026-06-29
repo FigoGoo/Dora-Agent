@@ -1,5 +1,5 @@
 import { Circle, CircleAlert, CircleCheck, Clock3 } from 'lucide-react';
-import { statusTone } from '../../lib/format.js';
+import { statusTone } from '../../utils/format.js';
 
 const toneIcon = {
   success: CircleCheck,
