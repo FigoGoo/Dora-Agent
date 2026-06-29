@@ -1,7 +1,12 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.jsx';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  window.history.pushState({}, '', '/');
+});
 
 describe('DORAIGC landing page', () => {
   it('renders the approved brand and prompt-first creation entry', () => {
@@ -123,5 +128,154 @@ describe('DORAIGC landing page', () => {
       '--dora-mint': '#35e0ba',
       '--dora-cyan': '#4bd8ff'
     });
+  });
+});
+
+describe('DORAIGC static client pages', () => {
+  it('keeps the side navigation focused on creation and content entry points', () => {
+    render(<App />);
+
+    const navigation = screen.getByRole('complementary', { name: 'DORAIGC 导航' });
+
+    expect(within(navigation).getByRole('button', { name: '快速创作' })).toBeInTheDocument();
+    expect(within(navigation).queryByRole('button', { name: '工作台' })).not.toBeInTheDocument();
+    expect(within(navigation).queryByRole('button', { name: '作品中心' })).not.toBeInTheDocument();
+    expect(within(navigation).queryByRole('button', { name: '积分' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '148积分' })).toBeInTheDocument();
+  });
+
+  it('continues to a private page after login from navigation', async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '快速创作' }));
+
+    const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
+    expect(within(dialog).getByText('进入快速创作')).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: '登录并继续' }));
+
+    expect(openSpy).toHaveBeenCalledWith('/workspace', '_blank', 'noopener,noreferrer');
+    expect(screen.queryByRole('heading', { name: 'Seedance 2.0 创作工作台' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '用户菜单' })).toBeInTheDocument();
+  });
+
+  it('navigates through workspace, projects, and assets mock pages after login', async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+
+    await user.click(screen.getByRole('button', { name: '快速创作' }));
+    expect(openSpy).toHaveBeenCalledWith('/workspace', '_blank', 'noopener,noreferrer');
+
+    await user.click(screen.getByRole('button', { name: '项目' }));
+    expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '新建项目' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '最近编辑' })).not.toBeInTheDocument();
+    expect(screen.getByText('Seedance 2.0 视频制作')).toBeInTheDocument();
+    expect(screen.getByText('功能介绍 202606140505')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '资产库' }));
+    expect(screen.getByRole('heading', { name: '资产库' })).toBeInTheDocument();
+    expect(screen.getByText('生成视频')).toBeInTheDocument();
+    expect(screen.getByText('保存失败')).toBeInTheDocument();
+  });
+
+  it('renders the standalone workspace route without the home shell navigation', () => {
+    window.history.pushState({}, '', '/workspace');
+
+    render(<App />);
+
+    expect(screen.getByRole('heading', { name: '短剧制作' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '媒体文件' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '预览画布' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '对话' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'DORAIGC 导航' })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('请输入你的消息...')).toBeInTheDocument();
+  });
+
+  it('navigates through skills, explore, and credits mock pages', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+
+    await user.click(screen.getByRole('button', { name: 'Skill' }));
+    expect(screen.getByRole('heading', { name: 'Skill 中心' })).toBeInTheDocument();
+    expect(screen.getByText('AI 短剧一站式生成')).toBeInTheDocument();
+    expect(screen.getByText('待审核')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '精选作品' }));
+    expect(screen.getByRole('heading', { name: '精选作品中心' })).toBeInTheDocument();
+    expect(screen.getByText('公开浏览')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '310积分' }));
+    expect(screen.getByRole('heading', { name: '积分中心' })).toBeInTheDocument();
+    expect(screen.getByText('148 积分')).toBeInTheDocument();
+    expect(screen.getByText('DORA-2026-CREATOR')).toBeInTheDocument();
+  });
+
+  it('keeps write actions on mock pages behind the login intent modal', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+
+    await user.click(screen.getByRole('button', { name: '项目' }));
+    await user.click(screen.getByRole('button', { name: '继续创作 Seedance 2.0 视频制作' }));
+
+    const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
+    expect(within(dialog).getByText('继续创作 Seedance 2.0 视频制作')).toBeInTheDocument();
+    expect(within(dialog).getByText('进入项目后会恢复最近会话和资产上下文。')).toBeInTheDocument();
+  });
+
+  it('opens the account menu from the avatar after login', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+    await user.click(screen.getByRole('button', { name: '用户菜单' }));
+
+    const menu = screen.getByRole('dialog', { name: '账户与积分' });
+    expect(menu).toHaveClass('account-menu--compact');
+    expect(menu).toHaveClass('account-menu--slim');
+    expect(within(menu).getByText('User')).toBeInTheDocument();
+    expect(within(menu).getByText('zhuifei2099@gmail.com')).toBeInTheDocument();
+    expect(within(menu).getByText('Free')).toBeInTheDocument();
+    expect(within(menu).getByRole('button', { name: '开通会员' })).toHaveClass('membership-button--theme');
+    expect(within(menu).getByText('会员积分')).toBeInTheDocument();
+    expect(within(menu).getByText('每周积分')).toBeInTheDocument();
+    expect(within(menu).getByText('奖励积分')).toBeInTheDocument();
+    expect(within(menu).getByRole('button', { name: '查看用量' })).toBeInTheDocument();
+    expect(within(menu).getByText('语言')).toBeInTheDocument();
+    expect(within(menu).getByText('反馈')).toBeInTheDocument();
+    expect(within(menu).getByText('管理账户')).toBeInTheDocument();
+  });
+
+  it('uses user-facing copy and the same card system on private pages', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+
+    await user.click(screen.getByRole('button', { name: '项目' }));
+    expect(screen.getAllByTestId('project-card')).toHaveLength(11);
+    expect(screen.getByText('创建新项目')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '资产库' }));
+    expect(screen.getAllByTestId('content-card')).toHaveLength(3);
+    expect(screen.getByText('查看已经生成或上传的素材，快速带回当前创作。')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Skill' }));
+    expect(screen.getAllByTestId('content-card')).toHaveLength(3);
+    expect(screen.queryByText(/静态|mock|系统|API|PRD/)).not.toBeInTheDocument();
   });
 });

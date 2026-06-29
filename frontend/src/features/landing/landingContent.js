@@ -1,6 +1,5 @@
 import {
   Blocks,
-  Coins,
   FolderKanban,
   Home,
   Images,
@@ -9,13 +8,12 @@ import {
 } from 'lucide-react';
 
 export const navItems = [
-  { label: '首页', icon: Home, active: true },
-  { label: '工作台', icon: Sparkles },
-  { label: '项目', icon: FolderKanban },
-  { label: '资产库', icon: Images },
-  { label: 'Skill', icon: Blocks },
-  { label: '精选作品', icon: Play },
-  { label: '积分', icon: Coins }
+  { label: '首页', page: 'home', icon: Home },
+  { label: '快速创作', page: 'workspace', icon: Sparkles },
+  { label: '项目', page: 'projects', icon: FolderKanban },
+  { label: '资产库', page: 'assets', icon: Images },
+  { label: 'Skill', page: 'skills', icon: Blocks },
+  { label: '精选作品', page: 'explore', icon: Play }
 ];
 
 export const workCategories = ['全部', '影视', '短剧', '动漫', 'MV', 'TVC', '文旅', '电商'];
@@ -286,3 +284,224 @@ export const publicWorks = [
     cover: '/works/doraigc-aigc-mv-shotboard.png',
   }
 ];
+
+export const workspaceMock = {
+  title: 'Seedance 2.0 创作工作台',
+  project: 'Seedance 2.0 视频制作',
+  status: '正在生成 分镜草图',
+  credit: '确认扣费',
+  prompt: '把城市夜景、电子节拍和运动镜头组合成 30 秒宣传短片。',
+  storyboard: ['霓虹街口开场', '角色穿过光带', '产品高光切入', '节拍转场收束'],
+  messages: [
+    { role: 'Agent', text: '我已拆成 4 个镜头段，先生成主视觉和节奏参考。' },
+    { role: '进度', text: '分镜预览正在生成，约 62%。' },
+    { role: 'User', text: '保留城市雨夜，但让产品更突出。' }
+  ],
+  assets: [
+    { title: '主视觉草图', type: '图片', cover: '/works/mv-city-generated.png' },
+    { title: '节拍波形', type: '音乐', cover: '/works/music-wave-generated.png' },
+    { title: '产品高光', type: '商品图', cover: '/works/product-band-generated.png' }
+  ]
+};
+
+export const agentWorkspaceMock = {
+  title: '短剧制作',
+  project: '角色关键图生成',
+  previewTitle: 'Element_Ajie_img',
+  model: 'Seedance 2.0',
+  size: '2K (2752*1536)',
+  credits: 310,
+  plan: 'Free',
+  files: [
+    { title: 'Element_Ajie_img', type: '角色图', cover: '/works/doraigc-aigc-movie-poster.png', active: true },
+    { title: 'Element_Xiaoyang_img', type: '角色图', cover: '/works/doraigc-aigc-cultural-tourism.png' },
+    { title: 'Element_NightStreet_img', type: '场景图', cover: '/works/mv-city-generated.png' }
+  ],
+  previewImages: [
+    { title: '阿杰近景', cover: '/works/doraigc-aigc-movie-poster.png' },
+    { title: '夜街全身', cover: '/works/doraigc-aigc-cultural-tourism.png' }
+  ],
+  resultSummary: [
+    '阿杰：30 岁男性，背行李包，休闲夹克，略带旅途疲惫感',
+    '晓阳：同龄男性，随性 T 恤外搭衬衫，神态轻松自然',
+    '夜市场景：城市夜市街头，橙黄色暖光与霓虹交织，烟火气更足'
+  ],
+  nextStep: '查看上方生成的三张图，确认角色色彩和场景氛围是否符合预期。',
+  confirmation: {
+    title: '元素图像满意吗？确认后进入角色音色设置。',
+    options: [
+      '图像满意，进入角色音色设置',
+      '重新生成某个元素图像',
+      '补充其它调整'
+    ]
+  }
+};
+
+export const projectMocks = [
+  {
+    title: '功能介绍 202606140505',
+    meta: '最后编辑于 2026年6月29日 23:39',
+    cover: '/works/doraigc-aigc-product-hero.png',
+    sessions: '4 个会话',
+    works: '1 个作品',
+    status: 'active'
+  },
+  {
+    title: '新视频项目',
+    meta: '最后编辑于 2026年6月28日 21:45',
+    cover: '/works/doraigc-aigc-mv-shotboard.png',
+    sessions: '2 个会话',
+    works: '2 个作品',
+    status: 'active'
+  },
+  {
+    title: 'Seedance 2.0 视频制作',
+    meta: '最后编辑于 2026年6月25日 17:53',
+    cover: '/works/doraigc-aigc-short-drama-storyboard.png',
+    sessions: '3 个会话',
+    works: '2 个作品',
+    status: 'active'
+  },
+  {
+    title: '短剧制作',
+    meta: '最后编辑于 2026年6月23日 00:58',
+    cover: '/works/doraigc-aigc-cultural-tourism.png',
+    sessions: '5 个会话',
+    works: '1 个作品',
+    status: 'active'
+  },
+  {
+    title: 'AI模型身份查询',
+    meta: '最后编辑于 2026年6月23日 00:42',
+    cover: '/works/doraigc-aigc-movie-poster.png',
+    sessions: '1 个会话',
+    works: '1 个作品',
+    status: 'active'
+  },
+  {
+    title: '音乐创作项目',
+    meta: '最后编辑于 2026年6月15日 18:26',
+    cover: '/works/doraigc-aigc-music-visualizer.png',
+    sessions: '2 个会话',
+    works: '私密草稿',
+    status: 'archived'
+  },
+  {
+    title: '歌曲制作',
+    meta: '最后编辑于 2026年6月15日 18:15',
+    cover: '/works/music-wave-generated.png',
+    sessions: '2 个会话',
+    works: '1 个作品',
+    status: 'active'
+  },
+  {
+    title: '功能介绍',
+    meta: '最后编辑于 2026年6月14日 01:17',
+    cover: '/works/doraigc-ratio-mv-16x9.png',
+    sessions: '1 个会话',
+    works: '草稿',
+    status: 'active'
+  },
+  {
+    title: '穿越世界杯',
+    meta: '最后编辑于 2026年6月12日 22:48',
+    cover: '/works/doraigc-ratio-tourism-4x3.png',
+    sessions: '3 个会话',
+    works: '2 个作品',
+    status: 'active'
+  },
+  {
+    title: 'AI视频演示：禁止在校园使用超能力',
+    meta: '最后编辑于 2026年6月4日 14:07',
+    cover: '/works/doraigc-aigc-ecommerce-ad.png',
+    sessions: '1 个会话',
+    works: '1 个作品',
+    status: 'archived'
+  }
+];
+
+export const assetMocks = [
+  {
+    title: '霓虹城市 16:9 预览',
+    type: '生成视频',
+    status: '可引用',
+    project: 'Seedance 2.0 视频制作',
+    source: '最近生成',
+    cover: '/works/mv-city-generated.png'
+  },
+  {
+    title: '香氛投放主图',
+    type: '生成图片',
+    status: '可引用',
+    project: '商品宣传短片',
+    source: '上传素材与创作工具',
+    cover: '/works/doraigc-aigc-ecommerce-ad.png'
+  },
+  {
+    title: '沙海海报修订稿',
+    type: '生成图片',
+    status: '保存失败',
+    project: '电影海报概念',
+    source: '海报生成',
+    cover: '/works/doraigc-aigc-movie-poster.png'
+  }
+];
+
+export const skillMocks = [
+  {
+    title: 'AI 短剧一站式生成',
+    owner: '个人 Skill',
+    status: '待审核',
+    description: '从故事梗概生成角色、分镜、竖屏封面和发布摘要。',
+    cover: '/works/doraigc-ratio-anime-short-9x16.png',
+    tags: ['短剧', '角色', '分镜']
+  },
+  {
+    title: '视频拉片复刻',
+    owner: 'DORAIGC 推荐',
+    status: '已发布',
+    description: '提取参考片构图、节奏和色彩，再生成新的镜头提示。',
+    cover: '/works/doraigc-ratio-mv-16x9.png',
+    tags: ['拉片', '镜头', '复刻']
+  },
+  {
+    title: '商品卖点短片',
+    owner: '企业 Skill',
+    status: '有新版本',
+    description: '把商品卖点、投放比例和素材清单合成为短视频脚本。',
+    cover: '/works/doraigc-aigc-product-hero.png',
+    tags: ['电商', 'TVC']
+  }
+];
+
+export const userWorkMocks = [
+  {
+    title: '夜航电子音乐封面',
+    state: '已公开',
+    cover: '/works/music-wave-generated.png',
+    meta: 'MV / 4 个资产'
+  },
+  {
+    title: '湖城文旅航拍',
+    state: '私密草稿',
+    cover: '/works/doraigc-aigc-cultural-tourism.png',
+    meta: '文旅 / 待补简介'
+  },
+  {
+    title: '香氛投放组图',
+    state: '内容安全复核中',
+    cover: '/works/doraigc-aigc-ecommerce-ad.png',
+    meta: '电商 / 9 张图'
+  }
+];
+
+export const creditMock = {
+  balance: '148 积分',
+  expiring: '32 积分将在 2026-07-15 过期',
+  redeemCode: 'DORA-2026-CREATOR',
+  ledger: [
+    { title: 'Seedance 分镜生成冻结', amount: '-18', status: '已释放' },
+    { title: '兑换码充值', amount: '+100', status: '兑换成功' },
+    { title: 'MV 主视觉生成', amount: '-12', status: '已扣减' }
+  ]
+};
