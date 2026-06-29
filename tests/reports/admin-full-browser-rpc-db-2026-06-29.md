@@ -20,6 +20,53 @@
 - 浏览器：Chrome 当前登录态 `admin@dora.local`
 - API 测试会话：`asess_e2e_20260629_fulltest`，测试后已撤销。
 
+## 2026-06-29 二次本地启动巡检修复归档
+
+提交：`0b4eb1e fix: harden admin resource smoke issues`
+分支：`cc-yr`
+结论：未偏离目标。本次只围绕截图红框中的 `系统 Skill`、`模型供应商`、`模型管理`、`Tool 管理` 做本地启动、页面巡检、API smoke 和缺陷修复。
+
+### 已修复问题
+
+| 问题 | 表现 / 证据 | 根因 | 解决方案 | 回归保护 |
+| --- | --- | --- | --- | --- |
+| Tool 详情直接展示英文枚举 | 详情抽屉显示 `active`、`medium`、`model_generation`、`asset` 等 | 通用详情组件按原值渲染后端枚举 | `ResourceListPage.jsx` 增加常见详情枚举中文映射，嵌套对象和顶层详情都按字段名转换 | `ResourceListPage.test.jsx` 覆盖 `status/tool_type/risk_level/charge_mode/billing_unit` 中文展示 |
+| Tool 列表计费单位仍显示 `asset/call` | Tool 管理列表显示 `asset · 12 积分`、`call · 3 积分` | Tool 计费单位复用了模型计费单位映射，缺少 `asset` 等 Tool 单位 | `pageConfigs.jsx` 增加 `toolBillingUnitOptions` 和 `toolBillingUnitLabel`，Tool 列表显示 `按资产/按调用` | `pageConfigs.test.jsx` 覆盖 Tool 计价列中文展示 |
+| 模型供应商 PATCH 会丢旧字段 | 只传 `status` 或只改名时，存在丢失 `provider_code/base_url/config/secret_ref_status` 的风险 | 后端 `SaveProvider` 把 PATCH 当全量保存；HTTP handler 在 PATCH 时会自动生成缺省 `provider_code` 并构造空 `config` | 应用层更新旧供应商时先读取现有行，未传字段保留旧值；HTTP handler 仅创建时自动生成 `provider_code`，且只有显式传 `config/secret_key_ref` 时才覆盖配置 | `app_admin_contract_test.go` 覆盖只改状态/只改名称保留旧字段；`m3_integration_test.go` 覆盖 HTTP PATCH 保留密钥状态 |
+| 供应商编辑表单缺少 `provider_code` | 管理员编辑供应商时无法看见/保留供应商编码 | 前端编辑 action 字段未包含 `provider_code` | `pageConfigs.jsx` 在模型供应商编辑字段中补 `provider_code` | `pageConfigs.test.jsx` 覆盖编辑字段必须包含 `provider_code` |
+
+### 本次未作为缺陷处理的 smoke 假阴性
+
+- 系统 Skill 测试结果保存第一次返回 `SAFETY_EVIDENCE_INVALID`，根因是 smoke payload 使用了 `{}` 或字段不完整的 `safety_evidence_json`，不是业务接口缺陷。
+- 合法契约：`Idempotency-Key` 必须是 `skill_test:<test_run_id>`；`safety_evidence_json.scene=skill_test`、`target_type=skill_test_prompt`、`target_ref_id` 等于 `test_run_id`（传 `test_case_id` 时等于 `test_case_id`）、`source_run_id=test_run_id`、`trace_id` 与 `X-Trace-Id` 对齐、`expires_at` 在未来。
+- 后续本地 smoke 不应再用空安全证据；若字段不满足上述契约，返回 `SAFETY_EVIDENCE_INVALID` 是预期行为。
+
+### 验证证据
+
+命令验证：
+
+| 命令 | 结果 |
+| --- | --- |
+| `pnpm test -- --run`（目录：`admin_frontend/`） | 13 个测试文件、40 个测试用例通过 |
+| `pnpm build`（目录：`admin_frontend/`） | 通过，Vite 生产构建成功 |
+| `go test ./services/business/internal/application/modelconfig ./services/business/internal/transport/http -count=1` | 通过 |
+| `git diff --check` | 通过，无空白错误 |
+
+本地页面 / API 验证：
+
+- 四个页面 `/admin/skills/system`、`/admin/models/providers`、`/admin/models`、`/admin/tools` 均可加载，无浏览器 console error。
+- 模型供应商 API smoke：新增、只改 `status`、只改名称后，`provider_code/base_url/secret_ref_status` 均保持正确。
+- 模型管理 API smoke：新增文本模型成功。
+- Tool 管理 API smoke：`impact-preview` 和 `whitelist` 保存成功。
+- 系统 Skill API smoke：使用合法安全证据保存测试结果成功，返回 `saved=true`。
+- Tool 管理页面刷新后列表显示 `按资产 · 12 积分`、`按调用 · 3 积分`，详情抽屉显示 `状态 启用`、`风险等级 中风险`、`Tool 类型 模型生成 Tool`。
+
+### 后续读取提醒
+
+- 后续继续验收管理端四页时，先读取本节，避免重复把上述已修问题当作新缺陷。
+- 供应商 PATCH 的既定口径是“部分更新，未传字段保留旧值”；不得恢复为全量覆盖。
+- 枚举展示的既定口径是“管理端可见 UI 使用中文标签，后端仍保留枚举值作为契约值”。
+
 ## 2026-06-29 修复回归
 
 修复项：
