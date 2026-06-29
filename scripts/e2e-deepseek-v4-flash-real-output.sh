@@ -65,6 +65,13 @@ psql_agent() {
   docker exec -i "$POSTGRES_CONTAINER" psql -U "$POSTGRES_USER" -d "$AGENT_DB_NAME" -v ON_ERROR_STOP=1 "$@"
 }
 
+cleanup_skill() {
+  if [[ -n "${SKILL_ID:-}" && -n "${ADMIN_TOKEN:-}" && "${KEEP_E2E_SKILL:-false}" != "true" ]]; then
+    api POST "$BUSINESS_BASE_URL/api/admin/skills/system/$SKILL_ID/deprecate" "$ADMIN_TOKEN" "deepseek-deprecate-${RUN_SUFFIX}" '{}' >/dev/null || true
+  fi
+}
+trap cleanup_skill EXIT
+
 env_value() {
   local key="$1"
   awk -F= -v key="$key" '$1 == key {print substr($0, length(key) + 2)}' .env.local 2>/dev/null | tail -n 1

@@ -110,7 +110,7 @@ ON CONFLICT (pricing_policy_id) DO NOTHING;
 INSERT INTO skills (
   id, skill_key, skill_name, skill_scope, owner_user_id, enterprise_id, status, published_version_id, route_hints_json, created_by_user_id
 ) VALUES (
-  'sk_seed_storyboard', 'storyboard', 'Storyboard', 'public', 'usr_1001', null, 'published', 'skv_seed_storyboard_100', '{"intent":"storyboard"}'::jsonb, 'usr_1001'
+  'sk_seed_storyboard', 'storyboard', 'Storyboard', 'public', 'usr_1001', null, 'published', 'skv_seed_storyboard_100', '{"intent":"storyboard","keywords":"storyboard,故事板,分镜,镜头,广告短片,广告片,视觉方案,主视觉","priority":"80","negative_keywords":"邮件,道歉信,合同,发票"}'::jsonb, 'usr_1001'
 ) ON CONFLICT (skill_key) DO NOTHING;
 
 INSERT INTO skill_versions (

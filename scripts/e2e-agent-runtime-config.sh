@@ -74,6 +74,9 @@ SET model_id = '${ORIGINAL_DEFAULT_MODEL}', pricing_snapshot_id = '${ORIGINAL_DE
 WHERE resource_type = '${MODEL_RESOURCE_TYPE}' AND scope = 'global' AND status = 'active';
 SQL
   fi
+  if [[ -n "${SKILL_ID:-}" && -n "${ADMIN_TOKEN:-}" && "${KEEP_E2E_SKILL:-false}" != "true" ]]; then
+    api POST "$BUSINESS_BASE_URL/api/admin/skills/system/$SKILL_ID/deprecate" "$ADMIN_TOKEN" "e2e-deprecate-${RUN_SUFFIX}" '{}' >/dev/null || true
+  fi
 }
 trap restore_default EXIT
 
