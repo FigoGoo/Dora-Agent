@@ -9,7 +9,14 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:19080'
+      '/api/agent': {
+        target: 'http://localhost:18080',
+        changeOrigin: true
+      },
+      '/api': {
+        target: 'http://localhost:19080',
+        changeOrigin: true
+      }
     }
   }
 });

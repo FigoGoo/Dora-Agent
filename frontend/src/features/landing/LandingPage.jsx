@@ -17,9 +17,136 @@ const MASONRY_DEFAULT_CARD_WIDTH = 320;
 const MASONRY_DEFAULT_GAP = 8;
 const MASONRY_META_HEIGHT = 36;
 const CARTOON_AVATAR_COUNT = 12;
+const USE_LOCAL_DEMO_LOGIN = import.meta.env.DEV || import.meta.env.MODE === 'test';
+const DEMO_PROJECT_ID = import.meta.env.VITE_DORA_DEMO_PROJECT_ID || 'prj_active_1001';
+const DEMO_LOGIN_ACCOUNT = import.meta.env.VITE_DORA_DEMO_ACCOUNT || (USE_LOCAL_DEMO_LOGIN ? 'user1001@dora.local' : '');
+const DEMO_LOGIN_PASSWORD = import.meta.env.VITE_DORA_DEMO_PASSWORD || (USE_LOCAL_DEMO_LOGIN ? 'local-user-change-me' : '');
 
 function openLoginIntent(setLoginIntent, title, prompt) {
   setLoginIntent({ title, prompt: prompt || '登录后会继续刚才的创作动作。' });
+}
+
+function createIdempotencyKey(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function parseJSONResponse(response) {
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const message = payload?.message || payload?.error || `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return payload;
+}
+
+function authHeaders(auth) {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${auth.accessToken}`,
+    'X-Space-Id': auth.spaceID
+  };
+}
+
+function getEventPayloadValue(event, keys) {
+  for (const key of keys) {
+    const value = event?.payload?.[key];
+
+    if (value !== undefined && value !== null && value !== '') {
+      return String(value);
+    }
+  }
+
+  return '';
+}
+
+function summarizeAgentEvents(events) {
+  const skillEvent = events.find((event) => event.type === 'agent.skill.selected');
+  const toolEvent = events.find((event) => event.type === 'tool.call.completed' || event.type === 'tool.call.started');
+  const modelEvent = events.find((event) => (
+    event.type === 'generation.progress'
+    && (event.payload?.stage === 'model_snapshot_resolved' || event.payload?.model_id)
+  ));
+  const confirmationEvent = events.find((event) => event.type === 'confirmation.required');
+
+  return {
+    skill: getEventPayloadValue(skillEvent, ['title', 'skill_title', 'skill_id']) || '等待 Skill 路由',
+    tool: getEventPayloadValue(toolEvent, ['tool_name', 'tool_key', 'name']) || '等待 Tool 策略',
+    model: getEventPayloadValue(modelEvent, ['model_id', 'model_key', 'model_display_name']) || '等待模型快照',
+    confirmation: getEventPayloadValue(confirmationEvent, ['title', 'reason', 'type']) || '等待确认事件'
+  };
+}
+
+async function continueIntentWithAgentRun(intent) {
+  const trimmedPrompt = intent.prompt.trim();
+
+  if (!DEMO_LOGIN_ACCOUNT || !DEMO_LOGIN_PASSWORD) {
+    throw new Error('缺少前台登录配置');
+  }
+
+  const loginPayload = await parseJSONResponse(await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      login_type: 'personal',
+      account: DEMO_LOGIN_ACCOUNT,
+      password: DEMO_LOGIN_PASSWORD
+    })
+  }));
+  const loginData = loginPayload.data || loginPayload;
+  const auth = {
+    accessToken: loginData.access_token,
+    spaceID: loginData.current_space_id
+  };
+
+  if (!auth.accessToken || !auth.spaceID) {
+    throw new Error('登录响应缺少 access_token 或 current_space_id');
+  }
+
+  const sessionPayload = await parseJSONResponse(await fetch('/api/agent/sessions', {
+    method: 'POST',
+    headers: {
+      ...authHeaders(auth),
+      'Idempotency-Key': createIdempotencyKey('frontend-session')
+    },
+    body: JSON.stringify({
+      project_id: DEMO_PROJECT_ID,
+      initial_title: trimmedPrompt
+    })
+  }));
+
+  const runPayload = await parseJSONResponse(await fetch('/api/agent/runs', {
+    method: 'POST',
+    headers: {
+      ...authHeaders(auth),
+      'Idempotency-Key': createIdempotencyKey('frontend-run')
+    },
+    body: JSON.stringify({
+      session_id: sessionPayload.session_id,
+      project_id: DEMO_PROJECT_ID,
+      user_input: {
+        client_message_id: createIdempotencyKey('frontend-message'),
+        content_type: 'text',
+        text: trimmedPrompt
+      }
+    })
+  }));
+
+  const eventsPayload = await parseJSONResponse(await fetch(`/api/agent/runs/${runPayload.run_id}/events?after_sequence=0&limit=100`, {
+    method: 'GET',
+    headers: authHeaders(auth)
+  }));
+
+  return {
+    prompt: trimmedPrompt,
+    auth,
+    sessionID: sessionPayload.session_id,
+    runID: runPayload.run_id,
+    runStatus: runPayload.status,
+    events: eventsPayload.events || [],
+    nextSequence: eventsPayload.next_sequence || 0
+  };
 }
 
 function parseRatio(ratio) {
@@ -328,7 +455,7 @@ function PublicWorks({ activeCategory, likedWorks, mutedWorks, onLike, onToggleM
   );
 }
 
-function LoginModal({ intent, onClose }) {
+function LoginModal({ intent, isContinuing, error, onClose, onContinue }) {
   if (!intent) {
     return null;
   }
@@ -352,9 +479,12 @@ function LoginModal({ intent, onClose }) {
             <strong>{intent.prompt}</strong>
           </div>
           <div className="login-modal__actions">
-            <button className="start-button" type="button">登录并继续</button>
-            <button className="secondary-button" type="button">注册账号</button>
+            <button className="start-button" type="button" disabled={isContinuing} onClick={onContinue}>
+              {isContinuing ? '正在进入工作台' : '登录并继续'}
+            </button>
+            <button className="secondary-button" type="button" disabled={isContinuing}>注册账号</button>
           </div>
+          {error ? <p className="login-modal__error" role="alert">{error}</p> : null}
           <button className="subtle-button" type="button" onClick={onClose}>稍后再说</button>
         </div>
       </section>
@@ -393,16 +523,83 @@ function WorkPreviewModal({ work, onClose, onCreate }) {
   );
 }
 
+function AgentWorkbenchPanel({ workspace }) {
+  if (!workspace) {
+    return null;
+  }
+
+  const summary = summarizeAgentEvents(workspace.events);
+
+  return (
+    <section className="agent-workbench-panel" aria-label="Agent 工作台">
+      <div className="agent-workbench-panel__header">
+        <span className="attention-tag">Agent run</span>
+        <strong>{workspace.runID}</strong>
+      </div>
+      <p>{workspace.prompt}</p>
+      <dl className="agent-workbench-panel__grid">
+        <div>
+          <dt>Session</dt>
+          <dd>{workspace.sessionID}</dd>
+        </div>
+        <div>
+          <dt>Skill</dt>
+          <dd>{summary.skill}</dd>
+        </div>
+        <div>
+          <dt>Tool</dt>
+          <dd>{summary.tool}</dd>
+        </div>
+        <div>
+          <dt>Model</dt>
+          <dd>{summary.model}</dd>
+        </div>
+        <div>
+          <dt>Confirmation</dt>
+          <dd>{summary.confirmation}</dd>
+        </div>
+        <div>
+          <dt>Events</dt>
+          <dd>{workspace.events.length} 条</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
 export function LandingPage() {
   const [prompt, setPrompt] = useState('');
   const [loginIntent, setLoginIntent] = useState(null);
+  const [isContinuing, setIsContinuing] = useState(false);
+  const [continueError, setContinueError] = useState('');
+  const [workspace, setWorkspace] = useState(null);
   const [previewWork, setPreviewWork] = useState(null);
   const [likedWorks, setLikedWorks] = useState([]);
   const [mutedWorks, setMutedWorks] = useState([]);
   const [activeCategory, setActiveCategory] = useState('全部');
 
   function requestLogin(title, promptValue) {
+    setContinueError('');
     openLoginIntent(setLoginIntent, title, promptValue || prompt || '登录后会继续刚才的创作动作。');
+  }
+
+  async function handleContinueIntent() {
+    if (!loginIntent || isContinuing) {
+      return;
+    }
+
+    setIsContinuing(true);
+    setContinueError('');
+
+    try {
+      const nextWorkspace = await continueIntentWithAgentRun(loginIntent);
+      setWorkspace(nextWorkspace);
+      setLoginIntent(null);
+    } catch (error) {
+      setContinueError(error instanceof Error ? error.message : '进入工作台失败');
+    } finally {
+      setIsContinuing(false);
+    }
   }
 
   function handleWorkLike(work) {
@@ -424,6 +621,7 @@ export function LandingPage() {
     function closeOverlay(event) {
       if (event.key === 'Escape') {
         setLoginIntent(null);
+        setContinueError('');
         setPreviewWork(null);
       }
     }
@@ -452,6 +650,7 @@ export function LandingPage() {
               />
             </div>
             <HotSkills onUse={(skill) => requestLogin(skill.title, skill.title)} />
+            <AgentWorkbenchPanel workspace={workspace} />
             <RecentProjects onUse={requestLogin} />
           </div>
           <WorkCategoryBridge activeCategory={activeCategory} onCategoryChange={setActiveCategory} />
@@ -465,7 +664,16 @@ export function LandingPage() {
           onPreview={setPreviewWork}
         />
       </main>
-      <LoginModal intent={loginIntent} onClose={() => setLoginIntent(null)} />
+      <LoginModal
+        intent={loginIntent}
+        isContinuing={isContinuing}
+        error={continueError}
+        onClose={() => {
+          setLoginIntent(null);
+          setContinueError('');
+        }}
+        onContinue={handleContinueIntent}
+      />
       <WorkPreviewModal work={previewWork} onClose={() => setPreviewWork(null)} onCreate={handleWorkCreate} />
     </div>
   );

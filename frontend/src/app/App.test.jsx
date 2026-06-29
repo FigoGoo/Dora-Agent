@@ -1,9 +1,14 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.jsx';
 
 describe('DORAIGC landing page', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete global.fetch;
+  });
+
   it('renders the approved brand and prompt-first creation entry', () => {
     render(<App />);
 
@@ -32,6 +37,148 @@ describe('DORAIGC landing page', () => {
     const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByText('做一个霓虹城市里的音乐短片')).toBeInTheDocument();
+  });
+
+  it('continues a saved prompt by logging in and creating an Agent run', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (url) => {
+      if (url === '/api/auth/login') {
+        return {
+          ok: true,
+          json: async () => ({
+            code: 'OK',
+            data: {
+              access_token: 'user-token-1001',
+              current_space_id: 'sp_1001'
+            }
+          })
+        };
+      }
+
+      if (url === '/api/agent/sessions') {
+        return {
+          ok: true,
+          json: async () => ({
+            session_id: 'sess_frontend_full_flow',
+            project_id: 'prj_active_1001',
+            status: 'active'
+          })
+        };
+      }
+
+      if (url === '/api/agent/runs') {
+        return {
+          ok: true,
+          json: async () => ({
+            run_id: 'run_frontend_full_flow',
+            session_id: 'sess_frontend_full_flow',
+            project_id: 'prj_active_1001',
+            status: 'running',
+            stream_url: '/api/agent/runs/run_frontend_full_flow/stream'
+          })
+        };
+      }
+
+      if (url === '/api/agent/runs/run_frontend_full_flow/events?after_sequence=0&limit=100') {
+        return {
+          ok: true,
+          json: async () => ({
+            events: [
+              {
+                type: 'agent.skill.selected',
+                sequence: 1,
+                payload: {
+                  skill_id: 'sk_storyboard',
+                  title: '复杂分镜 Skill'
+                }
+              },
+              {
+                type: 'tool.call.completed',
+                sequence: 2,
+                payload: {
+                  tool_name: 'storyboard_extract_20260630',
+                  policy_allowed: true
+                }
+              },
+              {
+                type: 'generation.progress',
+                sequence: 3,
+                payload: {
+                  stage: 'model_snapshot_resolved',
+                  model_id: 'mdl_frontend_image'
+                }
+              },
+              {
+                type: 'confirmation.required',
+                sequence: 4,
+                payload: {
+                  title: '确认生成资产'
+                }
+              }
+            ],
+            next_sequence: 4
+          })
+        };
+      }
+
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    global.fetch = fetchMock;
+
+    render(<App />);
+
+    await user.type(screen.getByPlaceholderText('由一个想法或故事开始...'), '用新增分镜 Skill 生成一条城市广告片');
+    await user.click(screen.getByRole('button', { name: '开始创作' }));
+    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+
+    expect(await screen.findByRole('region', { name: 'Agent 工作台' })).toBeInTheDocument();
+    expect(screen.getByText('run_frontend_full_flow')).toBeInTheDocument();
+    expect(screen.getByText('复杂分镜 Skill')).toBeInTheDocument();
+    expect(screen.getByText('storyboard_extract_20260630')).toBeInTheDocument();
+    expect(screen.getByText('mdl_frontend_image')).toBeInTheDocument();
+    expect(screen.getByText('确认生成资产')).toBeInTheDocument();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/auth/login', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        login_type: 'personal',
+        account: 'user1001@dora.local',
+        password: 'local-user-change-me'
+      })
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/agent/sessions', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({
+        Authorization: 'Bearer user-token-1001',
+        'X-Space-Id': 'sp_1001',
+        'Idempotency-Key': expect.stringMatching(/^frontend-session-/)
+      }),
+      body: JSON.stringify({
+        project_id: 'prj_active_1001',
+        initial_title: '用新增分镜 Skill 生成一条城市广告片'
+      })
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/agent/runs', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({
+        Authorization: 'Bearer user-token-1001',
+        'X-Space-Id': 'sp_1001',
+        'Idempotency-Key': expect.stringMatching(/^frontend-run-/)
+      }),
+      body: expect.stringContaining('用新增分镜 Skill 生成一条城市广告片')
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      '/api/agent/runs/run_frontend_full_flow/events?after_sequence=0&limit=100',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer user-token-1001',
+          'X-Space-Id': 'sp_1001'
+        })
+      })
+    );
   });
 
   it('filters the public work feed by category', async () => {
