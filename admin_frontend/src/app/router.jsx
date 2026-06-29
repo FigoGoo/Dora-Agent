@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { RequireAdminSession } from './auth.js';
-import { AdminShell } from '../layout/AdminShell.jsx';
+import { AdminShell } from '../components/layout/AdminShell.jsx';
 import { LoginPage } from '../pages/LoginPage.jsx';
 import { RotatePasswordPage } from '../pages/RotatePasswordPage.jsx';
 import { DashboardPage } from '../pages/DashboardPage.jsx';

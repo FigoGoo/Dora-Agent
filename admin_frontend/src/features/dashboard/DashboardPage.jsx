@@ -5,7 +5,7 @@ import { adminApi } from '../../lib/api/admin.js';
 import { PageHeader } from '../../components/admin/PageHeader.jsx';
 import { ErrorState } from '../../components/admin/ErrorState.jsx';
 import { SkeletonBlock } from '../../components/admin/Skeleton.jsx';
-import { navGroups } from '../../layout/AdminShell.jsx';
+import { navGroups } from '../../components/layout/navGroups.js';
 
 export function DashboardPage() {
   const query = useQuery({ queryKey: ['admin-dashboard'], queryFn: adminApi.dashboard });
