@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.jsx';
@@ -144,6 +144,41 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByRole('button', { name: '148积分' })).toBeInTheDocument();
   });
 
+  it('renders the projects page from a direct route', () => {
+    window.history.pushState({}, '', '/projects');
+
+    render(<App />);
+
+    const navigation = screen.getByRole('complementary', { name: 'DORAIGC 导航' });
+    expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '新建项目' })).toBeInTheDocument();
+    expect(within(navigation).getByRole('button', { name: '项目' })).toHaveClass('is-active');
+    expect(screen.queryByRole('heading', { name: 'Dora Agent - 人人都是艺术大师' })).not.toBeInTheDocument();
+  });
+
+  it('keeps URL and page state in sync for client navigation', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+
+    await user.click(screen.getByRole('button', { name: '项目' }));
+    expect(window.location.pathname).toBe('/projects');
+    expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '资产库' }));
+    expect(window.location.pathname).toBe('/assets');
+    expect(screen.getByRole('heading', { name: '资产库' })).toBeInTheDocument();
+
+    window.history.pushState({}, '', '/projects');
+    window.dispatchEvent(new Event('popstate'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument();
+    });
+  });
+
   it('continues to a private page after login from navigation', async () => {
     const user = userEvent.setup();
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
@@ -173,6 +208,7 @@ describe('DORAIGC static client pages', () => {
     expect(openSpy).toHaveBeenCalledWith('/workspace', '_blank', 'noopener,noreferrer');
 
     await user.click(screen.getByRole('button', { name: '项目' }));
+    expect(window.location.pathname).toBe('/projects');
     expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建项目' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '最近编辑' })).not.toBeInTheDocument();
@@ -180,6 +216,7 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByText('功能介绍 202606140505')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '资产库' }));
+    expect(window.location.pathname).toBe('/assets');
     expect(screen.getByRole('heading', { name: '资产库' })).toBeInTheDocument();
     expect(screen.getByText('生成视频')).toBeInTheDocument();
     expect(screen.getByText('保存失败')).toBeInTheDocument();

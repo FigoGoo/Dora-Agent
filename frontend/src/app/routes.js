@@ -1,6 +1,6 @@
 export const WORKSPACE_ROUTE = '/workspace';
 
-export const LANDING_ROUTES = {
+export const CLIENT_ROUTES = {
   home: '/',
   projects: '/projects',
   assets: '/assets',
@@ -12,7 +12,7 @@ export const LANDING_ROUTES = {
 
 export const PUBLIC_PAGES = new Set(['home', 'explore']);
 
-const ROUTE_TO_PAGE = Object.entries(LANDING_ROUTES).reduce((routes, [page, path]) => {
+const ROUTE_TO_PAGE = Object.entries(CLIENT_ROUTES).reduce((routes, [page, path]) => {
   routes[path] = page;
   return routes;
 }, {});
@@ -27,5 +27,5 @@ export function getPageFromPath(pathname) {
 }
 
 export function getPathForPage(page) {
-  return LANDING_ROUTES[page] || LANDING_ROUTES.home;
+  return CLIENT_ROUTES[page] || CLIENT_ROUTES.home;
 }

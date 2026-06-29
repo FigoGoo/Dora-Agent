@@ -735,7 +735,7 @@
 }
 
 .landing-main--projects {
-  padding-top: 76px;
+  padding: 60px 18px 22px;
 }
 
 .context-header {
@@ -758,6 +758,8 @@
 }
 
 .context-header--projects {
+  height: 56px;
+  padding: 10px 18px;
   background:
     linear-gradient(180deg, rgba(5, 7, 10, 0.76), rgba(5, 8, 11, 0.32) 64%, rgba(5, 8, 11, 0));
 }
@@ -1951,7 +1953,8 @@
 
 .projects-page {
   gap: 0;
-  padding-top: 0;
+  min-height: auto;
+  padding: 0;
 }
 
 .projects-page__title {
@@ -1974,15 +1977,15 @@
 
 .project-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 24px 18px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 18px 16px;
   align-items: start;
 }
 
 .project-tile {
   display: grid;
   min-width: 0;
-  gap: 12px;
+  gap: 8px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -2051,7 +2054,7 @@
 .project-tile__body {
   display: grid;
   min-width: 0;
-  gap: 5px;
+  gap: 3px;
 }
 
 .project-tile__body strong {

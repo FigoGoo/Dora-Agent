@@ -1,14 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUp,
-  Bell,
-  CalendarDays,
-  ChevronDown,
-  Crown,
   Eye,
-  FolderKanban,
-  Gift,
-  Globe2,
   Heart,
   ImagePlus,
   Images,
@@ -24,14 +17,20 @@ import {
   X
 } from 'lucide-react';
 import { BrandLogo } from '../../components/brand/BrandLogo.jsx';
-import { getPageFromPath, getPathForPage, PUBLIC_PAGES, WORKSPACE_ROUTE } from './landingRoutes.js';
+import { LoginModal } from '../../components/common/LoginModal.jsx';
+import { PageHeader } from '../../components/common/PageHeader.jsx';
+import { WorkPreviewModal } from '../../components/common/WorkPreviewModal.jsx';
+import { ContextHeader } from '../../components/layout/ContextHeader.jsx';
+import { SideNav } from '../../components/layout/SideNav.jsx';
+import { getPageFromPath, getPathForPage, WORKSPACE_ROUTE } from '../../app/routes.js';
+import { currentUser } from '../account/accountMock.js';
+import { ProjectsPage } from '../projects/ProjectsPage.jsx';
 import {
   agentWorkspaceMock,
   assetMocks,
   creditMock,
   hotSkills,
   navItems,
-  projectMocks,
   promptTools,
   publicWorks,
   recentProjects,
@@ -40,7 +39,6 @@ import {
   workCategories,
   workspaceMock
 } from './landingContent.js';
-import { ProjectsPage } from './pages/ProjectsPage.jsx';
 
 const themeStyle = {
   '--dora-lime': '#cfff24',
@@ -56,41 +54,6 @@ const MASONRY_DEFAULT_CARD_WIDTH = 320;
 const MASONRY_DEFAULT_GAP = 8;
 const MASONRY_META_HEIGHT = 36;
 const CARTOON_AVATAR_COUNT = 12;
-const currentUser = {
-  name: 'User',
-  email: 'zhuifei2099@gmail.com',
-  plan: 'Free',
-  credits: 310
-};
-
-const accountPointGroups = [
-  {
-    icon: Ticket,
-    title: '会员积分',
-    value: '0',
-    items: [
-      ['套餐', '0'],
-      ['购买积分', '0'],
-      ['SD 2.0 专属积分', '0'],
-      ['额外', '0']
-    ]
-  },
-  {
-    icon: CalendarDays,
-    title: '每周积分',
-    value: '200',
-    items: [['每周一 00:00 刷新', '']]
-  },
-  {
-    icon: Gift,
-    title: '奖励积分',
-    value: '110',
-    items: [
-      ['邀请奖励', '0'],
-      ['探索奖励', '110']
-    ]
-  }
-];
 
 function openLoginIntent(setLoginIntent, title, prompt, targetPage) {
   setLoginIntent({ title, prompt: prompt || '登录后会继续刚才的创作动作。', targetPage });
@@ -126,141 +89,6 @@ function createMasonryColumns(items, columnCount, cardWidth) {
   }
 
   return columns.map((column) => column.works);
-}
-
-function SideNav({ activePage, isLoggedIn, onNavigate, onLogin, onToggleAccountMenu }) {
-  return (
-    <aside className="side-nav" aria-label="DORAIGC 导航">
-      <BrandLogo />
-      <nav>
-        {navItems.map((item) => {
-          const needsLogin = !isLoggedIn && !PUBLIC_PAGES.has(item.page);
-
-          return (
-            <button
-              key={item.label}
-              type="button"
-              className={activePage === item.page ? 'nav-item is-active' : 'nav-item'}
-              onClick={() => (needsLogin ? onLogin(`进入${item.label}`, `登录后进入${item.label}，继续刚才的创作安排。`, item.page) : onNavigate(item.page))}
-            >
-              <item.icon aria-hidden="true" size={22} />
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-      {isLoggedIn ? (
-        <div className="side-nav__footer">
-          <button type="button" className="ghost-link" onClick={onToggleAccountMenu}>
-            <UserCircle aria-hidden="true" size={18} />
-            <span>账户</span>
-          </button>
-        </div>
-      ) : null}
-    </aside>
-  );
-}
-
-function AccountMenu({ user, onOpenCredits }) {
-  return (
-    <section className="account-menu account-menu--compact account-menu--slim" role="dialog" aria-modal="false" aria-labelledby="account-menu-title">
-      <h2 id="account-menu-title" className="sr-only">账户与积分</h2>
-      <div className="account-menu__profile">
-        <div>
-          <strong>{user.name}</strong>
-          <span>{user.plan}</span>
-          <p>{user.email}</p>
-        </div>
-      </div>
-      <button className="membership-button membership-button--theme" type="button" aria-label="开通会员">
-        <Crown aria-hidden="true" size={19} />
-        <span>开通会员</span>
-      </button>
-      <div className="account-points" aria-label="积分概览">
-        {accountPointGroups.map((group) => (
-          <section className="account-point-group" key={group.title} aria-labelledby={`${group.title}-title`}>
-            <div className="account-point-group__head">
-              <group.icon aria-hidden="true" size={18} />
-              <strong id={`${group.title}-title`}>{group.title}</strong>
-              <span>{group.value}</span>
-            </div>
-            {group.items.map(([label, value]) => (
-              <div className="account-point-row" key={label}>
-                <span>{label}</span>
-                {value ? <strong>{value}</strong> : null}
-              </div>
-            ))}
-          </section>
-        ))}
-      </div>
-      <button className="usage-button" type="button" onClick={onOpenCredits}>
-        查看用量
-      </button>
-      <div className="account-menu__links">
-        <button type="button">
-          <Globe2 aria-hidden="true" size={19} />
-          <span>语言</span>
-          <strong>简体中文</strong>
-          <ChevronDown aria-hidden="true" size={15} />
-        </button>
-        <button type="button">
-          <MessageCircle aria-hidden="true" size={19} />
-          <span>反馈</span>
-        </button>
-        <button type="button">
-          <Settings aria-hidden="true" size={19} />
-          <span>管理账户</span>
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function ContextHeader({ activePage, isLoggedIn, user, isAccountMenuOpen, onLogin, onToggleAccountMenu, onOpenCredits }) {
-  return (
-    <header className={activePage === 'projects' ? 'context-header context-header--projects' : 'context-header'}>
-      {activePage === 'projects' ? (
-        <div className="projects-page__title">
-          <FolderKanban aria-hidden="true" size={18} />
-          <h1 id="projects-title">项目</h1>
-        </div>
-      ) : (
-        <div className="status-pill attention-tag">
-          <span className="status-dot" />
-          DORAIGC 创作者招募中
-        </div>
-      )}
-      <div className="context-header__actions">
-        <button className="credit-pill" type="button" onClick={isLoggedIn ? onOpenCredits : () => onLogin('查看积分')}>
-          <Ticket aria-hidden="true" size={16} />
-          <span>{isLoggedIn ? user.credits : 148}</span>
-          <span>积分</span>
-        </button>
-        <button className="icon-button" type="button" aria-label="通知" title="通知" onClick={() => onLogin('查看通知')}>
-          <Bell aria-hidden="true" size={18} />
-        </button>
-        {isLoggedIn ? (
-          <div className="account-menu-shell">
-            <span className="plan-pill">{user.plan}</span>
-            <button
-              className="avatar-button"
-              type="button"
-              aria-label="用户菜单"
-              aria-expanded={isAccountMenuOpen}
-              onClick={onToggleAccountMenu}
-            >
-              <UserCircle aria-hidden="true" size={22} />
-            </button>
-            {isAccountMenuOpen ? <AccountMenu user={user} onOpenCredits={onOpenCredits} /> : null}
-          </div>
-        ) : (
-          <button className="login-button" type="button" onClick={() => onLogin('登录')}>
-            登录
-          </button>
-        )}
-      </div>
-    </header>
-  );
 }
 
 function PromptComposer({ prompt, onPromptChange, onLogin }) {
@@ -485,84 +313,6 @@ function PublicWorks({ activeCategory, likedWorks, mutedWorks, onLike, onToggleM
           </div>
         ))}
       </div>
-    </section>
-  );
-}
-
-function LoginModal({ intent, onClose, onComplete }) {
-  if (!intent) {
-    return null;
-  }
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <section className="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title" onClick={(event) => event.stopPropagation()}>
-        <button className="icon-button login-modal__close" type="button" aria-label="关闭登录弹窗" title="关闭" onClick={onClose}>
-          <X aria-hidden="true" size={18} />
-        </button>
-        <div className="login-modal__brand-panel">
-          <BrandLogo compact />
-          <span className="login-modal__badge">已为你保留</span>
-          <strong>当前想法和入口会在登录后继续。</strong>
-        </div>
-        <div className="login-modal__form">
-          <h2 id="login-title">登录后继续创作</h2>
-          <p>用账号保存项目、素材和积分记录，这次的动作不会丢。</p>
-          <div className="intent-preview">
-            <span>{intent.title}</span>
-            <strong>{intent.prompt}</strong>
-          </div>
-          <div className="login-modal__actions">
-            <button className="start-button" type="button" onClick={onComplete}>登录并继续</button>
-            <button className="secondary-button" type="button" onClick={onComplete}>注册账号</button>
-          </div>
-          <button className="subtle-button" type="button" onClick={onClose}>稍后再说</button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function WorkPreviewModal({ work, onClose, onCreate }) {
-  if (!work) {
-    return null;
-  }
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <section className="preview-modal" role="dialog" aria-modal="true" aria-labelledby="preview-title" onClick={(event) => event.stopPropagation()}>
-        <button className="icon-button preview-modal__close" type="button" aria-label="关闭作品预览" title="关闭" onClick={onClose}>
-          <X aria-hidden="true" size={18} />
-        </button>
-        <img src={work.cover} alt="" />
-        <div className="preview-modal__body">
-          <span className="work-card__tag transparent-tag">
-            {work.type}
-          </span>
-          <h2 id="preview-title">{work.title}</h2>
-          <p>{work.description}</p>
-          <div className="preview-modal__meta">
-            <span>{work.metric}</span>
-            <span>公开喜欢</span>
-          </div>
-          <button className="start-button" type="button" onClick={() => onCreate(work)}>
-            用这个方向创作
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function PageHeader({ eyebrow, title, copy, children }) {
-  return (
-    <section className="mock-page__header" aria-labelledby={`${title}-title`}>
-      <span className="mock-page__eyebrow">{eyebrow}</span>
-      <div>
-        <h1 id={`${title}-title`}>{title}</h1>
-        <p>{copy}</p>
-      </div>
-      {children}
     </section>
   );
 }
@@ -977,7 +727,7 @@ function CreditsPage({ onIntent }) {
 
 export function LandingPage() {
   const [prompt, setPrompt] = useState('');
-  const [activePage, setActivePage] = useState('home');
+  const [activePage, setActivePage] = useState(() => (typeof window === 'undefined' ? 'home' : getPageFromPath(window.location.pathname)));
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [loginIntent, setLoginIntent] = useState(null);
@@ -991,13 +741,26 @@ export function LandingPage() {
     setIsAccountMenuOpen(false);
   }
 
+  function navigateToPage(page, options = {}) {
+    setActivePage(page);
+    setIsAccountMenuOpen(false);
+
+    if (typeof window !== 'undefined' && !options.replaceOnly) {
+      const path = getPathForPage(page);
+
+      if (window.location.pathname !== path) {
+        window.history.pushState({}, '', path);
+      }
+    }
+  }
+
   function handleLoginComplete() {
     setIsLoggedIn(true);
 
     if (loginIntent?.targetPage === 'workspace') {
       openWorkspaceInNewTab();
     } else if (loginIntent?.targetPage) {
-      setActivePage(loginIntent.targetPage);
+      navigateToPage(loginIntent.targetPage);
     }
 
     setLoginIntent(null);
@@ -1011,13 +774,11 @@ export function LandingPage() {
       return;
     }
 
-    setActivePage(page);
-    setIsAccountMenuOpen(false);
+    navigateToPage(page);
   }
 
   function openCreditsPage() {
-    setActivePage('credits');
-    setIsAccountMenuOpen(false);
+    navigateToPage('credits');
   }
 
   function handleWorkLike(work) {
@@ -1031,10 +792,23 @@ export function LandingPage() {
 
   function handleWorkCreate(work) {
     setPrompt(work.intent);
-    setActivePage('home');
+    navigateToPage('home');
     setPreviewWork(null);
     requestLogin('基于精选作品创作', work.intent);
   }
+
+  useEffect(() => {
+    function syncPageFromPath() {
+      setActivePage(getPageFromPath(window.location.pathname));
+      setIsAccountMenuOpen(false);
+    }
+
+    window.addEventListener('popstate', syncPageFromPath);
+
+    return () => {
+      window.removeEventListener('popstate', syncPageFromPath);
+    };
+  }, []);
 
   useEffect(() => {
     function closeOverlay(event) {
@@ -1057,6 +831,7 @@ export function LandingPage() {
       <SideNav
         activePage={activePage}
         isLoggedIn={isLoggedIn}
+        navItems={navItems}
         onNavigate={handleNavigate}
         onLogin={requestLogin}
         onToggleAccountMenu={() => setIsAccountMenuOpen((value) => !value)}

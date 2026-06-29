@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react';
-import { projectMocks } from '../landingContent.js';
+import { projectMocks } from './projectMocks.js';
 
 export function ProjectsPage({ onIntent }) {
   return (
