@@ -36,6 +36,12 @@ func TestAdminToolDTOAndImpactPreviewExposeOpenAPIFields(t *testing.T) {
 			RetryPolicyJSON: emptyObject, CancelPolicyJSON: emptyObject, Status: "active",
 			EffectiveAt: now.Add(-time.Hour), ChangedByAdminID: &adminID, CreatedAt: now, UpdatedAt: now,
 		},
+		&businesscore.ToolPricingPolicy{
+			ID: "tprice_contract", PricingPolicyID: "tool_price_contract", ToolName: "tool_contract", ToolType: "builtin",
+			ChargeMode: "per_call", BillingUnit: "call", UnitPoints: 9, FreeQuota: 2, MinChargePoints: 1,
+			Status: "active", EffectiveAt: now.Add(-time.Hour), ChangedByAdminID: &adminID, MetadataJSON: emptyObject,
+			CreatedAt: now, UpdatedAt: now,
+		},
 		&businesscore.Skill{
 			ID: "skl_tool_contract", SkillKey: "tool-contract", SkillName: "Tool Contract Skill",
 			SkillScope: "public", Status: "published", RouteHintsJSON: emptyObject, CreatedByAdminID: &adminID,
@@ -74,6 +80,20 @@ func TestAdminToolDTOAndImpactPreviewExposeOpenAPIFields(t *testing.T) {
 	if found.ToolKey != "tool_contract:builtin" {
 		t.Fatalf("tool_key=%q", found.ToolKey)
 	}
+	if found.PricingPolicyID != "tool_price_contract" || found.UnitPoints != 9 || found.FreeQuota != 2 || found.MinChargePoints != 1 {
+		t.Fatalf("pricing fields should be exposed for admin tool management: %#v", found)
+	}
+	if found.RiskLevel != "medium" || !found.RequiresConfirmation || found.TimeoutMS != 30000 {
+		t.Fatalf("policy fields should be exposed for admin tool management: %#v", found)
+	}
+
+	disabled, err := app.SetToolStatus(t.Context(), admin.AdminAuth{AdminID: adminID}, "tool_contract", "builtin", "disabled")
+	if err != nil {
+		t.Fatalf("disable tool: %v", err)
+	}
+	if disabled.Status != "disabled" || disabled.RiskLevel != "medium" || disabled.TimeoutMS != 30000 {
+		t.Fatalf("disabled admin dto should keep configured policy fields: %#v", disabled)
+	}
 
 	preview, err := app.ImpactPreview(t.Context(), admin.AdminAuth{AdminID: adminID}, "tool_contract", "builtin")
 	if err != nil {
@@ -81,5 +101,60 @@ func TestAdminToolDTOAndImpactPreviewExposeOpenAPIFields(t *testing.T) {
 	}
 	if preview["tool_key"] != "tool_contract:builtin" || preview["impact_count"] != int64(1) {
 		t.Fatalf("openapi preview fields mismatch: %#v", preview)
+	}
+	affectedSkills, ok := preview["affected_skills"].([]AffectedSkillDTO)
+	if !ok || len(affectedSkills) != 1 || affectedSkills[0].SkillName != "Tool Contract Skill" || affectedSkills[0].Status != "published" {
+		t.Fatalf("affected skill summaries missing: %#v", preview["affected_skills"])
+	}
+}
+
+func TestRegisterToolCreatesMetadataPolicyAndPricing(t *testing.T) {
+	app := newToolPolicyContractApp(t)
+	adminID := "adm_root"
+	registered, err := app.RegisterTool(t.Context(), RegisterToolInput{
+		Auth:                 admin.AdminAuth{AdminID: adminID},
+		ToolName:             "storyboard_extract",
+		ToolType:             "builtin",
+		DisplayName:          "分镜提取",
+		Description:          "从剧本文本中提取镜头、人物和场景信息，适合视频类 Skill 生成故事板前调用。",
+		Version:              "1.0.0",
+		InputSchemaJSON:      `{"type":"object","properties":{"script":{"type":"string"}}}`,
+		OutputSchemaJSON:     `{"type":"object","properties":{"shots":{"type":"array"}}}`,
+		Allowed:              true,
+		RiskLevel:            "medium",
+		RequiresConfirmation: true,
+		TimeoutMS:            45000,
+		RetryPolicy:          map[string]string{"max_retries": "1"},
+		CancelPolicy:         map[string]string{"cancelable": "true"},
+		ChargeMode:           "per_call",
+		BillingUnit:          "call",
+		UnitPoints:           5,
+		FreeQuota:            1,
+		MinChargePoints:      1,
+	})
+	if err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+	if registered.ToolKey != "storyboard_extract:builtin" || registered.Description == "" {
+		t.Fatalf("registered tool metadata mismatch: %#v", registered)
+	}
+	if !registered.Allowed || registered.RiskLevel != "medium" || !registered.RequiresConfirmation || registered.TimeoutMS != 45000 {
+		t.Fatalf("registered tool policy mismatch: %#v", registered)
+	}
+	if registered.ChargeMode != "per_call" || registered.UnitPoints != 5 || registered.FreeQuota != 1 || registered.MinChargePoints != 1 {
+		t.Fatalf("registered tool pricing mismatch: %#v", registered)
+	}
+	if registered.PricingPolicyID == "" {
+		t.Fatalf("pricing policy id should be generated: %#v", registered)
+	}
+
+	var changeCount int64
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.ToolPolicyChangeRecord{}).
+		Where("tool_name = ? AND tool_type = ? AND change_type = ?", "storyboard_extract", "builtin", "tool.register").
+		Count(&changeCount).Error; err != nil {
+		t.Fatalf("count change records: %v", err)
+	}
+	if changeCount != 1 {
+		t.Fatalf("expected one register change record, got %d", changeCount)
 	}
 }

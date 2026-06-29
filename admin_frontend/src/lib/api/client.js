@@ -36,6 +36,11 @@ export async function createRequestHash(body = {}) {
     .join('');
 }
 
+export function safeHeaderValue(value, fallback) {
+  const text = String(value || '').trim();
+  return text && /^[\x20-\x7E]+$/.test(text) ? text : fallback;
+}
+
 export function parseApiError(payload, status = 0) {
   const detail = payload?.error || payload || {};
   return new ApiError({
@@ -78,11 +83,7 @@ export async function adminRequest(path, options = {}) {
       body.request_hash = await createRequestHash(body);
     }
     headers['Content-Type'] = 'application/json';
-    headers['Idempotency-Key'] = options.idempotencyKey || `admin-${crypto.randomUUID()}`;
-  }
-
-  if (options.reason) {
-    headers['X-Admin-Reason'] = options.reason;
+    headers['Idempotency-Key'] = safeHeaderValue(options.idempotencyKey, `admin-${crypto.randomUUID()}`);
   }
 
   const response = await fetch(`${path}${buildQuery(options.query)}`, {

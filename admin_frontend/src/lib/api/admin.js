@@ -3,7 +3,7 @@ import { adminRequest } from './client.js';
 export const adminApi = {
   login: (body) => adminRequest('/api/admin/auth/login', { method: 'POST', body }),
   logout: () => adminRequest('/api/admin/auth/logout', { method: 'POST', body: {} }),
-  rotatePassword: (body) => adminRequest('/api/admin/auth/rotate-password', { method: 'POST', body, reason: body.reason }),
+  rotatePassword: (body) => adminRequest('/api/admin/auth/rotate-password', { method: 'POST', body }),
   dashboard: () => adminRequest('/api/admin/dashboard'),
   list: (path, query) => adminRequest(path, { query }),
   get: (path) => adminRequest(path),
@@ -12,10 +12,10 @@ export const adminApi = {
   put: (path, body = {}, options = {}) => adminRequest(path, { method: 'PUT', body, ...options }),
   previewUserStatus: (userId, body) =>
     adminRequest(`/api/admin/users/${userId}/status/preview`, { method: 'POST', body }),
-  confirmUserStatus: (userId, body, reason) =>
-    adminRequest(`/api/admin/users/${userId}/status/confirm`, { method: 'POST', body, reason }),
-  previewTakeDownWork: (publicWorkId, body, reason) =>
-    adminRequest(`/api/admin/works/public/${publicWorkId}/take-down/preview`, { method: 'POST', body, reason }),
-  confirmTakeDownWork: (publicWorkId, body, reason) =>
-    adminRequest(`/api/admin/works/public/${publicWorkId}/take-down/confirm`, { method: 'POST', body, reason })
+  confirmUserStatus: (userId, body) =>
+    adminRequest(`/api/admin/users/${userId}/status/confirm`, { method: 'POST', body }),
+  previewTakeDownWork: (publicWorkId, body) =>
+    adminRequest(`/api/admin/works/public/${publicWorkId}/take-down/preview`, { method: 'POST', body }),
+  confirmTakeDownWork: (publicWorkId, body) =>
+    adminRequest(`/api/admin/works/public/${publicWorkId}/take-down/confirm`, { method: 'POST', body })
 };

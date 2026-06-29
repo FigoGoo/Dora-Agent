@@ -1522,7 +1522,6 @@ paths:
       parameters:
       - $ref: '#/components/parameters/UserId'
       - $ref: '#/components/parameters/IdempotencyKey'
-      - $ref: '#/components/parameters/AdminReason'
       requestBody:
         $ref: '#/components/requestBodies/ConfirmUserStatusBody'
   /api/admin/audit-logs:
@@ -1660,6 +1659,21 @@ paths:
         '500':
           $ref: '#/components/responses/SystemProblem'
       parameters:
+      - name: provider_id
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: resource_type
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
       - $ref: '#/components/parameters/PageSize'
     post:
       tags:
@@ -1778,6 +1792,27 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/PageSize'
+    post:
+      tags:
+      - Tool
+      operationId: registerAdminTool
+      responses:
+        '200':
+          $ref: '#/components/responses/RegisterAdminToolOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/RegisterAdminToolBody'
   /api/admin/tools/{tool_key}/impact-preview:
     post:
       tags:
@@ -2100,7 +2135,6 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
-      - $ref: '#/components/parameters/AdminReason'
       requestBody:
         $ref: '#/components/requestBodies/AdminGrantCreditsBody'
   /api/admin/credits/codes:
@@ -2281,7 +2315,6 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/PublicWorkId'
-      - $ref: '#/components/parameters/AdminReason'
       requestBody:
         $ref: '#/components/requestBodies/PreviewTakeDownPublicWorkBody'
   /api/admin/works/public/{public_work_id}/take-down/confirm:
@@ -2305,7 +2338,6 @@ paths:
       parameters:
       - $ref: '#/components/parameters/PublicWorkId'
       - $ref: '#/components/parameters/IdempotencyKey'
-      - $ref: '#/components/parameters/AdminReason'
       requestBody:
         $ref: '#/components/requestBodies/ConfirmTakeDownPublicWorkBody'
 components:
@@ -2317,13 +2349,6 @@ components:
       schema:
         type: string
         maxLength: 128
-    AdminReason:
-      name: X-Admin-Reason
-      in: header
-      required: true
-      schema:
-        type: string
-        maxLength: 512
     PageSize:
       name: page_size
       in: query
@@ -2655,6 +2680,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/SetModelStatusRequest'
+    RegisterAdminToolBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RegisterAdminToolRequest'
     PreviewToolImpactBody:
       required: true
       content:
@@ -3304,6 +3335,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/PreviewToolImpactOkEnvelope'
+    RegisterAdminToolOk:
+      description: registerAdminTool successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RegisterAdminToolOkEnvelope'
     UpdateToolPolicyOk:
       description: updateToolPolicy successful response.
       content:
@@ -3869,6 +3906,13 @@ components:
           type: string
         published_version_id:
           type: string
+        latest_version_id:
+          type: string
+          description: Latest version id for admin list operations.
+        active_test_case_count:
+          type: integer
+          format: int64
+          description: Number of active test cases bound to latest_version_id.
         description:
           type: string
         route_hints:
@@ -4627,6 +4671,8 @@ components:
           type: string
         provider_id:
           type: string
+        provider_name:
+          type: string
         model_code:
           type: string
         display_name:
@@ -4657,9 +4703,16 @@ components:
       - tool_key
       - tool_name
       - tool_type
+      - display_name
       - status
       - risk_level
       - charge_mode
+      - allowed
+      - requires_confirmation
+      - timeout_ms
+      - unit_points
+      - free_quota
+      - min_charge_points
       additionalProperties: false
       properties:
         tool_key:
@@ -4668,11 +4721,42 @@ components:
           type: string
         tool_type:
           type: string
+        display_name:
+          type: string
+        description:
+          type: string
         status:
           type: string
+        version:
+          type: string
+        allowed:
+          type: boolean
         risk_level:
           type: string
+        requires_confirmation:
+          type: boolean
+        timeout_ms:
+          type: integer
+        retry_policy:
+          type: object
+          additionalProperties:
+            type: string
+        cancel_policy:
+          type: object
+          additionalProperties:
+            type: string
         charge_mode:
+          type: string
+        billing_unit:
+          type: string
+        unit_points:
+          type: number
+        free_quota:
+          type: integer
+        min_charge_points:
+          type: integer
+          format: int64
+        pricing_policy_id:
           type: string
     ToolImpactPreviewDTO:
       type: object
@@ -4684,12 +4768,40 @@ components:
       properties:
         tool_key:
           type: string
+        tool_name:
+          type: string
+        tool_type:
+          type: string
         impact_count:
           type: integer
+        affected_skill_bindings:
+          type: integer
+        requires_review:
+          type: boolean
         affected_skill_ids:
           type: array
           items:
             type: string
+        affected_skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/AffectedSkillDTO'
+    AffectedSkillDTO:
+      type: object
+      required:
+      - skill_id
+      - skill_name
+      - status
+      additionalProperties: false
+      properties:
+        skill_id:
+          type: string
+        skill_name:
+          type: string
+        status:
+          type: string
+        published_version_id:
+          type: string
     ToolPolicyDTO:
       type: object
       required:
@@ -5616,10 +5728,8 @@ components:
     SkillDraftMutationRequest:
       type: object
       required:
-      - skill_key
       - skill_name
-      - version
-      - skill_spec_json
+      - skill_markdown
       - request_hash
       additionalProperties: false
       properties:
@@ -5627,6 +5737,10 @@ components:
           type: string
         skill_name:
           type: string
+        skill_tags:
+          type: array
+          items:
+            type: string
         skill_scope:
           type: string
         description:
@@ -5637,6 +5751,9 @@ components:
             type: string
         version:
           type: string
+        skill_markdown:
+          type: string
+          description: Skill 编辑器 Markdown 源码，使用中文标签段落和结构化 tool/agui 引用。
         skill_spec_json:
           type: string
         input_schema_json:
@@ -5991,6 +6108,7 @@ components:
       required:
       - preview_token
       - target_status
+      - reason
       - request_hash
       additionalProperties: false
       properties:
@@ -6158,6 +6276,7 @@ components:
           type: string
         pricing_snapshot_id:
           type: string
+          description: Optional. When omitted, the backend binds the current active price snapshot or creates a zero-point default snapshot. Setting a default updates the single active default row for the resource type.
         request_hash:
           type: string
     SetModelStatusRequest:
@@ -6169,6 +6288,70 @@ components:
       properties:
         status:
           type: string
+          description: Target status. Disabling an active default model returns STATE_CONFLICT.
+        reason:
+          type: string
+        request_hash:
+          type: string
+    RegisterAdminToolRequest:
+      type: object
+      required:
+      - tool_name
+      - tool_type
+      - display_name
+      - description
+      - risk_level
+      - charge_mode
+      - billing_unit
+      - reason
+      - request_hash
+      additionalProperties: false
+      properties:
+        tool_name:
+          type: string
+        tool_type:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        version:
+          type: string
+        input_schema_json:
+          type: string
+          description: JSON object schema describing natural-language input extracted for this Tool.
+        output_schema_json:
+          type: string
+          description: JSON object schema describing the Tool result shape.
+        allowed:
+          type: boolean
+        risk_level:
+          type: string
+        requires_confirmation:
+          type: boolean
+        timeout_ms:
+          type: integer
+        retry_policy:
+          type: object
+          additionalProperties:
+            type: string
+        cancel_policy:
+          type: object
+          additionalProperties:
+            type: string
+        charge_mode:
+          type: string
+        billing_unit:
+          type: string
+        unit_points:
+          type: number
+        free_quota:
+          type: integer
+        min_charge_points:
+          type: integer
+          format: int64
         reason:
           type: string
         request_hash:
@@ -7987,6 +8170,25 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/ToolImpactPreviewDTO'
+        trace_id:
+          type: string
+    RegisterAdminToolOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminToolDTO'
         trace_id:
           type: string
     UpdateToolPolicyOkEnvelope:

@@ -61,6 +61,7 @@ type ProviderDTO struct {
 type ModelAdminDTO struct {
 	ModelID            string         `json:"model_id"`
 	ProviderID         string         `json:"provider_id"`
+	ProviderName       string         `json:"provider_name,omitempty"`
 	ModelCode          string         `json:"model_code"`
 	DisplayName        string         `json:"display_name"`
 	ResourceType       string         `json:"resource_type"`
@@ -141,19 +142,9 @@ func (a *App) ResolveGenerationModelSnapshot(ctx context.Context, _ accountspace
 	if resourceType == "" || modelID == "" || pricingSnapshotID == "" {
 		return ModelRuntimeSnapshotDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "resource_type, model_id and pricing_snapshot_id are required")
 	}
-	var model businesscore.Model
-	if err := a.repo.DB().WithContext(ctx).Where("id = ? AND resource_type = ? AND status = ?", modelID, resourceType, activeStatus).First(&model).Error; err != nil {
-		return ModelRuntimeSnapshotDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "model is not available")
-	}
-	var provider businesscore.ModelProvider
-	if err := a.repo.DB().WithContext(ctx).Where("id = ? AND status = ?", model.ProviderID, activeStatus).First(&provider).Error; err != nil {
-		return ModelRuntimeSnapshotDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "model provider is not available")
-	}
-	if model.CredentialID != nil && *model.CredentialID != "" {
-		var credential businesscore.ModelProviderCredential
-		if err := a.repo.DB().WithContext(ctx).Where("id = ? AND status = ?", *model.CredentialID, activeStatus).First(&credential).Error; err != nil {
-			return ModelRuntimeSnapshotDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "model credential is not available")
-		}
+	model, provider, err := a.activeModelRuntime(ctx, resourceType, modelID)
+	if err != nil {
+		return ModelRuntimeSnapshotDTO{}, err
 	}
 	if _, err := a.activePrice(ctx, model.ID, resourceType, pricingSnapshotID); err != nil {
 		return ModelRuntimeSnapshotDTO{}, err
@@ -278,9 +269,12 @@ func (a *App) RecordConnectivityTest(ctx context.Context, auth admin.AdminAuth, 
 	return map[string]any{"test_id": row.ID, "provider_id": provider.ID, "status": row.Status, "latency_ms": latency}, nil
 }
 
-func (a *App) ListModels(ctx context.Context, _ admin.AdminAuth, resourceType, status string, limit, offset int) (Page[ModelAdminDTO], error) {
+func (a *App) ListModels(ctx context.Context, _ admin.AdminAuth, providerID, resourceType, status string, limit, offset int) (Page[ModelAdminDTO], error) {
 	limit = clampLimit(limit, 10, 100)
 	db := a.repo.DB().WithContext(ctx).Order("display_name ASC, id ASC").Limit(limit).Offset(nonNegative(offset))
+	if strings.TrimSpace(providerID) != "" {
+		db = db.Where("provider_id = ?", strings.TrimSpace(providerID))
+	}
 	if strings.TrimSpace(resourceType) != "" {
 		db = db.Where("resource_type = ?", strings.TrimSpace(resourceType))
 	}
@@ -291,9 +285,10 @@ func (a *App) ListModels(ctx context.Context, _ admin.AdminAuth, resourceType, s
 	if err := db.Find(&rows).Error; err != nil {
 		return Page[ModelAdminDTO]{}, err
 	}
+	providerNames := a.modelProviderNames(ctx, rows)
 	out := make([]ModelAdminDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, a.modelAdminDTO(ctx, row))
+		out = append(out, a.modelAdminDTOWithProviderName(ctx, row, providerNames[row.ProviderID]))
 	}
 	return Page[ModelAdminDTO]{Items: out, Limit: limit, Offset: nonNegative(offset)}, nil
 }
@@ -383,35 +378,110 @@ func (a *App) SetDefaultModel(ctx context.Context, auth admin.AdminAuth, resourc
 	if auth.AdminID == "" {
 		return ModelSummaryDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
 	}
-	if strings.TrimSpace(pricingSnapshotID) == "" {
-		price, err := a.activePrice(ctx, strings.TrimSpace(modelID), strings.TrimSpace(resourceType), "")
-		if err != nil {
-			return ModelSummaryDTO{}, err
-		}
-		pricingSnapshotID = price.PricingSnapshotID
-	}
-	if _, err := a.ResolveGenerationModelSnapshot(ctx, accountspace.AuthContext{}, resourceType, modelID, pricingSnapshotID); err != nil {
+	resourceType = strings.TrimSpace(resourceType)
+	modelID = strings.TrimSpace(modelID)
+	pricingSnapshotID = strings.TrimSpace(pricingSnapshotID)
+	if _, _, err := a.activeModelRuntime(ctx, resourceType, modelID); err != nil {
 		return ModelSummaryDTO{}, err
 	}
 	now := a.now()
-	tx := a.repo.DB().WithContext(ctx).Begin()
-	if err := tx.Model(&businesscore.DefaultModel{}).Where("resource_type = ? AND scope = ? AND status = ?", resourceType, "global", activeStatus).Updates(map[string]any{"status": "inactive", "updated_at": now, "updated_by": auth.AdminID}).Error; err != nil {
-		tx.Rollback()
+	if pricingSnapshotID == "" {
+		price, err := a.activePrice(ctx, modelID, resourceType, "")
+		if err == nil {
+			pricingSnapshotID = price.PricingSnapshotID
+		} else if bizerrors.FromError(err).Code != bizerrors.CodeResourceNotFound {
+			return ModelSummaryDTO{}, err
+		} else {
+			price, err := a.createDefaultPricingSnapshot(ctx, auth, modelID, resourceType, now)
+			if err != nil {
+				return ModelSummaryDTO{}, err
+			}
+			pricingSnapshotID = price.PricingSnapshotID
+		}
+	} else if _, err := a.activePrice(ctx, modelID, resourceType, pricingSnapshotID); err != nil {
 		return ModelSummaryDTO{}, err
 	}
-	row := businesscore.DefaultModel{
-		ID: security.RandomID("dm_"), ResourceType: resourceType, ModelID: modelID, PricingSnapshotID: pricingSnapshotID,
-		Scope: "global", Status: activeStatus, CreatedByAdminID: &auth.AdminID,
-		CreatedBy: stringPtr(auth.AdminID), UpdatedBy: stringPtr(auth.AdminID), CreatedAt: now, UpdatedAt: now,
-	}
-	if err := tx.Create(&row).Error; err != nil {
-		tx.Rollback()
-		return ModelSummaryDTO{}, err
-	}
-	if err := tx.Commit().Error; err != nil {
+	if err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var row businesscore.DefaultModel
+		err := tx.Where("resource_type = ? AND scope = ? AND status = ?", resourceType, "global", activeStatus).First(&row).Error
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return err
+		}
+		if err == gorm.ErrRecordNotFound {
+			row = businesscore.DefaultModel{
+				ID: security.RandomID("dm_"), ResourceType: resourceType, ModelID: modelID, PricingSnapshotID: pricingSnapshotID,
+				Scope: "global", Status: activeStatus, CreatedByAdminID: &auth.AdminID,
+				CreatedBy: stringPtr(auth.AdminID), CreatedAt: now,
+			}
+		} else {
+			row.ModelID = modelID
+			row.PricingSnapshotID = pricingSnapshotID
+			if row.CreatedByAdminID == nil {
+				row.CreatedByAdminID = &auth.AdminID
+			}
+			if row.CreatedBy == nil {
+				row.CreatedBy = stringPtr(auth.AdminID)
+			}
+		}
+		row.UpdatedBy = stringPtr(auth.AdminID)
+		row.UpdatedAt = now
+		return tx.Save(&row).Error
+	}); err != nil {
 		return ModelSummaryDTO{}, err
 	}
 	return a.ResolveDefaultModel(ctx, accountspace.AuthContext{}, resourceType)
+}
+
+func (a *App) activeModelRuntime(ctx context.Context, resourceType, modelID string) (businesscore.Model, businesscore.ModelProvider, error) {
+	resourceType = strings.TrimSpace(resourceType)
+	modelID = strings.TrimSpace(modelID)
+	if resourceType == "" || modelID == "" {
+		return businesscore.Model{}, businesscore.ModelProvider{}, bizerrors.New(bizerrors.CodeInvalidArgument, "resource_type and model_id are required")
+	}
+	var model businesscore.Model
+	if err := a.repo.DB().WithContext(ctx).Where("id = ? AND resource_type = ? AND status = ?", modelID, resourceType, activeStatus).First(&model).Error; err != nil {
+		return businesscore.Model{}, businesscore.ModelProvider{}, bizerrors.New(bizerrors.CodeResourceNotFound, "model is not available")
+	}
+	var provider businesscore.ModelProvider
+	if err := a.repo.DB().WithContext(ctx).Where("id = ? AND status = ?", model.ProviderID, activeStatus).First(&provider).Error; err != nil {
+		return businesscore.Model{}, businesscore.ModelProvider{}, bizerrors.New(bizerrors.CodeResourceNotFound, "model provider is not available")
+	}
+	if model.CredentialID != nil && strings.TrimSpace(*model.CredentialID) != "" {
+		var credential businesscore.ModelProviderCredential
+		if err := a.repo.DB().WithContext(ctx).Where("id = ? AND status = ?", strings.TrimSpace(*model.CredentialID), activeStatus).First(&credential).Error; err != nil {
+			return businesscore.Model{}, businesscore.ModelProvider{}, bizerrors.New(bizerrors.CodeResourceNotFound, "model credential is not available")
+		}
+	}
+	return model, provider, nil
+}
+
+func (a *App) createDefaultPricingSnapshot(ctx context.Context, auth admin.AdminAuth, modelID, resourceType string, now time.Time) (businesscore.ModelPrice, error) {
+	adminID := auth.AdminID
+	row := businesscore.ModelPrice{
+		ID: security.RandomID("mprice_"), PricingSnapshotID: security.RandomID("price_auto_"), ModelID: modelID,
+		ResourceType: resourceType, BillingUnit: defaultBillingUnit(resourceType), UnitPoints: 0, MinChargePoints: 0,
+		Status: activeStatus, EffectiveAt: now, CreatedByAdminID: &adminID,
+		CreatedBy: stringPtr(adminID), UpdatedBy: stringPtr(adminID), CreatedAt: now,
+	}
+	if err := a.repo.DB().WithContext(ctx).Create(&row).Error; err != nil {
+		return businesscore.ModelPrice{}, err
+	}
+	return row, nil
+}
+
+func defaultBillingUnit(resourceType string) string {
+	switch strings.TrimSpace(resourceType) {
+	case "text":
+		return "token"
+	case "image":
+		return "image"
+	case "video":
+		return "video"
+	case "music":
+		return "audio"
+	default:
+		return "call"
+	}
 }
 
 func (a *App) SetModelStatus(ctx context.Context, auth admin.AdminAuth, modelID, status string) (ModelAdminDTO, error) {
@@ -422,7 +492,19 @@ func (a *App) SetModelStatus(ctx context.Context, auth admin.AdminAuth, modelID,
 	if err := a.repo.DB().WithContext(ctx).Where("id = ?", modelID).First(&row).Error; err != nil {
 		return ModelAdminDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "model not found")
 	}
-	row.Status = normalizeStatus(status, activeStatus)
+	nextStatus := normalizeStatus(status, activeStatus)
+	if nextStatus != activeStatus {
+		var defaultCount int64
+		if err := a.repo.DB().WithContext(ctx).Model(&businesscore.DefaultModel{}).
+			Where("model_id = ? AND scope = ? AND status = ?", row.ID, "global", activeStatus).
+			Count(&defaultCount).Error; err != nil {
+			return ModelAdminDTO{}, err
+		}
+		if defaultCount > 0 {
+			return ModelAdminDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "default model cannot be disabled")
+		}
+	}
+	row.Status = nextStatus
 	row.UpdatedBy = stringPtr(auth.AdminID)
 	row.UpdatedAt = a.now()
 	if err := a.repo.DB().WithContext(ctx).Save(&row).Error; err != nil {
@@ -459,14 +541,46 @@ func (a *App) activePrice(ctx context.Context, modelID, resourceType, pricingSna
 }
 
 func (a *App) modelAdminDTO(ctx context.Context, row businesscore.Model) ModelAdminDTO {
+	providerNames := a.modelProviderNames(ctx, []businesscore.Model{row})
+	return a.modelAdminDTOWithProviderName(ctx, row, providerNames[row.ProviderID])
+}
+
+func (a *App) modelAdminDTOWithProviderName(ctx context.Context, row businesscore.Model, providerName string) ModelAdminDTO {
 	defaultModel, _ := a.activeDefault(ctx, row.ResourceType)
 	price, _ := a.activePrice(ctx, row.ID, row.ResourceType, "")
 	return ModelAdminDTO{
-		ModelID: row.ID, ProviderID: row.ProviderID, ModelCode: row.ModelCode, DisplayName: row.DisplayName,
+		ModelID: row.ID, ProviderID: row.ProviderID, ProviderName: providerName, ModelCode: row.ModelCode, DisplayName: row.DisplayName,
 		ResourceType: row.ResourceType, CapabilityTags: stringSlice(row.CapabilityTags), Status: row.Status,
 		RouteConfig: jsonObject(row.RouteConfigJSON), PricingSnapshotID: price.PricingSnapshotID,
 		IsDefault: defaultModel.ModelID == row.ID, DefaultForResource: defaultModel.ModelID == row.ID, UpdatedAt: row.UpdatedAt,
 	}
+}
+
+func (a *App) modelProviderNames(ctx context.Context, rows []businesscore.Model) map[string]string {
+	ids := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		if row.ProviderID == "" {
+			continue
+		}
+		if _, ok := seen[row.ProviderID]; ok {
+			continue
+		}
+		seen[row.ProviderID] = struct{}{}
+		ids = append(ids, row.ProviderID)
+	}
+	if len(ids) == 0 {
+		return map[string]string{}
+	}
+	var providers []businesscore.ModelProvider
+	if err := a.repo.DB().WithContext(ctx).Select("id", "display_name").Where("id IN ?", ids).Find(&providers).Error; err != nil {
+		return map[string]string{}
+	}
+	names := make(map[string]string, len(providers))
+	for _, provider := range providers {
+		names[provider.ID] = provider.DisplayName
+	}
+	return names
 }
 
 func providerDTO(row businesscore.ModelProvider) ProviderDTO {

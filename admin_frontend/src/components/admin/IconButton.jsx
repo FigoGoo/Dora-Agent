@@ -1,8 +1,8 @@
 import { Tooltip } from './Tooltip.jsx';
 
-function IconButtonContent({ label, icon: Icon, ...props }) {
+function IconButtonContent({ label, icon: Icon, type = 'button', ...props }) {
   return (
-    <button className="admin-icon-btn" aria-label={label} {...props}>
+    <button type={type} className="admin-icon-btn" aria-label={label} {...props}>
       <Icon aria-hidden="true" size={18} />
     </button>
   );

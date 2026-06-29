@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { adminRequest, createRequestHash, parseApiError } from './client.js';
+import { adminRequest, createRequestHash, parseApiError, safeHeaderValue } from './client.js';
 import { getAdminSession, saveAdminSession } from '../auth/session.js';
 
 describe('admin API client', () => {
@@ -17,7 +17,12 @@ describe('admin API client', () => {
     expect(left).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  test('adds admin auth, idempotency, reason and request_hash to write requests', async () => {
+  test('keeps generated request headers ASCII safe', () => {
+    expect(safeHeaderValue('skill_test:run_1', 'fallback')).toBe('skill_test:run_1');
+    expect(safeHeaderValue('审核测试', 'fallback')).toBe('fallback');
+  });
+
+  test('adds admin auth, idempotency and request_hash to write requests', async () => {
     saveAdminSession({ admin_id: 'adm_1', account: 'root', status: 'active', access_token: 'token_1' });
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -36,13 +41,34 @@ describe('admin API client', () => {
     const body = JSON.parse(init.body);
     expect(init.headers.Authorization).toBe('Bearer token_1');
     expect(init.headers['Idempotency-Key']).toMatch(/^admin-/);
-    expect(init.headers['X-Admin-Reason']).toBe('policy violation');
+    expect(init.headers['X-Admin-Reason']).toBeUndefined();
     expect(body.request_hash).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  test('keeps non-ASCII admin reason in the JSON body instead of request headers', async () => {
+    saveAdminSession({ admin_id: 'adm_1', account: 'root', status: 'active', access_token: 'token_1' });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ code: 'OK', data: { ok: true }, trace_id: 'trace_1' })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await adminRequest('/api/admin/models/default', {
+      method: 'POST',
+      reason: '设为默认：DeepSeek V4 Fast\n后台操作',
+      body: { model_id: 'mdl_deepseek_v4_fast', reason: '设为默认：DeepSeek V4 Fast\n后台操作' }
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(init.headers['X-Admin-Reason']).toBeUndefined();
+    expect(init.headers['X-Admin-Reason-Encoding']).toBeUndefined();
+    expect(body.reason).toBe('设为默认：DeepSeek V4 Fast\n后台操作');
+  });
+
   test('renews the remembered admin session from response headers', async () => {
-    saveAdminSession({ admin_id: 'adm_1', account: 'root', status: 'active', access_token: 'token_1', expires_at: '2026-06-29T00:00:00Z' });
-    const renewedAt = '2026-07-06T00:00:00Z';
+    saveAdminSession({ admin_id: 'adm_1', account: 'root', status: 'active', access_token: 'token_1', expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() });
+    const renewedAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({

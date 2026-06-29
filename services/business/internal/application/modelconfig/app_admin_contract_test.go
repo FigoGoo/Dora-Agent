@@ -7,6 +7,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
+	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
 	"gorm.io/datatypes"
 )
 
@@ -83,7 +84,7 @@ func TestSetDefaultModelInfersActivePricingSnapshotWhenOmitted(t *testing.T) {
 		t.Fatalf("pricing_snapshot_id=%q", out.PricingSnapshotID)
 	}
 
-	list, err := app.ListModels(t.Context(), auth, "image", "", 10, 0)
+	list, err := app.ListModels(t.Context(), auth, "", "image", "", 10, 0)
 	if err != nil {
 		t.Fatalf("list models: %v", err)
 	}
@@ -99,6 +100,152 @@ func TestSetDefaultModelInfersActivePricingSnapshotWhenOmitted(t *testing.T) {
 	}
 	if !found.IsDefault || !found.DefaultForResource {
 		t.Fatalf("default aliases not set: %#v", *found)
+	}
+	filtered, err := app.ListModels(t.Context(), auth, found.ProviderID, "image", "", 10, 0)
+	if err != nil {
+		t.Fatalf("list models by provider: %v", err)
+	}
+	if len(filtered.Items) == 0 {
+		t.Fatalf("expected models for provider %q", found.ProviderID)
+	}
+	for _, item := range filtered.Items {
+		if item.ProviderID != found.ProviderID {
+			t.Fatalf("provider filter leaked model: %#v", item)
+		}
+	}
+}
+
+func TestSetDefaultModelCreatesFreePricingSnapshotWhenMissing(t *testing.T) {
+	app := newModelConfigContractApp(t)
+	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return now }
+	auth := admin.AdminAuth{AdminID: "adm_root"}
+	adminID := auth.AdminID
+
+	rows := []any{
+		&businesscore.ModelProvider{
+			ID: "mp_contract_free_default", ProviderCode: "provider_contract_free_default", DisplayName: "Provider Free Default",
+			ProviderType: "openai_compatible", Status: "active", ConfigJSON: datatypes.JSON([]byte("{}")),
+			CreatedByAdminID: &adminID, CreatedAt: now, UpdatedAt: now,
+		},
+		&businesscore.Model{
+			ID: "mdl_contract_free_default", ProviderID: "mp_contract_free_default", ModelCode: "model_contract_free_default",
+			DisplayName: "Model Free Default", ResourceType: "text", CapabilityTags: datatypes.JSON([]byte("[]")),
+			Status: "active", RouteConfigJSON: datatypes.JSON([]byte("{}")), CreatedByAdminID: &adminID,
+			CreatedAt: now, UpdatedAt: now,
+		},
+	}
+	for _, row := range rows {
+		if err := app.repo.DB().WithContext(t.Context()).Create(row).Error; err != nil {
+			t.Fatalf("seed %T: %v", row, err)
+		}
+	}
+
+	out, err := app.SetDefaultModel(t.Context(), auth, "text", "mdl_contract_free_default", "")
+	if err != nil {
+		t.Fatalf("set default model without price: %v", err)
+	}
+	if out.PricingSnapshotID == "" {
+		t.Fatalf("expected generated pricing snapshot id: %#v", out)
+	}
+
+	var price businesscore.ModelPrice
+	if err := app.repo.DB().WithContext(t.Context()).
+		Where("pricing_snapshot_id = ? AND model_id = ?", out.PricingSnapshotID, "mdl_contract_free_default").
+		First(&price).Error; err != nil {
+		t.Fatalf("generated price missing: %v", err)
+	}
+	if price.BillingUnit != "token" || price.UnitPoints != 0 || price.MinChargePoints != 0 {
+		t.Fatalf("unexpected generated price: %#v", price)
+	}
+}
+
+func TestSetDefaultModelCanBeRepeatedWithoutUniqueConflict(t *testing.T) {
+	app := newModelConfigContractApp(t)
+	now := time.Date(2026, 6, 29, 11, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return now }
+	auth := admin.AdminAuth{AdminID: "adm_root"}
+	adminID := auth.AdminID
+
+	rows := []any{
+		&businesscore.ModelProvider{
+			ID: "mp_contract_repeat_default", ProviderCode: "provider_contract_repeat_default", DisplayName: "Provider Repeat Default",
+			ProviderType: "openai_compatible", Status: "active", ConfigJSON: datatypes.JSON([]byte("{}")),
+			CreatedByAdminID: &adminID, CreatedAt: now, UpdatedAt: now,
+		},
+		&businesscore.Model{
+			ID: "mdl_contract_repeat_default_a", ProviderID: "mp_contract_repeat_default", ModelCode: "model_repeat_a",
+			DisplayName: "Model Repeat A", ResourceType: "text", CapabilityTags: datatypes.JSON([]byte("[]")),
+			Status: "active", RouteConfigJSON: datatypes.JSON([]byte("{}")), CreatedByAdminID: &adminID, CreatedAt: now, UpdatedAt: now,
+		},
+		&businesscore.Model{
+			ID: "mdl_contract_repeat_default_b", ProviderID: "mp_contract_repeat_default", ModelCode: "model_repeat_b",
+			DisplayName: "Model Repeat B", ResourceType: "text", CapabilityTags: datatypes.JSON([]byte("[]")),
+			Status: "active", RouteConfigJSON: datatypes.JSON([]byte("{}")), CreatedByAdminID: &adminID, CreatedAt: now, UpdatedAt: now,
+		},
+	}
+	for _, row := range rows {
+		if err := app.repo.DB().WithContext(t.Context()).Create(row).Error; err != nil {
+			t.Fatalf("seed %T: %v", row, err)
+		}
+	}
+
+	if _, err := app.SetDefaultModel(t.Context(), auth, "text", "mdl_contract_repeat_default_a", ""); err != nil {
+		t.Fatalf("set default a: %v", err)
+	}
+	if _, err := app.SetDefaultModel(t.Context(), auth, "text", "mdl_contract_repeat_default_b", ""); err != nil {
+		t.Fatalf("set default b: %v", err)
+	}
+	out, err := app.SetDefaultModel(t.Context(), auth, "text", "mdl_contract_repeat_default_a", "")
+	if err != nil {
+		t.Fatalf("set default a again: %v", err)
+	}
+	if out.ModelID != "mdl_contract_repeat_default_a" {
+		t.Fatalf("default model=%q", out.ModelID)
+	}
+
+	var activeDefaultCount int64
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.DefaultModel{}).
+		Where("resource_type = ? AND scope = ? AND status = ?", "text", "global", activeStatus).
+		Count(&activeDefaultCount).Error; err != nil {
+		t.Fatalf("count active defaults: %v", err)
+	}
+	if activeDefaultCount != 1 {
+		t.Fatalf("active default count=%d", activeDefaultCount)
+	}
+}
+
+func TestSetModelStatusRejectsDisablingDefaultModel(t *testing.T) {
+	app := newModelConfigContractApp(t)
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return now }
+	auth := admin.AdminAuth{AdminID: "adm_root"}
+	adminID := auth.AdminID
+
+	rows := []any{
+		&businesscore.ModelProvider{
+			ID: "mp_contract_default_guard", ProviderCode: "provider_contract_default_guard", DisplayName: "Provider Default Guard",
+			ProviderType: "openai_compatible", Status: "active", ConfigJSON: datatypes.JSON([]byte("{}")),
+			CreatedByAdminID: &adminID, CreatedAt: now, UpdatedAt: now,
+		},
+		&businesscore.Model{
+			ID: "mdl_contract_default_guard", ProviderID: "mp_contract_default_guard", ModelCode: "model_default_guard",
+			DisplayName: "Model Default Guard", ResourceType: "image", CapabilityTags: datatypes.JSON([]byte("[]")),
+			Status: "active", RouteConfigJSON: datatypes.JSON([]byte("{}")), CreatedByAdminID: &adminID, CreatedAt: now, UpdatedAt: now,
+		},
+	}
+	for _, row := range rows {
+		if err := app.repo.DB().WithContext(t.Context()).Create(row).Error; err != nil {
+			t.Fatalf("seed %T: %v", row, err)
+		}
+	}
+	if _, err := app.SetDefaultModel(t.Context(), auth, "image", "mdl_contract_default_guard", ""); err != nil {
+		t.Fatalf("set default model: %v", err)
+	}
+	if _, err := app.SetModelStatus(t.Context(), auth, "mdl_contract_default_guard", "disabled"); err == nil {
+		t.Fatal("expected disabling default model to fail")
+	} else if got := bizerrors.FromError(err).Code; got != bizerrors.CodeStateConflict {
+		t.Fatalf("error code=%s err=%v", got, err)
 	}
 }
 

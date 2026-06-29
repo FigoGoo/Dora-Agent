@@ -6,6 +6,7 @@ import { RotatePasswordPage } from '../features/auth/RotatePasswordPage.jsx';
 import { DashboardPage } from '../features/dashboard/DashboardPage.jsx';
 import { ResourceListPage } from '../features/resources/ResourceListPage.jsx';
 import { CreditGrantPage } from '../features/resources/CreditGrantPage.jsx';
+import { SystemSkillEditorPage } from '../features/resources/SystemSkillEditorPage.jsx';
 import { pageConfigs } from '../features/resources/pageConfigs.jsx';
 
 export function App() {
@@ -17,6 +18,7 @@ export function App() {
         <Route path="/admin/rotate-password" element={<RotatePasswordPage />} />
         <Route path="/admin" element={<AdminShell />}>
           <Route index element={<DashboardPage />} />
+          <Route path="skills/system/new" element={<SystemSkillEditorPage />} />
           {Object.entries(pageConfigs).map(([path, config]) => (
             <Route key={path} path={path} element={<ResourceListPage config={config} />} />
           ))}
