@@ -81,6 +81,46 @@ Agent 用户运行层：
 - 公开 AG-UI / HTTP 事件只允许暴露前端需要字段；完整 `provider_runtime_ref` 只能留在服务端 DB interrupt payload 中用于后续确认执行。
 - 本次修复未偏离方向：没有新增产品能力，只把管理端配置打通到用户侧 Agent 运行消费，并补充防回归脚本和契约测试。
 
+## 2026-06-29 Tool 管理注册入口修复归档
+
+结论：通过。后端 `POST /api/admin/tools` 本身可注册 Tool，但管理端 Tool 页面缺少“注册 Tool”入口，导致系统 Skill 编辑器提示“先在 Tool 管理中注册名称和作用说明”时，管理员没有前端路径可走。
+
+### 已发现并修复的问题
+
+| 问题 | 表现 / 证据 | 根因 | 解决方案 | 回归保护 |
+| --- | --- | --- | --- | --- |
+| Tool 管理没有注册入口 | Tool 页只能列表、策略、计价、白名单、启停；系统 Skill 编辑器却提示先在 Tool 管理注册 | `pageConfigs.tools.create` 缺失，前端没有表单映射 `POST /api/admin/tools` | Tool 页新增“注册 Tool”弹窗，覆盖基础信息、Schema、执行策略、计价和注册原因 | `pageConfigs.test.jsx` 覆盖 create 配置和提交体字段 |
+| Tool 注册原因未进入注册变更记录 | API 请求可传 `reason`，但 `tool_policy_change_records.after_json.reason` 为空 | HTTP handler 未接 `reason`，`RegisterToolInput` 和应用层 change record 未保存 | handler 接收 `reason/request_hash`，应用层把 `reason` 写入 `tool.register` 的 `after_json` | `TestAdminRegisterToolPersistsReasonAndPolicies` 覆盖注册响应、策略计价和 reason 落库 |
+
+### 真实链路验证
+
+- 通过后台账号调用 `POST /api/admin/tools` 注册唯一 Tool。
+- `GET /api/admin/tools?page_size=100` 能回显同一个 `tool_key`。
+- DB 断言 `tool_definitions`、`tool_policies`、`tool_pricing_policies` 各自有本轮 active 记录。
+- DB 断言 `tool_policy_change_records.after_json.reason` 等于本轮注册原因。
+
+最后一次本地 smoke 证据：
+
+- `tool_key=e2e_ui_register_tool_20260629155628:builtin`
+- `pricing_policy_id=tool_price_5460fd9f8548c53e69ee59c166594355`
+- `reason=验证 Tool 管理注册入口 20260629155628`
+
+### 验证命令
+
+| 命令 | 结果 |
+| --- | --- |
+| `pnpm --dir admin_frontend test -- pageConfigs.test.jsx --run` | 通过，13 个测试文件、41 个测试用例 |
+| `pnpm --dir admin_frontend test -- --run` | 通过，13 个测试文件、41 个测试用例 |
+| `go test ./services/business/internal/transport/http -run TestAdminRegisterToolPersistsReasonAndPolicies -count=1` | 通过 |
+| `go test ./services/business/internal/application/toolpolicy ./services/business/internal/transport/http -count=1` | 通过 |
+| 本地 `POST /api/admin/tools` + `GET /api/admin/tools` + DB 三表和 change record 查询 | 通过 |
+
+### 后续读取提醒
+
+- Tool 管理页必须保留注册入口；否则系统 Skill 编辑器中“先注册 Tool”的产品路径会断。
+- Tool 注册只登记元信息、Schema、策略、计价和审计原因，不代表创建运行时执行器；运行时执行器仍由平台工程侧接入。
+- 后续改 Tool 注册字段时，要同步 `api/openapi/business-api.yaml`、`handlers_m3.go`、`toolpolicy.RegisterToolInput`、`pageConfigs.tools.create` 和前后端测试。
+
 ## 2026-06-29 二次本地启动巡检修复归档
 
 提交：`0b4eb1e fix: harden admin resource smoke issues`

@@ -10,6 +10,7 @@ vi.mock('../../lib/api/admin.js', () => ({
 }));
 
 import { adminApi } from '../../lib/api/admin.js';
+import { prepareCreateBody } from './ResourceListPage.jsx';
 import { pageConfigs } from './pageConfigs.jsx';
 
 describe('admin resource page configs', () => {
@@ -44,7 +45,11 @@ describe('admin resource page configs', () => {
   test('describes tool management as a complete policy and pricing surface', () => {
     const config = pageConfigs.tools;
     expect(config.detail).toBe(true);
-    expect(config.create).toBeUndefined();
+    expect(config.create).toMatchObject({
+      title: '注册 Tool',
+      path: '/api/admin/tools',
+      modalSize: 'xl'
+    });
     expect(config.defaultPageSize).toBe(50);
     expect(config.groupBy).toMatchObject({
       field: 'tool_type',
@@ -91,6 +96,82 @@ describe('admin resource page configs', () => {
     render(config.columns.find((column) => column.key === 'pricing_policy').render({ charge_mode: 'model_generation', billing_unit: 'asset', unit_points: 12 }));
     expect(screen.getByText('模型生成')).toBeInTheDocument();
     expect(screen.getByText('按资产 · 12 积分')).toBeInTheDocument();
+  });
+
+  test('maps tool registration form fields to backend contract', () => {
+    const config = pageConfigs.tools;
+    const fieldNames = config.create.fields.map((field) => field.name);
+    expect(fieldNames).toEqual([
+      'tool_name',
+      'tool_type',
+      'display_name',
+      'description',
+      'status',
+      'version',
+      'input_schema_json',
+      'output_schema_json',
+      'allowed',
+      'risk_level',
+      'requires_confirmation',
+      'timeout_ms',
+      'retry_policy',
+      'cancel_policy',
+      'charge_mode',
+      'billing_unit',
+      'unit_points',
+      'free_quota',
+      'min_charge_points',
+      'reason'
+    ]);
+
+    const body = prepareCreateBody(
+      {
+        tool_name: 'storyboard_extract',
+        tool_type: 'builtin',
+        display_name: '分镜提取',
+        description: '从剧本文本中提取镜头、人物和场景信息。',
+        status: 'active',
+        version: '1.0.0',
+        input_schema_json: '{"type":"object"}',
+        output_schema_json: '{"type":"object"}',
+        allowed: true,
+        risk_level: 'medium',
+        requires_confirmation: true,
+        timeout_ms: '45000',
+        retry_policy: '{"max_retries":"1"}',
+        cancel_policy: '{"cancelable":"true"}',
+        charge_mode: 'per_call',
+        billing_unit: 'call',
+        unit_points: '5',
+        free_quota: '1',
+        min_charge_points: '1',
+        reason: '注册内置分镜 Tool'
+      },
+      config
+    );
+
+    expect(body).toEqual({
+      tool_name: 'storyboard_extract',
+      tool_type: 'builtin',
+      display_name: '分镜提取',
+      description: '从剧本文本中提取镜头、人物和场景信息。',
+      status: 'active',
+      version: '1.0.0',
+      input_schema_json: '{"type":"object"}',
+      output_schema_json: '{"type":"object"}',
+      allowed: true,
+      risk_level: 'medium',
+      requires_confirmation: true,
+      timeout_ms: 45000,
+      retry_policy: { max_retries: '1' },
+      cancel_policy: { cancelable: 'true' },
+      charge_mode: 'per_call',
+      billing_unit: 'call',
+      unit_points: 5,
+      free_quota: 1,
+      min_charge_points: 1,
+      reason: '注册内置分镜 Tool'
+    });
   });
 
   test('sends fields required by backend confirmations', async () => {

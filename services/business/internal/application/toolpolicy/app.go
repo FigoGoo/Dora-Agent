@@ -95,6 +95,7 @@ type RegisterToolInput struct {
 	UnitPoints           float64
 	FreeQuota            int
 	MinChargePoints      int64
+	Reason               string
 }
 
 func (a *App) CheckToolExecutionPolicy(ctx context.Context, auth accountspace.AuthContext, toolName, toolType, _ string, _ map[string]string) (ExecutionPolicyDTO, error) {
@@ -201,7 +202,12 @@ func (a *App) RegisterTool(ctx context.Context, in RegisterToolInput) (ToolDTO, 
 		if err := tx.Create(&pricing).Error; err != nil {
 			return err
 		}
-		after, _ := json.Marshal(map[string]any{"definition": definition, "policy": policy, "pricing": pricing})
+		after, _ := json.Marshal(map[string]any{
+			"definition": definition,
+			"policy":     policy,
+			"pricing":    pricing,
+			"reason":     strings.TrimSpace(in.Reason),
+		})
 		return tx.Create(&businesscore.ToolPolicyChangeRecord{
 			ID: security.RandomID("tpcr_"), ToolName: toolName, ToolType: toolType, ChangeType: "tool.register",
 			BeforeJSON: datatypes.JSON([]byte("{}")), AfterJSON: datatypes.JSON(after), ChangedByAdminID: &in.Auth.AdminID, CreatedAt: now,

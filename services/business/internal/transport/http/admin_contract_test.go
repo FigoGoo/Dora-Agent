@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	nethttp "net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetdict"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/skillcatalog"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/toolpolicy"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/idempotency"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/auditlog"
@@ -87,6 +89,61 @@ func TestAdminSkillReviewRequestAcceptsOpenAPIDecisionFields(t *testing.T) {
 	}
 	if got := req.normalizedComment(); got != "证据不足" {
 		t.Fatalf("normalized comment=%q", got)
+	}
+}
+
+func TestAdminRegisterToolPersistsReasonAndPolicies(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_business_admin_tool_register")
+	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/2026-06-27-business-core/business")
+	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
+	testdb.ExecSQL(t, db.DB, testdb.MustReadSQL(t, "tests/business/seed/business_core_seed.sql"))
+
+	repo := businesscore.New(db.DB)
+	adminApp := admin.New(repo, idempotency.NewGuard(db.DB, time.Hour, time.Hour), auditlog.NewGormWriter(db.DB))
+	toolApp := toolpolicy.New(repo)
+	router := NewRouter(RouterOptions{Admin: adminApp, Tool: toolApp})
+	token := loginAdmin(t, router, "admin@dora.local", "local-admin-change-me")
+
+	resp := requestJSON(t, router, nethttp.MethodPost, "/api/admin/tools", token, "idem-admin-tool-register", map[string]any{
+		"tool_name":             "admin_storyboard_extract",
+		"tool_type":             "builtin",
+		"display_name":          "分镜提取",
+		"description":           "从剧本文本中提取镜头、人物和场景信息。",
+		"status":                "active",
+		"version":               "1.0.0",
+		"input_schema_json":     `{"type":"object"}`,
+		"output_schema_json":    `{"type":"object"}`,
+		"allowed":               true,
+		"risk_level":            "medium",
+		"requires_confirmation": true,
+		"timeout_ms":            45000,
+		"retry_policy":          map[string]any{"max_retries": "1"},
+		"cancel_policy":         map[string]any{"cancelable": "true"},
+		"charge_mode":           "per_call",
+		"billing_unit":          "call",
+		"unit_points":           5,
+		"free_quota":            1,
+		"min_charge_points":     1,
+		"reason":                "注册内置分镜 Tool",
+		"request_hash":          "hash-admin-tool-register",
+	})
+	data := resp["data"].(map[string]any)
+	if data["tool_key"] != "admin_storyboard_extract:builtin" || data["pricing_policy_id"] == "" {
+		t.Fatalf("register tool response mismatch: %#v", data)
+	}
+
+	var change businesscore.ToolPolicyChangeRecord
+	if err := repo.DB().WithContext(t.Context()).
+		Where("tool_name = ? AND tool_type = ? AND change_type = ?", "admin_storyboard_extract", "builtin", "tool.register").
+		First(&change).Error; err != nil {
+		t.Fatalf("load register change record: %v", err)
+	}
+	var after map[string]any
+	if err := json.Unmarshal(change.AfterJSON, &after); err != nil {
+		t.Fatalf("decode after json: %v", err)
+	}
+	if after["reason"] != "注册内置分镜 Tool" {
+		t.Fatalf("register reason missing from change record: %#v", after)
 	}
 }
 

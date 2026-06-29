@@ -832,6 +832,60 @@ export const pageConfigs = {
       { key: 'execution_policy', title: '执行策略', width: 300, render: ToolExecutionPolicyCell },
       { key: 'pricing_policy', title: '计价策略', width: 240, render: ToolPricingPolicyCell }
     ],
+    create: {
+      title: '注册 Tool',
+      path: '/api/admin/tools',
+      modalSize: 'xl',
+      fields: [
+        {
+          name: 'tool_name',
+          label: 'Tool 名称',
+          group: '基础信息',
+          groupHint: '只注册 Tool 元信息和治理策略，不创建或部署运行时执行器。',
+          groupLayout: 'dense',
+          required: true,
+          placeholder: '例如 storyboard_extract'
+        },
+        { name: 'tool_type', label: 'Tool 类型', group: '基础信息', groupLayout: 'dense', defaultValue: 'builtin', required: true },
+        { name: 'display_name', label: '展示名称', group: '基础信息', groupLayout: 'dense', required: true },
+        { name: 'description', label: '说明', group: '基础信息', groupLayout: 'single', textarea: true, required: true, rows: 3 },
+        { name: 'status', label: '状态', group: '基础信息', groupLayout: 'dense', defaultValue: 'active', options: activeStatusOptions },
+        { name: 'version', label: '版本', group: '基础信息', groupLayout: 'dense', defaultValue: '1.0.0' },
+        {
+          name: 'input_schema_json',
+          label: '输入 Schema JSON',
+          group: 'Schema',
+          groupHint: '描述 Agent 从自然语言中整理给 Tool 的输入结构。',
+          groupLayout: 'split',
+          span: 'half',
+          type: 'json-string',
+          defaultValue: '{}',
+          rows: 7
+        },
+        {
+          name: 'output_schema_json',
+          label: '输出 Schema JSON',
+          group: 'Schema',
+          groupLayout: 'split',
+          span: 'half',
+          type: 'json-string',
+          defaultValue: '{}',
+          rows: 7
+        },
+        { name: 'allowed', label: '允许使用', group: '执行策略', groupLayout: 'dense', type: 'checkbox', defaultValue: true },
+        { name: 'risk_level', label: '风险等级', group: '执行策略', groupLayout: 'dense', options: riskLevelOptions, defaultValue: 'low', required: true },
+        { name: 'requires_confirmation', label: '需要确认', group: '执行策略', groupLayout: 'dense', type: 'checkbox' },
+        { name: 'timeout_ms', label: '超时毫秒', group: '执行策略', groupLayout: 'dense', type: 'number', defaultValue: 30000 },
+        { name: 'retry_policy', label: '重试策略 JSON', group: '执行策略 JSON', groupLayout: 'split', span: 'half', type: 'json', defaultValue: '{}', rows: 5 },
+        { name: 'cancel_policy', label: '取消策略 JSON', group: '执行策略 JSON', groupLayout: 'split', span: 'half', type: 'json', defaultValue: '{}', rows: 5 },
+        { name: 'charge_mode', label: '计费模式', group: '计费规则', groupLayout: 'dense', options: chargeModeOptions, defaultValue: 'per_call', required: true },
+        { name: 'billing_unit', label: '计费单位', group: '计费规则', groupLayout: 'dense', options: toolBillingUnitOptions, defaultValue: 'call', required: true },
+        { name: 'unit_points', label: '单价积分', group: '计费规则', groupLayout: 'dense', type: 'number', defaultValue: 0 },
+        { name: 'free_quota', label: '免费额度', group: '计费规则', groupLayout: 'dense', type: 'number', defaultValue: 0 },
+        { name: 'min_charge_points', label: '最低扣费积分', group: '计费规则', groupLayout: 'dense', type: 'number', defaultValue: 0 },
+        { name: 'reason', label: '注册原因', group: '审计原因', groupLayout: 'single', textarea: true, required: true, rows: 4 }
+      ]
+    },
     actions: [
       {
         label: '影响预览',

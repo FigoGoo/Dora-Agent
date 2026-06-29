@@ -311,6 +311,8 @@ func (h m3Handler) adminRegisterTool(c *gin.Context) {
 		UnitPoints           float64           `json:"unit_points"`
 		FreeQuota            int               `json:"free_quota"`
 		MinChargePoints      int64             `json:"min_charge_points"`
+		Reason               string            `json:"reason"`
+		RequestHash          string            `json:"request_hash"`
 	}
 	if !bindJSON(c, &req) {
 		return
@@ -325,6 +327,7 @@ func (h m3Handler) adminRegisterTool(c *gin.Context) {
 		OutputSchemaJSON: req.OutputSchemaJSON, Allowed: allowed, RiskLevel: req.RiskLevel, RequiresConfirmation: req.RequiresConfirmation,
 		TimeoutMS: req.TimeoutMS, RetryPolicy: req.RetryPolicy, CancelPolicy: req.CancelPolicy, ChargeMode: req.ChargeMode,
 		BillingUnit: req.BillingUnit, UnitPoints: req.UnitPoints, FreeQuota: req.FreeQuota, MinChargePoints: req.MinChargePoints,
+		Reason: req.Reason,
 	})
 	respond(c, out, err)
 }
