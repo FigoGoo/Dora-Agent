@@ -38,7 +38,7 @@ owner：测试与验收责任域
 
 | 报告 | 覆盖范围 | 结论 |
 | --- | --- | --- |
-| [Skill 路由真实场景评估报告](../../tests/reports/skill-routing-scenario-eval-2026-06-30.md) | Skill route_hints 命中率、E2E 测试 Skill 污染清理、无关 prompt 负例 | 通过 |
+| [Skill 路由真实业务场景评估报告](../../tests/reports/skill-routing-scenario-eval-2026-06-30.md) | 9 个真实业务 seed Skill、24 条正反例矩阵、否定语境路由、是否接 DeepSeek 分类器判断 | 通过 |
 | [DeepSeek V4 Flash 真实输出链路验收报告](../../tests/reports/deepseek-v4-flash-real-output-2026-06-30.md) | 真实 DeepSeek ChatCompletions、Skill 命中、确认扣费、草稿产物、最终资产引用 | 通过 |
 | [后台 Skill / 模型 / Tool 到用户 Agent 链路验收报告](../../tests/reports/admin-agent-full-flow-2026-06-30.md) | 后台新增 Tool、模型供应商、模型、系统 Skill 后由用户 Agent 消费 | 通过 |
 

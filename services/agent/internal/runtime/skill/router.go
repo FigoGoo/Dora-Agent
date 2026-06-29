@@ -79,7 +79,7 @@ func matchScore(prompt string, hints map[string]string) (int, string) {
 func countHintMatches(prompt string, hint string) int {
 	count := 0
 	for _, item := range splitHints(hint) {
-		if strings.Contains(prompt, strings.ToLower(item)) {
+		if containsPositiveHint(prompt, strings.ToLower(item)) {
 			count++
 		}
 	}
@@ -88,7 +88,43 @@ func countHintMatches(prompt string, hint string) int {
 
 func blockedByNegativeHint(prompt string, hints map[string]string) bool {
 	for _, item := range splitHints(hints["negative_keywords"]) {
-		if strings.Contains(prompt, strings.ToLower(item)) {
+		if containsPositiveHint(prompt, strings.ToLower(item)) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPositiveHint(prompt string, hint string) bool {
+	if hint == "" {
+		return false
+	}
+	start := 0
+	for {
+		idx := strings.Index(prompt[start:], hint)
+		if idx < 0 {
+			return false
+		}
+		absIdx := start + idx
+		if !isNegatedMention(prompt, absIdx) {
+			return true
+		}
+		start = absIdx + len(hint)
+		if start >= len(prompt) {
+			return false
+		}
+	}
+}
+
+func isNegatedMention(prompt string, hintStart int) bool {
+	prefixStart := hintStart - 24
+	if prefixStart < 0 {
+		prefixStart = 0
+	}
+	prefix := prompt[prefixStart:hintStart]
+	negators := []string{"不要", "不是", "别", "无需", "不用", "不需要", "非", "no ", "not ", "without ", "instead of "}
+	for _, negator := range negators {
+		if strings.Contains(prefix, negator) {
 			return true
 		}
 	}

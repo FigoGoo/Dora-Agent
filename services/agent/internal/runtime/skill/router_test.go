@@ -53,6 +53,32 @@ func TestRouteHonorsNegativeKeywords(t *testing.T) {
 	}
 }
 
+func TestRouteIgnoresNegativeKeywordInNegatedContext(t *testing.T) {
+	router := NewRouter()
+	candidates := []Summary{
+		{
+			SkillID: "sk_product_copy", Status: "published",
+			RouteHints: map[string]string{
+				"keywords":          "直播间,转化短文案",
+				"negative_keywords": "品牌定位,定位策略",
+				"priority":          "70",
+			},
+		},
+		{
+			SkillID: "sk_brand", Status: "published",
+			RouteHints: map[string]string{
+				"keywords": "品牌定位,定位策略",
+				"priority": "75",
+			},
+		},
+	}
+
+	result := router.Route("不要做品牌定位，只写一条直播间转化短文案", candidates)
+	if !result.Matched || result.Skill.SkillID != "sk_product_copy" {
+		t.Fatalf("negated negative keyword should not block target route: %#v", result)
+	}
+}
+
 func TestRouteDoesNotDefaultToUnrelatedPublishedSkill(t *testing.T) {
 	router := NewRouter()
 	candidates := []Summary{

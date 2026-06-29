@@ -66,6 +66,24 @@ func main() {
 		{Name: "storyboard_cn", Expected: "sk_seed_storyboard", Prompt: "请给城市香水做一个30秒广告短片，包含三条分镜建议和风险提醒"},
 		{Name: "storyboard_visual_plan", Expected: "sk_seed_storyboard", Prompt: "帮我做高端护肤新品主视觉方案，要有镜头氛围和故事板"},
 		{Name: "storyboard_en", Expected: "sk_seed_storyboard", Prompt: "Create a storyboard for a product launch video with 3 shots"},
+		{Name: "product_copy_cn", Expected: "sk_seed_product_copy", Prompt: "帮我写一版小红书风格的护肤品种草文案，包含标题、卖点和CTA"},
+		{Name: "product_copy_detail_page", Expected: "sk_seed_product_copy", Prompt: "给这款便携咖啡机生成电商详情页卖点和短标题"},
+		{Name: "brand_strategy_cn", Expected: "sk_seed_brand_strategy", Prompt: "为新中式茶饮品牌做定位策略，包含人群、差异化和品牌语气"},
+		{Name: "brand_strategy_en", Expected: "sk_seed_brand_strategy", Prompt: "Create brand positioning and tone of voice for a premium skincare startup"},
+		{Name: "social_calendar_cn", Expected: "sk_seed_social_calendar", Prompt: "帮我规划下个月抖音和小红书内容日历，按每周主题输出"},
+		{Name: "seo_article_cn", Expected: "sk_seed_seo_article", Prompt: "写一篇关于家用投影仪选购的SEO文章大纲，包含关键词和小标题"},
+		{Name: "meeting_summary_cn", Expected: "sk_seed_meeting_summary", Prompt: "把这段会议纪要整理成决议、待办和负责人列表"},
+		{Name: "customer_support_reply", Expected: "sk_seed_support_reply", Prompt: "客户投诉物流延迟，帮我写客服回复话术并给出补偿建议"},
+		{Name: "data_insight_cn", Expected: "sk_seed_data_insight", Prompt: "根据这组转化率和客单价数据，输出经营分析和优化建议"},
+		{Name: "image_prompt_cn", Expected: "sk_seed_image_prompt", Prompt: "给高级感香水海报生成一组MJ提示词，包含构图、光影和材质"},
+		{Name: "storyboard_vs_copy", Expected: "sk_seed_storyboard", Prompt: "不是单纯写卖点文案，我要一个新品广告片分镜脚本"},
+		{Name: "copy_vs_brand", Expected: "sk_seed_product_copy", Prompt: "不要做品牌定位，只写一条直播间转化短文案"},
+		{Name: "brand_vs_social", Expected: "sk_seed_brand_strategy", Prompt: "先别排社媒日历，帮我确定这个咖啡品牌的目标人群和差异化"},
+		{Name: "seo_vs_social", Expected: "sk_seed_seo_article", Prompt: "不是发朋友圈，帮我写可被搜索收录的长文结构和SEO关键词"},
+		{Name: "summary_vs_support", Expected: "sk_seed_meeting_summary", Prompt: "请整理客服复盘会议的纪要，提取待办，而不是回复客户"},
+		{Name: "support_vs_copy", Expected: "sk_seed_support_reply", Prompt: "不用写营销文案，帮我回复一位要求退款的用户"},
+		{Name: "data_vs_seo", Expected: "sk_seed_data_insight", Prompt: "这些不是SEO关键词，是投放点击率、转化率和ROI数据，请做分析"},
+		{Name: "prompt_vs_storyboard", Expected: "sk_seed_image_prompt", Prompt: "不要三幕剧情分镜，只要一组可直接用于出图的海报提示词"},
 		{Name: "email_negative", Expected: "", Prompt: "帮我写一封给客户的道歉邮件，语气诚恳一些"},
 		{Name: "invoice_negative", Expected: "", Prompt: "帮我整理这张发票的报销说明"},
 		{Name: "generic_chat", Expected: "", Prompt: "今天适合做什么运动？"},
@@ -159,7 +177,7 @@ func matchScore(prompt string, hints map[string]string) (int, string) {
 func countHintMatches(prompt string, hint string) int {
 	count := 0
 	for _, item := range splitHints(hint) {
-		if strings.Contains(prompt, strings.ToLower(item)) {
+		if containsPositiveHint(prompt, strings.ToLower(item)) {
 			count++
 		}
 	}
@@ -168,7 +186,43 @@ func countHintMatches(prompt string, hint string) int {
 
 func blockedByNegativeHint(prompt string, hints map[string]string) bool {
 	for _, item := range splitHints(hints["negative_keywords"]) {
-		if strings.Contains(prompt, strings.ToLower(item)) {
+		if containsPositiveHint(prompt, strings.ToLower(item)) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPositiveHint(prompt string, hint string) bool {
+	if hint == "" {
+		return false
+	}
+	start := 0
+	for {
+		idx := strings.Index(prompt[start:], hint)
+		if idx < 0 {
+			return false
+		}
+		absIdx := start + idx
+		if !isNegatedMention(prompt, absIdx) {
+			return true
+		}
+		start = absIdx + len(hint)
+		if start >= len(prompt) {
+			return false
+		}
+	}
+}
+
+func isNegatedMention(prompt string, hintStart int) bool {
+	prefixStart := hintStart - 24
+	if prefixStart < 0 {
+		prefixStart = 0
+	}
+	prefix := prompt[prefixStart:hintStart]
+	negators := []string{"不要", "不是", "别", "无需", "不用", "不需要", "非", "no ", "not ", "without ", "instead of "}
+	for _, negator := range negators {
+		if strings.Contains(prefix, negator) {
 			return true
 		}
 	}
