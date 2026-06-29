@@ -20,6 +20,7 @@ type AgentConfig struct {
 	DatabaseURL             string
 	ServiceName             string
 	BusinessServiceName     string
+	BusinessHostPorts       []string
 	KitexRegistry           string
 	EtcdEndpoints           []string
 	EtcdNamespace           string
@@ -142,6 +143,7 @@ func loadFromWithEtcdLoader(paths []string, loader configsource.EtcdLoader) (Age
 		DatabaseURL:             databaseURL,
 		ServiceName:             values.String("AGENT_SERVICE_NAME", "dora.agent"),
 		BusinessServiceName:     values.String("BUSINESS_SERVICE_NAME", "dora.business"),
+		BusinessHostPorts:       values.CSV("BUSINESS_HOSTPORTS"),
 		KitexRegistry:           values.String("KITEX_REGISTRY", "none"),
 		EtcdEndpoints:           values.CSV("ETCD_ENDPOINTS"),
 		EtcdNamespace:           values.String("ETCD_NAMESPACE", ""),
@@ -174,6 +176,7 @@ var agentEtcdConfigKeys = []string{
 	"AGENT_HTTP_PORT",
 	"AGENT_HTTP_ADDR",
 	"BUSINESS_SERVICE_NAME",
+	"BUSINESS_HOSTPORTS",
 	"KITEX_REGISTRY",
 	"KITEX_TIMEOUT_MS",
 	"AGENT_SSE_ENABLED",

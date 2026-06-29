@@ -536,7 +536,7 @@ func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO,
 	if err := a.saveOutputElements(ctx, skill.ID, versionID, userID, now, in.OutputElements); err != nil {
 		return SkillDetailDTO{}, err
 	}
-	return skillDTO(skill), nil
+	return a.skillAdminDTO(ctx, skill), nil
 }
 
 type compiledMarkdownSkill struct {

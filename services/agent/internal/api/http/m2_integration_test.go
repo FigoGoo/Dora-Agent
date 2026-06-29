@@ -420,14 +420,35 @@ func assertNoProviderRuntimeRef(t *testing.T, events []any) {
 	t.Helper()
 	for _, raw := range events {
 		event, ok := raw.(map[string]any)
-		if !ok || event["type"] != "generation.progress" {
+		if !ok {
 			continue
 		}
 		payload, _ := event["payload"].(map[string]any)
-		if _, exists := payload["provider_runtime_ref"]; exists {
-			t.Fatalf("generation.progress leaked provider_runtime_ref: %#v", event)
+		if containsKeyRecursive(payload, "provider_runtime_ref") {
+			t.Fatalf("event leaked provider_runtime_ref: %#v", event)
 		}
 	}
+}
+
+func containsKeyRecursive(value any, key string) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		if _, ok := typed[key]; ok {
+			return true
+		}
+		for _, child := range typed {
+			if containsKeyRecursive(child, key) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if containsKeyRecursive(child, key) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func agentRaw(t *testing.T, router http.Handler, method, path, idem string, body any) agentRawResponse {
