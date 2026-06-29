@@ -194,13 +194,13 @@ func (h m3Handler) adminSaveProviderWithID(c *gin.Context, providerID string) {
 	if req.DisplayName == "" {
 		req.DisplayName = req.ProviderName
 	}
-	if req.ProviderCode == "" {
+	if req.ProviderCode == "" && providerID == "" {
 		req.ProviderCode = stableCode(req.DisplayName)
 	}
-	if req.Config == nil {
-		req.Config = map[string]any{}
-	}
 	if strings.TrimSpace(req.SecretKeyRef) != "" {
+		if req.Config == nil {
+			req.Config = map[string]any{}
+		}
 		req.Config["secret_key_ref"] = strings.TrimSpace(req.SecretKeyRef)
 	}
 	out, err := h.model.SaveProvider(c.Request.Context(), modelconfig.SaveProviderInput{Auth: adminAuth(c), ProviderID: providerID, ProviderCode: req.ProviderCode, DisplayName: req.DisplayName, ProviderType: req.ProviderType, Status: req.Status, BaseURL: req.BaseURL, Config: req.Config})

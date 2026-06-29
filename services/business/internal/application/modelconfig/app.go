@@ -3,6 +3,7 @@ package modelconfig
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -199,27 +200,62 @@ func (a *App) SaveProvider(ctx context.Context, in SaveProviderInput) (ProviderD
 	if in.Auth.AdminID == "" {
 		return ProviderDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
 	}
-	code := strings.TrimSpace(in.ProviderCode)
-	name := strings.TrimSpace(in.DisplayName)
-	if code == "" || name == "" {
-		return ProviderDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "provider_code and display_name are required")
-	}
 	now := a.now()
 	id := strings.TrimSpace(in.ProviderID)
 	if id == "" {
 		id = security.RandomID("mp_")
 	}
-	status := normalizeStatus(in.Status, activeStatus)
-	var baseURL *string
+	var existing businesscore.ModelProvider
+	if strings.TrimSpace(in.ProviderID) != "" {
+		if err := a.repo.DB().WithContext(ctx).Where("id = ?", id).First(&existing).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return ProviderDTO{}, err
+			}
+			if strings.TrimSpace(in.ProviderCode) == "" || strings.TrimSpace(in.DisplayName) == "" {
+				return ProviderDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "provider not found")
+			}
+		}
+	}
+	code := strings.TrimSpace(in.ProviderCode)
+	if code == "" {
+		code = existing.ProviderCode
+	}
+	name := strings.TrimSpace(in.DisplayName)
+	if name == "" {
+		name = existing.DisplayName
+	}
+	if code == "" || name == "" {
+		return ProviderDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "provider_code and display_name are required")
+	}
+	providerType := strings.TrimSpace(in.ProviderType)
+	if providerType == "" {
+		providerType = existing.ProviderType
+	}
+	status := existing.Status
+	if strings.TrimSpace(in.Status) != "" || status == "" {
+		status = normalizeStatus(in.Status, activeStatus)
+	}
+	baseURL := existing.BaseURL
 	if strings.TrimSpace(in.BaseURL) != "" {
 		value := strings.TrimSpace(in.BaseURL)
 		baseURL = &value
 	}
+	configJSON := existing.ConfigJSON
+	if in.Config != nil {
+		configJSON = mustJSON(in.Config)
+	} else if len(configJSON) == 0 {
+		configJSON = mustJSON(map[string]any{})
+	}
 	adminID := in.Auth.AdminID
 	row := businesscore.ModelProvider{
-		ID: id, ProviderCode: code, DisplayName: name, ProviderType: defaultString(in.ProviderType, "openai_compatible"),
-		Status: status, BaseURL: baseURL, ConfigJSON: mustJSON(in.Config), CreatedByAdminID: &adminID,
+		ID: id, ProviderCode: code, DisplayName: name, ProviderType: defaultString(providerType, "openai_compatible"),
+		Status: status, BaseURL: baseURL, ConfigJSON: configJSON, CreatedByAdminID: &adminID,
 		CreatedBy: stringPtr(adminID), UpdatedBy: stringPtr(adminID), CreatedAt: now, UpdatedAt: now,
+	}
+	if existing.ID != "" {
+		row.CreatedByAdminID = existing.CreatedByAdminID
+		row.CreatedBy = existing.CreatedBy
+		row.CreatedAt = existing.CreatedAt
 	}
 	if err := a.repo.DB().WithContext(ctx).Save(&row).Error; err != nil {
 		return ProviderDTO{}, err

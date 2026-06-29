@@ -1,3 +1,4 @@
+import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 vi.mock('../../lib/api/admin.js', () => ({
@@ -86,6 +87,10 @@ describe('admin resource page configs', () => {
       allowed: false,
       reason: '企业禁用'
     });
+
+    render(config.columns.find((column) => column.key === 'pricing_policy').render({ charge_mode: 'model_generation', billing_unit: 'asset', unit_points: 12 }));
+    expect(screen.getByText('模型生成')).toBeInTheDocument();
+    expect(screen.getByText('按资产 · 12 积分')).toBeInTheDocument();
   });
 
   test('sends fields required by backend confirmations', async () => {
@@ -203,6 +208,8 @@ describe('admin resource page configs', () => {
 
   test('keeps model provider row actions focused on edit and status changes', () => {
     expect(pageConfigs['models/providers'].actions.map((action) => (typeof action.label === 'function' ? action.label({ status: 'active' }) : action.label))).toEqual(['编辑', '停用']);
+    expect(pageConfigs['models/providers'].actions[0].fields.map((field) => field.name)).toContain('provider_code');
+    expect(pageConfigs['models/providers'].actions[1].body({ row: { status: 'active' } })).toEqual({ status: 'disabled' });
   });
 
   test('links models to provider-filtered model management through the side panel', () => {

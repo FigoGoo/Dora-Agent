@@ -50,6 +50,16 @@ const chargeModeOptions = [
   { label: '业务价值', value: 'business_value' }
 ];
 
+const toolBillingUnitOptions = [
+  { label: '按资产', value: 'asset' },
+  { label: '按调用', value: 'call' },
+  { label: '按 Token', value: 'token' },
+  { label: '按图片', value: 'image' },
+  { label: '按视频', value: 'video' },
+  { label: '按音频', value: 'audio' },
+  { label: '按次生成', value: 'generation' }
+];
+
 const scopeTypeOptions = [
   { label: '空间', value: 'space' },
   { label: '企业', value: 'enterprise' },
@@ -85,6 +95,7 @@ const statusColumn = { key: 'status', title: '状态', width: 120, render: (row)
 const createdColumn = { key: 'created_at', title: '创建时间', width: 180, render: (row) => formatDateTime(row.created_at || row.registered_at || row.published_at) };
 const resourceTypeLabel = (value) => optionLabel(resourceTypeOptions, value);
 const billingUnitLabel = (value) => optionLabel(modelBillingUnitOptions, value);
+const toolBillingUnitLabel = (value) => optionLabel(toolBillingUnitOptions, value);
 const secretRefStatusLabel = (value) =>
   ({
     configured: '已配置',
@@ -170,7 +181,7 @@ function ToolPricingPolicyCell(row) {
     <div className="admin-table-cell-stack">
       <span className="admin-table-cell-main">{optionLabel(chargeModeOptions, row.charge_mode)}</span>
       <span className="admin-table-cell-meta">
-        {billingUnitLabel(row.billing_unit)} · {formatPoints(row.unit_points)}
+        {toolBillingUnitLabel(row.billing_unit)} · {formatPoints(row.unit_points)}
       </span>
       {row.pricing_policy_id ? <span className="admin-table-cell-meta">{row.pricing_policy_id}</span> : null}
     </div>
@@ -495,9 +506,10 @@ export const pageConfigs = {
     actions: [
 	      {
 	        label: '编辑',
-	        method: 'PATCH',
-	        path: (row) => `/api/admin/models/providers/${row.provider_id}`,
+        method: 'PATCH',
+        path: (row) => `/api/admin/models/providers/${row.provider_id}`,
         fields: [
+          { name: 'provider_code', label: '供应商编码', required: true },
           { name: 'provider_name', label: '供应商名称', required: true },
           { name: 'provider_type', label: '供应商类型' },
           { name: 'base_url', label: 'Base URL' },
