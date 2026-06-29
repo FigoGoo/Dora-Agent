@@ -1,13 +1,30 @@
-import { Bell, FolderKanban, Ticket, UserCircle } from 'lucide-react';
+import { Bell, Blocks, FolderKanban, Ticket, UserCircle } from 'lucide-react';
 import { AccountMenu } from './AccountMenu.jsx';
 
+const PAGE_TITLE_CONFIG = {
+  projects: {
+    icon: FolderKanban,
+    id: 'projects-title',
+    label: '项目'
+  },
+  skills: {
+    icon: Blocks,
+    id: 'skills-title',
+    label: 'Skill'
+  }
+};
+
 export function ContextHeader({ activePage, isLoggedIn, user, isAccountMenuOpen, onLogin, onToggleAccountMenu, onOpenCredits }) {
+  const pageTitle = PAGE_TITLE_CONFIG[activePage];
+  const PageIcon = pageTitle?.icon;
+  const headerClassName = pageTitle ? `context-header context-header--${activePage}` : 'context-header';
+
   return (
-    <header className={activePage === 'projects' ? 'context-header context-header--projects' : 'context-header'}>
-      {activePage === 'projects' ? (
-        <div className="projects-page__title">
-          <FolderKanban aria-hidden="true" size={18} />
-          <h1 id="projects-title">项目</h1>
+    <header className={headerClassName}>
+      {pageTitle ? (
+        <div className="context-page-title">
+          <PageIcon aria-hidden="true" size={18} />
+          <h1 id={pageTitle.id}>{pageTitle.label}</h1>
         </div>
       ) : (
         <div className="status-pill attention-tag">

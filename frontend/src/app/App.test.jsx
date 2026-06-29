@@ -156,6 +156,36 @@ describe('DORAIGC static client pages', () => {
     expect(screen.queryByRole('heading', { name: 'Dora Agent - 人人都是艺术大师' })).not.toBeInTheDocument();
   });
 
+  it('renders the Skill page from the direct route', () => {
+    window.history.pushState({}, '', '/skill');
+
+    render(<App />);
+
+    const navigation = screen.getByRole('complementary', { name: 'DORAIGC 导航' });
+    expect(screen.getByRole('heading', { name: 'Skill' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '我的', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '新建Skill' })).toBeInTheDocument();
+    expect(screen.getAllByTestId('skill-card')).toHaveLength(10);
+    expect(screen.getByText('塔可夫斯基风格诗意短片')).toBeInTheDocument();
+    expect(within(navigation).getByRole('button', { name: 'Skill' })).toHaveClass('is-active');
+  });
+
+  it('redirects the legacy explore route to the home featured works section', async () => {
+    window.history.pushState({}, '', '/explore');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/');
+    });
+
+    const navigation = screen.getByRole('complementary', { name: 'DORAIGC 导航' });
+    expect(screen.getByRole('heading', { name: '精选作品' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '精选作品中心' })).not.toBeInTheDocument();
+    expect(within(navigation).getByRole('button', { name: '精选作品' })).toHaveClass('is-active');
+    expect(within(navigation).getByRole('button', { name: '首页' })).not.toHaveClass('is-active');
+  });
+
   it('keeps URL and page state in sync for client navigation', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -235,7 +265,7 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByPlaceholderText('请输入你的消息...')).toBeInTheDocument();
   });
 
-  it('navigates through skills, explore, and credits mock pages', async () => {
+  it('navigates through skills, featured works, and credits mock pages', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -243,13 +273,19 @@ describe('DORAIGC static client pages', () => {
     await user.click(screen.getByRole('button', { name: '登录并继续' }));
 
     await user.click(screen.getByRole('button', { name: 'Skill' }));
-    expect(screen.getByRole('heading', { name: 'Skill 中心' })).toBeInTheDocument();
-    expect(screen.getByText('AI 短剧一站式生成')).toBeInTheDocument();
-    expect(screen.getByText('待审核')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/skill');
+    expect(screen.getByRole('heading', { name: 'Skill' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '我的', selected: true })).toBeInTheDocument();
+    expect(screen.getAllByTestId('skill-card')).toHaveLength(10);
+    expect(screen.getAllByText('剧情短片（音色参考）')).toHaveLength(2);
+    expect(screen.getByText('审核中')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '精选作品' }));
-    expect(screen.getByRole('heading', { name: '精选作品中心' })).toBeInTheDocument();
-    expect(screen.getByText('公开浏览')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+    expect(screen.getByRole('heading', { name: '精选作品' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '精选作品中心' })).not.toBeInTheDocument();
+    expect(screen.getByText('MV 分镜生成')).toBeInTheDocument();
+    expect(within(screen.getByRole('complementary', { name: 'DORAIGC 导航' })).getByRole('button', { name: '精选作品' })).toHaveClass('is-active');
 
     await user.click(screen.getByRole('button', { name: '310积分' }));
     expect(screen.getByRole('heading', { name: '积分中心' })).toBeInTheDocument();
@@ -312,7 +348,7 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByText('查看已经生成或上传的素材，快速带回当前创作。')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Skill' }));
-    expect(screen.getAllByTestId('content-card')).toHaveLength(3);
+    expect(screen.getAllByTestId('skill-card')).toHaveLength(10);
     expect(screen.queryByText(/静态|mock|系统|API|PRD/)).not.toBeInTheDocument();
   });
 });

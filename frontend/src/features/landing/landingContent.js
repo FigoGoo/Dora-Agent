@@ -7,13 +7,15 @@ import {
   Sparkles
 } from 'lucide-react';
 
+export const HOME_FEATURED_SECTION_ID = 'featured-works';
+
 export const navItems = [
   { label: '首页', page: 'home', icon: Home },
   { label: '快速创作', page: 'workspace', icon: Sparkles },
   { label: '项目', page: 'projects', icon: FolderKanban },
   { label: '资产库', page: 'assets', icon: Images },
   { label: 'Skill', page: 'skills', icon: Blocks },
-  { label: '精选作品', page: 'explore', icon: Play }
+  { label: '精选作品', page: 'home', icon: Play, targetId: HOME_FEATURED_SECTION_ID }
 ];
 
 export const workCategories = ['全部', '影视', '短剧', '动漫', 'MV', 'TVC', '文旅', '电商'];
@@ -361,33 +363,6 @@ export const assetMocks = [
     project: '电影海报概念',
     source: '海报生成',
     cover: '/works/doraigc-aigc-movie-poster.png'
-  }
-];
-
-export const skillMocks = [
-  {
-    title: 'AI 短剧一站式生成',
-    owner: '个人 Skill',
-    status: '待审核',
-    description: '从故事梗概生成角色、分镜、竖屏封面和发布摘要。',
-    cover: '/works/doraigc-ratio-anime-short-9x16.png',
-    tags: ['短剧', '角色', '分镜']
-  },
-  {
-    title: '视频拉片复刻',
-    owner: 'DORAIGC 推荐',
-    status: '已发布',
-    description: '提取参考片构图、节奏和色彩，再生成新的镜头提示。',
-    cover: '/works/doraigc-ratio-mv-16x9.png',
-    tags: ['拉片', '镜头', '复刻']
-  },
-  {
-    title: '商品卖点短片',
-    owner: '企业 Skill',
-    status: '有新版本',
-    description: '把商品卖点、投放比例和素材清单合成为短视频脚本。',
-    cover: '/works/doraigc-aigc-product-hero.png',
-    tags: ['电商', 'TVC']
   }
 ];
 

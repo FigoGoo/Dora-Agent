@@ -22,19 +22,20 @@ import { PageHeader } from '../../components/common/PageHeader.jsx';
 import { WorkPreviewModal } from '../../components/common/WorkPreviewModal.jsx';
 import { ContextHeader } from '../../components/layout/ContextHeader.jsx';
 import { SideNav } from '../../components/layout/SideNav.jsx';
-import { getPageFromPath, getPathForPage, WORKSPACE_ROUTE } from '../../app/routes.js';
+import { getPageFromPath, getPathForPage, normalizePath, WORKSPACE_ROUTE } from '../../app/routes.js';
 import { currentUser } from '../account/accountMock.js';
 import { ProjectsPage } from '../projects/ProjectsPage.jsx';
+import { SkillsPage } from '../skills/SkillsPage.jsx';
 import {
   agentWorkspaceMock,
   assetMocks,
   creditMock,
+  HOME_FEATURED_SECTION_ID,
   hotSkills,
   navItems,
   promptTools,
   publicWorks,
   recentProjects,
-  skillMocks,
   userWorkMocks,
   workCategories,
   workspaceMock
@@ -63,6 +64,22 @@ function openWorkspaceInNewTab() {
   if (typeof window !== 'undefined') {
     window.open(WORKSPACE_ROUTE, '_blank', 'noopener,noreferrer');
   }
+}
+
+function scrollToHomeSection(targetId) {
+  if (typeof window === 'undefined' || !targetId) {
+    return;
+  }
+
+  const schedule = window.requestAnimationFrame || ((callback) => window.setTimeout(callback, 0));
+
+  schedule(() => {
+    const target = document.getElementById(targetId);
+
+    if (typeof target?.scrollIntoView === 'function') {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
 }
 
 function parseRatio(ratio) {
@@ -183,7 +200,7 @@ function RecentProjects({ onUse }) {
 
 function WorkCategoryBridge({ activeCategory, onCategoryChange }) {
   return (
-    <section className="featured-bridge" aria-labelledby="public-works-title">
+    <section className="featured-bridge" id={HOME_FEATURED_SECTION_ID} aria-labelledby="public-works-title">
       <h2 id="public-works-title">精选作品</h2>
       <div className="work-tabs" aria-label="作品分类">
         {workCategories.map((category) => (
@@ -601,40 +618,6 @@ function AssetsPage({ onIntent }) {
   );
 }
 
-function SkillsPage({ onIntent }) {
-  return (
-    <section className="mock-page" aria-labelledby="skills-title">
-      <PageHeader
-        eyebrow="创作方法"
-        title="Skill 中心"
-        copy="整理常用创作方法，查看审核进度和可用版本。"
-      >
-        <button className="start-button" type="button" onClick={() => onIntent('创建 Skill', '登录后进入 Skill Builder。')}>
-          创建 Skill
-        </button>
-      </PageHeader>
-      <div className="mock-card-grid mock-card-grid--three">
-        {skillMocks.map((skill) => (
-          <article className="mock-card content-card skill-library-card" data-testid="content-card" key={skill.title}>
-            <img src={skill.cover} alt="" />
-            <div className="content-card__body">
-              <span className="transparent-tag">{skill.owner}</span>
-              <h2>{skill.title}</h2>
-              <p>{skill.description}</p>
-              <div className="tag-row">
-                {skill.tags.map((tag) => (
-                  <small key={tag}>{tag}</small>
-                ))}
-              </div>
-              <strong className="status-text">{skill.status}</strong>
-            </div>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function WorksPage({ onIntent }) {
   return (
     <section className="mock-page" aria-labelledby="works-title">
@@ -662,29 +645,6 @@ function WorksPage({ onIntent }) {
           </article>
         ))}
       </div>
-    </section>
-  );
-}
-
-function ExplorePage({ activeCategory, onCategoryChange, likedWorks, mutedWorks, onLike, onToggleMute, onPreview }) {
-  return (
-    <section className="mock-page explore-page" aria-labelledby="explore-title">
-      <PageHeader
-        eyebrow="灵感广场"
-        title="精选作品中心"
-        copy="浏览大家公开分享的灵感作品，找到可继续创作的方向。"
-      >
-        <span className="status-pill">公开浏览</span>
-      </PageHeader>
-      <WorkCategoryBridge activeCategory={activeCategory} onCategoryChange={onCategoryChange} />
-      <PublicWorks
-        activeCategory={activeCategory}
-        likedWorks={likedWorks}
-        mutedWorks={mutedWorks}
-        onLike={onLike}
-        onToggleMute={onToggleMute}
-        onPreview={onPreview}
-      />
     </section>
   );
 }
@@ -735,6 +695,16 @@ export function LandingPage() {
   const [likedWorks, setLikedWorks] = useState([]);
   const [mutedWorks, setMutedWorks] = useState([]);
   const [activeCategory, setActiveCategory] = useState('全部');
+  const [pendingScrollTarget, setPendingScrollTarget] = useState(() => (
+    typeof window !== 'undefined' && normalizePath(window.location.pathname) === '/explore'
+      ? HOME_FEATURED_SECTION_ID
+      : null
+  ));
+  const [activeNavTarget, setActiveNavTarget] = useState(() => (
+    typeof window !== 'undefined' && normalizePath(window.location.pathname) === '/explore'
+      ? HOME_FEATURED_SECTION_ID
+      : null
+  ));
 
   function requestLogin(title, promptValue, targetPage) {
     openLoginIntent(setLoginIntent, title, promptValue || prompt || '登录后会继续刚才的创作动作。', targetPage);
@@ -744,6 +714,8 @@ export function LandingPage() {
   function navigateToPage(page, options = {}) {
     setActivePage(page);
     setIsAccountMenuOpen(false);
+    setPendingScrollTarget(options.targetId || null);
+    setActiveNavTarget(options.targetId || null);
 
     if (typeof window !== 'undefined' && !options.replaceOnly) {
       const path = getPathForPage(page);
@@ -767,14 +739,14 @@ export function LandingPage() {
     setIsAccountMenuOpen(false);
   }
 
-  function handleNavigate(page) {
+  function handleNavigate(page, targetId) {
     if (page === 'workspace') {
       openWorkspaceInNewTab();
       setIsAccountMenuOpen(false);
       return;
     }
 
-    navigateToPage(page);
+    navigateToPage(page, { targetId });
   }
 
   function openCreditsPage() {
@@ -799,8 +771,16 @@ export function LandingPage() {
 
   useEffect(() => {
     function syncPageFromPath() {
+      const normalizedPath = normalizePath(window.location.pathname);
+
       setActivePage(getPageFromPath(window.location.pathname));
+      setPendingScrollTarget(normalizedPath === '/explore' ? HOME_FEATURED_SECTION_ID : null);
+      setActiveNavTarget(normalizedPath === '/explore' ? HOME_FEATURED_SECTION_ID : null);
       setIsAccountMenuOpen(false);
+
+      if (normalizedPath === '/explore') {
+        window.history.replaceState({}, '', getPathForPage('home'));
+      }
     }
 
     window.addEventListener('popstate', syncPageFromPath);
@@ -809,6 +789,24 @@ export function LandingPage() {
       window.removeEventListener('popstate', syncPageFromPath);
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || normalizePath(window.location.pathname) !== '/explore') {
+      return;
+    }
+
+    window.history.replaceState({}, '', getPathForPage('home'));
+  }, []);
+
+  useEffect(() => {
+    if (activePage !== 'home' || !pendingScrollTarget) {
+      return;
+    }
+
+    const targetId = pendingScrollTarget;
+    setPendingScrollTarget(null);
+    scrollToHomeSection(targetId);
+  }, [activePage, pendingScrollTarget]);
 
   useEffect(() => {
     function closeOverlay(event) {
@@ -826,17 +824,25 @@ export function LandingPage() {
     };
   }, []);
 
+  const mainClassName =
+    activePage === 'projects'
+      ? 'landing-main landing-main--projects'
+      : activePage === 'skills'
+        ? 'landing-main landing-main--skills'
+        : 'landing-main';
+
   return (
     <div className="doraigc-shell" style={themeStyle} data-testid="doraigc-shell">
       <SideNav
         activePage={activePage}
+        activeNavTarget={activeNavTarget}
         isLoggedIn={isLoggedIn}
         navItems={navItems}
         onNavigate={handleNavigate}
         onLogin={requestLogin}
         onToggleAccountMenu={() => setIsAccountMenuOpen((value) => !value)}
       />
-      <main className={activePage === 'projects' ? 'landing-main landing-main--projects' : 'landing-main'}>
+      <main className={mainClassName}>
         <ContextHeader
           activePage={activePage}
           isLoggedIn={isLoggedIn}
@@ -879,17 +885,6 @@ export function LandingPage() {
         {activePage === 'assets' ? <AssetsPage onIntent={requestLogin} /> : null}
         {activePage === 'skills' ? <SkillsPage onIntent={requestLogin} /> : null}
         {activePage === 'works' ? <WorksPage onIntent={requestLogin} /> : null}
-        {activePage === 'explore' ? (
-          <ExplorePage
-            activeCategory={activeCategory}
-            onCategoryChange={setActiveCategory}
-            likedWorks={likedWorks}
-            mutedWorks={mutedWorks}
-            onLike={handleWorkLike}
-            onToggleMute={handleToggleMute}
-            onPreview={setPreviewWork}
-          />
-        ) : null}
         {activePage === 'credits' ? <CreditsPage onIntent={requestLogin} /> : null}
       </main>
       <LoginModal intent={loginIntent} onClose={() => setLoginIntent(null)} onComplete={handleLoginComplete} />
