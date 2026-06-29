@@ -2,7 +2,7 @@
 
 状态：active
 owner：文档与契约责任域；业务服务责任域和前端责任域确认
-更新时间：2026-06-28
+更新时间：2026-06-29
 适用范围：Dora-Agent Web 前端 -> 业务 API 适配层
 
 ## 成熟度复核
@@ -47,16 +47,52 @@ owner：文档与契约责任域；业务服务责任域和前端责任域确认
 ## 后台高风险操作
 
 - 后台高风险写操作必须拆分为 preview 和 confirm；preview 只返回影响范围、确认摘要、`preview_token` 和过期时间，不改变业务事实。
-- confirm 必须携带 `preview_token`、`AdminReason` 和 `Idempotency-Key`；服务端必须校验 preview token、管理员身份、操作对象、原因摘要和幂等冲突。
+- confirm 必须在 JSON body 携带 `preview_token` 和 `reason`，并在 header 携带 `Idempotency-Key`；服务端必须校验 preview token、管理员身份、操作对象、原因摘要和幂等冲突。
+- 后台操作原因属于业务审计字段，不使用 HTTP header 传输；所有中文、多行原因都按 JSON body 原文传递。
 - 用户状态变更使用 `POST /api/admin/users/{user_id}/status/preview` 和 `POST /api/admin/users/{user_id}/status/confirm`。
 - 公开作品下架使用 `POST /api/admin/works/public/{public_work_id}/take-down/preview` 和 `POST /api/admin/works/public/{public_work_id}/take-down/confirm`。
 - confirm 成功后必须写入后台审计；失败时只返回业务错误码，不泄露内部实现、策略细节或数据库结构。
+
+## 后台 Skill 创建
+
+- `POST /api/admin/skills/system` 的主输入是 `skill_markdown`，管理端 Skill 编辑器只提交 Skill 名称、标签和 Markdown 源码。
+- Markdown 使用中文标签段落，例如 `<名称>`、`<说明>`、`<输入>`、`<计划>`、`<工具引用>`、`<AG-UI元素引用>`、`<生成偏好>`、`<提示词写法>` 和 `<结果输出>`。
+- Tool 引用使用结构化标签，例如 `<tool id="image_generate:model_generation">图片生成</tool>`；文本展示只显示标签内名称，源码保存完整标签。
+- AG-UI 引用使用结构化标签，例如 `<agui id="storyboard_panel">故事板面板</agui>`；对话框内/外分组由 Markdown 段落文本表达。
+- `<输入>` 和 `<结果输出>` 都使用自然语言描述运行时意图，不要求管理员手写 JSON Schema；Agent 运行时根据意图向用户发起 AG-UI 填写、选择、上传、审阅或修改。
+- 业务服务解析 `skill_markdown` 后派生 `skill_spec_json`、`route_hints`、`input_schema_json`、`output_schema_json`、Tool 绑定和默认 `memory_policy_json`；前端不得自行拼装这些运行时 JSON 字段。
+- `input_schema_json.mode=agent_requested_inputs`，保存从 `<输入>` 推断出的 `input_intents`、偏好的 AG-UI 交互和循环补充策略；`output_schema_json.mode=agent_generated_outputs`，保存从 `<结果输出>` 推断出的 `output_intents`、产物类型、偏好的展示面板和用户可修改策略。
+- `skill_key`、`version`、旧 `skill_spec_json` 等字段保留兼容，但新管理端默认不要求管理员手工填写。
+- 系统 Skill 列表额外返回 `latest_version_id` 和 `active_test_case_count`，用于管理端判断发布前置条件；发布仍由后端强校验至少 3 个 active 测试用例。
+- 审核提交、通过和拒绝必须同步 `skills.status` 与 `skill_versions.status`；拒绝新 Skill 时主状态回到 `draft`，拒绝已发布 Skill 的新版本时主状态保持 `published`。
+
+## 后台 Tool 注册
+
+- `POST /api/admin/tools` 只注册 Tool 元信息和默认治理策略，不创建运行时执行器。
+- 管理端常规 Tool 管理页不暴露新增按钮，只展示已注册 Tool，并提供启停、策略、计费、白名单和影响预览。
+- 注册字段必须包含 `tool_name`、`tool_type`、`display_name` 和 `description`；`description` 是给 Skill 作者选择 Tool 时阅读的作用说明。
+- 注册时同时初始化全局执行策略和默认计费策略，包括 `allowed`、`risk_level`、`requires_confirmation`、`timeout_ms`、`charge_mode`、`billing_unit`、`unit_points`、`free_quota` 和 `min_charge_points`。
+- `input_schema_json` 和 `output_schema_json` 保存 Tool 执行器的结构化输入/输出说明；为空时默认 `{}`，不得由前端臆造未被执行器支持的字段。
+- 内置 Tool 的真实执行能力仍由后端运行时提供；管理端注册成功只代表 Skill 可以引用该 Tool，并不代表新增了新的代码级执行器。
+- 管理端 Tool 列表展示真实治理配置；Tool 停用只影响运行时执行检查，不得把管理端策略展示改成 `disabled/0`。
+- Tool 影响预览同时返回 `affected_skill_ids` 和 `affected_skills[]`，其中 `affected_skills` 至少包含 `skill_id`、`skill_name` 和 `status`，便于管理端展示中文对象说明。
+
+## 后台模型配置
+
+- 模型供应商和模型是联动配置：`GET /api/admin/models/providers` 返回供应商候选，管理端创建或编辑模型时必须从供应商候选中选择 `provider_id`，不要求管理员手工输入供应商 ID。
+- 模型管理页应采用左侧供应商索引、右侧模型列表的联动布局；选择左侧供应商后，右侧模型列表通过 `provider_id` 查询参数刷新。
+- `GET /api/admin/models` 支持 `provider_id`、`resource_type`、`status` 查询参数；从供应商详情或供应商列表进入模型管理时，应携带 `provider_id` 做默认筛选并同步左侧选中态。
+- `AdminModelDTO` 返回 `provider_id` 和展示用 `provider_name`；表格展示使用供应商名称，仍保留 ID 便于审计和排障。
+- 模型供应商负责密钥引用、基础 URL 和连通性测试；模型负责模型编码、资源类型、路由配置、默认模型和计费价格快照。
+- 设为默认模型时 `pricing_snapshot_id` 可省略；后端优先绑定当前 active 价格快照，没有 active 价格快照时自动创建 0 积分默认价格快照；同一资源类型只维护一条 active 默认记录，重复设默认通过更新该记录完成。
+- 默认模型不能直接停用；`POST /api/admin/models/{model_id}/status` 对 active 默认模型返回 `STATE_CONFLICT`，管理端也不展示停用按钮。
 
 ## 通用规则
 
 - 用户端工程目录固定为 `frontend/`，承载公开页、登录态 C 端、项目、工作台、资产、作品和企业空间。
 - 管理端工程目录固定为 `admin_frontend/`，承载独立后台登录态和 `/api/admin/**`。
 - 两端 cookie/token 命名空间隔离；后台请求 `RequestMeta.source=admin`，必须包含 `admin_id`、操作原因和审计字段。
+- 后台登录成功返回 `AdminSessionDTO.expires_at`；后台 session 为 7 天滑动窗口，任一有效 `/api/admin/**` 鉴权请求都会续期并通过 `X-Admin-Session-Expires-At` 响应头返回新的过期时间。
 - 未登录公开读 API 不返回用户私有资产、会话、黑板、提示词、积分、模型成本。
 - 需要登录的动作返回 `UNAUTHENTICATED`，前端弹 LoginModal。
 - 列表默认 `page_size = 10`，最大值建议 `50`。

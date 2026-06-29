@@ -25,6 +25,8 @@ type App struct {
 	secret string
 }
 
+const adminSessionTTL = 7 * 24 * time.Hour
+
 func New(repo *businesscore.Repository, guard *idempotency.IdempotencyGuard, audit auditlog.Writer) *App {
 	return &App{
 		repo:   repo,
@@ -47,6 +49,7 @@ type AdminAuth struct {
 	Account     string
 	SessionID   string
 	AccessToken string
+	ExpiresAt   time.Time
 }
 
 type RequestMeta = accountspace.RequestMeta
@@ -90,10 +93,11 @@ type UserStatusInput struct {
 }
 
 type ListUsersInput struct {
-	Auth   AdminAuth
-	Status string
-	Limit  int
-	Offset int
+	Auth    AdminAuth
+	Status  string
+	Keyword string
+	Limit   int
+	Offset  int
 }
 
 type AuditQueryInput struct {
@@ -309,9 +313,10 @@ func (a *App) Login(ctx context.Context, in AdminLoginInput) (AdminSessionDTO, e
 		now := a.now()
 		accessToken, tokenHash := security.NewOpaqueToken("admin")
 		csrfToken, csrfHash := security.NewOpaqueToken("csrf")
+		expiresAt := now.Add(adminSessionTTL)
 		session := businesscore.PlatformAdminSession{
 			ID: security.RandomID("asess_"), AdminID: admin.ID, SessionTokenDigest: tokenHash, CSRFTokenHash: &csrfHash,
-			Status: accountspace.StatusActive, ExpiresAt: now.Add(12 * time.Hour),
+			Status: accountspace.StatusActive, ExpiresAt: expiresAt,
 			CreatedBy: optionalString(admin.ID), UpdatedBy: optionalString(admin.ID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&session).Error; err != nil {
@@ -395,7 +400,11 @@ func (a *App) RotatePassword(ctx context.Context, in RotatePasswordInput) (Admin
 		if err := tx.Create(audit).Error; err != nil {
 			return err
 		}
-		dto = AdminSessionDTO{AdminID: row.ID, Account: row.AdminAccount, Status: row.Status, MustRotatePassword: false, CSRFToken: "", AccessToken: in.Auth.AccessToken, ExpiresAt: now.Add(12 * time.Hour), BootstrapStatus: "rotated"}
+		expiresAt := in.Auth.ExpiresAt
+		if expiresAt.IsZero() {
+			expiresAt = now.Add(adminSessionTTL)
+		}
+		dto = AdminSessionDTO{AdminID: row.ID, Account: row.AdminAccount, Status: row.Status, MustRotatePassword: false, CSRFToken: "", AccessToken: in.Auth.AccessToken, ExpiresAt: expiresAt, BootstrapStatus: "rotated"}
 		return nil
 	})
 	if err != nil {
@@ -569,6 +578,13 @@ func (a *App) ListUsers(ctx context.Context, in ListUsersInput) (Page[UserSummar
 	if in.Status != "" {
 		db = db.Where("status = ?", in.Status)
 	}
+	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
+		like := "%" + strings.ToLower(keyword) + "%"
+		db = db.Where(
+			"LOWER(id) LIKE ? OR LOWER(account_no) LIKE ? OR LOWER(display_name) LIKE ? OR LOWER(COALESCE(email, '')) LIKE ? OR LOWER(COALESCE(phone, '')) LIKE ?",
+			like, like, like, like, like,
+		)
+	}
 	var rows []businesscore.User
 	if err := db.Order("created_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
 		return Page[UserSummaryDTO]{}, err
@@ -721,15 +737,23 @@ func (a *App) AuthenticateToken(ctx context.Context, rawToken string) (AdminAuth
 		return AdminAuth{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin authorization token is required")
 	}
 	tokenHash := security.HashOpaque(rawToken)
+	now := a.now()
 	var session businesscore.PlatformAdminSession
-	if err := a.repo.DB().WithContext(ctx).Where("session_token_digest = ? AND status = ? AND expires_at > ?", tokenHash, accountspace.StatusActive, a.now()).First(&session).Error; err != nil {
+	if err := a.repo.DB().WithContext(ctx).Where("session_token_digest = ? AND status = ? AND expires_at > ?", tokenHash, accountspace.StatusActive, now).First(&session).Error; err != nil {
 		return AdminAuth{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin session is invalid")
 	}
 	var admin businesscore.PlatformAdmin
 	if err := a.repo.DB().WithContext(ctx).Where("id = ? AND status = ?", session.AdminID, accountspace.StatusActive).First(&admin).Error; err != nil {
 		return AdminAuth{}, bizerrors.New(bizerrors.CodePermissionDenied, "admin is unavailable")
 	}
-	return AdminAuth{AdminID: admin.ID, Account: admin.AdminAccount, SessionID: session.ID, AccessToken: rawToken}, nil
+	expiresAt := now.Add(adminSessionTTL)
+	if err := a.repo.DB().WithContext(ctx).Model(&businesscore.PlatformAdminSession{}).Where("id = ?", session.ID).Updates(map[string]any{
+		"expires_at": expiresAt,
+		"updated_at": now,
+	}).Error; err != nil {
+		return AdminAuth{}, err
+	}
+	return AdminAuth{AdminID: admin.ID, Account: admin.AdminAccount, SessionID: session.ID, AccessToken: rawToken, ExpiresAt: expiresAt}, nil
 }
 
 func (a *App) requireAdmin(ctx context.Context, auth AdminAuth, allowRotateOnly bool) error {

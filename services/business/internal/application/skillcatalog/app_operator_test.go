@@ -40,11 +40,17 @@ func TestSkillCatalogOperatorColumnsAreFilledFromAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit review: %v", err)
 	}
+	if got := loadSkillStatus(t, app, detail.SkillID); got != statusSubmitted {
+		t.Fatalf("skill status after submit=%q", got)
+	}
 	requireSkillOperatorColumns(t, app, "skill_versions", "id = ?", auth.UserID, auth.UserID, submitted["version_id"])
 
 	adminAuth := admin.AdminAuth{AdminID: "adm_root"}
 	if _, err := app.ConfirmReview(t.Context(), adminAuth, versionID, "reject", "needs changes"); err != nil {
 		t.Fatalf("reject review: %v", err)
+	}
+	if got := loadSkillStatus(t, app, detail.SkillID); got != statusDraft {
+		t.Fatalf("skill status after reject=%q", got)
 	}
 	requireSkillOperatorColumns(t, app, "skill_versions", "id = ?", auth.UserID, adminAuth.AdminID, versionID)
 	requireSkillOperatorColumns(t, app, "skill_review_records", "version_id = ? AND review_action = ?", adminAuth.AdminID, adminAuth.AdminID, versionID, "reject")
@@ -55,6 +61,15 @@ func TestSkillCatalogOperatorColumnsAreFilledFromAuth(t *testing.T) {
 	requireSkillOperatorColumns(t, app, "skills", "id = ?", "", adminAuth.AdminID, "sk_seed_storyboard")
 	requireSkillOperatorColumns(t, app, "skill_versions", "id = ?", "", adminAuth.AdminID, "skv_seed_storyboard_100")
 	requireSkillOperatorColumns(t, app, "skill_review_records", "version_id = ? AND review_action = ?", adminAuth.AdminID, adminAuth.AdminID, "skv_seed_storyboard_100", "publish")
+}
+
+func loadSkillStatus(t *testing.T, app *App, skillID string) string {
+	t.Helper()
+	var status string
+	if err := app.repo.DB().Raw("SELECT status FROM skills WHERE id = ?", skillID).Scan(&status).Error; err != nil {
+		t.Fatalf("load skill status: %v", err)
+	}
+	return status
 }
 
 func latestVersionID(t *testing.T, app *App, skillID string) string {

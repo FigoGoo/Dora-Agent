@@ -186,7 +186,6 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/PageSize'
-      - $ref: '#/components/parameters/PageToken'
   /api/enterprise/invites:
     post:
       tags:
@@ -1523,7 +1522,6 @@ paths:
       parameters:
       - $ref: '#/components/parameters/UserId'
       - $ref: '#/components/parameters/IdempotencyKey'
-      - $ref: '#/components/parameters/AdminReason'
       requestBody:
         $ref: '#/components/requestBodies/ConfirmUserStatusBody'
   /api/admin/audit-logs:
@@ -1661,6 +1659,21 @@ paths:
         '500':
           $ref: '#/components/responses/SystemProblem'
       parameters:
+      - name: provider_id
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: resource_type
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
       - $ref: '#/components/parameters/PageSize'
     post:
       tags:
@@ -1779,6 +1792,27 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/PageSize'
+    post:
+      tags:
+      - Tool
+      operationId: registerAdminTool
+      responses:
+        '200':
+          $ref: '#/components/responses/RegisterAdminToolOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/RegisterAdminToolBody'
   /api/admin/tools/{tool_key}/impact-preview:
     post:
       tags:
@@ -2071,6 +2105,16 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/PageSize'
+      - $ref: '#/components/parameters/PageToken'
+      - $ref: '#/components/parameters/AdminKeyword'
+      - name: target_type
+        in: query
+        schema:
+          type: string
+          enum:
+          - user
+          - personal
+          - enterprise
   /api/admin/credits/grants:
     post:
       tags:
@@ -2091,7 +2135,6 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
-      - $ref: '#/components/parameters/AdminReason'
       requestBody:
         $ref: '#/components/requestBodies/AdminGrantCreditsBody'
   /api/admin/credits/codes:
@@ -2227,6 +2270,31 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/PageSize'
+      - $ref: '#/components/parameters/PageToken'
+      - $ref: '#/components/parameters/AdminKeyword'
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - active
+          - taken_down
+          - cancelled
+      - name: category
+        in: query
+        schema:
+          type: string
+          maxLength: 64
+      - name: tag
+        in: query
+        schema:
+          type: string
+          maxLength: 64
+      - name: resource_type
+        in: query
+        schema:
+          type: string
+          maxLength: 64
   /api/admin/works/public/{public_work_id}/take-down/preview:
     post:
       tags:
@@ -2247,7 +2315,6 @@ paths:
           $ref: '#/components/responses/SystemProblem'
       parameters:
       - $ref: '#/components/parameters/PublicWorkId'
-      - $ref: '#/components/parameters/AdminReason'
       requestBody:
         $ref: '#/components/requestBodies/PreviewTakeDownPublicWorkBody'
   /api/admin/works/public/{public_work_id}/take-down/confirm:
@@ -2271,7 +2338,6 @@ paths:
       parameters:
       - $ref: '#/components/parameters/PublicWorkId'
       - $ref: '#/components/parameters/IdempotencyKey'
-      - $ref: '#/components/parameters/AdminReason'
       requestBody:
         $ref: '#/components/requestBodies/ConfirmTakeDownPublicWorkBody'
 components:
@@ -2283,13 +2349,6 @@ components:
       schema:
         type: string
         maxLength: 128
-    AdminReason:
-      name: X-Admin-Reason
-      in: header
-      required: true
-      schema:
-        type: string
-        maxLength: 512
     PageSize:
       name: page_size
       in: query
@@ -2302,6 +2361,12 @@ components:
       in: query
       schema:
         type: string
+    AdminKeyword:
+      name: keyword
+      in: query
+      schema:
+        type: string
+        maxLength: 128
     ProjectId:
       name: project_id
       in: path
@@ -2615,6 +2680,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/SetModelStatusRequest'
+    RegisterAdminToolBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RegisterAdminToolRequest'
     PreviewToolImpactBody:
       required: true
       content:
@@ -3264,6 +3335,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/PreviewToolImpactOkEnvelope'
+    RegisterAdminToolOk:
+      description: registerAdminTool successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RegisterAdminToolOkEnvelope'
     UpdateToolPolicyOk:
       description: updateToolPolicy successful response.
       content:
@@ -3486,6 +3563,7 @@ components:
       - status
       - must_rotate_password
       - csrf_token
+      - access_token
       - expires_at
       additionalProperties: false
       properties:
@@ -3501,6 +3579,8 @@ components:
         must_rotate_password:
           type: boolean
         csrf_token:
+          type: string
+        access_token:
           type: string
         expires_at:
           type: string
@@ -3789,6 +3869,8 @@ components:
       properties:
         skill_id:
           type: string
+        skill_key:
+          type: string
         skill_name:
           type: string
         version:
@@ -3797,39 +3879,46 @@ components:
           type: string
         skill_scope:
           type: string
+        route_hints:
+          type: object
+          additionalProperties:
+            type: string
     SkillDetailDTO:
       type: object
       required:
       - skill_id
+      - skill_key
       - skill_name
-      - version
+      - skill_scope
       - status
-      - tool_refs
       - updated_at
       additionalProperties: false
       properties:
         skill_id:
           type: string
+        skill_key:
+          type: string
         skill_name:
           type: string
-        version:
+        skill_scope:
           type: string
         status:
           type: string
+        published_version_id:
+          type: string
+        latest_version_id:
+          type: string
+          description: Latest version id for admin list operations.
+        active_test_case_count:
+          type: integer
+          format: int64
+          description: Number of active test cases bound to latest_version_id.
         description:
           type: string
-        skill_spec_json:
-          type: string
-        output_schema_json:
-          type: string
-        tool_refs:
-          type: array
-          items:
+        route_hints:
+          type: object
+          additionalProperties:
             type: string
-        memory_policy_json:
-          type: string
-        confirmation_policy_json:
-          type: string
         updated_at:
           type: string
           format: date-time
@@ -3837,25 +3926,16 @@ components:
       type: object
       required:
       - test_run_id
-      - skill_id
       - status
-      - case_count
+      - saved
       additionalProperties: false
       properties:
         test_run_id:
           type: string
-        skill_id:
-          type: string
         status:
           type: string
-        case_count:
-          type: integer
-        passed_count:
-          type: integer
-        failed_count:
-          type: integer
-        agent_trace_id:
-          type: string
+        saved:
+          type: boolean
     SkillReviewDTO:
       type: object
       required:
@@ -4530,17 +4610,31 @@ components:
       - provider_id
       - provider_name
       - status
-      - secret_ref_status
+      - updated_at
       additionalProperties: false
       properties:
         provider_id:
           type: string
+        provider_code:
+          type: string
         provider_name:
+          type: string
+        display_name:
+          type: string
+        provider_type:
           type: string
         status:
           type: string
         secret_ref_status:
           type: string
+        base_url:
+          type: string
+        config:
+          type: object
+          additionalProperties: {}
+        updated_at:
+          type: string
+          format: date-time
     ConnectivityTestDTO:
       type: object
       required:
@@ -4564,35 +4658,61 @@ components:
       required:
       - model_id
       - provider_id
+      - model_code
       - display_name
       - resource_type
       - status
-      - pricing_snapshot_id
+      - is_default
+      - default_for_resource
+      - updated_at
       additionalProperties: false
       properties:
         model_id:
           type: string
         provider_id:
           type: string
+        provider_name:
+          type: string
+        model_code:
+          type: string
         display_name:
           type: string
         resource_type:
           type: string
+        capability_tags:
+          type: array
+          items:
+            type: string
         status:
           type: string
+        route_config:
+          type: object
+          additionalProperties: {}
         pricing_snapshot_id:
           type: string
         is_default:
           type: boolean
+        default_for_resource:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
     AdminToolDTO:
       type: object
       required:
       - tool_key
       - tool_name
       - tool_type
+      - display_name
       - status
       - risk_level
       - charge_mode
+      - allowed
+      - requires_confirmation
+      - timeout_ms
+      - unit_points
+      - free_quota
+      - min_charge_points
       additionalProperties: false
       properties:
         tool_key:
@@ -4601,11 +4721,42 @@ components:
           type: string
         tool_type:
           type: string
+        display_name:
+          type: string
+        description:
+          type: string
         status:
           type: string
+        version:
+          type: string
+        allowed:
+          type: boolean
         risk_level:
           type: string
+        requires_confirmation:
+          type: boolean
+        timeout_ms:
+          type: integer
+        retry_policy:
+          type: object
+          additionalProperties:
+            type: string
+        cancel_policy:
+          type: object
+          additionalProperties:
+            type: string
         charge_mode:
+          type: string
+        billing_unit:
+          type: string
+        unit_points:
+          type: number
+        free_quota:
+          type: integer
+        min_charge_points:
+          type: integer
+          format: int64
+        pricing_policy_id:
           type: string
     ToolImpactPreviewDTO:
       type: object
@@ -4617,12 +4768,40 @@ components:
       properties:
         tool_key:
           type: string
+        tool_name:
+          type: string
+        tool_type:
+          type: string
         impact_count:
           type: integer
+        affected_skill_bindings:
+          type: integer
+        requires_review:
+          type: boolean
         affected_skill_ids:
           type: array
           items:
             type: string
+        affected_skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/AffectedSkillDTO'
+    AffectedSkillDTO:
+      type: object
+      required:
+      - skill_id
+      - skill_name
+      - status
+      additionalProperties: false
+      properties:
+        skill_id:
+          type: string
+        skill_name:
+          type: string
+        status:
+          type: string
+        published_version_id:
+          type: string
     ToolPolicyDTO:
       type: object
       required:
@@ -4669,16 +4848,20 @@ components:
       type: object
       required:
       - tool_key
-      - allowed_space_ids
+      - scope_type
+      - scope_id
+      - allowed
       - updated_at
       additionalProperties: false
       properties:
         tool_key:
           type: string
-        allowed_space_ids:
-          type: array
-          items:
-            type: string
+        scope_type:
+          type: string
+        scope_id:
+          type: string
+        allowed:
+          type: boolean
         updated_at:
           type: string
           format: date-time
@@ -4688,6 +4871,7 @@ components:
       - target_id
       - target_type
       - display_name
+      - status
       additionalProperties: false
       properties:
         target_id:
@@ -4696,24 +4880,29 @@ components:
           type: string
         display_name:
           type: string
+        status:
+          type: string
+        account_id:
+          type: string
     CreditGrantDTO:
       type: object
       required:
-      - grant_id
-      - target_id
-      - points
-      - audit_id
+      - batch_id
+      - account_id
+      - granted_points
+      - available_points
       additionalProperties: false
       properties:
-        grant_id:
+        batch_id:
           type: string
-        target_id:
+        account_id:
           type: string
-        points:
+        granted_points:
           type: integer
           format: int64
-        audit_id:
-          type: string
+        available_points:
+          type: integer
+          format: int64
     RedeemCodeBatchDTO:
       type: object
       required:
@@ -5540,15 +5729,34 @@ components:
       type: object
       required:
       - skill_name
-      - skill_spec_json
+      - skill_markdown
       - request_hash
       additionalProperties: false
       properties:
+        skill_key:
+          type: string
         skill_name:
+          type: string
+        skill_tags:
+          type: array
+          items:
+            type: string
+        skill_scope:
           type: string
         description:
           type: string
+        route_hints:
+          type: object
+          additionalProperties:
+            type: string
+        version:
+          type: string
+        skill_markdown:
+          type: string
+          description: Skill 编辑器 Markdown 源码，使用中文标签段落和结构化 tool/agui 引用。
         skill_spec_json:
+          type: string
+        input_schema_json:
           type: string
         output_schema_json:
           type: string
@@ -5565,14 +5773,32 @@ components:
     RunSkillTestRequest:
       type: object
       required:
-      - test_case_ids
+      - version_id
+      - test_run_id
+      - status
+      - actual_elements_json
+      - safety_evidence_json
       - request_hash
       additionalProperties: false
       properties:
-        test_case_ids:
-          type: array
-          items:
-            type: string
+        version_id:
+          type: string
+        test_run_id:
+          type: string
+        test_case_id:
+          type: string
+        status:
+          type: string
+          enum:
+          - passed
+          - failed
+          - blocked
+          - timeout
+          - rejected
+        actual_elements_json:
+          type: string
+        safety_evidence_json:
+          type: string
         request_hash:
           type: string
     SubmitSkillReviewRequest:
@@ -5837,13 +6063,16 @@ components:
       type: object
       required:
       - account
-      - role
+      - initial_password
+      - reason
       - request_hash
       additionalProperties: false
       properties:
         account:
           type: string
-        role:
+        initial_password:
+          type: string
+        reason:
           type: string
         request_hash:
           type: string
@@ -5879,6 +6108,7 @@ components:
       required:
       - preview_token
       - target_status
+      - reason
       - request_hash
       additionalProperties: false
       properties:
@@ -5895,31 +6125,51 @@ components:
       required:
       - provider_name
       - status
-      - secret_key_ref
       - request_hash
       additionalProperties: false
       properties:
+        provider_code:
+          type: string
         provider_name:
+          type: string
+        display_name:
+          type: string
+        provider_type:
           type: string
         status:
           type: string
         secret_key_ref:
           type: string
+        base_url:
+          type: string
+        config:
+          type: object
+          additionalProperties: {}
         request_hash:
           type: string
     PatchModelProviderRequest:
       type: object
       required:
-      - base_updated_at
       - request_hash
       additionalProperties: false
       properties:
+        provider_code:
+          type: string
         provider_name:
+          type: string
+        display_name:
+          type: string
+        provider_type:
           type: string
         status:
           type: string
         secret_key_ref:
           type: string
+        base_url:
+          type: string
+        config:
+          type: object
+          additionalProperties: {}
         base_updated_at:
           type: string
           format: date-time
@@ -5928,11 +6178,12 @@ components:
     TestModelProviderConnectivityRequest:
       type: object
       required:
-      - test_reason
       - request_hash
       additionalProperties: false
       properties:
         test_reason:
+          type: string
+        model_id:
           type: string
         request_hash:
           type: string
@@ -5940,13 +6191,15 @@ components:
       type: object
       required:
       - provider_id
+      - model_code
       - display_name
       - resource_type
-      - pricing_snapshot_id
       - request_hash
       additionalProperties: false
       properties:
         provider_id:
+          type: string
+        model_code:
           type: string
         display_name:
           type: string
@@ -5954,22 +6207,55 @@ components:
           type: string
         pricing_snapshot_id:
           type: string
+        billing_unit:
+          type: string
+        unit_points:
+          type: number
+        min_charge_points:
+          type: integer
+          format: int64
         status:
+          type: string
+        capability_tags:
+          type: array
+          items:
+            type: string
+        route_config:
+          type: object
+          additionalProperties: {}
+        credential_id:
           type: string
         request_hash:
           type: string
     PatchModelRequest:
       type: object
       required:
-      - base_updated_at
       - request_hash
       additionalProperties: false
       properties:
+        model_code:
+          type: string
         display_name:
           type: string
         pricing_snapshot_id:
           type: string
+        billing_unit:
+          type: string
+        unit_points:
+          type: number
+        min_charge_points:
+          type: integer
+          format: int64
         status:
+          type: string
+        capability_tags:
+          type: array
+          items:
+            type: string
+        route_config:
+          type: object
+          additionalProperties: {}
+        credential_id:
           type: string
         base_updated_at:
           type: string
@@ -5988,6 +6274,9 @@ components:
           type: string
         resource_type:
           type: string
+        pricing_snapshot_id:
+          type: string
+          description: Optional. When omitted, the backend binds the current active price snapshot or creates a zero-point default snapshot. Setting a default updates the single active default row for the resource type.
         request_hash:
           type: string
     SetModelStatusRequest:
@@ -5999,6 +6288,70 @@ components:
       properties:
         status:
           type: string
+          description: Target status. Disabling an active default model returns STATE_CONFLICT.
+        reason:
+          type: string
+        request_hash:
+          type: string
+    RegisterAdminToolRequest:
+      type: object
+      required:
+      - tool_name
+      - tool_type
+      - display_name
+      - description
+      - risk_level
+      - charge_mode
+      - billing_unit
+      - reason
+      - request_hash
+      additionalProperties: false
+      properties:
+        tool_name:
+          type: string
+        tool_type:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        version:
+          type: string
+        input_schema_json:
+          type: string
+          description: JSON object schema describing natural-language input extracted for this Tool.
+        output_schema_json:
+          type: string
+          description: JSON object schema describing the Tool result shape.
+        allowed:
+          type: boolean
+        risk_level:
+          type: string
+        requires_confirmation:
+          type: boolean
+        timeout_ms:
+          type: integer
+        retry_policy:
+          type: object
+          additionalProperties:
+            type: string
+        cancel_policy:
+          type: object
+          additionalProperties:
+            type: string
+        charge_mode:
+          type: string
+        billing_unit:
+          type: string
+        unit_points:
+          type: number
+        free_quota:
+          type: integer
+        min_charge_points:
+          type: integer
+          format: int64
         reason:
           type: string
         request_hash:
@@ -6006,10 +6359,11 @@ components:
     PreviewToolImpactRequest:
       type: object
       required:
-      - target_status
       - request_hash
       additionalProperties: false
       properties:
+        tool_type:
+          type: string
         target_status:
           type: string
         target_risk_level:
@@ -6021,18 +6375,29 @@ components:
     UpdateToolPolicyRequest:
       type: object
       required:
-      - status
       - risk_level
       - requires_confirmation
       - request_hash
       additionalProperties: false
       properties:
-        status:
+        tool_type:
           type: string
+        allowed:
+          type: boolean
         risk_level:
           type: string
         requires_confirmation:
           type: boolean
+        timeout_ms:
+          type: integer
+        retry_policy:
+          type: object
+          additionalProperties:
+            type: string
+        cancel_policy:
+          type: object
+          additionalProperties:
+            type: string
         request_hash:
           type: string
     UpdateToolPricingPolicyRequest:
@@ -6044,12 +6409,19 @@ components:
       - request_hash
       additionalProperties: false
       properties:
+        tool_type:
+          type: string
         charge_mode:
           type: string
         billing_unit:
           type: string
         unit_points:
           type: number
+        free_quota:
+          type: integer
+        min_charge_points:
+          type: integer
+          format: int64
         request_hash:
           type: string
     SetToolStatusRequest:
@@ -6060,6 +6432,8 @@ components:
       - request_hash
       additionalProperties: false
       properties:
+        tool_type:
+          type: string
         status:
           type: string
         reason:
@@ -6069,14 +6443,23 @@ components:
     ReplaceToolWhitelistRequest:
       type: object
       required:
-      - allowed_space_ids
+      - scope_type
+      - scope_id
+      - allowed
+      - reason
       - request_hash
       additionalProperties: false
       properties:
-        allowed_space_ids:
-          type: array
-          items:
-            type: string
+        tool_type:
+          type: string
+        scope_type:
+          type: string
+        scope_id:
+          type: string
+        allowed:
+          type: boolean
+        reason:
+          type: string
         request_hash:
           type: string
     PublishSystemSkillRequest:
@@ -6105,7 +6488,6 @@ components:
       type: object
       required:
       - decision
-      - reason
       - request_hash
       additionalProperties: false
       properties:
@@ -6137,6 +6519,9 @@ components:
           format: int64
         reason:
           type: string
+        expires_at:
+          type: string
+          format: date-time
         request_hash:
           type: string
     CreateRedeemCodesRequest:
@@ -7785,6 +8170,25 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/ToolImpactPreviewDTO'
+        trace_id:
+          type: string
+    RegisterAdminToolOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminToolDTO'
         trace_id:
           type: string
     UpdateToolPolicyOkEnvelope:

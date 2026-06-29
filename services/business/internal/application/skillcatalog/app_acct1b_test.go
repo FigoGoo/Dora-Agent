@@ -6,6 +6,7 @@ import (
 
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	"gorm.io/datatypes"
 )
@@ -101,5 +102,49 @@ func TestRoutableSkillsFiltersWhitelistDeniedTools(t *testing.T) {
 	}
 	if !idSet(personalItems)["skl_blocked_acct1b"] {
 		t.Fatalf("无白名单作用域时不得误杀 Skill，got=%#v", idSet(personalItems))
+	}
+}
+
+func TestListReviewsExposesOpenAPIReviewFields(t *testing.T) {
+	app := newSkillTestApp(t)
+	db := app.repo.DB().WithContext(t.Context())
+	now := time.Now().UTC()
+	submittedAt := now.Add(-time.Hour)
+	userID := "usr_review_contract"
+	rows := []any{
+		&businesscore.Skill{
+			ID: "skl_review_contract", SkillKey: "review-contract", SkillName: "Review Contract",
+			SkillScope: "public", Status: "draft", OwnerUserID: &userID, RouteHintsJSON: emptyJSON,
+			CreatedAt: now, UpdatedAt: now,
+		},
+		&businesscore.SkillVersion{
+			ID: "skv_review_contract", SkillID: "skl_review_contract", Version: "1.0.0", Status: statusSubmitted,
+			SkillSpecJSON: emptyJSON, InputSchemaJSON: emptyJSON, OutputSchemaJSON: emptyJSON,
+			MemoryPolicyJSON: emptyJSON, ConfirmationPolicyJSON: emptyJSON, SubmittedByUserID: &userID,
+			SubmittedAt: &submittedAt, CreatedAt: now, UpdatedAt: now,
+		},
+	}
+	for _, row := range rows {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatalf("seed %T: %v", row, err)
+		}
+	}
+
+	page, err := app.ListReviews(t.Context(), admin.AdminAuth{AdminID: "adm_root"}, 10, 0)
+	if err != nil {
+		t.Fatalf("list reviews: %v", err)
+	}
+	var found *ReviewCandidateDTO
+	for i := range page.Items {
+		if page.Items[i].VersionID == "skv_review_contract" {
+			found = &page.Items[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("review missing from admin list: %#v", page.Items)
+	}
+	if found.ReviewID != found.VersionID || found.Status != statusSubmitted || found.SubmittedAt == nil {
+		t.Fatalf("openapi review aliases missing: %#v", *found)
 	}
 }

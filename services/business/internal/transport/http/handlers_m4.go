@@ -213,7 +213,7 @@ func (h m4Handler) searchCreditTargets(c *gin.Context) {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
 	}
-	out, err := h.credit.SearchCreditTargets(c.Request.Context(), adminAuth(c), c.Query("keyword"), c.Query("target_type"), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	out, err := h.credit.SearchCreditTargets(c.Request.Context(), adminAuth(c), c.Query("keyword"), c.Query("target_type"), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
@@ -254,7 +254,7 @@ func (h m4Handler) listRedeemCodes(c *gin.Context) {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
 	}
-	out, err := h.credit.ListRedeemCodes(c.Request.Context(), adminAuth(c), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	out, err := h.credit.ListRedeemCodes(c.Request.Context(), adminAuth(c), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 

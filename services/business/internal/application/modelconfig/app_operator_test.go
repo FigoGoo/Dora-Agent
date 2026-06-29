@@ -48,7 +48,7 @@ func TestModelConfigOperatorColumnsAreFilledFromAdminAuth(t *testing.T) {
 		t.Fatalf("set default model: %v", err)
 	}
 	requireOperatorColumns(t, app, "default_models", "resource_type = ? AND scope = ? AND status = ?", "adm_root", "adm_root", "image", "global", activeStatus)
-	requireOperatorColumns(t, app, "default_models", "id = ?", "", "adm_root", "dm_seed_image")
+	requireOperatorColumns(t, app, "default_models", "id = ?", "adm_root", "adm_root", "dm_seed_image")
 }
 
 func requireOperatorColumns(t *testing.T, app *App, table string, where string, wantCreatedBy string, wantUpdatedBy string, args ...any) {

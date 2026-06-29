@@ -51,6 +51,55 @@ func TestAdminUserDetailDoesNotExposeBusinessOwnership(t *testing.T) {
 	}
 }
 
+func TestAdminLoginUsesSevenDayRememberWindow(t *testing.T) {
+	app := newAdminTestApp(t)
+	now := time.Date(2026, 6, 29, 8, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return now }
+
+	session, err := app.Login(t.Context(), AdminLoginInput{
+		Account: "admin@dora.local", Password: "local-admin-change-me", Meta: RequestMeta{TraceID: "trace-admin-login"},
+	})
+	if err != nil {
+		t.Fatalf("admin login: %v", err)
+	}
+
+	want := now.Add(7 * 24 * time.Hour)
+	if !session.ExpiresAt.Equal(want) {
+		t.Fatalf("admin session expiry=%s want=%s", session.ExpiresAt, want)
+	}
+}
+
+func TestAdminAuthenticateTokenRenewsSevenDayWindow(t *testing.T) {
+	app := newAdminTestApp(t)
+	loginAt := time.Date(2026, 6, 29, 8, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return loginAt }
+	session, err := app.Login(t.Context(), AdminLoginInput{
+		Account: "admin@dora.local", Password: "local-admin-change-me", Meta: RequestMeta{TraceID: "trace-admin-login"},
+	})
+	if err != nil {
+		t.Fatalf("admin login: %v", err)
+	}
+	renewAt := loginAt.Add(6 * 24 * time.Hour)
+	app.now = func() time.Time { return renewAt }
+
+	auth, err := app.AuthenticateToken(t.Context(), "Bearer "+session.AccessToken)
+	if err != nil {
+		t.Fatalf("authenticate token: %v", err)
+	}
+
+	want := renewAt.Add(7 * 24 * time.Hour)
+	if !auth.ExpiresAt.Equal(want) {
+		t.Fatalf("renewed auth expiry=%s want=%s", auth.ExpiresAt, want)
+	}
+	var stored businesscore.PlatformAdminSession
+	if err := app.repo.DB().WithContext(t.Context()).Where("id = ?", auth.SessionID).First(&stored).Error; err != nil {
+		t.Fatalf("load renewed session: %v", err)
+	}
+	if !stored.ExpiresAt.Equal(want) {
+		t.Fatalf("stored session expiry=%s want=%s", stored.ExpiresAt, want)
+	}
+}
+
 func TestAdminUserDetailUsesTypedOwnershipPlaceholders(t *testing.T) {
 	detail := UserDetailDTO{
 		Spaces:                []AdminUserSpaceDTO{},
@@ -59,6 +108,31 @@ func TestAdminUserDetailUsesTypedOwnershipPlaceholders(t *testing.T) {
 	}
 	if detail.Spaces == nil || detail.EnterpriseMemberships == nil || detail.RecentAuditRefs == nil {
 		t.Fatalf("admin user detail ownership placeholders must be typed non-nil slices: %#v", detail)
+	}
+}
+
+func TestListUsersFiltersByKeyword(t *testing.T) {
+	app := newAdminTestApp(t)
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.PlatformAdmin{}).
+		Where("id = ?", "adm_root").Update("must_rotate_password", false).Error; err != nil {
+		t.Fatalf("prep admin: %v", err)
+	}
+	auth := AdminAuth{AdminID: "adm_root", Account: "admin@dora.local", SessionID: "admin-session"}
+
+	page, err := app.ListUsers(t.Context(), ListUsersInput{Auth: auth, Keyword: "usr_1001", Limit: 10})
+	if err != nil {
+		t.Fatalf("list users by keyword: %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].UserID != "usr_1001" {
+		t.Fatalf("expected usr_1001 keyword match, got total=%d items=%#v", page.Total, page.Items)
+	}
+
+	empty, err := app.ListUsers(t.Context(), ListUsersInput{Auth: auth, Keyword: "not-a-real-user", Limit: 10})
+	if err != nil {
+		t.Fatalf("list users by empty keyword: %v", err)
+	}
+	if empty.Total != 0 || len(empty.Items) != 0 {
+		t.Fatalf("expected no keyword matches, got total=%d items=%#v", empty.Total, empty.Items)
 	}
 }
 

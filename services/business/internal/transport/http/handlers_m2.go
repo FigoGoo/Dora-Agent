@@ -5,6 +5,7 @@ import (
 	"io"
 	nethttp "net/http"
 	"strconv"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
@@ -317,7 +318,7 @@ func (h m2Handler) adminDashboard(c *gin.Context) {
 }
 
 func (h m2Handler) listAdmins(c *gin.Context) {
-	out, err := h.admin.ListAdmins(c.Request.Context(), adminAuth(c), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	out, err := h.admin.ListAdmins(c.Request.Context(), adminAuth(c), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
@@ -346,7 +347,7 @@ func (h m2Handler) disableAdmin(c *gin.Context) {
 }
 
 func (h m2Handler) adminUsers(c *gin.Context) {
-	out, err := h.admin.ListUsers(c.Request.Context(), admin.ListUsersInput{Auth: adminAuth(c), Status: c.Query("status"), Limit: intQuery(c, "limit", 10), Offset: intQuery(c, "offset", 0)})
+	out, err := h.admin.ListUsers(c.Request.Context(), admin.ListUsersInput{Auth: adminAuth(c), Status: c.Query("status"), Keyword: c.Query("keyword"), Limit: adminPageLimit(c, 10), Offset: adminPageOffset(c)})
 	respond(c, out, err)
 }
 
@@ -381,7 +382,7 @@ func (h m2Handler) confirmUserStatus(c *gin.Context) {
 }
 
 func (h m2Handler) auditLogs(c *gin.Context) {
-	out, err := h.admin.ListAuditLogs(c.Request.Context(), admin.AuditQueryInput{Auth: adminAuth(c), BusinessAction: c.Query("business_action"), TraceID: c.Query("trace_id"), Limit: intQuery(c, "limit", 10), Offset: intQuery(c, "offset", 0)})
+	out, err := h.admin.ListAuditLogs(c.Request.Context(), admin.AuditQueryInput{Auth: adminAuth(c), BusinessAction: c.Query("business_action"), TraceID: c.Query("trace_id"), Limit: adminPageLimit(c, 10), Offset: adminPageOffset(c)})
 	respond(c, out, err)
 }
 
@@ -415,6 +416,9 @@ func (h m2Handler) adminAuth(allowRotate bool) gin.HandlerFunc {
 			_ = c.Error(err)
 			c.Abort()
 			return
+		}
+		if !auth.ExpiresAt.IsZero() {
+			c.Header("X-Admin-Session-Expires-At", auth.ExpiresAt.Format(time.RFC3339Nano))
 		}
 		_ = allowRotate
 		c.Set("admin_auth", auth)
@@ -495,6 +499,17 @@ func intQuery(c *gin.Context, key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func adminPageLimit(c *gin.Context, fallback int) int {
+	return intQuery(c, "limit", intQuery(c, "page_size", fallback))
+}
+
+func adminPageOffset(c *gin.Context) int {
+	if c.Query("offset") != "" {
+		return intQuery(c, "offset", 0)
+	}
+	return intQuery(c, "page_token", 0)
 }
 
 func tenantID(c *gin.Context) string {

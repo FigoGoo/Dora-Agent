@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,6 +29,12 @@ const (
 	statusDeprecated = "deprecated"
 
 	defaultConfirmationPolicyJSON = `{"requires_confirmation":false}`
+)
+
+var (
+	markdownMentionPattern = regexp.MustCompile(`@([A-Za-z0-9_.:-]+)`)
+	toolTagPattern         = regexp.MustCompile(`(?is)<tool\s+[^>]*id\s*=\s*["']([^"']+)["'][^>]*>.*?</tool>`)
+	aguiTagPattern         = regexp.MustCompile(`(?is)<(?:agui|ag-ui)\s+[^>]*id\s*=\s*["']([^"']+)["'][^>]*>.*?</(?:agui|ag-ui)>`)
 )
 
 type App struct {
@@ -96,8 +103,13 @@ type OutputElementDTO struct {
 }
 
 type ReviewCandidateDTO struct {
+	ReviewID               string             `json:"review_id,omitempty"`
 	SkillID                string             `json:"skill_id"`
 	VersionID              string             `json:"version_id"`
+	SkillName              string             `json:"skill_name,omitempty"`
+	CreatorID              string             `json:"creator_id,omitempty"`
+	Status                 string             `json:"status,omitempty"`
+	SubmittedAt            *time.Time         `json:"submitted_at,omitempty"`
 	SkillSpecJSON          string             `json:"skill_spec_json"`
 	InputSchemaJSON        string             `json:"input_schema_json"`
 	OutputSchemaJSON       string             `json:"output_schema_json"`
@@ -110,14 +122,16 @@ type ReviewCandidateDTO struct {
 }
 
 type SkillDetailDTO struct {
-	SkillID            string            `json:"skill_id"`
-	SkillKey           string            `json:"skill_key"`
-	SkillName          string            `json:"skill_name"`
-	SkillScope         string            `json:"skill_scope"`
-	Status             string            `json:"status"`
-	PublishedVersionID string            `json:"published_version_id,omitempty"`
-	RouteHints         map[string]string `json:"route_hints,omitempty"`
-	UpdatedAt          time.Time         `json:"updated_at"`
+	SkillID             string            `json:"skill_id"`
+	SkillKey            string            `json:"skill_key"`
+	SkillName           string            `json:"skill_name"`
+	SkillScope          string            `json:"skill_scope"`
+	Status              string            `json:"status"`
+	PublishedVersionID  string            `json:"published_version_id,omitempty"`
+	LatestVersionID     string            `json:"latest_version_id"`
+	ActiveTestCaseCount int64             `json:"active_test_case_count"`
+	RouteHints          map[string]string `json:"route_hints,omitempty"`
+	UpdatedAt           time.Time         `json:"updated_at"`
 }
 
 type TestResultDTO struct {
@@ -294,16 +308,25 @@ func (a *App) GetReviewCandidateSkillSpec(ctx context.Context, auth accountspace
 	if err := a.repo.DB().WithContext(ctx).Where("id = ? AND skill_id = ?", versionID, skillID).First(&sv).Error; err != nil {
 		return ReviewCandidateDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "skill version not found")
 	}
+	var skill businesscore.Skill
+	_ = a.repo.DB().WithContext(ctx).Where("id = ?", skillID).First(&skill).Error
 	toolRefs, err := a.toolRefs(ctx, skillID, sv.ID)
 	if err != nil {
 		return ReviewCandidateDTO{}, err
+	}
+	creatorID := ""
+	if sv.SubmittedByUserID != nil {
+		creatorID = *sv.SubmittedByUserID
+	} else if skill.OwnerUserID != nil {
+		creatorID = *skill.OwnerUserID
 	}
 	outputElements, err := a.outputElements(ctx, sv.ID)
 	if err != nil {
 		return ReviewCandidateDTO{}, err
 	}
 	dto := ReviewCandidateDTO{
-		SkillID: skillID, VersionID: sv.ID, SkillSpecJSON: string(sv.SkillSpecJSON),
+		ReviewID: sv.ID, SkillID: skillID, VersionID: sv.ID, SkillName: skill.SkillName, CreatorID: creatorID,
+		Status: sv.Status, SubmittedAt: sv.SubmittedAt, SkillSpecJSON: string(sv.SkillSpecJSON),
 		InputSchemaJSON: string(sv.InputSchemaJSON), OutputSchemaJSON: string(sv.OutputSchemaJSON),
 		ToolRefs: toolRefs, MemoryPolicyJSON: string(sv.MemoryPolicyJSON), ConfirmationPolicyJSON: jsonString(sv.ConfirmationPolicyJSON, defaultConfirmationPolicyJSON),
 		OutputElements: outputElements,
@@ -398,7 +421,7 @@ func (a *App) ListSkills(ctx context.Context, auth accountspace.AuthContext, sta
 	}
 	out := make([]SkillDetailDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, skillDTO(row))
+		out = append(out, a.skillAdminDTO(ctx, row))
 	}
 	return Page[SkillDetailDTO]{Items: out, Limit: limit, Offset: nonNegative(offset)}, nil
 }
@@ -411,9 +434,12 @@ type SaveSkillInput struct {
 	SkillScope             string
 	RouteHints             map[string]string
 	Version                string
+	SkillMarkdown          string
+	SkillTags              []string
 	SkillSpecJSON          string
 	InputSchemaJSON        string
 	OutputSchemaJSON       string
+	ToolRefs               []string
 	MemoryPolicyJSON       string
 	ConfirmationPolicyJSON string
 	OutputElements         []OutputElementInput
@@ -437,6 +463,28 @@ type OutputElementInput struct {
 func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO, error) {
 	if in.Auth.UserID == "" {
 		return SkillDetailDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "user auth is required")
+	}
+	if strings.TrimSpace(in.SkillMarkdown) != "" {
+		compiled := compileSkillMarkdown(in.SkillMarkdown, in.SkillName, in.SkillTags)
+		if strings.TrimSpace(in.SkillName) == "" {
+			in.SkillName = compiled.Name
+		}
+		if strings.TrimSpace(in.SkillKey) == "" {
+			in.SkillKey = skillKeyFromName(compiled.Name, in.SkillMarkdown)
+		}
+		if len(in.RouteHints) == 0 && strings.TrimSpace(compiled.InvocationRule) != "" {
+			in.RouteHints = map[string]string{"invocation_rule": compiled.InvocationRule}
+		}
+		if strings.TrimSpace(in.SkillSpecJSON) == "" {
+			in.SkillSpecJSON = compiled.SkillSpecJSON
+		}
+		if strings.TrimSpace(in.InputSchemaJSON) == "" {
+			in.InputSchemaJSON = compiled.InputSchemaJSON
+		}
+		if strings.TrimSpace(in.OutputSchemaJSON) == "" {
+			in.OutputSchemaJSON = compiled.OutputSchemaJSON
+		}
+		in.ToolRefs = mergeStrings(in.ToolRefs, compiled.ToolRefs)
 	}
 	if strings.TrimSpace(in.SkillKey) == "" || strings.TrimSpace(in.SkillName) == "" {
 		return SkillDetailDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "skill_key and skill_name are required")
@@ -464,6 +512,9 @@ func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO,
 		CreatedBy: optionalString(userID), UpdatedBy: optionalString(userID), CreatedAt: now, UpdatedAt: now,
 	}
 	if err := a.repo.DB().WithContext(ctx).Save(&skill).Error; err != nil {
+		if isUniqueConstraintError(err) {
+			return SkillDetailDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "skill_key already exists")
+		}
 		return SkillDetailDTO{}, err
 	}
 	versionID := security.RandomID("skv_")
@@ -479,10 +530,550 @@ func (a *App) SaveSkill(ctx context.Context, in SaveSkillInput) (SkillDetailDTO,
 	if err := a.repo.DB().WithContext(ctx).Create(&sv).Error; err != nil {
 		return SkillDetailDTO{}, err
 	}
+	if err := a.saveToolBindings(ctx, skill.ID, versionID, userID, now, in.ToolRefs); err != nil {
+		return SkillDetailDTO{}, err
+	}
 	if err := a.saveOutputElements(ctx, skill.ID, versionID, userID, now, in.OutputElements); err != nil {
 		return SkillDetailDTO{}, err
 	}
 	return skillDTO(skill), nil
+}
+
+type compiledMarkdownSkill struct {
+	Name             string
+	InvocationRule   string
+	SkillSpecJSON    string
+	InputSchemaJSON  string
+	OutputSchemaJSON string
+	ToolRefs         []string
+}
+
+func compileSkillMarkdown(markdown, fallbackName string, tags []string) compiledMarkdownSkill {
+	markdown = strings.TrimSpace(markdown)
+	sections := parseSkillMarkdownSections(markdown)
+	nameSection := sections["name"]
+	if nameSection == "未命名 Skill" {
+		nameSection = ""
+	}
+	name := firstNonEmpty(nameSection, fallbackName)
+	description := sections["description"]
+	invocationRule := firstNonEmpty(sections["invocation_rule"], description)
+	toolRefs := extractToolRefs(sections["tool_refs"])
+	aguiRefs := extractAGUIRefs(sections["agui_refs"])
+	inputSchema := buildInputSchema(sections["inputs"])
+	outputSchema := buildOutputSchema(sections["result_outputs"])
+	cleanTags := compactStrings(tags)
+	spec := map[string]any{
+		"schema_version":         "skill.markdown.v1",
+		"source_format":          "markdown",
+		"markdown":               markdown,
+		"name":                   name,
+		"description":            description,
+		"skill_tags":             cleanTags,
+		"sections":               sections,
+		"input_intents":          inputSchema["input_intents"],
+		"tool_refs":              toolRefs,
+		"agui_refs":              aguiRefs,
+		"generation_preferences": sections["generation_preferences"],
+		"prompt_guidelines":      sections["prompt_guidelines"],
+		"output_intents":         outputSchema["output_intents"],
+	}
+	return compiledMarkdownSkill{
+		Name: name, InvocationRule: invocationRule, ToolRefs: toolRefs,
+		SkillSpecJSON: mustJSONString(spec), InputSchemaJSON: mustJSONString(inputSchema), OutputSchemaJSON: mustJSONString(outputSchema),
+	}
+}
+
+func parseSkillMarkdownSections(markdown string) map[string]string {
+	sections := map[string][]string{
+		"name": {}, "description": {}, "invocation_rule": {}, "inputs": {}, "plan": {}, "tool_refs": {}, "agui_refs": {},
+		"generation_preferences": {}, "prompt_guidelines": {}, "result_outputs": {},
+	}
+	current := ""
+	for _, raw := range strings.Split(markdown, "\n") {
+		line := strings.TrimRight(raw, "\r")
+		if title, tag, ok := parseMarkdownHeading(line); ok {
+			key := skillSectionKey(tag)
+			if key == "" {
+				key = skillSectionKey(title)
+			}
+			current = key
+			if key == "name" && strings.TrimSpace(title) != "" {
+				sections[key] = []string{strings.TrimSpace(title)}
+			}
+			continue
+		}
+		if current != "" {
+			sections[current] = append(sections[current], line)
+		}
+	}
+	out := make(map[string]string, len(sections))
+	for key, lines := range sections {
+		out[key] = strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+	return out
+}
+
+func parseMarkdownHeading(line string) (string, string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "#") {
+		return "", "", false
+	}
+	i := 0
+	for i < len(trimmed) && trimmed[i] == '#' {
+		i++
+	}
+	if i == 0 || i > 6 || i >= len(trimmed) || trimmed[i] != ' ' {
+		return "", "", false
+	}
+	title := strings.TrimSpace(trimmed[i:])
+	tag := ""
+	if start := strings.LastIndex(title, "<"); start >= 0 && strings.HasSuffix(title, ">") {
+		tag = strings.TrimSpace(strings.TrimSuffix(title[start+1:], ">"))
+		title = strings.TrimSpace(title[:start])
+	}
+	return title, tag, true
+}
+
+func skillSectionKey(label string) string {
+	label = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(label), " ", ""))
+	switch label {
+	case "名称", "name":
+		return "name"
+	case "说明", "描述", "description":
+		return "description"
+	case "调用规则", "触发说明", "skill调用规则", "invocation_rule":
+		return "invocation_rule"
+	case "输入", "入参", "用户输入", "input", "inputs":
+		return "inputs"
+	case "计划", "流程", "流程规划", "plan":
+		return "plan"
+	case "工具引用", "tool_refs", "toolrefs":
+		return "tool_refs"
+	case "ag-ui元素引用", "agui元素引用", "ag-ui引用", "agui引用":
+		return "agui_refs"
+	case "生成偏好", "generation_preferences":
+		return "generation_preferences"
+	case "提示词写法", "提示词", "prompt_guidelines":
+		return "prompt_guidelines"
+	case "结果输出", "输出", "result_outputs":
+		return "result_outputs"
+	default:
+		return ""
+	}
+}
+
+func extractToolRefs(section string) []string {
+	refs := make([]string, 0)
+	for _, match := range toolTagPattern.FindAllStringSubmatch(section, -1) {
+		ref := strings.TrimSpace(match[1])
+		if ref == "" {
+			continue
+		}
+		if !strings.Contains(ref, ":") {
+			ref += ":builtin"
+		}
+		refs = append(refs, ref)
+	}
+	for _, match := range markdownMentionPattern.FindAllStringSubmatch(section, -1) {
+		ref := strings.TrimSpace(match[1])
+		if ref == "" || strings.HasPrefix(ref, "agui.") {
+			continue
+		}
+		if !strings.Contains(ref, ":") {
+			ref += ":builtin"
+		}
+		refs = append(refs, ref)
+	}
+	return compactStrings(refs)
+}
+
+func extractAGUIRefs(section string) map[string][]string {
+	out := map[string][]string{"inside_dialog": {}, "outside_dialog": {}}
+	slot := "inside_dialog"
+	for _, raw := range strings.Split(section, "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.Contains(line, "对话框外") {
+			slot = "outside_dialog"
+		} else if strings.Contains(line, "对话框内") {
+			slot = "inside_dialog"
+		}
+		for _, match := range aguiTagPattern.FindAllStringSubmatch(line, -1) {
+			ref := strings.TrimPrefix(strings.TrimSpace(match[1]), "agui.")
+			if ref != "" {
+				out[slot] = append(out[slot], ref)
+			}
+		}
+		for _, match := range markdownMentionPattern.FindAllStringSubmatch(line, -1) {
+			ref := strings.TrimPrefix(strings.TrimSpace(match[1]), "agui.")
+			if ref != "" {
+				out[slot] = append(out[slot], ref)
+			}
+		}
+	}
+	out["inside_dialog"] = compactStrings(out["inside_dialog"])
+	out["outside_dialog"] = compactStrings(out["outside_dialog"])
+	return out
+}
+
+func inferOutputArtifacts(section string) []string {
+	var out []string
+	for _, item := range linesFromSection(section) {
+		lower := strings.ToLower(item)
+		switch {
+		case strings.Contains(item, "故事板") || strings.Contains(lower, "storyboard"):
+			out = append(out, "storyboard")
+		case strings.Contains(item, "图片") || strings.Contains(item, "图像") || strings.Contains(lower, "image"):
+			out = append(out, "image_asset")
+		case strings.Contains(item, "音频") || strings.Contains(item, "声音") || strings.Contains(lower, "audio"):
+			out = append(out, "audio_asset")
+		case strings.Contains(item, "视频") || strings.Contains(lower, "video"):
+			out = append(out, "video_asset")
+		case strings.Contains(item, "文档") || strings.Contains(item, "规格") || strings.Contains(lower, "markdown") || strings.Contains(lower, ".md"):
+			out = append(out, "markdown_doc")
+		case strings.Contains(item, "资产") || strings.Contains(lower, "asset"):
+			out = append(out, "asset")
+		}
+	}
+	return compactStrings(out)
+}
+
+func buildInputSchema(section string) map[string]any {
+	lines := linesFromSection(section)
+	intents := make([]map[string]any, 0, len(lines))
+	for i, line := range lines {
+		preferredAGUI := inferInputAGUI(line)
+		if len(preferredAGUI) == 0 {
+			preferredAGUI = []string{"textarea"}
+		}
+		intent := map[string]any{
+			"id":             fmt.Sprintf("input_%d", i+1),
+			"name":           inferInputName(line, i+1),
+			"description":    line,
+			"required_when":  inferInputRequiredWhen(line),
+			"preferred_agui": preferredAGUI,
+		}
+		if options := inferInputOptions(line); len(options) > 0 {
+			intent["options"] = options
+		}
+		if assetTypes := inferAcceptedAssetTypes(line); len(assetTypes) > 0 {
+			intent["accepted_asset_types"] = assetTypes
+		}
+		intents = append(intents, intent)
+	}
+	if len(intents) == 0 {
+		intents = append(intents, map[string]any{
+			"id":             "input_1",
+			"name":           "用户目标",
+			"description":    "用户可以用自然语言描述目标，Agent 在缺少必要信息时继续追问。",
+			"required_when":  "按 Agent 判断",
+			"preferred_agui": []string{"textarea"},
+		})
+	}
+	return map[string]any{
+		"schema_version": "skill.runtime_input.v1",
+		"mode":           "agent_requested_inputs",
+		"source":         "skill_markdown",
+		"input_intents":  intents,
+		"runtime_policy": map[string]any{
+			"ask_when_missing":           true,
+			"allow_partial_start":        true,
+			"allow_iterative_refinement": true,
+		},
+	}
+}
+
+func buildOutputSchema(section string) map[string]any {
+	lines := linesFromSection(section)
+	intents := make([]map[string]any, 0, len(lines))
+	artifactTypes := make([]string, 0, len(lines))
+	for i, line := range lines {
+		artifacts := inferOutputArtifacts(line)
+		if len(artifacts) == 0 {
+			artifacts = []string{"structured_result"}
+		}
+		preferredAGUI := inferOutputAGUI(line)
+		if len(preferredAGUI) == 0 {
+			preferredAGUI = []string{"result_summary"}
+		}
+		artifactTypes = append(artifactTypes, artifacts...)
+		intents = append(intents, map[string]any{
+			"id":             fmt.Sprintf("output_%d", i+1),
+			"name":           inferOutputName(line, i+1),
+			"description":    line,
+			"artifact_types": artifacts,
+			"preferred_agui": preferredAGUI,
+			"reviewable":     isReviewableOutput(line),
+		})
+	}
+	artifactTypes = compactStrings(artifactTypes)
+	if len(intents) == 0 {
+		artifactTypes = []string{"structured_result"}
+		intents = append(intents, map[string]any{
+			"id":             "output_1",
+			"name":           "最终结果",
+			"description":    "Agent 根据用户目标生成可审阅结果，并在用户满意后输出最终结果。",
+			"artifact_types": artifactTypes,
+			"preferred_agui": []string{"result_summary"},
+			"reviewable":     true,
+		})
+	}
+	return map[string]any{
+		"schema_version": "skill.runtime_output.v1",
+		"mode":           "agent_generated_outputs",
+		"source":         "skill_markdown",
+		"artifact_types": artifactTypes,
+		"output_intents": intents,
+		"runtime_policy": map[string]any{
+			"allow_incremental_delivery":        true,
+			"allow_user_revision":               true,
+			"final_output_after_user_satisfied": true,
+		},
+	}
+}
+
+func inferInputAGUI(line string) []string {
+	var out []string
+	lower := strings.ToLower(line)
+	if containsAny(line, "上传", "文件", "素材", "图片", "图像", "PDF", "文本", "视频", "音频") || strings.Contains(lower, "pdf") {
+		out = append(out, "asset_upload", "asset_picker")
+	}
+	if containsAny(line, "选择", "选项", "风格", "偏好", "提供") {
+		out = append(out, "chips", "select")
+	}
+	if containsAny(line, "多行", "补充", "目标", "描述", "自然语言", "说明") {
+		out = append(out, "textarea")
+	}
+	if containsAny(line, "确认", "满意") {
+		out = append(out, "confirm")
+	}
+	return compactStrings(out)
+}
+
+func inferInputName(line string, index int) string {
+	switch {
+	case containsAny(line, "剧本", "素材", "文件", "上传"):
+		return "剧本/素材"
+	case containsAny(line, "风格", "偏好"):
+		return "风格偏好"
+	case containsAny(line, "目标", "描述", "自然语言"):
+		return "创作目标"
+	case containsAny(line, "修改", "镜头"):
+		return "修改意见"
+	default:
+		return fmt.Sprintf("输入项 %d", index)
+	}
+}
+
+func inferInputRequiredWhen(line string) string {
+	if containsAny(line, "如果", "缺少", "不清楚", "需要") {
+		return line
+	}
+	return "按 Agent 判断"
+}
+
+func inferInputOptions(line string) []string {
+	options := make([]string, 0)
+	for _, candidate := range []string{"写实", "动画", "电影感"} {
+		if strings.Contains(line, candidate) {
+			options = append(options, candidate)
+		}
+	}
+	return options
+}
+
+func inferAcceptedAssetTypes(line string) []string {
+	lower := strings.ToLower(line)
+	var out []string
+	if containsAny(line, "图片", "图像") {
+		out = append(out, "image")
+	}
+	if strings.Contains(line, "PDF") || strings.Contains(lower, "pdf") {
+		out = append(out, "pdf")
+	}
+	if strings.Contains(line, "文本") {
+		out = append(out, "text")
+	}
+	if strings.Contains(line, "视频") {
+		out = append(out, "video")
+	}
+	if strings.Contains(line, "音频") || strings.Contains(line, "声音") {
+		out = append(out, "audio")
+	}
+	return compactStrings(out)
+}
+
+func inferOutputAGUI(line string) []string {
+	var out []string
+	lower := strings.ToLower(line)
+	if strings.Contains(line, "故事板") || strings.Contains(lower, "storyboard") {
+		out = append(out, "storyboard_panel")
+	}
+	if containsAny(line, "图片", "图像", "资产") || strings.Contains(lower, "image") || strings.Contains(lower, "asset") {
+		out = append(out, "asset_panel")
+	}
+	if strings.Contains(line, "图片") || strings.Contains(line, "图像") || strings.Contains(lower, "image") {
+		out = append(out, "image_preview")
+	}
+	if strings.Contains(line, "视频") || strings.Contains(lower, "video") {
+		out = append(out, "video_preview", "asset_panel")
+	}
+	if strings.Contains(line, "音频") || strings.Contains(line, "声音") || strings.Contains(lower, "audio") {
+		out = append(out, "audio_preview", "asset_panel")
+	}
+	if containsAny(line, "最终", "结果", "完成") {
+		out = append(out, "result_summary")
+	}
+	return compactStrings(out)
+}
+
+func inferOutputName(line string, index int) string {
+	switch {
+	case strings.Contains(line, "故事板"):
+		return "故事板"
+	case containsAny(line, "图片", "图像"):
+		return "图片资产"
+	case strings.Contains(line, "视频"):
+		return "视频资产"
+	case strings.Contains(line, "音频") || strings.Contains(line, "声音"):
+		return "音频资产"
+	case containsAny(line, "最终", "结果"):
+		return "最终结果"
+	default:
+		return fmt.Sprintf("输出项 %d", index)
+	}
+}
+
+func isReviewableOutput(line string) bool {
+	return containsAny(line, "审阅", "修改", "确认", "满意", "预览")
+}
+
+func containsAny(value string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func linesFromSection(section string) []string {
+	out := make([]string, 0)
+	for _, raw := range strings.Split(section, "\n") {
+		line := strings.TrimSpace(raw)
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "-"), "*"))
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func skillKeyFromName(name, seed string) string {
+	source := firstNonEmpty(name, seed)
+	var b strings.Builder
+	for _, r := range strings.ToLower(source) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == ' ':
+			if b.Len() > 0 {
+				b.WriteByte('_')
+			}
+		}
+	}
+	key := strings.Trim(b.String(), "_")
+	for strings.Contains(key, "__") {
+		key = strings.ReplaceAll(key, "__", "_")
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(name) + "\n" + strings.TrimSpace(seed)))
+	suffix := fmt.Sprintf("%x", sum[:4])
+	if key != "" {
+		if len(key) > 118 {
+			key = strings.Trim(key[:118], "_")
+		}
+		return key + "_" + suffix
+	}
+	return "skill_" + suffix
+}
+
+func isUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "SQLSTATE 23505") || strings.Contains(text, "duplicate key value")
+}
+
+func saveToolRefRows(refs []string, skillID, versionID, operatorID string, now time.Time) []businesscore.SkillToolBinding {
+	clean := compactStrings(refs)
+	rows := make([]businesscore.SkillToolBinding, 0, len(clean))
+	for _, ref := range clean {
+		toolName, toolType := splitToolRef(ref)
+		if toolName == "" || toolType == "" {
+			continue
+		}
+		rows = append(rows, businesscore.SkillToolBinding{
+			ID: security.RandomID("stb_"), SkillID: skillID, VersionID: versionID,
+			ToolName: toolName, ToolType: toolType, Required: true,
+			CreatedBy: optionalString(operatorID), UpdatedBy: optionalString(operatorID), CreatedAt: now,
+		})
+	}
+	return rows
+}
+
+func splitToolRef(ref string) (string, string) {
+	parts := strings.SplitN(strings.TrimSpace(ref), ":", 2)
+	if len(parts) == 1 {
+		return strings.TrimSpace(parts[0]), "builtin"
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+}
+
+func (a *App) saveToolBindings(ctx context.Context, skillID, versionID, operatorID string, now time.Time, refs []string) error {
+	rows := saveToolRefRows(refs, skillID, versionID, operatorID, now)
+	if len(rows) == 0 {
+		return nil
+	}
+	return a.repo.DB().WithContext(ctx).Create(&rows).Error
+}
+
+func compactStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func mergeStrings(left, right []string) []string {
+	merged := make([]string, 0, len(left)+len(right))
+	merged = append(merged, left...)
+	merged = append(merged, right...)
+	return compactStrings(merged)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func mustJSONString(value any) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "{}"
+	}
+	return string(encoded)
 }
 
 // validateOutputElements 校验输出元素结构：类型必须平台内置且 active，双态/编辑/引用不得超字典上限(SKILL-2 FP2)。
@@ -583,7 +1174,15 @@ func (a *App) SubmitReview(ctx context.Context, auth accountspace.AuthContext, s
 	version.SubmittedAt = &now
 	version.UpdatedBy = optionalString(auth.UserID)
 	version.UpdatedAt = now
-	if err := a.repo.DB().WithContext(ctx).Save(&version).Error; err != nil {
+	skill.Status = statusSubmitted
+	skill.UpdatedBy = optionalString(auth.UserID)
+	skill.UpdatedAt = now
+	if err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&version).Error; err != nil {
+			return err
+		}
+		return tx.Save(&skill).Error
+	}); err != nil {
 		return nil, err
 	}
 	return map[string]any{"skill_id": skill.ID, "version_id": version.ID, "review_status": statusSubmitted}, nil
@@ -618,7 +1217,7 @@ func (a *App) ListSystemSkills(ctx context.Context, _ admin.AdminAuth, status st
 	}
 	out := make([]SkillDetailDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, skillDTO(row))
+		out = append(out, a.skillAdminDTO(ctx, row))
 	}
 	return Page[SkillDetailDTO]{Items: out, Limit: limit, Offset: nonNegative(offset)}, nil
 }
@@ -730,20 +1329,32 @@ func (a *App) rejectReview(ctx context.Context, auth admin.AdminAuth, versionID,
 		return SkillDetailDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "review candidate not found")
 	}
 	now := a.now()
-	version.Status = statusDraft
-	version.ReviewedByAdminID = &auth.AdminID
-	version.ReviewedAt = &now
-	version.UpdatedBy = optionalString(auth.AdminID)
-	version.UpdatedAt = now
-	if err := a.repo.DB().WithContext(ctx).Save(&version).Error; err != nil {
-		return SkillDetailDTO{}, err
-	}
 	commentPtr := optionalString(comment)
-	if err := a.repo.DB().WithContext(ctx).Create(&businesscore.SkillReviewRecord{ID: security.RandomID("skr_"), SkillID: version.SkillID, VersionID: version.ID, ReviewAction: "reject", ReviewStatus: "rejected", ReviewComment: commentPtr, ReviewedByAdminID: auth.AdminID, CreatedBy: optionalString(auth.AdminID), UpdatedBy: optionalString(auth.AdminID), CreatedAt: now}).Error; err != nil {
-		return SkillDetailDTO{}, err
-	}
 	var skill businesscore.Skill
-	if err := a.repo.DB().WithContext(ctx).Where("id = ?", version.SkillID).First(&skill).Error; err != nil {
+	if err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		version.Status = statusDraft
+		version.ReviewedByAdminID = &auth.AdminID
+		version.ReviewedAt = &now
+		version.UpdatedBy = optionalString(auth.AdminID)
+		version.UpdatedAt = now
+		if err := tx.Save(&version).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id = ?", version.SkillID).First(&skill).Error; err != nil {
+			return err
+		}
+		if skill.PublishedVersionID != nil && *skill.PublishedVersionID != "" {
+			skill.Status = statusPublished
+		} else {
+			skill.Status = statusDraft
+		}
+		skill.UpdatedBy = optionalString(auth.AdminID)
+		skill.UpdatedAt = now
+		if err := tx.Save(&skill).Error; err != nil {
+			return err
+		}
+		return tx.Create(&businesscore.SkillReviewRecord{ID: security.RandomID("skr_"), SkillID: version.SkillID, VersionID: version.ID, ReviewAction: "reject", ReviewStatus: "rejected", ReviewComment: commentPtr, ReviewedByAdminID: auth.AdminID, CreatedBy: optionalString(auth.AdminID), UpdatedBy: optionalString(auth.AdminID), CreatedAt: now}).Error
+	}); err != nil {
 		return SkillDetailDTO{}, err
 	}
 	a.notifySkillReview(ctx, skill, version.ID, "rejected", comment)
@@ -825,6 +1436,21 @@ func skillDTO(row businesscore.Skill) SkillDetailDTO {
 		SkillID: row.ID, SkillKey: row.SkillKey, SkillName: row.SkillName, SkillScope: row.SkillScope,
 		Status: row.Status, PublishedVersionID: versionID, RouteHints: stringMap(row.RouteHintsJSON), UpdatedAt: row.UpdatedAt,
 	}
+}
+
+func (a *App) skillAdminDTO(ctx context.Context, row businesscore.Skill) SkillDetailDTO {
+	dto := skillDTO(row)
+	var version businesscore.SkillVersion
+	if err := a.repo.DB().WithContext(ctx).
+		Where("skill_id = ?", row.ID).
+		Order("updated_at DESC, created_at DESC").
+		First(&version).Error; err == nil {
+		dto.LatestVersionID = version.ID
+		_ = a.repo.DB().WithContext(ctx).Model(&businesscore.SkillTestCase{}).
+			Where("skill_id = ? AND version_id = ? AND status = ?", row.ID, version.ID, statusActive).
+			Count(&dto.ActiveTestCaseCount).Error
+	}
+	return dto
 }
 
 func stringMap(raw datatypes.JSON) map[string]string {

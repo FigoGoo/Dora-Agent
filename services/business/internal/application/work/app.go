@@ -167,6 +167,16 @@ type ListPublicWorksInput struct {
 	Offset       int
 }
 
+type ListAdminPublicWorksInput struct {
+	Keyword      string
+	Status       string
+	Category     string
+	Tag          string
+	ResourceType string
+	Limit        int
+	Offset       int
+}
+
 type WorkDTO struct {
 	WorkID       string    `json:"work_id"`
 	ProjectID    string    `json:"project_id"`
@@ -717,14 +727,15 @@ func (a *App) ListPublicWorks(ctx context.Context, in ListPublicWorksInput) (Pag
 		db = db.Where("resource_type = ?", in.ResourceType)
 	}
 	if in.Tag != "" {
-		db = db.Where("snapshot_payload->'tags' ? ?", in.Tag)
+		db = applySnapshotTagFilter(db, in.Tag)
+	}
+	countDB := db.Session(&gorm.Session{})
+	var total int64
+	if err := countDB.Count(&total).Error; err != nil {
+		return Page[PublicWorkCardDTO]{}, err
 	}
 	var rows []businesscore.WorkPublicSnapshot
 	if err := db.Order("published_at DESC, public_work_id ASC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
-		return Page[PublicWorkCardDTO]{}, err
-	}
-	var total int64
-	if err := db.Count(&total).Error; err != nil {
 		return Page[PublicWorkCardDTO]{}, err
 	}
 	items := make([]PublicWorkCardDTO, 0, len(rows))
@@ -865,15 +876,32 @@ func (a *App) ConfirmTakeDownWork(ctx context.Context, in ConfirmTakeDownWorkInp
 	return out, nil
 }
 
-func (a *App) ListAdminPublicWorks(ctx context.Context, limit, offset int) (Page[AdminPublicWorkDTO], error) {
-	limit, offset = normalizePage(limit, offset)
+func (a *App) ListAdminPublicWorks(ctx context.Context, in ListAdminPublicWorksInput) (Page[AdminPublicWorkDTO], error) {
+	limit, offset := normalizePage(in.Limit, in.Offset)
 	var rows []businesscore.WorkPublicSnapshot
 	db := a.repo.DB().WithContext(ctx).Model(&businesscore.WorkPublicSnapshot{})
-	if err := db.Order("published_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+	if strings.TrimSpace(in.Status) != "" {
+		db = db.Where("status = ?", strings.TrimSpace(in.Status))
+	}
+	if strings.TrimSpace(in.Category) != "" {
+		db = db.Where("category = ?", strings.TrimSpace(in.Category))
+	}
+	if strings.TrimSpace(in.ResourceType) != "" {
+		db = db.Where("resource_type = ?", strings.TrimSpace(in.ResourceType))
+	}
+	if strings.TrimSpace(in.Tag) != "" {
+		db = applySnapshotTagFilter(db, in.Tag)
+	}
+	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
+		like := "%" + strings.ToLower(keyword) + "%"
+		db = db.Where("LOWER(title) LIKE ? OR LOWER(public_work_id) LIKE ? OR LOWER(published_by) LIKE ?", like, like, like)
+	}
+	countDB := db.Session(&gorm.Session{})
+	var total int64
+	if err := countDB.Count(&total).Error; err != nil {
 		return Page[AdminPublicWorkDTO]{}, err
 	}
-	var total int64
-	if err := db.Count(&total).Error; err != nil {
+	if err := db.Order("published_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
 		return Page[AdminPublicWorkDTO]{}, err
 	}
 	items := make([]AdminPublicWorkDTO, 0, len(rows))
@@ -881,6 +909,17 @@ func (a *App) ListAdminPublicWorks(ctx context.Context, limit, offset int) (Page
 		items = append(items, AdminPublicWorkDTO{PublicWorkID: row.PublicWorkID, WorkID: row.WorkID, Title: snapshotPayload(row).Title, Status: row.Status, PublishedAt: row.PublishedAt, TakenDownAt: row.TakenDownAt})
 	}
 	return Page[AdminPublicWorkDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+}
+
+func applySnapshotTagFilter(db *gorm.DB, tag string) *gorm.DB {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return db
+	}
+	if db.Dialector != nil && db.Dialector.Name() == "sqlite" {
+		return db.Where("EXISTS (SELECT 1 FROM json_each(snapshot_payload, '$.tags') WHERE json_each.value = ?)", tag)
+	}
+	return db.Where("(snapshot_payload->'tags') @> jsonb_build_array(?::text)", tag)
 }
 
 func (a *App) CountNotificationFailuresForTest(ctx context.Context, publicWorkID string) int64 {
