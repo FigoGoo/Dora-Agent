@@ -364,8 +364,9 @@ func (a *App) RotatePassword(ctx context.Context, in RotatePasswordInput) (Admin
 	if hash == "" {
 		hash = security.HashIdentifier(in.Auth.AdminID + ":rotate:" + in.Reason)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "admin.password.rotate", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "admin:" + in.Auth.AdminID, Scope: "admin.password.rotate", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "admin:" + in.Auth.AdminID, Scope: "admin.password.rotate", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.AdminID,
 	})
 	if err != nil {
@@ -467,8 +468,9 @@ func (a *App) CreateAdmin(ctx context.Context, in CreateAdminInput) (PlatformAdm
 	if hash == "" {
 		hash = security.HashIdentifier(in.Account + ":" + in.Reason)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "admin.create", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "admin:" + in.Auth.AdminID, Scope: "admin.create", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "admin:" + in.Auth.AdminID, Scope: "admin.create", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.AdminID,
 	})
 	if err != nil {
@@ -515,8 +517,9 @@ func (a *App) DisableAdmin(ctx context.Context, in DisableAdminInput) (PlatformA
 	if hash == "" {
 		hash = security.HashIdentifier(in.AdminID + ":" + in.Reason)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "admin.disable", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "admin:" + in.Auth.AdminID, Scope: "admin.disable", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "admin:" + in.Auth.AdminID, Scope: "admin.disable", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.AdminID,
 	})
 	if err != nil {
@@ -654,8 +657,9 @@ func (a *App) ConfirmSetUserStatus(ctx context.Context, in UserStatusInput) (Use
 	if hash == "" {
 		hash = security.HashIdentifier(in.UserID + ":" + in.TargetStatus + ":" + in.Reason)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "admin.user.status", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "admin:" + in.Auth.AdminID, Scope: "admin.user.status", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "admin:" + in.Auth.AdminID, Scope: "admin.user.status", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.AdminID,
 	})
 	if err != nil {
@@ -849,6 +853,16 @@ func last4(value string) string {
 		return value
 	}
 	return value[len(value)-4:]
+}
+
+func businessIdempotencyKey(meta RequestMeta, scope, hash string) string {
+	if key := strings.TrimSpace(meta.IdempotencyKey); key != "" {
+		return key
+	}
+	if hash == "" {
+		return ""
+	}
+	return scope + ":" + hash
 }
 
 func errorCode(err error) string {

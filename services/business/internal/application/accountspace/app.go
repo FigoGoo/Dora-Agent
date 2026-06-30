@@ -233,10 +233,11 @@ func (a *App) RegisterPersonalAccount(ctx context.Context, in RegisterInput) (Au
 	if requestHash == "" {
 		requestHash = security.HashIdentifier(actorKey + ":register")
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "auth.register", requestHash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
 		TenantID:       authTenantID(actorKey),
 		Scope:          "auth.register",
-		IdempotencyKey: in.Meta.IdempotencyKey,
+		IdempotencyKey: idempotencyKey,
 		RequestHash:    requestHash,
 		ActorUserID:    security.HashIdentifier(actorKey),
 	})
@@ -496,11 +497,12 @@ func (a *App) SwitchIdentity(ctx context.Context, in SwitchIdentityInput) (AuthS
 	if hash == "" {
 		hash = security.HashIdentifier(in.Auth.UserID + ":" + target + ":" + in.TargetEnterpriseID)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "account.switch_identity", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
 		TenantID:       "user:" + in.Auth.UserID,
 		SpaceID:        in.Auth.SpaceID,
 		Scope:          "account.switch_identity",
-		IdempotencyKey: in.Meta.IdempotencyKey,
+		IdempotencyKey: idempotencyKey,
 		RequestHash:    hash,
 		ActorUserID:    in.Auth.UserID,
 	})
@@ -587,11 +589,12 @@ func (a *App) CreateEnterprise(ctx context.Context, in CreateEnterpriseInput) (E
 	if hash == "" {
 		hash = security.HashIdentifier(in.Auth.UserID + ":" + name)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "enterprise.create", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
 		TenantID:       "user:" + in.Auth.UserID,
 		SpaceID:        in.Auth.SpaceID,
 		Scope:          "enterprise.create",
-		IdempotencyKey: in.Meta.IdempotencyKey,
+		IdempotencyKey: idempotencyKey,
 		RequestHash:    hash,
 		ActorUserID:    in.Auth.UserID,
 	})
@@ -769,11 +772,12 @@ func (a *App) CreateMemberInvite(ctx context.Context, in InviteInput) (Enterpris
 	if hash == "" {
 		hash = security.HashIdentifier(in.Auth.EnterpriseID + ":" + email + ":" + phone)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "enterprise.invite.create", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
 		TenantID:       "enterprise:" + in.Auth.EnterpriseID,
 		SpaceID:        in.Auth.SpaceID,
 		Scope:          "enterprise.invite.create",
-		IdempotencyKey: in.Meta.IdempotencyKey,
+		IdempotencyKey: idempotencyKey,
 		RequestHash:    hash,
 		ActorUserID:    in.Auth.UserID,
 		EnterpriseID:   &in.Auth.EnterpriseID,
@@ -853,11 +857,12 @@ func (a *App) ConfirmRemoveMember(ctx context.Context, in RemoveMemberInput) (En
 	if hash == "" {
 		hash = security.HashIdentifier(in.Auth.EnterpriseID + ":" + in.MemberID + ":" + in.Reason)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "enterprise.member.remove", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
 		TenantID:       "enterprise:" + in.Auth.EnterpriseID,
 		SpaceID:        in.Auth.SpaceID,
 		Scope:          "enterprise.member.remove",
-		IdempotencyKey: in.Meta.IdempotencyKey,
+		IdempotencyKey: idempotencyKey,
 		RequestHash:    hash,
 		ActorUserID:    in.Auth.UserID,
 		EnterpriseID:   &in.Auth.EnterpriseID,
@@ -925,11 +930,12 @@ func (a *App) ConfirmTransferOwner(ctx context.Context, in TransferOwnerInput) (
 	if hash == "" {
 		hash = security.HashIdentifier(in.Auth.EnterpriseID + ":" + in.TargetMemberID + ":" + in.Reason)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "enterprise.owner.transfer", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
 		TenantID:       "enterprise:" + in.Auth.EnterpriseID,
 		SpaceID:        in.Auth.SpaceID,
 		Scope:          "enterprise.owner.transfer",
-		IdempotencyKey: in.Meta.IdempotencyKey,
+		IdempotencyKey: idempotencyKey,
 		RequestHash:    hash,
 		ActorUserID:    in.Auth.UserID,
 		EnterpriseID:   &in.Auth.EnterpriseID,
@@ -1215,6 +1221,16 @@ func boolString(value bool) string {
 
 func authTenantID(actorKey string) string {
 	return "auth:" + security.HashIdentifier(actorKey)[:59]
+}
+
+func businessIdempotencyKey(meta RequestMeta, scope, hash string) string {
+	if key := strings.TrimSpace(meta.IdempotencyKey); key != "" {
+		return key
+	}
+	if hash == "" {
+		return ""
+	}
+	return scope + ":" + hash
 }
 
 func errorCode(err error) string {

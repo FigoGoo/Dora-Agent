@@ -178,7 +178,7 @@ func normalizeValue(value any) any {
 func shouldIgnoreHashField(key string) bool {
 	normalized := strings.ToLower(strings.ReplaceAll(key, "-", "_"))
 	switch normalized {
-	case "request_id", "trace_id", "x_client_request_id", "client_request_id":
+	case "request_id", "trace_id", "x_client_request_id", "client_request_id", "request_hash":
 		return true
 	default:
 		return false

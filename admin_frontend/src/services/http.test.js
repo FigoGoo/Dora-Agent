@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { adminRequest, createRequestHash, parseApiError, safeHeaderValue } from './http.js';
+import { adminRequest, parseApiError } from './http.js';
 import { getAdminSession, saveAdminSession } from './session.js';
 
 describe('admin API client', () => {
@@ -9,20 +9,7 @@ describe('admin API client', () => {
     vi.restoreAllMocks();
   });
 
-  test('creates stable request hashes for semantic request bodies', async () => {
-    const left = await createRequestHash({ reason: 'disable', target_status: 'disabled' });
-    const right = await createRequestHash({ target_status: 'disabled', reason: 'disable' });
-
-    expect(left).toBe(right);
-    expect(left).toMatch(/^[a-f0-9]{64}$/);
-  });
-
-  test('keeps generated request headers ASCII safe', () => {
-    expect(safeHeaderValue('skill_test:run_1', 'fallback')).toBe('skill_test:run_1');
-    expect(safeHeaderValue('审核测试', 'fallback')).toBe('fallback');
-  });
-
-  test('adds admin auth, idempotency and request_hash to write requests', async () => {
+  test('adds admin auth and JSON headers to write requests without generic idempotency fields', async () => {
     saveAdminSession({ admin_id: 'adm_1', account: 'root', status: 'active', access_token: 'token_1' });
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -40,9 +27,10 @@ describe('admin API client', () => {
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(init.body);
     expect(init.headers.Authorization).toBe('Bearer token_1');
-    expect(init.headers['Idempotency-Key']).toMatch(/^admin-/);
+    expect(init.headers['Content-Type']).toBe('application/json');
+    expect(init.headers['Idempotency-Key']).toBeUndefined();
     expect(init.headers['X-Admin-Reason']).toBeUndefined();
-    expect(body.request_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(body).toEqual({ target_status: 'disabled', preview_token: 'preview_1' });
   });
 
   test('keeps non-ASCII admin reason in the JSON body instead of request headers', async () => {

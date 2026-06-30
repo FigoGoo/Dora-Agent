@@ -39,7 +39,7 @@ func (h workbenchHandler) createSession(c *gin.Context) {
 	if !bind(c, &req) {
 		return
 	}
-	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	out, err := h.app.CreateSession(c.Request.Context(), auth(c), req, traceID(c))
 	respond(c, out, err)
 }
@@ -59,7 +59,7 @@ func (h workbenchHandler) createRun(c *gin.Context) {
 	if !bind(c, &req) {
 		return
 	}
-	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	out, err := h.app.CreateRun(c.Request.Context(), auth(c), req, traceID(c))
 	respond(c, out, err)
 }
@@ -130,7 +130,7 @@ func (h workbenchHandler) appendUserInput(c *gin.Context) {
 	if !bind(c, &req) {
 		return
 	}
-	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	out, err := h.app.AppendUserInput(c.Request.Context(), auth(c), c.Param("run_id"), req, traceID(c))
 	respond(c, out, err)
 }
@@ -142,7 +142,7 @@ func (h workbenchHandler) acceptInterrupt(c *gin.Context) {
 	}
 	req.RunID = c.Param("run_id")
 	req.InterruptID = c.Param("interrupt_id")
-	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	out, err := h.app.AcceptInterrupt(c.Request.Context(), auth(c), c.Param("run_id"), req, traceID(c))
 	respond(c, out, err)
 }
@@ -154,7 +154,7 @@ func (h workbenchHandler) rejectInterrupt(c *gin.Context) {
 	}
 	req.RunID = c.Param("run_id")
 	req.InterruptID = c.Param("interrupt_id")
-	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	out, err := h.app.RejectInterrupt(c.Request.Context(), auth(c), c.Param("run_id"), req, traceID(c))
 	respond(c, out, err)
 }
@@ -164,8 +164,10 @@ func (h workbenchHandler) cancelRun(c *gin.Context) {
 		CancelReason   string `json:"cancel_reason"`
 		IdempotencyKey string `json:"idempotency_key"`
 	}
-	_ = c.ShouldBindJSON(&req)
-	out, err := h.app.CancelRun(c.Request.Context(), auth(c), c.Param("run_id"), req.CancelReason, idempotencyKey(c, req.IdempotencyKey), traceID(c))
+	if !bind(c, &req) {
+		return
+	}
+	out, err := h.app.CancelRun(c.Request.Context(), auth(c), c.Param("run_id"), req.CancelReason, strings.TrimSpace(req.IdempotencyKey), traceID(c))
 	respond(c, out, err)
 }
 
@@ -241,13 +243,6 @@ func auth(c *gin.Context) workbench.AuthContextDTO {
 
 func traceID(c *gin.Context) string {
 	return observability.TraceID(c.Request.Context())
-}
-
-func idempotencyKey(c *gin.Context, bodyValue string) string {
-	if header := c.GetHeader("Idempotency-Key"); header != "" {
-		return header
-	}
-	return strings.TrimSpace(bodyValue)
 }
 
 func intQuery(c *gin.Context, key string, fallback int) int {

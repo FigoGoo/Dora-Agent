@@ -57,8 +57,8 @@ owner：测试与验收责任域
 ## 统一断言
 
 - 所有列表默认 `page_size=10`，最大 `50`；字典类例外必须在契约中声明。
-- 所有写 HTTP API 必须校验 `Idempotency-Key`，重复同 hash 返回同一结果，同 key 不同 hash 返回 `IDEMPOTENCY_CONFLICT`。
-- 所有写 RPC 必须携带 `RequestMeta.idempotency_key`，并记录 trace。
+- HTTP 写 API 不要求客户端传 `Idempotency-Key` 或 `request_hash`；需要幂等的业务写由后端应用层按业务字段生成或校验内部业务幂等键，并验证重复同语义请求不重复创建事实或扣费。
+- 写 RPC 在业务需要幂等时必须携带 `RequestMeta.idempotency_key`，并记录 trace。
 - 普通用户端、公开端和管理端响应不得泄露系统 Prompt、完整用户提示词、API Key、TOS 签名、供应商原始响应、内部成本、私有素材正文、完整手机号和完整邮箱。
 - 业务 DB 不保存 Agent session、run、message、event、tool_call、blackboard、memory。
 - Agent DB 不保存积分余额、积分流水、最终资产事实、作品公开状态、企业成员关系、业务权限事实。

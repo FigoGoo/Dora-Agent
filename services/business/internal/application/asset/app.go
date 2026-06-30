@@ -270,7 +270,7 @@ func (a *App) CreateUploadIntent(ctx context.Context, in CreateUploadIntentInput
 	if err := requireAuth(in.Auth); err != nil {
 		return UploadIntentDTO{}, err
 	}
-	if in.Meta.IdempotencyKey == "" || in.ProjectID == "" || in.AssetType == "" || in.ContentType == "" || in.SizeBytes <= 0 {
+	if in.ProjectID == "" || in.AssetType == "" || in.ContentType == "" || in.SizeBytes <= 0 {
 		return UploadIntentDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "upload intent request is incomplete")
 	}
 	if err := validateSafetyEvidence(in.SafetyEvidence, "asset_upload_metadata", "asset_metadata", in.Meta.TraceID, a.now()); err != nil {
@@ -287,7 +287,8 @@ func (a *App) CreateUploadIntent(ctx context.Context, in CreateUploadIntentInput
 		"size_bytes": in.SizeBytes, "checksum": in.Checksum,
 		"safety_evidence_id": in.SafetyEvidence.SafetyEvidenceId, "evaluated_object_digest": in.SafetyEvidence.EvaluatedObjectDigest,
 	})
-	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "asset.upload_intent", IdempotencyKey: in.Meta.IdempotencyKey, RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID)})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "asset.upload_intent", hash)
+	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "asset.upload_intent", IdempotencyKey: idempotencyKey, RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID)})
 	if err != nil {
 		return UploadIntentDTO{}, err
 	}
@@ -321,7 +322,7 @@ func (a *App) CreateUploadIntent(ctx context.Context, in CreateUploadIntentInput
 			ID: security.RandomID("ui_"), UploadIntentID: intentID, OwnerUserID: in.Auth.UserID, SpaceID: in.Auth.SpaceID,
 			ProjectID: &in.ProjectID, AssetType: in.AssetType, Bucket: &a.tos.Bucket, ObjectKey: &objectKey,
 			ObjectKeyHash: digest(objectKey), MIMEType: &in.ContentType, MaxSizeBytes: in.SizeBytes, Status: StatusCreated,
-			ExpiresAt: now.Add(15 * time.Minute), ConfirmedAssetID: &assetID, IdempotencyKey: in.Meta.IdempotencyKey,
+			ExpiresAt: now.Add(15 * time.Minute), ConfirmedAssetID: &assetID, IdempotencyKey: idempotencyKey,
 			TraceID: in.Meta.TraceID, CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&intent).Error; err != nil {
@@ -342,11 +343,12 @@ func (a *App) ConfirmUploadIntent(ctx context.Context, in ConfirmUploadInput) (A
 	if err := requireAuth(in.Auth); err != nil {
 		return AssetDetailDTO{}, err
 	}
-	if in.Meta.IdempotencyKey == "" || in.UploadIntentID == "" || in.SizeBytes <= 0 || in.ContentType == "" || in.Checksum == "" {
+	if in.UploadIntentID == "" || in.SizeBytes <= 0 || in.ContentType == "" || in.Checksum == "" {
 		return AssetDetailDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "confirm upload request is incomplete")
 	}
 	hash := requestHash(in.Meta, in.Auth, map[string]any{"upload_intent_id": in.UploadIntentID, "etag": in.Etag, "size_bytes": in.SizeBytes, "checksum": in.Checksum})
-	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "asset.upload_confirm", IdempotencyKey: in.Meta.IdempotencyKey, RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID)})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "asset.upload_confirm", hash)
+	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "asset.upload_confirm", IdempotencyKey: idempotencyKey, RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID)})
 	if err != nil {
 		return AssetDetailDTO{}, err
 	}
@@ -408,9 +410,6 @@ func (a *App) ConfirmUploadIntent(ctx context.Context, in ConfirmUploadInput) (A
 }
 
 func (a *App) AbortUploadIntent(ctx context.Context, auth AuthContext, meta RequestMeta, uploadIntentID string) (UploadIntentDTO, error) {
-	if meta.IdempotencyKey == "" {
-		return UploadIntentDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "idempotency_key is required")
-	}
 	var dto UploadIntentDTO
 	err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var intent businesscore.UploadIntent
@@ -493,14 +492,15 @@ func (a *App) PrepareGeneratedAssetObjects(ctx context.Context, auth AuthContext
 	if err := requireAuth(auth); err != nil {
 		return nil, err
 	}
-	if meta.IdempotencyKey == "" || projectID == "" || sessionID == "" || runID == "" || len(artifacts) == 0 {
+	if projectID == "" || sessionID == "" || runID == "" || len(artifacts) == 0 {
 		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "prepare generated asset objects request is incomplete")
 	}
 	if err := a.ensureProjectWritable(ctx, auth, projectID); err != nil {
 		return nil, err
 	}
 	hash := requestHash(meta, auth, map[string]any{"project_id": projectID, "session_id": sessionID, "run_id": runID, "artifacts": artifacts})
-	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "space:" + auth.SpaceID, SpaceID: auth.SpaceID, Scope: "asset.generated_objects.prepare", IdempotencyKey: meta.IdempotencyKey, RequestHash: hash, ActorUserID: auth.UserID, EnterpriseID: optionalString(auth.EnterpriseID)})
+	idempotencyKey := businessIdempotencyKey(meta, "asset.generated_objects.prepare", hash)
+	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "space:" + auth.SpaceID, SpaceID: auth.SpaceID, Scope: "asset.generated_objects.prepare", IdempotencyKey: idempotencyKey, RequestHash: hash, ActorUserID: auth.UserID, EnterpriseID: optionalString(auth.EnterpriseID)})
 	if err != nil {
 		return nil, err
 	}
@@ -537,7 +537,7 @@ func (a *App) PrepareGeneratedAssetObjects(ctx context.Context, auth AuthContext
 				ID: security.RandomID("gaos_"), SlotID: security.RandomID("slot_"), ProjectID: projectID, SessionID: sessionID, RunID: runID,
 				ArtifactID: artifact.ArtifactID, ResourceType: artifact.ResourceType, Bucket: a.tos.Bucket, ObjectKey: objectKey,
 				ObjectKeyHash: digest(objectKey), ContentType: artifact.ContentType, SizeBytes: artifact.SizeBytes, Checksum: optionalStringValue(artifact.Checksum),
-				Status: StatusCreated, IdempotencyKey: meta.IdempotencyKey, MetadataJSON: mustJSON(artifact.MetadataSummary), ExpiresAt: now.Add(15 * time.Minute),
+				Status: StatusCreated, IdempotencyKey: idempotencyKey, MetadataJSON: mustJSON(artifact.MetadataSummary), ExpiresAt: now.Add(15 * time.Minute),
 				CreatedByUserID: auth.UserID, TraceID: meta.TraceID, CreatedBy: optionalString(auth.UserID), UpdatedBy: optionalString(auth.UserID), CreatedAt: now, UpdatedAt: now,
 			}
 			if err := tx.Create(&row).Error; err != nil {
@@ -812,6 +812,16 @@ func requestHash(meta RequestMeta, auth AuthContext, extra map[string]any) strin
 	}
 	data, _ := json.Marshal(map[string]any{"space_id": auth.SpaceID, "actor_user_id": auth.UserID, "enterprise_id": auth.EnterpriseID, "extra": extra})
 	return digest(string(data))
+}
+
+func businessIdempotencyKey(meta RequestMeta, scope, hash string) string {
+	if key := strings.TrimSpace(meta.IdempotencyKey); key != "" {
+		return key
+	}
+	if hash == "" {
+		return ""
+	}
+	return scope + ":" + hash
 }
 
 func requireAuth(auth AuthContext) error {

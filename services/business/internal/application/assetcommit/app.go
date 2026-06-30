@@ -212,15 +212,16 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 	if in.Auth.UserID == "" || in.Auth.SpaceID == "" {
 		return CommitDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "auth context is required")
 	}
-	if in.Meta.IdempotencyKey == "" || in.ProjectID == "" || in.SessionID == "" || in.RunID == "" || in.FreezeID == "" || len(in.Artifacts) == 0 {
+	if in.ProjectID == "" || in.SessionID == "" || in.RunID == "" || in.FreezeID == "" || len(in.Artifacts) == 0 {
 		return CommitDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "asset commit request is incomplete")
 	}
 	if err := validateSafetyEvidence(in.SafetyEvidence, in.SessionID, in.RunID, in.Meta.TraceID, a.now()); err != nil {
 		return CommitDTO{}, err
 	}
 	hash := requestHash(in.Meta, in.Auth, map[string]any{"project_id": in.ProjectID, "run_id": in.RunID, "freeze_id": in.FreezeID, "artifacts": in.Artifacts, "elements": in.FinalElements})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "asset.commit_charge", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "asset.commit_charge", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "asset.commit_charge", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -317,7 +318,7 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 			ID: ledgerID, AccountID: account.ID, EntryType: "asset_commit_charge", PointsDelta: -charged,
 			BalanceAfter: account.AvailablePoints, FrozenAfter: account.FrozenPoints, SourceType: "asset_commit",
 			SourceID: commitID, ProjectID: &in.ProjectID, RunID: &in.RunID, TraceID: optionalString(in.Meta.TraceID),
-			IdempotencyKey: optionalString(in.Meta.IdempotencyKey), MetadataJSON: mustJSON(map[string]any{"asset_count": len(assetRefs), "charged_line_items": lineItems}), CreatedAt: now,
+			IdempotencyKey: optionalString(idempotencyKey), MetadataJSON: mustJSON(map[string]any{"asset_count": len(assetRefs), "charged_line_items": lineItems}), CreatedAt: now,
 		}).Error; err != nil {
 			return err
 		}
@@ -330,7 +331,7 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 			RunID: in.RunID, FreezeID: in.FreezeID, EstimateID: estimateID, ActorUserID: in.Auth.UserID, SpaceID: in.Auth.SpaceID,
 			SafetyEvidenceID: in.SafetyEvidence.SafetyEvidenceId, SafetyEvidenceHash: safetyDigest(in.SafetyEvidence),
 			ChargedPoints: charged, ReleasedPoints: released, CommitStatus: commitStatusForSkipped(lineItems), LedgerRef: &ledgerID,
-			IdempotencyKey: in.Meta.IdempotencyKey, TraceID: in.Meta.TraceID,
+			IdempotencyKey: idempotencyKey, TraceID: in.Meta.TraceID,
 			CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&batch).Error; err != nil {
@@ -687,6 +688,16 @@ func requestHash(meta RequestMeta, auth AuthContext, extra map[string]any) strin
 	}
 	data, _ := json.Marshal(map[string]any{"space_id": auth.SpaceID, "actor_user_id": auth.UserID, "enterprise_id": auth.EnterpriseID, "extra": extra})
 	return digest(string(data))
+}
+
+func businessIdempotencyKey(meta RequestMeta, scope, hash string) string {
+	if key := strings.TrimSpace(meta.IdempotencyKey); key != "" {
+		return key
+	}
+	if hash == "" {
+		return ""
+	}
+	return scope + ":" + hash
 }
 
 func safetyDigest(evidence *businessagent.SafetyEvidenceDTO) string {

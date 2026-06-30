@@ -47,7 +47,7 @@ owner：文档与契约责任域；业务服务责任域和前端责任域确认
 ## 后台高风险操作
 
 - 后台高风险写操作必须拆分为 preview 和 confirm；preview 只返回影响范围、确认摘要、`preview_token` 和过期时间，不改变业务事实。
-- confirm 必须在 JSON body 携带 `preview_token` 和 `reason`，并在 header 携带 `Idempotency-Key`；服务端必须校验 preview token、管理员身份、操作对象、原因摘要和幂等冲突。
+- confirm 必须在 JSON body 携带 `preview_token` 和 `reason`；服务端必须校验 preview token、管理员身份、操作对象、原因摘要，并在业务需要时由后端派生业务幂等键。
 - 后台操作原因属于业务审计字段，不使用 HTTP header 传输；所有中文、多行原因都按 JSON body 原文传递。
 - 用户状态变更使用 `POST /api/admin/users/{user_id}/status/preview` 和 `POST /api/admin/users/{user_id}/status/confirm`。
 - 公开作品下架使用 `POST /api/admin/works/public/{public_work_id}/take-down/preview` 和 `POST /api/admin/works/public/{public_work_id}/take-down/confirm`。
@@ -96,7 +96,7 @@ owner：文档与契约责任域；业务服务责任域和前端责任域确认
 - 未登录公开读 API 不返回用户私有资产、会话、黑板、提示词、积分、模型成本。
 - 需要登录的动作返回 `UNAUTHENTICATED`，前端弹 LoginModal。
 - 列表默认 `page_size = 10`，最大值建议 `50`。
-- 写操作必须透传 `Idempotency-Key`。
+- HTTP 写操作不再要求客户端传 `Idempotency-Key` 或 `request_hash`；需要幂等的业务写由具体业务应用层基于业务字段、目标资源和操作者生成或校验内部业务幂等信息。
 - 后台高风险写操作需要确认或二次确认语义。
 - 后台不消费 AG-UI，不代替用户进入空间，不查看私有会话、黑板、提示词、私有素材或积分明细正文。
 

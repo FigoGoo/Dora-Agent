@@ -204,9 +204,6 @@ func requestRaw(t *testing.T, router http.Handler, method, path, token, idem str
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if idem != "" {
-		req.Header.Set("Idempotency-Key", idem)
-	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	var out map[string]any

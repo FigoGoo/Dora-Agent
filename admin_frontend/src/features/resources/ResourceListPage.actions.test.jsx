@@ -92,7 +92,7 @@ describe('ResourceListPage actions', () => {
         resource_type: 'text',
         pricing_snapshot_id: 'price_deepseek_v4_fast'
       },
-      { idempotencyKey: undefined }
+      { headers: undefined }
     ));
   });
 
@@ -143,7 +143,6 @@ describe('ResourceListPage actions', () => {
         safety_evidence_json: values.safety_evidence_json
       },
       {
-        idempotencyKey: 'skill_test:skrun_manual_001',
         headers: { 'X-Trace-Id': 'trace_skrun_manual_001' }
       }
     ));

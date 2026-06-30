@@ -18,39 +18,39 @@ func registerM3Routes(router *gin.Engine, opts RouterOptions) {
 	router.GET("/api/models/generation", auth.userAuth(), h.listGenerationModels)
 	router.GET("/api/tools/bindable", auth.userAuth(), h.listBindableTools)
 	router.GET("/api/skills", auth.userAuth(), h.listSkills)
-	router.POST("/api/skills", auth.userAuth(), requireIdempotency(), h.createSkill)
+	router.POST("/api/skills", auth.userAuth(), h.createSkill)
 	router.GET("/api/skills/:skill_id", auth.userAuth(), h.getSkill)
-	router.PATCH("/api/skills/:skill_id", auth.userAuth(), requireIdempotency(), h.updateSkill)
-	router.POST("/api/skills/:skill_id/test", auth.userAuth(), requireIdempotency(), h.submitSkillTest)
-	router.POST("/api/skills/:skill_id/submit-review", auth.userAuth(), requireIdempotency(), h.submitSkillReview)
-	router.POST("/api/skills/:skill_id/rollback", auth.userAuth(), requireIdempotency(), h.rollbackSkill)
+	router.PATCH("/api/skills/:skill_id", auth.userAuth(), h.updateSkill)
+	router.POST("/api/skills/:skill_id/test", auth.userAuth(), h.submitSkillTest)
+	router.POST("/api/skills/:skill_id/submit-review", auth.userAuth(), h.submitSkillReview)
+	router.POST("/api/skills/:skill_id/rollback", auth.userAuth(), h.rollbackSkill)
 	router.GET("/api/asset-element-types", auth.userAuth(), h.listAssetElementTypes)
 
 	router.GET("/api/admin/models/providers", auth.adminAuth(false), h.adminListProviders)
-	router.POST("/api/admin/models/providers", auth.adminAuth(false), requireIdempotency(), h.adminSaveProvider)
-	router.PATCH("/api/admin/models/providers/:provider_id", auth.adminAuth(false), requireIdempotency(), h.adminPatchProvider)
-	router.POST("/api/admin/models/providers/:provider_id/connectivity-test", auth.adminAuth(false), requireIdempotency(), h.adminConnectivityTest)
+	router.POST("/api/admin/models/providers", auth.adminAuth(false), h.adminSaveProvider)
+	router.PATCH("/api/admin/models/providers/:provider_id", auth.adminAuth(false), h.adminPatchProvider)
+	router.POST("/api/admin/models/providers/:provider_id/connectivity-test", auth.adminAuth(false), h.adminConnectivityTest)
 	router.GET("/api/admin/models", auth.adminAuth(false), h.adminListModels)
-	router.POST("/api/admin/models", auth.adminAuth(false), requireIdempotency(), h.adminSaveModel)
-	router.PATCH("/api/admin/models/:model_id", auth.adminAuth(false), requireIdempotency(), h.adminPatchModel)
-	router.POST("/api/admin/models/default", auth.adminAuth(false), requireIdempotency(), h.adminSetDefaultModel)
-	router.POST("/api/admin/models/:model_id/status", auth.adminAuth(false), requireIdempotency(), h.adminSetModelStatus)
+	router.POST("/api/admin/models", auth.adminAuth(false), h.adminSaveModel)
+	router.PATCH("/api/admin/models/:model_id", auth.adminAuth(false), h.adminPatchModel)
+	router.POST("/api/admin/models/default", auth.adminAuth(false), h.adminSetDefaultModel)
+	router.POST("/api/admin/models/:model_id/status", auth.adminAuth(false), h.adminSetModelStatus)
 
 	router.GET("/api/admin/tools", auth.adminAuth(false), h.adminListTools)
-	router.POST("/api/admin/tools", auth.adminAuth(false), requireIdempotency(), h.adminRegisterTool)
+	router.POST("/api/admin/tools", auth.adminAuth(false), h.adminRegisterTool)
 	router.POST("/api/admin/tools/:tool_key/impact-preview", auth.adminAuth(false), h.adminToolImpactPreview)
-	router.PATCH("/api/admin/tools/:tool_key/policy", auth.adminAuth(false), requireIdempotency(), h.adminUpdateToolPolicy)
-	router.PATCH("/api/admin/tools/:tool_key/pricing-policy", auth.adminAuth(false), requireIdempotency(), h.adminUpdateToolPricing)
-	router.POST("/api/admin/tools/:tool_key/status", auth.adminAuth(false), requireIdempotency(), h.adminSetToolStatus)
-	router.PUT("/api/admin/tools/:tool_key/whitelist", auth.adminAuth(false), requireIdempotency(), h.adminSaveToolWhitelist)
+	router.PATCH("/api/admin/tools/:tool_key/policy", auth.adminAuth(false), h.adminUpdateToolPolicy)
+	router.PATCH("/api/admin/tools/:tool_key/pricing-policy", auth.adminAuth(false), h.adminUpdateToolPricing)
+	router.POST("/api/admin/tools/:tool_key/status", auth.adminAuth(false), h.adminSetToolStatus)
+	router.PUT("/api/admin/tools/:tool_key/whitelist", auth.adminAuth(false), h.adminSaveToolWhitelist)
 
 	router.GET("/api/admin/skills/system", auth.adminAuth(false), h.adminListSystemSkills)
-	router.POST("/api/admin/skills/system", auth.adminAuth(false), requireIdempotency(), h.adminCreateSystemSkill)
-	router.POST("/api/admin/skills/system/:skill_id/test", auth.adminAuth(false), requireIdempotency(), h.adminSkillTest)
-	router.POST("/api/admin/skills/system/:skill_id/publish", auth.adminAuth(false), requireIdempotency(), h.adminPublishSkill)
-	router.POST("/api/admin/skills/system/:skill_id/deprecate", auth.adminAuth(false), requireIdempotency(), h.adminDeprecateSkill)
+	router.POST("/api/admin/skills/system", auth.adminAuth(false), h.adminCreateSystemSkill)
+	router.POST("/api/admin/skills/system/:skill_id/test", auth.adminAuth(false), h.adminSkillTest)
+	router.POST("/api/admin/skills/system/:skill_id/publish", auth.adminAuth(false), h.adminPublishSkill)
+	router.POST("/api/admin/skills/system/:skill_id/deprecate", auth.adminAuth(false), h.adminDeprecateSkill)
 	router.GET("/api/admin/skills/reviews", auth.adminAuth(false), h.adminListSkillReviews)
-	router.POST("/api/admin/skills/reviews/:review_id/confirm", auth.adminAuth(false), requireIdempotency(), h.adminConfirmSkillReview)
+	router.POST("/api/admin/skills/reviews/:review_id/confirm", auth.adminAuth(false), h.adminConfirmSkillReview)
 
 	router.GET("/api/admin/asset-element-types", auth.adminAuth(false), h.adminListAssetElementTypes)
 }
@@ -147,7 +147,7 @@ func (h m3Handler) submitSkillTest(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	out, err := h.skill.SaveSkillTestResult(c.Request.Context(), userAuth(c), c.Param("skill_id"), req.VersionID, req.TestRunID, req.TestCaseID, c.GetHeader("Idempotency-Key"), req.Status, req.ActualElementsJSON, req.ErrorCode, req.ErrorSummary, req.SafetyEvidenceJSON, req.AgentTraceID)
+	out, err := h.skill.SaveSkillTestResult(c.Request.Context(), userAuth(c), c.Param("skill_id"), req.VersionID, req.TestRunID, req.TestCaseID, "", req.Status, req.ActualElementsJSON, req.ErrorCode, req.ErrorSummary, req.SafetyEvidenceJSON, req.AgentTraceID)
 	respond(c, out, err)
 }
 
@@ -312,7 +312,6 @@ func (h m3Handler) adminRegisterTool(c *gin.Context) {
 		FreeQuota            int               `json:"free_quota"`
 		MinChargePoints      int64             `json:"min_charge_points"`
 		Reason               string            `json:"reason"`
-		RequestHash          string            `json:"request_hash"`
 	}
 	if !bindJSON(c, &req) {
 		return
@@ -452,7 +451,7 @@ func (h m3Handler) adminSkillTest(c *gin.Context) {
 	}
 	auth := userAuth(c)
 	auth.UserID = adminAuth(c).AdminID
-	out, err := h.skill.SaveSkillTestResult(c.Request.Context(), auth, c.Param("skill_id"), req.VersionID, req.TestRunID, req.TestCaseID, c.GetHeader("Idempotency-Key"), req.Status, req.ActualElementsJSON, "", "", req.SafetyEvidenceJSON, loggerTrace(c))
+	out, err := h.skill.SaveSkillTestResult(c.Request.Context(), auth, c.Param("skill_id"), req.VersionID, req.TestRunID, req.TestCaseID, "", req.Status, req.ActualElementsJSON, "", "", req.SafetyEvidenceJSON, loggerTrace(c))
 	respond(c, out, err)
 }
 
@@ -564,17 +563,6 @@ func (h m3Handler) adminSaveAssetElementTypeWithKey(c *gin.Context, elementType 
 	}
 	out, err := h.dictionary.SaveElementType(c.Request.Context(), assetdict.SaveInput{Auth: adminAuth(c), ElementType: req.ElementType, DisplayName: req.DisplayName, SchemaVersion: req.SchemaVersion, SchemaJSON: req.SchemaJSON, Status: req.Status})
 	respond(c, out, err)
-}
-
-func requireIdempotency() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if c.GetHeader("Idempotency-Key") == "" {
-			_ = c.Error(bizerrors.New(bizerrors.CodeInvalidArgument, "Idempotency-Key is required"))
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
 }
 
 func bindJSON(c *gin.Context, out any) bool {

@@ -180,11 +180,12 @@ func (a *App) CreateProject(ctx context.Context, in CreateInput) (ProjectDetailD
 	if hash == "" {
 		hash = security.HashIdentifier(in.Auth.UserID + ":" + spaceID + ":" + title)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "project.create", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
 		TenantID:       "space:" + spaceID,
 		SpaceID:        spaceID,
 		Scope:          "project.create",
-		IdempotencyKey: in.Meta.IdempotencyKey,
+		IdempotencyKey: idempotencyKey,
 		RequestHash:    hash,
 		ActorUserID:    in.Auth.UserID,
 		EnterpriseID:   optionalString(in.Auth.EnterpriseID),
@@ -244,8 +245,9 @@ func (a *App) UpdateProject(ctx context.Context, in UpdateInput) (ProjectDetailD
 	if hash == "" {
 		hash = security.HashIdentifier(in.Auth.UserID + ":" + in.ProjectID + ":update")
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "project.update", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "project.update", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "project.update", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -359,8 +361,9 @@ func (a *App) AttachAssetToProject(ctx context.Context, in AttachAssetInput) (Pr
 	if hash == "" {
 		hash = security.HashIdentifier(in.Auth.UserID + ":" + in.ProjectID + ":" + in.AssetID + ":" + role)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, "project.asset.attach", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "project.asset.attach", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "project.asset.attach", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -514,8 +517,9 @@ func (a *App) setArchiveState(ctx context.Context, in ArchiveInput, archived boo
 	if hash == "" {
 		hash = security.HashIdentifier(in.Auth.UserID + ":" + in.ProjectID + ":" + action + ":" + in.Reason)
 	}
+	idempotencyKey := businessIdempotencyKey(in.Meta, scope, hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: scope, IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: scope, IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -692,6 +696,16 @@ func validateCoverAssetTx(tx *gorm.DB, projectID string, coverAssetID string) er
 		return bizerrors.New(bizerrors.CodePermissionDenied, "cover asset is not referable in this project")
 	}
 	return nil
+}
+
+func businessIdempotencyKey(meta RequestMeta, scope, hash string) string {
+	if key := strings.TrimSpace(meta.IdempotencyKey); key != "" {
+		return key
+	}
+	if hash == "" {
+		return ""
+	}
+	return scope + ":" + hash
 }
 
 func errorCode(err error) string {

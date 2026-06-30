@@ -465,8 +465,9 @@ func agentRaw(t *testing.T, router http.Handler, method, path, idem string, body
 
 func agentRequest(method, path, idem string, body any) *http.Request {
 	var buf bytes.Buffer
-	if body != nil {
-		_ = json.NewEncoder(&buf).Encode(body)
+	payload := body
+	if payload != nil {
+		_ = json.NewEncoder(&buf).Encode(payload)
 	}
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
@@ -475,9 +476,6 @@ func agentRequest(method, path, idem string, body any) *http.Request {
 	req.Header.Set("X-Actor-User-Id", "usr_1001")
 	req.Header.Set("X-Space-Id", "sp_personal_1001")
 	req.Header.Set("X-Login-Identity-Type", "personal")
-	if idem != "" {
-		req.Header.Set("Idempotency-Key", idem)
-	}
 	return req
 }
 

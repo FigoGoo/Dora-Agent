@@ -346,7 +346,12 @@ func (a *App) SaveSkillTestResult(ctx context.Context, auth accountspace.AuthCon
 	if strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(testRunID) == "" {
 		return TestResultDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "skill_id, version_id and test_run_id are required")
 	}
-	if strings.TrimSpace(idempotencyKey) != "skill_test:"+testRunID {
+	expectedIdempotencyKey := "skill_test:" + testRunID
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if idempotencyKey == "" {
+		idempotencyKey = expectedIdempotencyKey
+	}
+	if idempotencyKey != expectedIdempotencyKey {
 		return TestResultDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "request_meta.idempotency_key must be skill_test:<test_run_id>")
 	}
 	now := a.now()

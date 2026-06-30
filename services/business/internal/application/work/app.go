@@ -306,8 +306,9 @@ func (a *App) CreateWork(ctx context.Context, in CreateWorkInput) (WorkDetailDTO
 		return WorkDetailDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "asset_ids is required")
 	}
 	hash := requestHash(in.Meta, in.Auth, map[string]any{"project_id": in.ProjectID, "title": title, "asset_ids": assetIDs, "cover_asset_id": in.CoverAssetID, "category": in.Category})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "work.create", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "work.create", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "work.create", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -377,8 +378,9 @@ func (a *App) UpdateWork(ctx context.Context, in UpdateWorkInput) (WorkDetailDTO
 		"work_id": in.WorkID, "title": in.Title, "description": in.Description, "assets": in.AssetIDs,
 		"cover": in.CoverAssetID, "category": in.Category, "tags": in.Tags, "base_updated_at": in.BaseUpdatedAt,
 	})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "work.update", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "work.update", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "work.update", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -581,8 +583,9 @@ func (a *App) ConfirmShareWork(ctx context.Context, in ConfirmShareWorkInput) (W
 		return WorkShareResultDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "preview token does not match current work or user")
 	}
 	hash := requestHash(in.Meta, in.Auth, map[string]any{"work_id": in.WorkID, "preview_token": in.PreviewToken})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "work.share.confirm", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "work.share.confirm", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "work.share.confirm", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -660,8 +663,9 @@ func (a *App) UnshareWork(ctx context.Context, in UnshareWorkInput) (WorkDetailD
 		return WorkDetailDTO{}, err
 	}
 	hash := requestHash(in.Meta, in.Auth, map[string]any{"work_id": in.WorkID, "reason": in.Reason})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "work.unshare", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "work.unshare", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "work.unshare", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -805,8 +809,9 @@ func (a *App) ConfirmTakeDownWork(ctx context.Context, in ConfirmTakeDownWorkInp
 		return AdminPublicWorkDTO{}, bizerrors.New(bizerrors.CodeStateConflict, "take-down preview token does not match confirm request")
 	}
 	hash := adminRequestHash(in.Meta, in.Auth, map[string]any{"public_work_id": in.PublicWorkID, "reason": in.Reason, "notify_author": in.NotifyAuthor})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "work.public.take_down", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "admin:" + in.Auth.AdminID, Scope: "work.public.take_down", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "admin:" + in.Auth.AdminID, Scope: "work.public.take_down", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.AdminID,
 	})
 	if err != nil {
@@ -938,8 +943,9 @@ func (a *App) setLike(ctx context.Context, in LikePublicWorkInput, liked bool) (
 		scope = "work.public.unlike"
 	}
 	hash := requestHash(in.Meta, in.Auth, map[string]any{"public_work_id": in.PublicWorkID, "liked": liked})
+	idempotencyKey := businessIdempotencyKey(in.Meta, scope, hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "user:" + in.Auth.UserID, SpaceID: in.Auth.SpaceID, Scope: scope, IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "user:" + in.Auth.UserID, SpaceID: in.Auth.SpaceID, Scope: scope, IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -1504,6 +1510,16 @@ func requestHash(meta RequestMeta, auth AuthContext, extra map[string]any) strin
 	}
 	data, _ := json.Marshal(extra)
 	return security.HashIdentifier(auth.UserID + ":" + auth.SpaceID + ":" + string(data))
+}
+
+func businessIdempotencyKey(meta RequestMeta, scope, hash string) string {
+	if key := strings.TrimSpace(meta.IdempotencyKey); key != "" {
+		return key
+	}
+	if hash == "" {
+		return ""
+	}
+	return scope + ":" + hash
 }
 
 func adminRequestHash(meta RequestMeta, auth AdminAuth, extra map[string]any) string {

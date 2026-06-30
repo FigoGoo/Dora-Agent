@@ -17,23 +17,23 @@ func registerM4Routes(router *gin.Engine, opts RouterOptions) {
 
 	router.GET("/api/credits/summary", auth.userAuth(), h.creditSummary)
 	router.GET("/api/credits/ledger", auth.userAuth(), h.creditLedger)
-	router.POST("/api/credits/redeem", auth.userAuth(), requireIdempotency(), h.redeemCode)
+	router.POST("/api/credits/redeem", auth.userAuth(), h.redeemCode)
 	router.GET("/api/enterprise/credits", auth.userAuth(), h.enterpriseCredits)
 	router.GET("/api/enterprise/usage", auth.userAuth(), h.enterpriseUsage)
 
 	router.GET("/api/assets", auth.userAuth(), h.listAssets)
 	router.GET("/api/assets/:asset_id", auth.userAuth(), h.getAsset)
-	router.POST("/api/assets/upload-intents", auth.userAuth(), requireIdempotency(), h.createUploadIntent)
-	router.POST("/api/assets/upload-intents/:upload_intent_id/confirm", auth.userAuth(), requireIdempotency(), h.confirmUploadIntent)
-	router.POST("/api/assets/upload-intents/:upload_intent_id/abort", auth.userAuth(), requireIdempotency(), h.abortUploadIntent)
+	router.POST("/api/assets/upload-intents", auth.userAuth(), h.createUploadIntent)
+	router.POST("/api/assets/upload-intents/:upload_intent_id/confirm", auth.userAuth(), h.confirmUploadIntent)
+	router.POST("/api/assets/upload-intents/:upload_intent_id/abort", auth.userAuth(), h.abortUploadIntent)
 	router.GET("/api/assets/:asset_id/access", auth.userAuth(), h.getAssetAccess)
 
 	router.GET("/api/admin/credits/grants/targets", auth.adminAuth(false), h.searchCreditTargets)
-	router.POST("/api/admin/credits/grants", auth.adminAuth(false), requireIdempotency(), h.adminGrantCredits)
+	router.POST("/api/admin/credits/grants", auth.adminAuth(false), h.adminGrantCredits)
 	router.GET("/api/admin/credits/codes", auth.adminAuth(false), h.listRedeemCodes)
-	router.POST("/api/admin/credits/codes", auth.adminAuth(false), requireIdempotency(), h.createRedeemCodes)
-	router.POST("/api/admin/credits/codes/:batch_id/disable", auth.adminAuth(false), requireIdempotency(), h.disableRedeemCodeBatch)
-	router.POST("/api/admin/credits/codes/:batch_id/export", auth.adminAuth(false), requireIdempotency(), h.exportRedeemCodes)
+	router.POST("/api/admin/credits/codes", auth.adminAuth(false), h.createRedeemCodes)
+	router.POST("/api/admin/credits/codes/:batch_id/disable", auth.adminAuth(false), h.disableRedeemCodeBatch)
+	router.POST("/api/admin/credits/codes/:batch_id/export", auth.adminAuth(false), h.exportRedeemCodes)
 }
 
 type m4Handler struct {
@@ -69,15 +69,11 @@ func (h m4Handler) redeemCode(c *gin.Context) {
 		RedeemCode        string `json:"redeem_code"`
 		TargetAccountType string `json:"target_account_type"`
 		RedeemChannel     string `json:"redeem_channel"`
-		RequestHash       string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
-	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
+	meta := h.auth.meta(c)
 	out, err := h.credit.RedeemCode(c.Request.Context(), credit.RedeemInput{
 		Auth: userAuth(c), Meta: meta, Code: req.RedeemCode,
 		TargetAccountType: req.TargetAccountType, RedeemChannel: req.RedeemChannel,
@@ -135,15 +131,11 @@ func (h m4Handler) createUploadIntent(c *gin.Context) {
 		AssetType      string                           `json:"asset_type"`
 		MetadataText   string                           `json:"metadata_text"`
 		SafetyEvidence *businessagent.SafetyEvidenceDTO `json:"safety_evidence"`
-		RequestHash    string                           `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
-	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
+	meta := h.auth.meta(c)
 	out, err := h.asset.CreateUploadIntent(c.Request.Context(), asset.CreateUploadIntentInput{
 		Auth: userAuth(c), Meta: meta, ProjectID: req.ProjectID, AssetType: assetType(req.AssetType, req.ContentType),
 		Filename: req.Filename, ContentType: req.ContentType, SizeBytes: req.SizeBytes, Checksum: req.Checksum,
@@ -163,15 +155,11 @@ func (h m4Handler) confirmUploadIntent(c *gin.Context) {
 		Etag        string `json:"etag"`
 		SizeBytes   int64  `json:"size_bytes"`
 		ContentType string `json:"content_type"`
-		RequestHash string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
-	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
+	meta := h.auth.meta(c)
 	out, err := h.asset.ConfirmUploadIntent(c.Request.Context(), asset.ConfirmUploadInput{
 		Auth: userAuth(c), Meta: meta, UploadIntentID: c.Param("upload_intent_id"),
 		Etag: req.Etag, SizeBytes: req.SizeBytes, ContentType: req.ContentType, Checksum: req.Checksum,
@@ -185,16 +173,12 @@ func (h m4Handler) abortUploadIntent(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Reason      string `json:"reason"`
-		RequestHash string `json:"request_hash"`
+		Reason string `json:"reason"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
-	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
+	meta := h.auth.meta(c)
 	out, err := h.asset.AbortUploadIntent(c.Request.Context(), userAuth(c), meta, c.Param("upload_intent_id"))
 	respond(c, out, err)
 }
@@ -223,12 +207,11 @@ func (h m4Handler) adminGrantCredits(c *gin.Context) {
 		return
 	}
 	var req struct {
-		TargetType  string `json:"target_type"`
-		TargetID    string `json:"target_id"`
-		Points      int64  `json:"points"`
-		Reason      string `json:"reason"`
-		ExpiresAt   string `json:"expires_at"`
-		RequestHash string `json:"request_hash"`
+		TargetType string `json:"target_type"`
+		TargetID   string `json:"target_id"`
+		Points     int64  `json:"points"`
+		Reason     string `json:"reason"`
+		ExpiresAt  string `json:"expires_at"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -238,10 +221,7 @@ func (h m4Handler) adminGrantCredits(c *gin.Context) {
 		_ = c.Error(err)
 		return
 	}
-	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
+	meta := h.auth.meta(c)
 	out, err := h.credit.AdminGrantCredits(c.Request.Context(), credit.AdminGrantInput{
 		Auth: adminAuth(c), Meta: meta, TargetType: req.TargetType, TargetID: req.TargetID,
 		Points: req.Points, ExpiresAt: expiresAt, Reason: req.Reason,
@@ -277,7 +257,6 @@ func (h m4Handler) createRedeemCodes(c *gin.Context) {
 		Channel         string `json:"channel"`
 		RedeemChannel   string `json:"redeem_channel"`
 		Reason          string `json:"reason"`
-		RequestHash     string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -309,10 +288,7 @@ func (h m4Handler) createRedeemCodes(c *gin.Context) {
 		_ = c.Error(err)
 		return
 	}
-	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
+	meta := h.auth.meta(c)
 	out, err := h.credit.CreateRedeemCodes(c.Request.Context(), credit.CreateCodesInput{
 		Auth: adminAuth(c), Meta: meta, Count: req.Count, Points: req.Points,
 		CodeExpiresAt: codeExpiresAt, CreditExpiresAt: creditExpiresAt, AccountType: req.AccountType,
@@ -327,8 +303,7 @@ func (h m4Handler) disableRedeemCodeBatch(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Reason      string `json:"reason"`
-		RequestHash string `json:"request_hash"`
+		Reason string `json:"reason"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -344,7 +319,6 @@ func (h m4Handler) exportRedeemCodes(c *gin.Context) {
 	}
 	var req struct {
 		ExportReason string `json:"export_reason"`
-		RequestHash  string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return

@@ -106,7 +106,6 @@ func requestMetaMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := c.GetHeader("X-Request-Id")
 		c.Set("request_id", requestID)
-		c.Set("idempotency_key", c.GetHeader("Idempotency-Key"))
 		c.Set("actor_user_id", c.GetHeader("X-Actor-User-Id"))
 		c.Request = c.Request.WithContext(logger.WithRequestID(c.Request.Context(), requestID))
 		c.Next()

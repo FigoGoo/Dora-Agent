@@ -519,9 +519,10 @@ func (a *App) RunSkillTestCase(ctx context.Context, auth AuthContextDTO, req Ski
 	if a.gateway == nil {
 		return SkillTestResultDTO{}, apperror.New(apperror.CodeNotImplemented, "business gateway is not configured")
 	}
-	if req.SkillID == "" || req.VersionID == "" || req.TestRunID == "" || req.IdempotencyKey == "" {
-		return SkillTestResultDTO{}, apperror.New(apperror.CodeInvalidArgument, "skill_id, version_id, test_run_id and idempotency_key are required")
+	if req.SkillID == "" || req.VersionID == "" || req.TestRunID == "" {
+		return SkillTestResultDTO{}, apperror.New(apperror.CodeInvalidArgument, "skill_id, version_id and test_run_id are required")
 	}
+	req.IdempotencyKey = skillTestIdempotencyKey(req.TestRunID, req.IdempotencyKey)
 	spec, err := a.gateway.GetReviewCandidateSkillSpec(ctx, auth, req.SkillID, req.VersionID, req.TestCaseID, req.TestRunID, traceID)
 	if err != nil {
 		return SkillTestResultDTO{}, mapBusinessError(err)
@@ -748,9 +749,13 @@ func (a *App) CreateSession(ctx context.Context, auth AuthContextDTO, req Create
 	if auth.ActorUserID == "" {
 		return CreateSessionResponse{}, apperror.New(apperror.CodeUnauthenticated, "auth context is required")
 	}
-	if req.ProjectID == "" || req.IdempotencyKey == "" {
-		return CreateSessionResponse{}, apperror.New(apperror.CodeInvalidArgument, "project_id and idempotency_key are required")
+	if req.ProjectID == "" {
+		return CreateSessionResponse{}, apperror.New(apperror.CodeInvalidArgument, "project_id is required")
 	}
+	req.IdempotencyKey = agentIdempotencyKey(req.IdempotencyKey, "agent.session.create", map[string]any{
+		"actor_user_id": auth.ActorUserID, "space_id": auth.SpaceID, "project_id": req.ProjectID,
+		"initial_title": strings.TrimSpace(req.InitialTitle), "trace_id": traceID,
+	})
 	if existing, err := a.repo.GetSessionByIdempotencyKey(ctx, req.IdempotencyKey); err == nil {
 		snapshot, snapErr := a.BuildSessionSnapshot(ctx, auth, existing.ID, traceID)
 		if snapErr != nil {
@@ -816,8 +821,8 @@ func (a *App) ListMessages(ctx context.Context, auth AuthContextDTO, sessionID s
 }
 
 func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunRequest, traceID string) (CreateRunResponse, error) {
-	if req.SessionID == "" || req.ProjectID == "" || req.IdempotencyKey == "" {
-		return CreateRunResponse{}, apperror.New(apperror.CodeInvalidArgument, "session_id, project_id and idempotency_key are required")
+	if req.SessionID == "" || req.ProjectID == "" {
+		return CreateRunResponse{}, apperror.New(apperror.CodeInvalidArgument, "session_id and project_id are required")
 	}
 	if req.UserInput.ClientMessageID == "" || req.UserInput.ContentType == "" || strings.TrimSpace(req.UserInput.Text) == "" {
 		return CreateRunResponse{}, apperror.New(apperror.CodeInvalidArgument, "user_input is incomplete")
@@ -825,6 +830,11 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	if err := validateRunInputs(req); err != nil {
 		return CreateRunResponse{}, err
 	}
+	req.IdempotencyKey = agentIdempotencyKey(req.IdempotencyKey, "agent.run.create", map[string]any{
+		"session_id": req.SessionID, "project_id": req.ProjectID, "client_message_id": req.UserInput.ClientMessageID,
+		"content_type": req.UserInput.ContentType, "text_digest": digestText(req.UserInput.Text),
+		"model_selection": req.ModelSelection, "referenced_assets": req.ReferencedAssets, "control_inputs": req.ControlInputs,
+	})
 	if existing, err := a.repo.GetRunByIdempotencyKey(ctx, req.IdempotencyKey); err == nil {
 		return runResponse(*existing), nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -938,12 +948,13 @@ func (a *App) GetRun(ctx context.Context, auth AuthContextDTO, runID string, tra
 }
 
 func (a *App) AppendUserInput(ctx context.Context, auth AuthContextDTO, runID string, req AppendUserInputRequest, traceID string) (RunDTO, error) {
-	if req.IdempotencyKey == "" {
-		return RunDTO{}, apperror.New(apperror.CodeInvalidArgument, "idempotency_key is required")
-	}
 	if req.UserInput.ClientMessageID == "" || req.UserInput.ContentType == "" || strings.TrimSpace(req.UserInput.Text) == "" {
 		return RunDTO{}, apperror.New(apperror.CodeInvalidArgument, "user_input is incomplete")
 	}
+	req.IdempotencyKey = agentIdempotencyKey(req.IdempotencyKey, "agent.run.additional_input", map[string]any{
+		"run_id": runID, "client_message_id": req.UserInput.ClientMessageID,
+		"content_type": req.UserInput.ContentType, "text_digest": digestText(req.UserInput.Text),
+	})
 	run, err := a.repo.GetRun(ctx, runID)
 	if err != nil {
 		return RunDTO{}, apperror.New(apperror.CodeResourceNotFound, "run not found")
@@ -1018,15 +1029,16 @@ func (a *App) AppendUserInput(ctx context.Context, auth AuthContextDTO, runID st
 }
 
 func (a *App) AcceptInterrupt(ctx context.Context, auth AuthContextDTO, runID string, req ConfirmInterruptRequest, traceID string) (RunDTO, error) {
-	if req.IdempotencyKey == "" {
-		return RunDTO{}, apperror.New(apperror.CodeInvalidArgument, "idempotency_key is required")
-	}
 	if req.RunID != "" && req.RunID != runID {
 		return RunDTO{}, apperror.New(apperror.CodeInvalidArgument, "run_id does not match path")
 	}
 	if req.InterruptID == "" || req.ConfirmedPayloadDigest == "" || req.Action != "confirm" {
 		return RunDTO{}, apperror.New(apperror.CodeInvalidArgument, "interrupt_id, action and confirmed_payload_digest are required")
 	}
+	req.IdempotencyKey = agentIdempotencyKey(req.IdempotencyKey, "agent.run.confirm", map[string]any{
+		"run_id": runID, "interrupt_id": req.InterruptID,
+		"action": req.Action, "confirmed_payload_digest": req.ConfirmedPayloadDigest,
+	})
 	run, interrupt, err := a.requireInterrupt(ctx, auth, runID, req.InterruptID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
 	if err != nil {
 		return RunDTO{}, err
@@ -1116,15 +1128,15 @@ func (a *App) dispatchConfirmedGeneration(ctx context.Context, auth AuthContextD
 }
 
 func (a *App) RejectInterrupt(ctx context.Context, auth AuthContextDTO, runID string, req RejectInterruptRequest, traceID string) (RunDTO, error) {
-	if req.IdempotencyKey == "" {
-		return RunDTO{}, apperror.New(apperror.CodeInvalidArgument, "idempotency_key is required")
-	}
 	if req.RunID != "" && req.RunID != runID {
 		return RunDTO{}, apperror.New(apperror.CodeInvalidArgument, "run_id does not match path")
 	}
 	if req.InterruptID == "" || req.ReasonCode == "" {
 		return RunDTO{}, apperror.New(apperror.CodeInvalidArgument, "interrupt_id and reason_code are required")
 	}
+	req.IdempotencyKey = agentIdempotencyKey(req.IdempotencyKey, "agent.run.reject", map[string]any{
+		"run_id": runID, "interrupt_id": req.InterruptID, "reason_code": req.ReasonCode,
+	})
 	run, interrupt, err := a.requireInterrupt(ctx, auth, runID, req.InterruptID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
 	if err != nil {
 		return RunDTO{}, err
@@ -1170,9 +1182,7 @@ func (a *App) RejectInterrupt(ctx context.Context, auth AuthContextDTO, runID st
 }
 
 func (a *App) CancelRun(ctx context.Context, auth AuthContextDTO, runID string, reason string, idempotencyKey string, traceID string) (RunDTO, error) {
-	if idempotencyKey == "" {
-		return RunDTO{}, apperror.New(apperror.CodeInvalidArgument, "idempotency_key is required")
-	}
+	idempotencyKey = agentIdempotencyKey(idempotencyKey, "agent.run.cancel", map[string]any{"run_id": runID, "reason": strings.TrimSpace(reason)})
 	run, err := a.repo.GetRun(ctx, runID)
 	if err != nil {
 		return RunDTO{}, apperror.New(apperror.CodeResourceNotFound, "run not found")
@@ -3144,6 +3154,22 @@ func digestStrings(values []string) string {
 	return fmt.Sprintf("sha256:%x", sum[:])
 }
 
+func skillTestIdempotencyKey(testRunID, explicit string) string {
+	if key := strings.TrimSpace(explicit); key != "" {
+		return key
+	}
+	return "skill_test:" + testRunID
+}
+
+func agentIdempotencyKey(explicit, scope string, payload any) string {
+	if key := strings.TrimSpace(explicit); key != "" {
+		return key
+	}
+	data, _ := json.Marshal(payload)
+	sum := sha256.Sum256(data)
+	return scope + ":" + fmt.Sprintf("%x", sum[:])
+}
+
 func skillTestSafetyEvidenceJSON(evidence runtimesafety.Evidence, testRunID, traceID string) string {
 	expiresAt := evidence.EvaluatedAt.Add(24 * time.Hour).Format(time.RFC3339Nano)
 	payload := map[string]any{
@@ -3373,7 +3399,7 @@ func commitRequestFromTaskDetail(detail map[string]any) (CommitGeneratedAssetAnd
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return CommitGeneratedAssetAndChargeRequest{}, false
 	}
-	if req.RunID == "" || req.FreezeID == "" || req.IdempotencyKey == "" || len(req.Artifacts) == 0 || req.SafetyEvidence == nil {
+	if req.RunID == "" || req.FreezeID == "" || len(req.Artifacts) == 0 || req.SafetyEvidence == nil {
 		return CommitGeneratedAssetAndChargeRequest{}, false
 	}
 	return req, true

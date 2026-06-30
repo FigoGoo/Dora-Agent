@@ -314,8 +314,8 @@ func (a *App) ListEnterpriseUsage(ctx context.Context, auth AuthContext, limit, 
 }
 
 func (a *App) EstimateGenerationCredits(ctx context.Context, in EstimateGenerationInput) (EstimateDTO, error) {
-	if strings.TrimSpace(in.ProjectID) == "" || strings.TrimSpace(in.ResourceType) == "" || strings.TrimSpace(in.ModelID) == "" || strings.TrimSpace(in.PricingSnapshotID) == "" || strings.TrimSpace(in.Meta.IdempotencyKey) == "" {
-		return EstimateDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "project_id, resource_type, model_id, pricing_snapshot_id and idempotency_key are required")
+	if strings.TrimSpace(in.ProjectID) == "" || strings.TrimSpace(in.ResourceType) == "" || strings.TrimSpace(in.ModelID) == "" || strings.TrimSpace(in.PricingSnapshotID) == "" {
+		return EstimateDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "project_id, resource_type, model_id and pricing_snapshot_id are required")
 	}
 	if err := validateSafetyEvidence(in.SafetyEvidence, "generation", "prompt", in.Meta.TraceID, a.now()); err != nil {
 		return EstimateDTO{}, err
@@ -324,8 +324,9 @@ func (a *App) EstimateGenerationCredits(ctx context.Context, in EstimateGenerati
 		"project_id": in.ProjectID, "resource_type": in.ResourceType, "model_id": in.ModelID, "pricing_snapshot_id": in.PricingSnapshotID,
 		"quantity": in.Quantity, "duration_seconds": in.DurationSeconds, "tool_usage_items": in.ToolUsageItems, "safety_evidence_digest": safetyDigest(in.SafetyEvidence),
 	})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "credit.estimate_generation", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.estimate_generation", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.estimate_generation", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -402,13 +403,14 @@ func (a *App) EstimateToolCredits(ctx context.Context, in EstimateToolInput) (Es
 }
 
 func (a *App) FreezeCredits(ctx context.Context, in FreezeInput) (FreezeDTO, error) {
-	if in.EstimateID == "" || in.Points <= 0 || in.RunID == "" || in.Meta.IdempotencyKey == "" {
-		return FreezeDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "estimate_id, points, run_id and idempotency_key are required")
+	if in.EstimateID == "" || in.Points <= 0 || in.RunID == "" {
+		return FreezeDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "estimate_id, points and run_id are required")
 	}
 	hash := requestHash(in.Meta, in.Auth, map[string]any{"estimate_id": in.EstimateID, "points": in.Points, "run_id": in.RunID, "confirmation_id": in.ConfirmationID})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "credit.freeze", hash)
 	tenant := "space:" + in.Auth.SpaceID
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: tenant, SpaceID: in.Auth.SpaceID, Scope: "credit.freeze", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: tenant, SpaceID: in.Auth.SpaceID, Scope: "credit.freeze", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -463,13 +465,13 @@ func (a *App) FreezeCredits(ctx context.Context, in FreezeInput) (FreezeDTO, err
 		freeze := businesscore.CreditFreeze{
 			ID: security.RandomID("cfz_"), FreezeID: freezeID, EstimateID: estimate.EstimateID, AccountID: account.ID,
 			ProjectID: estimate.ProjectID, RunID: in.RunID, ConfirmationID: optionalString(in.ConfirmationID),
-			FrozenPoints: in.Points, Status: StatusFrozen, ExpiresAt: now.Add(24 * time.Hour), IdempotencyKey: in.Meta.IdempotencyKey,
+			FrozenPoints: in.Points, Status: StatusFrozen, ExpiresAt: now.Add(24 * time.Hour), IdempotencyKey: idempotencyKey,
 			TraceID: in.Meta.TraceID, CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&freeze).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(ledger(account, "freeze", 0, "credit_freeze", freezeID, estimate.ProjectID, in.RunID, in.Meta.TraceID, in.Meta.IdempotencyKey)).Error; err != nil {
+		if err := tx.Create(ledger(account, "freeze", 0, "credit_freeze", freezeID, estimate.ProjectID, in.RunID, in.Meta.TraceID, idempotencyKey)).Error; err != nil {
 			return err
 		}
 		if err := tx.Model(&businesscore.CreditEstimate{}).Where("estimate_id = ?", estimate.EstimateID).Updates(map[string]any{"status": "frozen", "updated_by": in.Auth.UserID, "updated_at": now}).Error; err != nil {
@@ -489,12 +491,13 @@ func (a *App) FreezeCredits(ctx context.Context, in FreezeInput) (FreezeDTO, err
 }
 
 func (a *App) ReleaseFrozenCredits(ctx context.Context, in ReleaseInput) (ReleaseDTO, error) {
-	if in.FreezeID == "" || in.ReleasePoints <= 0 || in.Reason == "" || in.RunID == "" || in.Meta.IdempotencyKey == "" {
-		return ReleaseDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "freeze_id, release_points, reason, run_id and idempotency_key are required")
+	if in.FreezeID == "" || in.ReleasePoints <= 0 || in.Reason == "" || in.RunID == "" {
+		return ReleaseDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "freeze_id, release_points, reason and run_id are required")
 	}
 	hash := requestHash(in.Meta, in.Auth, map[string]any{"freeze_id": in.FreezeID, "release_points": in.ReleasePoints, "reason": in.Reason, "run_id": in.RunID})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "credit.release", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.release", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.release", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -507,11 +510,11 @@ func (a *App) ReleaseFrozenCredits(ctx context.Context, in ReleaseInput) (Releas
 		return ReleaseDTO{}, bizerrors.New(bizerrors.CodeProcessing, "release request is processing")
 	}
 	if decision.Mode == idempotency.DecisionReplay {
-		return a.getReleaseDTO(ctx, in.FreezeID, in.Meta.IdempotencyKey)
+		return a.getReleaseDTO(ctx, in.FreezeID, idempotencyKey)
 	}
 	var dto ReleaseDTO
 	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		freeze, released, err := a.releaseFreezeLocked(tx, in.FreezeID, in.ReleasePoints, in.Reason, in.RunID, in.Auth.UserID, in.Meta.TraceID, in.Meta.IdempotencyKey)
+		freeze, released, err := a.releaseFreezeLocked(tx, in.FreezeID, in.ReleasePoints, in.Reason, in.RunID, in.Auth.UserID, in.Meta.TraceID, idempotencyKey)
 		if err != nil {
 			return err
 		}
@@ -527,12 +530,13 @@ func (a *App) ReleaseFrozenCredits(ctx context.Context, in ReleaseInput) (Releas
 }
 
 func (a *App) ChargeToolUsageCredits(ctx context.Context, in ChargeToolInput) (ChargeToolDTO, error) {
-	if in.ProjectID == "" || in.EstimateID == "" || in.FreezeID == "" || in.SessionID == "" || in.RunID == "" || len(in.ChargeItems) == 0 || in.Meta.IdempotencyKey == "" {
+	if in.ProjectID == "" || in.EstimateID == "" || in.FreezeID == "" || in.SessionID == "" || in.RunID == "" || len(in.ChargeItems) == 0 {
 		return ChargeToolDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "charge tool request is incomplete")
 	}
 	hash := requestHash(in.Meta, in.Auth, map[string]any{"estimate_id": in.EstimateID, "freeze_id": in.FreezeID, "items": in.ChargeItems})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "credit.tool_charge", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.tool_charge", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.tool_charge", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -600,14 +604,14 @@ func (a *App) ChargeToolUsageCredits(ctx context.Context, in ChargeToolInput) (C
 		batch := businesscore.CreditToolChargeBatch{
 			ID: security.RandomID("ctcb_"), ToolChargeID: chargeID, AccountID: account.ID, ProjectID: in.ProjectID,
 			EstimateID: in.EstimateID, FreezeID: in.FreezeID, SessionID: in.SessionID, RunID: in.RunID,
-			ChargedPoints: charged, ReleasedPoints: released, Status: StatusCharged, IdempotencyKey: in.Meta.IdempotencyKey,
+			ChargedPoints: charged, ReleasedPoints: released, Status: StatusCharged, IdempotencyKey: idempotencyKey,
 			TraceID: in.Meta.TraceID, CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&batch).Error; err != nil {
 			return err
 		}
 		ledgerID := security.RandomID("cled_")
-		entry := ledger(account, "charge", -charged, "tool_charge", chargeID, in.ProjectID, in.RunID, in.Meta.TraceID, in.Meta.IdempotencyKey)
+		entry := ledger(account, "charge", -charged, "tool_charge", chargeID, in.ProjectID, in.RunID, in.Meta.TraceID, idempotencyKey)
 		entry.ID = ledgerID
 		if err := tx.Create(entry).Error; err != nil {
 			return err
@@ -624,8 +628,8 @@ func (a *App) ChargeToolUsageCredits(ctx context.Context, in ChargeToolInput) (C
 }
 
 func (a *App) RedeemCode(ctx context.Context, in RedeemInput) (RedeemDTO, error) {
-	if in.Code == "" || in.Meta.IdempotencyKey == "" {
-		return RedeemDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "code and idempotency_key are required")
+	if in.Code == "" {
+		return RedeemDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "code is required")
 	}
 	targetAccountType := normalizeAccountType(in.TargetAccountType)
 	if targetAccountType == "" {
@@ -639,8 +643,9 @@ func (a *App) RedeemCode(ctx context.Context, in RedeemInput) (RedeemDTO, error)
 		"code_digest": codeDigest(in.Code), "account_id": account.ID,
 		"target_account_type": targetAccountType, "redeem_channel": strings.TrimSpace(in.RedeemChannel),
 	})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "credit.redeem", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.redeem", IdempotencyKey: in.Meta.IdempotencyKey,
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.redeem", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
 	})
 	if err != nil {
@@ -706,12 +711,12 @@ func (a *App) RedeemCode(ctx context.Context, in RedeemInput) (RedeemDTO, error)
 		redemption := businesscore.RedeemCodeRedemption{
 			ID: redemptionID, RedeemCodeID: code.ID, AccountID: account.ID, UserID: in.Auth.UserID,
 			EnterpriseID: optionalString(in.Auth.EnterpriseID), Points: points, Status: "redeemed",
-			IdempotencyKey: in.Meta.IdempotencyKey, TraceID: in.Meta.TraceID, CreatedAt: now,
+			IdempotencyKey: idempotencyKey, TraceID: in.Meta.TraceID, CreatedAt: now,
 		}
 		if err := tx.Create(&redemption).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(ledger(account, "redeem", points, "redeem_code", code.ID, "", "", in.Meta.TraceID, in.Meta.IdempotencyKey)).Error; err != nil {
+		if err := tx.Create(ledger(account, "redeem", points, "redeem_code", code.ID, "", "", in.Meta.TraceID, idempotencyKey)).Error; err != nil {
 			return err
 		}
 		dto = RedeemDTO{AccountID: account.ID, RedeemedPoints: points, CreditBatchID: creditBatchID, RedemptionID: redemptionID, AvailablePoints: account.AvailablePoints}
@@ -768,15 +773,16 @@ func (a *App) AdminGrantCredits(ctx context.Context, in AdminGrantInput) (AdminG
 	if in.Auth.AdminID == "" {
 		return AdminGrantDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
 	}
-	if in.TargetID == "" || in.Points <= 0 || !in.ExpiresAt.After(a.now()) || in.Meta.IdempotencyKey == "" {
-		return AdminGrantDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "target_id, positive points, future expires_at and idempotency_key are required")
+	if in.TargetID == "" || in.Points <= 0 || !in.ExpiresAt.After(a.now()) {
+		return AdminGrantDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "target_id, positive points and future expires_at are required")
 	}
 	account, err := a.resolveGrantAccount(ctx, in.TargetType, in.TargetID)
 	if err != nil {
 		return AdminGrantDTO{}, err
 	}
 	hash := requestHash(in.Meta, AuthContext{UserID: in.Auth.AdminID}, map[string]any{"target_type": in.TargetType, "target_id": in.TargetID, "points": in.Points, "expires_at": in.ExpiresAt})
-	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "admin:" + in.Auth.AdminID, Scope: "credit.admin_grant", IdempotencyKey: in.Meta.IdempotencyKey, RequestHash: hash, ActorUserID: in.Auth.AdminID})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "credit.admin_grant", hash)
+	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "admin:" + in.Auth.AdminID, Scope: "credit.admin_grant", IdempotencyKey: idempotencyKey, RequestHash: hash, ActorUserID: in.Auth.AdminID})
 	if err != nil {
 		return AdminGrantDTO{}, err
 	}
@@ -808,7 +814,7 @@ func (a *App) AdminGrantCredits(ctx context.Context, in AdminGrantInput) (AdminG
 		if err := tx.Save(&account).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(ledger(account, "admin_grant", in.Points, "credit_batch", batchID, "", "", in.Meta.TraceID, in.Meta.IdempotencyKey)).Error; err != nil {
+		if err := tx.Create(ledger(account, "admin_grant", in.Points, "credit_batch", batchID, "", "", in.Meta.TraceID, idempotencyKey)).Error; err != nil {
 			return err
 		}
 		dto = AdminGrantDTO{BatchID: batchID, AccountID: account.ID, GrantedPoints: in.Points, AvailablePoints: account.AvailablePoints}
@@ -844,7 +850,7 @@ func (a *App) CreateRedeemCodes(ctx context.Context, in CreateCodesInput) (Creat
 	now := a.now()
 	accountType := normalizeAccountType(in.AccountType)
 	bindTargetType := normalizeBindTargetType(in.BindTargetType)
-	if in.Count <= 0 || in.Count > 1000 || in.Points <= 0 || !in.CodeExpiresAt.After(now) || !in.CreditExpiresAt.After(now) || in.Meta.IdempotencyKey == "" ||
+	if in.Count <= 0 || in.Count > 1000 || in.Points <= 0 || !in.CodeExpiresAt.After(now) || !in.CreditExpiresAt.After(now) ||
 		accountType == "" || bindTargetType == "" || !redeemBindTargetMatchesAccount(accountType, bindTargetType) {
 		return CreateCodesDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "invalid redeem code batch request")
 	}
@@ -861,7 +867,8 @@ func (a *App) CreateRedeemCodes(ctx context.Context, in CreateCodesInput) (Creat
 		"account_type":      accountType, "bind_target_type": bindTargetType,
 		"bind_target_id": strings.TrimSpace(in.BindTargetID), "channel": strings.TrimSpace(in.Channel), "reason": strings.TrimSpace(in.Reason),
 	})
-	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "admin:" + in.Auth.AdminID, Scope: "credit.codes.create", IdempotencyKey: in.Meta.IdempotencyKey, RequestHash: hash, ActorUserID: in.Auth.AdminID})
+	idempotencyKey := businessIdempotencyKey(in.Meta, "credit.codes.create", hash)
+	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "admin:" + in.Auth.AdminID, Scope: "credit.codes.create", IdempotencyKey: idempotencyKey, RequestHash: hash, ActorUserID: in.Auth.AdminID})
 	if err != nil {
 		return CreateCodesDTO{}, err
 	}
@@ -1527,6 +1534,16 @@ func requestHash(meta RequestMeta, auth AuthContext, extra map[string]any) strin
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+func businessIdempotencyKey(meta RequestMeta, scope, hash string) string {
+	if key := strings.TrimSpace(meta.IdempotencyKey); key != "" {
+		return key
+	}
+	if hash == "" {
+		return ""
+	}
+	return scope + ":" + hash
 }
 
 func estimateItemMetadata(raw datatypes.JSON) map[string]string {

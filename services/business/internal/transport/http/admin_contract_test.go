@@ -125,7 +125,6 @@ func TestAdminRegisterToolPersistsReasonAndPolicies(t *testing.T) {
 		"free_quota":            1,
 		"min_charge_points":     1,
 		"reason":                "注册内置分镜 Tool",
-		"request_hash":          "hash-admin-tool-register",
 	})
 	data := resp["data"].(map[string]any)
 	if data["tool_key"] != "admin_storyboard_extract:builtin" || data["pricing_policy_id"] == "" {

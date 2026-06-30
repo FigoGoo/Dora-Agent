@@ -155,10 +155,7 @@ export {
   ApiError,
   adminRequest,
   buildQuery,
-  createRequestHash,
-  parseApiError,
-  safeHeaderValue,
-  stableStringify
+  parseApiError
 } from '../../services/http.js';
 ```
 
@@ -208,7 +205,7 @@ At the top of `admin_frontend/src/services/http.test.js`, use:
 
 ```js
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { adminRequest, createRequestHash, parseApiError, safeHeaderValue } from './http.js';
+import { adminRequest, parseApiError } from './http.js';
 import { getAdminSession, saveAdminSession } from './session.js';
 ```
 

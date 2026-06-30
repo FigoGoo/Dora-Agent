@@ -978,7 +978,6 @@ export function ResourceListPage({ config }) {
       const fields = action.fields || [];
       const body = action.body?.({ reason, row, values, previewToken }) || prepareBody(values || {}, fields);
       const options = {
-        idempotencyKey: action.idempotencyKey?.({ row, values, body }),
         headers: action.headers?.({ row, values, body })
       };
       return apiMethod(action.method || 'POST')(action.path?.(row) || action.confirmPath(row), body, options);

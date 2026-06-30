@@ -11,7 +11,7 @@ func TestHashRequestCanonicalizesJSONAndIgnoresObservabilityFields(t *testing.T)
 		TenantID:    "tenant_1",
 		SpaceID:     "space_1",
 		ActorUserID: "user_1",
-		Body:        []byte(`{"trace_id":"trace-a","request_id":"req-a","name":"demo","items":[{"id":"b","qty":2},{"qty":1,"id":"a"}]}`),
+		Body:        []byte(`{"trace_id":"trace-a","request_id":"req-a","request_hash":"legacy-client-hash","name":"demo","items":[{"id":"b","qty":2},{"qty":1,"id":"a"}]}`),
 		Extra:       map[string]any{"X-Client-Request-ID": "client-a", "target_status": "active"},
 	}
 	inputB := idempotency.RequestHashInput{

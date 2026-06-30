@@ -46,7 +46,6 @@ owner：文档与契约责任域；Agent 服务责任域和前端责任域确认
 | --- | --- | --- | --- | --- |
 | Authorization | header | string | 是 | 登录 token |
 | X-Trace-Id | header | string | 是 | 链路追踪 |
-| Idempotency-Key | header | string | 写操作必填 | 幂等键 |
 | Last-Event-ID | header | string | SSE 重连可选 | 最近成功消费的 AG-UI `event_id`，仅用于 `/stream` |
 
 ## 创建会话
@@ -103,7 +102,7 @@ owner：文档与契约责任域；Agent 服务责任域和前端责任域确认
 - 当 session 已有 active run 时，`POST /api/agent/runs` 必须返回 `409 RUN_STATE_CONFLICT`，不得隐式取消旧 run 或创建并行 run。
 - `completed`、`failed`、`cancelled` 或 `expired` 后可以创建新 run；新 run 必须继承同一 `project_id` 并重新做项目权限校验。
 - `POST /api/agent/runs/:run_id/messages` 只能用于当前 active run 的追加输入或恢复，不创建新 run。
-- `cancel`、`accept`、`reject` 必须携带 `Idempotency-Key`；同 key 同 hash 返回同一结果，同 key 不同 hash 返回 `IDEMPOTENCY_CONFLICT`。
+- `cancel`、`accept`、`reject` 不要求客户端携带 `Idempotency-Key`；需要防重的运行时动作由 Agent 应用层按 run、interrupt、action 和确认摘要等业务字段生成内部幂等键。
 
 ## SSE 和事件补偿
 

@@ -49,7 +49,7 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 	if got := publicData["public_work_id"].(string); got != "pubw_seed_storyboard" {
 		t.Fatalf("unexpected seed public work id %q", got)
 	}
-	anonymousLike := requestRaw(t, router, http.MethodPost, "/api/public/works/pubw_seed_storyboard/like", "", "idem-anon-like", map[string]any{"request_hash": "hash-anon-like"})
+	anonymousLike := requestRaw(t, router, http.MethodPost, "/api/public/works/pubw_seed_storyboard/like", "", "", map[string]any{})
 	if anonymousLike.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous like should require login: status=%d body=%#v", anonymousLike.Code, anonymousLike.Body)
 	}
@@ -68,7 +68,7 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 	userToken := loginUser(t, router, "user1001@dora.local", "local-user-change-me")
 	created := requestJSON(t, router, http.MethodPost, "/api/works", userToken, "idem-http-work-create", map[string]any{
 		"project_id": "prj_active_1001", "title": "HTTP Work", "asset_ids": []string{"ast_generated_1001"},
-		"cover_asset_id": "ast_generated_1001", "category": "storyboard", "tags": []string{"http"}, "request_hash": "hash-http-work-create",
+		"cover_asset_id": "ast_generated_1001", "category": "storyboard", "tags": []string{"http"},
 	})
 	workID := created["data"].(map[string]any)["work"].(map[string]any)["work_id"].(string)
 	title := "HTTP Public Work"
@@ -87,7 +87,7 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 		"preview_token": previewToken,
 	})
 	publicWorkID := shared["data"].(map[string]any)["public_work_id"].(string)
-	requestJSON(t, router, http.MethodPost, "/api/public/works/"+publicWorkID+"/like", userToken, "idem-http-like", map[string]any{"request_hash": "hash-http-like"})
+	requestJSON(t, router, http.MethodPost, "/api/public/works/"+publicWorkID+"/like", userToken, "", map[string]any{})
 
 	adminToken := loginAdmin(t, router, "admin@dora.local", "local-admin-change-me")
 	takedownPreview := requestJSON(t, router, http.MethodPost, "/api/admin/works/public/"+publicWorkID+"/take-down/preview", adminToken, "", map[string]any{
@@ -129,5 +129,5 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 	if _, stale := navData["target_id"]; stale {
 		t.Fatalf("navigation response exposed stale target_id: %#v", navData)
 	}
-	requestJSON(t, router, http.MethodPost, "/api/notifications/"+notificationID+"/read", userToken, "idem-http-ntf-read", map[string]any{"request_hash": "hash-http-ntf-read"})
+	requestJSON(t, router, http.MethodPost, "/api/notifications/"+notificationID+"/read", userToken, "", map[string]any{})
 }

@@ -12,8 +12,6 @@ paths:
     post:
       operationId: createSession
       summary: 创建 Agent 会话
-      parameters:
-      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -65,8 +63,6 @@ paths:
     post:
       operationId: createRun
       summary: 创建 Agent Run
-      parameters:
-      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -146,7 +142,6 @@ paths:
       summary: 追加用户输入
       parameters:
       - $ref: '#/components/parameters/RunID'
-      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -169,7 +164,6 @@ paths:
       parameters:
       - $ref: '#/components/parameters/RunID'
       - $ref: '#/components/parameters/InterruptID'
-      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -192,7 +186,6 @@ paths:
       parameters:
       - $ref: '#/components/parameters/RunID'
       - $ref: '#/components/parameters/InterruptID'
-      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -214,7 +207,6 @@ paths:
       summary: 取消 Run
       parameters:
       - $ref: '#/components/parameters/RunID'
-      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -269,13 +261,6 @@ components:
       required: true
       schema:
         type: string
-    IdempotencyKey:
-      name: Idempotency-Key
-      in: header
-      required: true
-      schema:
-        type: string
-        maxLength: 160
     PageSize:
       name: page_size
       in: query

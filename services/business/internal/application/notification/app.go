@@ -192,8 +192,9 @@ func (a *App) MarkNotificationRead(ctx context.Context, auth AuthContext, meta R
 		return NotificationDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "auth context is required")
 	}
 	hash := requestHash(meta, auth, map[string]any{"notification_id": notificationID})
+	idempotencyKey := businessIdempotencyKey(meta, "notification.read", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "user:" + auth.UserID, SpaceID: auth.SpaceID, Scope: "notification.read", IdempotencyKey: meta.IdempotencyKey,
+		TenantID: "user:" + auth.UserID, SpaceID: auth.SpaceID, Scope: "notification.read", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: auth.UserID, EnterpriseID: optionalString(auth.EnterpriseID),
 	})
 	if err != nil {
@@ -231,8 +232,9 @@ func (a *App) MarkAllNotificationsRead(ctx context.Context, auth AuthContext, me
 		return UnreadCountDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "auth context is required")
 	}
 	hash := requestHash(meta, auth, map[string]any{"type": notificationType})
+	idempotencyKey := businessIdempotencyKey(meta, "notification.read_all", hash)
 	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
-		TenantID: "user:" + auth.UserID, SpaceID: auth.SpaceID, Scope: "notification.read_all", IdempotencyKey: meta.IdempotencyKey,
+		TenantID: "user:" + auth.UserID, SpaceID: auth.SpaceID, Scope: "notification.read_all", IdempotencyKey: idempotencyKey,
 		RequestHash: hash, ActorUserID: auth.UserID, EnterpriseID: optionalString(auth.EnterpriseID),
 	})
 	if err != nil {
@@ -428,6 +430,16 @@ func requestHash(meta RequestMeta, auth AuthContext, extra map[string]any) strin
 	payload, _ := json.Marshal(extra)
 	sum := sha256.Sum256([]byte(auth.UserID + ":" + auth.SpaceID + ":" + string(payload)))
 	return hex.EncodeToString(sum[:])
+}
+
+func businessIdempotencyKey(meta RequestMeta, scope, hash string) string {
+	if key := strings.TrimSpace(meta.IdempotencyKey); key != "" {
+		return key
+	}
+	if hash == "" {
+		return ""
+	}
+	return scope + ":" + hash
 }
 
 func normalizeTrace(traceID string) string {

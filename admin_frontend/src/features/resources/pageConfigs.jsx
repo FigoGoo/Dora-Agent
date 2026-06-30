@@ -456,7 +456,6 @@ export const pageConfigs = {
             hint: '已自动生成可提交模板；若修改 test_case_id 或状态，需要同步 target_ref_id 和 result。'
           }
         ],
-        idempotencyKey: ({ values }) => `skill_test:${values.test_run_id}`,
         headers: ({ values }) => ({ 'X-Trace-Id': values.trace_id }),
         successNotice: () => '测试结果已记录'
       },

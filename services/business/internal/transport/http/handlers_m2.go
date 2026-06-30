@@ -10,7 +10,6 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
-	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/idempotency"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/logger"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
 	"github.com/gin-gonic/gin"
@@ -73,7 +72,7 @@ func (h m2Handler) register(c *gin.Context) {
 		return
 	}
 	out, err := h.account.RegisterPersonalAccount(c.Request.Context(), accountspace.RegisterInput{
-		Email: req.Email, Phone: req.Phone, Password: req.Password, DisplayName: req.DisplayName, Meta: h.meta(c, true),
+		Email: req.Email, Phone: req.Phone, Password: req.Password, DisplayName: req.DisplayName, Meta: h.meta(c),
 	})
 	respond(c, out, err)
 }
@@ -89,13 +88,13 @@ func (h m2Handler) login(c *gin.Context) {
 		return
 	}
 	out, err := h.account.Login(c.Request.Context(), accountspace.LoginInput{
-		LoginType: req.LoginType, Account: req.Account, Password: req.Password, EnterpriseID: req.EnterpriseID, Meta: h.meta(c, false),
+		LoginType: req.LoginType, Account: req.Account, Password: req.Password, EnterpriseID: req.EnterpriseID, Meta: h.meta(c),
 	})
 	respond(c, out, err)
 }
 
 func (h m2Handler) logout(c *gin.Context) {
-	err := h.account.Logout(c.Request.Context(), userAuth(c), h.meta(c, true))
+	err := h.account.Logout(c.Request.Context(), userAuth(c), h.meta(c))
 	respond(c, gin.H{"logged_out": err == nil}, err)
 }
 
@@ -117,7 +116,7 @@ func (h m2Handler) switchIdentity(c *gin.Context) {
 		req.TargetEnterpriseID = req.EnterpriseID
 	}
 	out, err := h.account.SwitchIdentity(c.Request.Context(), accountspace.SwitchIdentityInput{
-		Auth: userAuth(c), TargetIdentityType: req.TargetIdentityType, TargetEnterpriseID: req.TargetEnterpriseID, Meta: h.meta(c, true),
+		Auth: userAuth(c), TargetIdentityType: req.TargetIdentityType, TargetEnterpriseID: req.TargetEnterpriseID, Meta: h.meta(c),
 	})
 	respond(c, out, err)
 }
@@ -136,7 +135,7 @@ func (h m2Handler) createEnterprise(c *gin.Context) {
 		req.EnterpriseName = req.Name
 	}
 	out, err := h.account.CreateEnterprise(c.Request.Context(), accountspace.CreateEnterpriseInput{
-		Auth: userAuth(c), EnterpriseName: req.EnterpriseName, OwnerDisplayName: req.OwnerDisplayName, ContactEmail: req.ContactEmail, Meta: h.meta(c, true),
+		Auth: userAuth(c), EnterpriseName: req.EnterpriseName, OwnerDisplayName: req.OwnerDisplayName, ContactEmail: req.ContactEmail, Meta: h.meta(c),
 	})
 	respond(c, out, err)
 }
@@ -162,7 +161,7 @@ func (h m2Handler) enterpriseInvite(c *gin.Context) {
 		return
 	}
 	out, err := h.account.CreateMemberInvite(c.Request.Context(), accountspace.InviteInput{
-		Auth: userAuth(c), Email: req.Email, Phone: req.Phone, InviteMessage: req.InviteMessage, ExpiresInDays: req.ExpiresInDays, Meta: h.meta(c, true),
+		Auth: userAuth(c), Email: req.Email, Phone: req.Phone, InviteMessage: req.InviteMessage, ExpiresInDays: req.ExpiresInDays, Meta: h.meta(c),
 	})
 	respond(c, out, err)
 }
@@ -185,7 +184,7 @@ func (h m2Handler) confirmRemoveMember(c *gin.Context) {
 		return
 	}
 	out, err := h.account.ConfirmRemoveMember(c.Request.Context(), accountspace.RemoveMemberInput{
-		Auth: userAuth(c), MemberID: c.Param("member_id"), Reason: req.Reason, PreviewToken: req.PreviewToken, Meta: h.meta(c, true),
+		Auth: userAuth(c), MemberID: c.Param("member_id"), Reason: req.Reason, PreviewToken: req.PreviewToken, Meta: h.meta(c),
 	})
 	respond(c, out, err)
 }
@@ -211,7 +210,7 @@ func (h m2Handler) confirmTransferOwner(c *gin.Context) {
 		return
 	}
 	out, err := h.account.ConfirmTransferOwner(c.Request.Context(), accountspace.TransferOwnerInput{
-		Auth: userAuth(c), TargetMemberID: req.TargetMemberID, PreviewToken: req.PreviewToken, Reason: req.Reason, Meta: h.meta(c, true),
+		Auth: userAuth(c), TargetMemberID: req.TargetMemberID, PreviewToken: req.PreviewToken, Reason: req.Reason, Meta: h.meta(c),
 	})
 	respond(c, out, err)
 }
@@ -231,7 +230,7 @@ func (h m2Handler) createProject(c *gin.Context) {
 	if !h.bind(c, &req) {
 		return
 	}
-	out, err := h.project.CreateProject(c.Request.Context(), project.CreateInput{Auth: userAuth(c), Title: req.Title, InitialPromptDigest: req.InitialPromptDigest, Source: req.Source, SpaceID: req.SpaceID, Meta: h.meta(c, true)})
+	out, err := h.project.CreateProject(c.Request.Context(), project.CreateInput{Auth: userAuth(c), Title: req.Title, InitialPromptDigest: req.InitialPromptDigest, Source: req.Source, SpaceID: req.SpaceID, Meta: h.meta(c)})
 	respond(c, out, err)
 }
 
@@ -250,7 +249,7 @@ func (h m2Handler) updateProject(c *gin.Context) {
 	if !h.bind(c, &req) {
 		return
 	}
-	out, err := h.project.UpdateProject(c.Request.Context(), project.UpdateInput{Auth: userAuth(c), ProjectID: c.Param("project_id"), Title: req.Title, Description: req.Description, CoverAssetID: req.CoverAssetID, BaseUpdatedAt: req.BaseUpdatedAt, Meta: h.meta(c, true)})
+	out, err := h.project.UpdateProject(c.Request.Context(), project.UpdateInput{Auth: userAuth(c), ProjectID: c.Param("project_id"), Title: req.Title, Description: req.Description, CoverAssetID: req.CoverAssetID, BaseUpdatedAt: req.BaseUpdatedAt, Meta: h.meta(c)})
 	respond(c, out, err)
 }
 
@@ -259,7 +258,7 @@ func (h m2Handler) archiveProject(c *gin.Context) {
 		Reason string `json:"reason"`
 	}
 	_ = c.ShouldBindJSON(&req)
-	out, err := h.project.ArchiveProject(c.Request.Context(), project.ArchiveInput{Auth: userAuth(c), ProjectID: c.Param("project_id"), Reason: req.Reason, Meta: h.meta(c, true)})
+	out, err := h.project.ArchiveProject(c.Request.Context(), project.ArchiveInput{Auth: userAuth(c), ProjectID: c.Param("project_id"), Reason: req.Reason, Meta: h.meta(c)})
 	respond(c, out, err)
 }
 
@@ -268,7 +267,7 @@ func (h m2Handler) restoreProject(c *gin.Context) {
 		Reason string `json:"reason"`
 	}
 	_ = c.ShouldBindJSON(&req)
-	out, err := h.project.RestoreProject(c.Request.Context(), project.ArchiveInput{Auth: userAuth(c), ProjectID: c.Param("project_id"), Reason: req.Reason, Meta: h.meta(c, true)})
+	out, err := h.project.RestoreProject(c.Request.Context(), project.ArchiveInput{Auth: userAuth(c), ProjectID: c.Param("project_id"), Reason: req.Reason, Meta: h.meta(c)})
 	respond(c, out, err)
 }
 
@@ -290,12 +289,12 @@ func (h m2Handler) adminLogin(c *gin.Context) {
 	if !h.bind(c, &req) {
 		return
 	}
-	out, err := h.admin.Login(c.Request.Context(), admin.AdminLoginInput{Account: req.Account, Password: req.Password, Meta: h.meta(c, false)})
+	out, err := h.admin.Login(c.Request.Context(), admin.AdminLoginInput{Account: req.Account, Password: req.Password, Meta: h.meta(c)})
 	respond(c, out, err)
 }
 
 func (h m2Handler) adminLogout(c *gin.Context) {
-	err := h.admin.Logout(c.Request.Context(), adminAuth(c), h.meta(c, true))
+	err := h.admin.Logout(c.Request.Context(), adminAuth(c), h.meta(c))
 	respond(c, gin.H{"logged_out": err == nil}, err)
 }
 
@@ -308,7 +307,7 @@ func (h m2Handler) rotateAdminPassword(c *gin.Context) {
 	if !h.bind(c, &req) {
 		return
 	}
-	out, err := h.admin.RotatePassword(c.Request.Context(), admin.RotatePasswordInput{Auth: adminAuth(c), CurrentPassword: req.CurrentPassword, NewPassword: req.NewPassword, Reason: req.Reason, Meta: h.meta(c, true)})
+	out, err := h.admin.RotatePassword(c.Request.Context(), admin.RotatePasswordInput{Auth: adminAuth(c), CurrentPassword: req.CurrentPassword, NewPassword: req.NewPassword, Reason: req.Reason, Meta: h.meta(c)})
 	respond(c, out, err)
 }
 
@@ -331,7 +330,7 @@ func (h m2Handler) createAdmin(c *gin.Context) {
 	if !h.bind(c, &req) {
 		return
 	}
-	out, err := h.admin.CreateAdmin(c.Request.Context(), admin.CreateAdminInput{Auth: adminAuth(c), Account: req.Account, InitialPassword: req.InitialPassword, Reason: req.Reason, Meta: h.meta(c, true)})
+	out, err := h.admin.CreateAdmin(c.Request.Context(), admin.CreateAdminInput{Auth: adminAuth(c), Account: req.Account, InitialPassword: req.InitialPassword, Reason: req.Reason, Meta: h.meta(c)})
 	respond(c, out, err)
 }
 
@@ -342,7 +341,7 @@ func (h m2Handler) disableAdmin(c *gin.Context) {
 	if !h.bind(c, &req) {
 		return
 	}
-	out, err := h.admin.DisableAdmin(c.Request.Context(), admin.DisableAdminInput{Auth: adminAuth(c), AdminID: c.Param("admin_id"), Reason: req.Reason, Meta: h.meta(c, true)})
+	out, err := h.admin.DisableAdmin(c.Request.Context(), admin.DisableAdminInput{Auth: adminAuth(c), AdminID: c.Param("admin_id"), Reason: req.Reason, Meta: h.meta(c)})
 	respond(c, out, err)
 }
 
@@ -377,7 +376,7 @@ func (h m2Handler) confirmUserStatus(c *gin.Context) {
 	if !h.bind(c, &req) {
 		return
 	}
-	out, err := h.admin.ConfirmSetUserStatus(c.Request.Context(), admin.UserStatusInput{Auth: adminAuth(c), UserID: c.Param("user_id"), TargetStatus: req.TargetStatus, PreviewToken: req.PreviewToken, Reason: req.Reason, Meta: h.meta(c, true)})
+	out, err := h.admin.ConfirmSetUserStatus(c.Request.Context(), admin.UserStatusInput{Auth: adminAuth(c), UserID: c.Param("user_id"), TargetStatus: req.TargetStatus, PreviewToken: req.PreviewToken, Reason: req.Reason, Meta: h.meta(c)})
 	respond(c, out, err)
 }
 
@@ -436,23 +435,9 @@ func (h m2Handler) bind(c *gin.Context, out any) bool {
 	return true
 }
 
-func (h m2Handler) meta(c *gin.Context, requireIdempotency bool) accountspace.RequestMeta {
-	body, _ := c.Get("raw_body")
-	rawBody, _ := body.([]byte)
-	key := c.GetHeader("Idempotency-Key")
-	if requireIdempotency && key == "" {
-		_ = c.Error(bizerrors.New(bizerrors.CodeInvalidArgument, "Idempotency-Key is required"))
-	}
-	hash, _ := idempotency.HashRequest(idempotency.RequestHashInput{
-		TenantID:    tenantID(c),
-		SpaceID:     spaceID(c),
-		ActorUserID: actorID(c),
-		AdminID:     adminID(c),
-		Body:        rawBody,
-	})
+func (h m2Handler) meta(c *gin.Context) accountspace.RequestMeta {
 	return accountspace.RequestMeta{
-		TraceID: logger.TraceID(c.Request.Context()), RequestID: c.GetString("request_id"), IdempotencyKey: key,
-		Source: "business_http", RequestHash: hash,
+		TraceID: logger.TraceID(c.Request.Context()), RequestID: c.GetString("request_id"), Source: "business_http",
 	}
 }
 
