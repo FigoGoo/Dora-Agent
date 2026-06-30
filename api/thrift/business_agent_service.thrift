@@ -26,7 +26,7 @@ struct AuthContext {
   6: optional string admin_id,
 }
 
-// RequestMeta 是跨服务请求元信息；写操作必须携带 idempotency_key。
+// RequestMeta 是跨服务请求元信息；业务需要幂等时可传 idempotency_key，未传时由业务应用层按业务字段生成内部幂等键。
 struct RequestMeta {
   1: required string request_id,
   2: required string trace_id,

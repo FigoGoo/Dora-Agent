@@ -2,6 +2,7 @@
 
 状态：active  
 owner：文档与契约责任域
+更新时间：2026-06-30
 适用范围：智能体微服务多轮执行循环  
 
 ## 执行轮次
@@ -29,7 +30,7 @@ owner：文档与契约责任域
 
 ## 恢复
 
-- resume 必须校验 run、interrupt、用户权限和幂等键。
+- resume 必须校验 run、interrupt、用户权限和内部幂等语义。
 - 恢复后输出 resume.accepted 并继续执行。
 
 ## 抢占

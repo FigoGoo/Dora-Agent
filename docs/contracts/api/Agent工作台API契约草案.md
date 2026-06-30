@@ -2,7 +2,7 @@
 
 状态：active
 owner：文档与契约责任域；Agent 服务责任域和前端责任域确认
-更新时间：2026-06-28
+更新时间：2026-06-30
 适用范围：前端 -> 智能体微服务，统一 Agent 工作台
 
 ## 成熟度复核
@@ -27,18 +27,18 @@ owner：文档与契约责任域；Agent 服务责任域和前端责任域确认
 
 | Method | Path | 描述 | 鉴权 | 状态 |
 | --- | --- | --- | --- | --- |
-| POST | `/api/agent/sessions` | 在项目下创建会话 | 登录态 | planned |
-| GET | `/api/agent/sessions/:session_id` | 查询会话快照 | 登录态 + 项目权限 | planned |
-| GET | `/api/agent/sessions/:session_id/messages` | 分页查询会话消息 | 登录态 + 项目权限 | planned |
-| POST | `/api/agent/runs` | 发送用户输入并创建 run | 登录态 + 项目权限 | planned |
-| GET | `/api/agent/runs/:run_id` | 查询 run 状态 | 登录态 + 项目权限 | planned |
-| GET | `/api/agent/runs/:run_id/stream` | SSE 实时事件 | 登录态 + 项目权限 | planned |
-| GET | `/api/agent/runs/:run_id/events` | 按 sequence 补偿事件 | 登录态 + 项目权限 | planned |
-| POST | `/api/agent/runs/:run_id/messages` | 追加用户输入 | 登录态 + 项目权限 | planned |
-| POST | `/api/agent/runs/:run_id/interrupts/:interrupt_id/accept` | 确认人工中断 | 登录态 + 项目权限 | planned |
-| POST | `/api/agent/runs/:run_id/interrupts/:interrupt_id/reject` | 拒绝人工中断 | 登录态 + 项目权限 | planned |
-| POST | `/api/agent/runs/:run_id/cancel` | 取消 run | 登录态 + 项目权限 | planned |
-| GET | `/api/agent/runs/:run_id/snapshot` | 查询 run 快照 | 登录态 + 项目权限 | planned |
+| POST | `/api/agent/sessions` | 在项目下创建会话 | 登录态 | implemented |
+| GET | `/api/agent/sessions/:session_id` | 查询会话快照 | 登录态 + 项目权限 | implemented |
+| GET | `/api/agent/sessions/:session_id/messages` | 分页查询会话消息 | 登录态 + 项目权限 | implemented |
+| POST | `/api/agent/runs` | 发送用户输入并创建 run | 登录态 + 项目权限 | implemented |
+| GET | `/api/agent/runs/:run_id` | 查询 run 状态 | 登录态 + 项目权限 | implemented |
+| GET | `/api/agent/runs/:run_id/stream` | SSE 实时事件 | 登录态 + 项目权限 | implemented |
+| GET | `/api/agent/runs/:run_id/events` | 按 sequence 补偿事件 | 登录态 + 项目权限 | implemented |
+| POST | `/api/agent/runs/:run_id/messages` | 追加用户输入 | 登录态 + 项目权限 | implemented |
+| POST | `/api/agent/runs/:run_id/interrupts/:interrupt_id/accept` | 确认人工中断 | 登录态 + 项目权限 | implemented |
+| POST | `/api/agent/runs/:run_id/interrupts/:interrupt_id/reject` | 拒绝人工中断 | 登录态 + 项目权限 | implemented |
+| POST | `/api/agent/runs/:run_id/cancel` | 取消 run | 登录态 + 项目权限 | implemented |
+| GET | `/api/agent/runs/:run_id/snapshot` | 查询 run 快照 | 登录态 + 项目权限 | implemented |
 
 ## 通用请求头
 

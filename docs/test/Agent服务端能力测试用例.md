@@ -2,7 +2,7 @@
 
 状态：active  
 owner：测试与验收责任域
-更新时间：2026-06-28  
+更新时间：2026-06-30
 适用范围：智能体微服务 Agent API、TurnLoop、AG-UI 事件生产、SSE 补偿、Agent DB、RPC client、Skill 测试、模型 Tool 和跨服务主链路  
 相关代码路径：`tests/agent/**`、`tests/contract/**`、`tests/e2e/service/**`、`api/openapi/agent-workbench.yaml`、`api/agui/**`、`services/agent/**`、`db/migrations/iterations/**/agent/**`  
 相关契约：`docs/current/README.md`、`docs/contracts/api/Agent工作台API契约草案.md`、`docs/contracts/ag-ui/统一Agent工作台AGUI事件协议草案.md`、`docs/contracts/data/Agent领域数据模型草案.md`、`docs/standards/AG-UI事件规范.md`、`docs/standards/TurnLoop执行规范.md`、`docs/standards/Agent领域数据建模规范.md`
@@ -27,13 +27,13 @@ owner：测试与验收责任域
 | AG-API-008 | SSE 实时事件鉴权 | `GET /api/agent/runs/:run_id/stream` | run 属于当前用户 | token、项目 view 权限通过后建立 SSE；无权限返回 401/403；heartbeat 按配置输出 | API/SSE test |
 | AG-API-009 | SSE Last-Event-ID 重连 | `GET /api/agent/runs/:run_id/stream` | event store 有 sequence 1..N | 带 `Last-Event-ID` 时从下一事件续传；重复 event_id 不重复推送语义 | SSE replay test、Agent DB |
 | AG-API-010 | event replay 查询 | `GET /api/agent/runs/:run_id/events` | after_sequence 指定 | 返回连续事件，默认分页 10，最大 100；缺口或超窗口时提示 snapshot fallback | API contract、Agent DB |
-| AG-API-011 | 确认中断 accept | `POST /api/agent/runs/:run_id/interrupts/:interrupt_id/accept` | run waiting_confirmation，interrupt required | 校验权限、项目仍 active、幂等键；interrupt -> accepted，run -> resuming/running；输出 `confirmation.accepted` 或 `resume.accepted`；不重复冻结 | API contract、Agent DB、AG-UI fixture |
-| AG-API-012 | 确认重复提交 | confirm API | 同一幂等键重复 | 返回同一确认结果；不重复调用 `FreezeCredits` | API contract、RPC call count |
+| AG-API-011 | 确认中断 accept | `POST /api/agent/runs/:run_id/interrupts/:interrupt_id/accept` | run waiting_confirmation，interrupt required | 校验权限、项目仍 active，应用层按 run/interrupt/action 形成内部幂等键；interrupt -> accepted，run -> resuming/running；输出 `confirmation.accepted` 或 `resume.accepted`；不重复冻结 | API contract、Agent DB、AG-UI fixture |
+| AG-API-012 | 确认重复提交 | confirm API | 同一 run/interrupt/action 语义重复 | 返回同一确认结果；不重复调用 `FreezeCredits` | API contract、RPC call count |
 | AG-API-013 | 确认过期 | confirm API | interrupt expired | 返回 `INTERRUPT_EXPIRED` 或 `RUN_STATE_CONFLICT`；run 进入 failed/cancelled 规则一致 | API contract、Agent DB |
 | AG-API-014 | 拒绝中断 | `POST /api/agent/runs/:run_id/interrupts/:interrupt_id/reject` | confirmation required | interrupt -> rejected，run -> cancelled；输出 `confirmation.rejected`、`agent.run.cancelled`；如有冻结则释放 | API contract、Agent DB、AG-UI |
 | AG-API-015 | 取消 run | `POST /api/agent/runs/:run_id/cancel` | running task | 停止新 Tool，正在运行 task 进入 cancel_requested/cancelled；已完成资产按规则保留，未完成释放冻结；run terminal | API contract、Agent DB、RPC mock |
 | AG-API-016 | snapshot 查询 | `GET /api/agent/runs/:run_id/snapshot` | completed/running/failed/archived 项目 | 返回消息、任务、资产引用、黑板和 last_event_sequence；archived 项目 readonly_reason；不返回长期 TOS URL | API contract、Agent DB、脱敏 |
-| AG-API-017 | API route parity | OpenAPI vs handler | `api/openapi/agent-workbench.yaml` | 所有设计路由存在 handler、鉴权、错误映射、幂等头要求；缺路由阻断联调 | route parity test |
+| AG-API-017 | API route parity | OpenAPI vs handler | `api/openapi/agent-workbench.yaml` | 所有设计路由存在 handler、鉴权、错误映射、业务幂等行为要求；缺路由阻断联调 | route parity test |
 
 ### TurnLoop 和运行状态机
 
@@ -110,7 +110,7 @@ owner：测试与验收责任域
 | ID | 功能点 | 测试入口 | 服务端断言 | 证据 |
 | --- | --- | --- | --- | --- |
 | AG-RPC-001 | Authorization token 解析 | BusinessGateway | Agent API 不信任前端 user/space，先调业务 token/space 解析；token 失败终止 | RPC mock、API test |
-| AG-RPC-002 | Auth/RequestMeta mapper | rpc mapper unit | `source=agent_service`、trace_id、idempotency_key、space/user 正确映射；不把 X-Client-Request-ID 写入 RequestMeta | unit |
+| AG-RPC-002 | Auth/RequestMeta mapper | rpc mapper unit | `source=agent_service`、trace_id、可选业务 `idempotency_key`、space/user 正确映射；不把 X-Client-Request-ID 写入 RequestMeta | unit |
 | AG-RPC-003 | 错误映射 | error mapper | 业务错误映射到 Agent domain error 和 AG-UI user_message；系统错保留 support_trace_id | unit/contract |
 | AG-RPC-004 | 超时映射 | rpc mock timeout | 业务 timeout 返回可重试标记，TurnLoop 按策略处理，不无限等待 | RPC mock |
 | AG-RPC-005 | `NOT_IMPLEMENTED` 扫描 | 全量 Agent-facing RPC | 当前服务范围内的 RPC client/server fixture 不返回 `NOT_IMPLEMENTED` | RPC smoke |
@@ -135,7 +135,7 @@ owner：测试与验收责任域
 | AG-SKILLTEST-007 | 阶段不匹配 | draft/final enabled 不匹配 | `draft_enabled=false` 不能作过程态，`final_enabled=false` 不能作最终资产元素 | Agent test |
 | AG-SKILLTEST-008 | 高风险/业务写入 Tool 隔离 | 测试 spec 绑定高风险或业务写入 Tool | 测试模式 preview 或隔离 adapter；不得改变业务事实；高风险不可测时稳定失败 | Agent test、业务 DB |
 | AG-SKILLTEST-009 | 测试通过回传 | 所有元素合法、安全 passed | 调 `SaveSkillTestResult(status=passed)`，safety_evidence_json 合法且 scene=skill_test | RPC contract |
-| AG-SKILLTEST-010 | 重复回传 | 同 test_run_id 幂等键 | 相同 hash 重放，不重复保存；不同 hash 返回 `IDEMPOTENCY_CONFLICT` | RPC contract |
+| AG-SKILLTEST-010 | 重复回传 | 同 test_run_id 派生业务幂等键 | 相同 hash 重放，不重复保存；不同 hash 返回 `IDEMPOTENCY_CONFLICT` | RPC contract |
 
 ### 模型 Tool 适配器和任务
 

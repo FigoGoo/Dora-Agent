@@ -1,5 +1,10 @@
 # Admin Frontend Foundation Implementation Plan
 
+状态：archived
+owner：前端责任域；文档与契约责任域
+更新时间：2026-06-30
+适用范围：管理端前端基础架构迁移执行计划；当前事实源已由 `docs/technical/frontend/features/2026-06-30-管理端前端基础架构设计.md` 承接
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Reorganize `admin_frontend` into the approved app/pages/features/components/services/utils/assets structure without changing behavior, API contracts, routes, DOM semantics, or styles.

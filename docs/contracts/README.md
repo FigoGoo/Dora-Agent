@@ -2,7 +2,7 @@
 
 状态：active
 owner：文档与契约责任域
-更新时间：2026-06-28
+更新时间：2026-06-30
 适用范围：Dora-Agent 第一版 RPC、API、AG-UI、Agent 数据模型和 SQL 契约入口
 
 ## 背景

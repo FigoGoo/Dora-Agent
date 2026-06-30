@@ -2,7 +2,7 @@
 
 状态：active
 owner：产品与需求责任域
-更新时间：2026-06-25
+更新时间：2026-06-30
 适用范围：平台开放 Tool、Skill 可绑定 Tool、Agent 直接调用 Tool、风险等级、可用范围、超时重试取消
 product_status：Done
 
@@ -125,7 +125,7 @@ flowchart TD
 - Skill 只能绑定平台开放 Tool。
 - Agent 直接调用 Tool 也必须满足平台开放、当前空间、权限和风险规则。
 - 内容安全治理不是 Skill 可绑定 Tool，由统一 Agent 固定执行。
-- 业务写入 Tool 必须支持幂等键，具体由 RPC 契约定义。
+- 业务写入 Tool 必须支持业务幂等，具体内部业务键生成和校验规则由 RPC 契约定义。
 - 高风险 Tool 必须人工确认。
 - 只有幂等 Tool 才允许自动重试。
 - 用户取消后不再发起新 Tool；已完成结果按业务规则保留。
@@ -177,4 +177,3 @@ flowchart TD
 - [x] Agent 直接调用 Tool 边界确认。
 - [x] 验收标准可测试。
 - [x] product_status 已更新为 Done，允许进入工程需求映射与契约先行阶段。
-

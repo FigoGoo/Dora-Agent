@@ -2,7 +2,7 @@
 
 状态：active
 owner：产品与需求责任域
-更新时间：2026-06-25
+更新时间：2026-06-30
 适用范围：AIGC 智能体 SaaS 第一版 PRD 文档入口
 product_status：Done
 

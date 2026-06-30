@@ -2,7 +2,7 @@
 
 状态：active
 owner：文档与契约责任域；业务服务责任域和前端责任域确认
-更新时间：2026-06-29
+更新时间：2026-06-30
 适用范围：Dora-Agent Web 前端 -> 业务 API 适配层
 
 ## 成熟度复核
@@ -47,7 +47,7 @@ owner：文档与契约责任域；业务服务责任域和前端责任域确认
 ## 后台高风险操作
 
 - 后台高风险写操作必须拆分为 preview 和 confirm；preview 只返回影响范围、确认摘要、`preview_token` 和过期时间，不改变业务事实。
-- confirm 必须在 JSON body 携带 `preview_token` 和 `reason`；服务端必须校验 preview token、管理员身份、操作对象、原因摘要，并在业务需要时由后端派生业务幂等键。
+- confirm 必须在 JSON body 携带 `preview_token` 和 `reason`；服务端必须校验 preview token、管理员身份、操作对象、原因摘要，并在业务需要时由业务应用层生成或校验内部业务幂等键。
 - 后台操作原因属于业务审计字段，不使用 HTTP header 传输；所有中文、多行原因都按 JSON body 原文传递。
 - 用户状态变更使用 `POST /api/admin/users/{user_id}/status/preview` 和 `POST /api/admin/users/{user_id}/status/confirm`。
 - 公开作品下架使用 `POST /api/admin/works/public/{public_work_id}/take-down/preview` 和 `POST /api/admin/works/public/{public_work_id}/take-down/confirm`。

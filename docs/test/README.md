@@ -2,7 +2,7 @@
 
 状态：active  
 owner：测试与验收责任域
-更新时间：2026-06-28  
+更新时间：2026-06-30
 适用范围：Dora-Agent 第一版用户端、管理端、业务服务和 Agent 微服务的服务端能力测试用例  
 相关代码路径：`tests/contract/**`、`tests/business/**`、`tests/agent/**`、`tests/e2e/**`、`api/thrift/**`、`api/openapi/**`、`api/agui/**`、`db/migrations/iterations/**`  
 相关契约：`docs/current/README.md`、`docs/contracts/**`、`docs/standards/测试规范.md`
@@ -58,7 +58,7 @@ owner：测试与验收责任域
 
 - 所有列表默认 `page_size=10`，最大 `50`；字典类例外必须在契约中声明。
 - HTTP 写 API 不要求客户端传 `Idempotency-Key` 或 `request_hash`；需要幂等的业务写由后端应用层按业务字段生成或校验内部业务幂等键，并验证重复同语义请求不重复创建事实或扣费。
-- 写 RPC 在业务需要幂等时必须携带 `RequestMeta.idempotency_key`，并记录 trace。
+- 写 RPC 在业务需要幂等时可携带 `RequestMeta.idempotency_key`；未携带时由业务应用层按业务字段生成或校验内部业务幂等键，并记录 trace。
 - 普通用户端、公开端和管理端响应不得泄露系统 Prompt、完整用户提示词、API Key、TOS 签名、供应商原始响应、内部成本、私有素材正文、完整手机号和完整邮箱。
 - 业务 DB 不保存 Agent session、run、message、event、tool_call、blackboard、memory。
 - Agent DB 不保存积分余额、积分流水、最终资产事实、作品公开状态、企业成员关系、业务权限事实。
