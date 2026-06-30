@@ -9,6 +9,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '/api/agent': 'http://localhost:18080',
       '/api': 'http://localhost:19080'
     }
   }

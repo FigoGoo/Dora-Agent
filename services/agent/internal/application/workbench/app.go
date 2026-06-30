@@ -580,6 +580,7 @@ type CreateRunRequest struct {
 	SessionID        string              `json:"session_id"`
 	ProjectID        string              `json:"project_id"`
 	UserInput        UserInputDTO        `json:"user_input"`
+	SelectedSkillID  string              `json:"selected_skill_id"`
 	ModelSelection   *ModelSelectionDTO  `json:"model_selection"`
 	ReferencedAssets []AssetReferenceDTO `json:"referenced_assets"`
 	ControlInputs    []ControlInputDTO   `json:"control_inputs"`
@@ -830,10 +831,12 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	if err := validateRunInputs(req); err != nil {
 		return CreateRunResponse{}, err
 	}
+	req.SelectedSkillID = strings.TrimSpace(req.SelectedSkillID)
 	req.IdempotencyKey = agentIdempotencyKey(req.IdempotencyKey, "agent.run.create", map[string]any{
 		"session_id": req.SessionID, "project_id": req.ProjectID, "client_message_id": req.UserInput.ClientMessageID,
 		"content_type": req.UserInput.ContentType, "text_digest": digestText(req.UserInput.Text),
-		"model_selection": req.ModelSelection, "referenced_assets": req.ReferencedAssets, "control_inputs": req.ControlInputs,
+		"selected_skill_id": req.SelectedSkillID, "model_selection": req.ModelSelection,
+		"referenced_assets": req.ReferencedAssets, "control_inputs": req.ControlInputs,
 	})
 	if existing, err := a.repo.GetRunByIdempotencyKey(ctx, req.IdempotencyKey); err == nil {
 		return runResponse(*existing), nil
@@ -890,6 +893,7 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 		ID: securityID("msg_"), SessionID: session.ID, RunID: run.ID, Role: "user", ContentType: req.UserInput.ContentType,
 		Content: req.UserInput.Text, Sequence: messageSequence, TraceID: traceID, Metadata: jsonObject(map[string]any{
 			"client_message_id": req.UserInput.ClientMessageID,
+			"selected_skill_id": req.SelectedSkillID,
 			"referenced_assets": req.ReferencedAssets,
 			"control_inputs":    req.ControlInputs,
 		}),
@@ -909,7 +913,7 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	if err := a.repo.AppendEvent(ctx, event); err != nil {
 		return CreateRunResponse{}, err
 	}
-	if err := a.recordM3StartEvents(ctx, auth, run, req.UserInput.Text, traceID); err != nil {
+	if err := a.recordM3StartEvents(ctx, auth, run, req.UserInput.Text, req.SelectedSkillID, traceID); err != nil {
 		return CreateRunResponse{}, err
 	}
 	if updated, err := a.repo.GetRun(ctx, run.ID); err == nil {
@@ -1441,14 +1445,16 @@ func isRevokedMembershipError(err error) bool {
 		strings.Contains(message, "permission revoked")
 }
 
-func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, traceID string) error {
+func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, requestedSkillID string, traceID string) error {
 	if a.gateway == nil {
 		return nil
 	}
+	requestedSkillID = strings.TrimSpace(requestedSkillID)
 	skillSelectionSnapshot := map[string]any{
 		"skill_id":                     "",
 		"skill_version":                "",
 		"skill_scope":                  "",
+		"selected_skill_id":            requestedSkillID,
 		"matched_reason":               "",
 		"fallback_reason":              "",
 		"tool_refs_digest":             digestStrings(nil),
@@ -1463,19 +1469,22 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 	if err != nil {
 		return err
 	}
-	selectedSkillID := ""
+	selectedRuntimeSkillID := ""
 	var selectedOutputElements []SkillOutputElementDTO
 	skills, _, err := a.gateway.ListRoutableSkills(ctx, auth, "", 10, "", traceID)
 	if err != nil {
 		_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_catalog_unavailable", err.Error())
 		skillSelectionSnapshot["fallback_reason"] = "skill_catalog_unavailable"
 	} else {
-		route := a.skillRouter.Route(prompt, runtimeSkillSummaries(skills))
+		route, selectedUnavailable := a.routeSkill(prompt, requestedSkillID, skills)
+		if selectedUnavailable {
+			_ = a.appendSkillMissingEvent(ctx, run, traceID, "selected_skill_unavailable", "指定 Skill 不可用，继续按 prompt 路由")
+		}
 		if !route.Matched {
 			_ = a.appendSkillMissingEvent(ctx, run, traceID, route.Reason, "未命中可路由 Skill，使用文本模型兜底")
 			skillSelectionSnapshot["fallback_reason"] = route.Reason
 		} else {
-			selectedSkillID = route.Skill.SkillID
+			selectedRuntimeSkillID = route.Skill.SkillID
 			skillSelectionSnapshot["skill_id"] = route.Skill.SkillID
 			skillSelectionSnapshot["skill_version"] = route.Skill.Version
 			skillSelectionSnapshot["version"] = route.Skill.Version
@@ -1500,6 +1509,9 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 				skillSelectionSnapshot["tool_refs_count"] = len(spec.ToolRefs)
 				skillSelectionSnapshot["output_elements"] = spec.OutputElements
 				skillSelectionSnapshot["output_elements_count"] = len(spec.OutputElements)
+				if isSkillCapabilityQuestion(prompt) {
+					return a.completeSkillCapabilityRun(ctx, run, route.Skill, spec, traceID)
+				}
 				if err := a.recordToolPolicyEvents(ctx, auth, run, spec.ToolRefs, safetyEvidence, traceID); err != nil {
 					if errors.Is(err, errToolConfirmationRequired) {
 						return nil
@@ -1586,7 +1598,7 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 		return err
 	}
 	result, err := a.turnLoop.StartTurn(ctx, turnloop.StartInput{
-		RunID: run.ID, ProjectID: run.ProjectID, Prompt: prompt, SkillID: selectedSkillID, ModelID: modelID,
+		RunID: run.ID, ProjectID: run.ProjectID, Prompt: prompt, SkillID: selectedRuntimeSkillID, ModelID: modelID,
 		SafetyResult: safetyEvidence.Result, HasPendingConfirmation: hasPendingConfirmation, IdempotencyKey: run.IdempotencyKey,
 	})
 	if err != nil {
@@ -1607,6 +1619,147 @@ func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run 
 		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "TURNLOOP_FAILED", result.Phase)
 	}
 	return nil
+}
+
+func isSkillCapabilityQuestion(prompt string) bool {
+	normalized := normalizeSkillCapabilityPrompt(prompt)
+	if normalized == "" {
+		return false
+	}
+	switch normalized {
+	case "你好", "您好", "嗨", "hello", "hi", "hey", "help":
+		return true
+	}
+	for _, phrase := range []string{
+		"有什么能力", "有啥能力", "你能做什么", "你可以做什么", "你会做什么", "能做什么", "可以做什么",
+		"介绍一下自己", "自我介绍", "whatcanyoudo", "capability", "abilities",
+	} {
+		if strings.Contains(normalized, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeSkillCapabilityPrompt(prompt string) string {
+	replacer := strings.NewReplacer(
+		" ", "",
+		"\t", "",
+		"\n", "",
+		"\r", "",
+		"？", "?",
+		"！", "!",
+		"，", ",",
+		"。", ".",
+		"、", ",",
+	)
+	return replacer.Replace(strings.ToLower(strings.TrimSpace(prompt)))
+}
+
+func (a *App) completeSkillCapabilityRun(ctx context.Context, run *model.Run, skill runtimeskill.Summary, spec SkillSpecDTO, traceID string) error {
+	if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusRunning, "", ""); err != nil {
+		return err
+	}
+	text := skillCapabilityReply(skill, spec)
+	sequence, err := a.repo.NextMessageSequence(ctx, run.SessionID)
+	if err != nil {
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "MESSAGE_SEQUENCE_FAILED", err.Error())
+		return err
+	}
+	message := &model.Message{
+		ID: securityID("msg_"), SessionID: run.SessionID, RunID: run.ID, Role: "assistant", ContentType: "text",
+		Content: text, Sequence: sequence, TraceID: traceID,
+		Metadata: jsonObject(map[string]any{
+			"response_type":       "skill_capability",
+			"skill_id":            skill.SkillID,
+			"skill_version":       skill.Version,
+			"tool_refs_count":     len(spec.ToolRefs),
+			"output_elements":     spec.OutputElements,
+			"output_elements_cnt": len(spec.OutputElements),
+		}),
+	}
+	if err := a.repo.CreateMessage(ctx, message); err != nil {
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "MESSAGE_CREATE_FAILED", err.Error())
+		return err
+	}
+	if err := a.appendRunEvent(ctx, run, "agent.message.completed", traceID, map[string]any{
+		"message_id":        message.ID,
+		"role":              "assistant",
+		"content_type":      "text",
+		"final_text":        text,
+		"text":              text,
+		"final_text_digest": digestText(text),
+		"token_usage_summary": map[string]any{
+			"source":            "local_skill_capability_reply",
+			"prompt_tokens":     0,
+			"completion_tokens": 0,
+			"total_tokens":      0,
+		},
+		"skill_id":      skill.SkillID,
+		"skill_version": skill.Version,
+	}); err != nil {
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "MESSAGE_EVENT_FAILED", err.Error())
+		return err
+	}
+	if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusCompleted, "", ""); err != nil {
+		return err
+	}
+	session, _ := a.repo.GetSession(ctx, run.SessionID)
+	lastSequence := int64(0)
+	if session != nil {
+		lastSequence = session.LastEventSequence + 1
+	}
+	return a.appendRunEvent(ctx, run, "agent.run.completed", traceID, map[string]any{
+		"run_status":          state.RunStatusCompleted,
+		"completed_at":        time.Now().UTC().Format(time.RFC3339Nano),
+		"final_message_id":    message.ID,
+		"last_event_sequence": lastSequence,
+		"snapshot_version":    time.Now().UTC().Format(time.RFC3339Nano),
+		"charged_points":      0,
+		"asset_count":         0,
+	})
+}
+
+func skillCapabilityReply(skill runtimeskill.Summary, spec SkillSpecDTO) string {
+	name := strings.TrimSpace(skill.SkillName)
+	if name == "" {
+		name = skill.SkillID
+	}
+	var builder strings.Builder
+	builder.WriteString("你好，我是 ")
+	builder.WriteString(name)
+	builder.WriteString(" Skill。")
+	builder.WriteString("我会优先围绕这个 Skill 处理你的后续输入，理解目标、整理生成要求，并在需要时规划输出。")
+	if len(spec.OutputElements) > 0 {
+		builder.WriteString("当前 Skill 的输出包括 ")
+		builder.WriteString(outputElementNames(spec.OutputElements))
+		builder.WriteString("。")
+	}
+	if len(spec.ToolRefs) > 0 {
+		builder.WriteString("只有当你提出明确的生成、编辑、检索或保存任务时，我才会进入对应 Tool 调用和确认流程。")
+	}
+	builder.WriteString("你可以直接描述要做的内容、风格、数量和素材约束。")
+	return builder.String()
+}
+
+func outputElementNames(elements []SkillOutputElementDTO) string {
+	names := make([]string, 0, len(elements))
+	for _, element := range elements {
+		name := strings.TrimSpace(element.ElementName)
+		if name == "" {
+			name = strings.TrimSpace(element.ElementType)
+		}
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return "Skill 配置的结构化结果"
+	}
+	if len(names) > 3 {
+		names = append(names[:3], "等")
+	}
+	return strings.Join(names, "、")
 }
 
 func (a *App) recordToolPolicyEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, toolRefs []string, safety *model.SafetyEvaluation, traceID string) error {
@@ -3063,6 +3216,7 @@ func runInputSummary(req CreateRunRequest) map[string]any {
 		"client_message_id":      req.UserInput.ClientMessageID,
 		"content_type":           req.UserInput.ContentType,
 		"language":               req.UserInput.Language,
+		"selected_skill_id":      strings.TrimSpace(req.SelectedSkillID),
 		"referenced_assets":      req.ReferencedAssets,
 		"referenced_asset_count": len(req.ReferencedAssets),
 		"control_inputs":         req.ControlInputs,
@@ -3074,6 +3228,24 @@ func runInputSummary(req CreateRunRequest) map[string]any {
 			"control_input_count":   len(req.ControlInputs),
 		},
 	}
+}
+
+func (a *App) routeSkill(prompt string, selectedSkillID string, skills []SkillSummaryDTO) (runtimeskill.RouteResult, bool) {
+	selectedSkillID = strings.TrimSpace(selectedSkillID)
+	summaries := runtimeSkillSummaries(skills)
+	if selectedSkillID != "" {
+		for _, skill := range summaries {
+			if skill.SkillID != selectedSkillID {
+				continue
+			}
+			if skill.Status == "published" {
+				return runtimeskill.RouteResult{Matched: true, Skill: skill, Reason: "selected_skill_id"}, false
+			}
+			break
+		}
+		return a.skillRouter.Route(prompt, summaries), true
+	}
+	return a.skillRouter.Route(prompt, summaries), false
 }
 
 func emptyControlValue(value any) bool {

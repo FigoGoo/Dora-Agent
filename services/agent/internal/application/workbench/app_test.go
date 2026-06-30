@@ -71,6 +71,40 @@ func TestToolPolicyRiskContextRequiresPerToolWhitelistCheck(t *testing.T) {
 	}
 }
 
+func TestSkillCapabilityQuestionDetection(t *testing.T) {
+	for _, prompt := range []string{"你好", "你好，你有什么能力", "你能做什么？", "what can you do", "help"} {
+		if !isSkillCapabilityQuestion(prompt) {
+			t.Fatalf("expected capability question: %q", prompt)
+		}
+	}
+	for _, prompt := range []string{"你好，帮我生成一张海报", "请生成 3 张故事板", "lookup with web fetch", "help me generate a poster"} {
+		if isSkillCapabilityQuestion(prompt) {
+			t.Fatalf("unexpected capability question match: %q", prompt)
+		}
+	}
+}
+
+func TestRouteSkillUsesSelectedPublishedSkillBeforePromptRoute(t *testing.T) {
+	app := New(nil, nil, "test")
+	route, selectedUnavailable := app.routeSkill("lookup with web fetch", "sk_selected", []SkillSummaryDTO{
+		{SkillID: "sk_prompt", SkillName: "Prompt Skill", Version: "1.0.0", Status: "published", RouteHints: map[string]string{"intent": "lookup"}},
+		{SkillID: "sk_selected", SkillName: "Selected Skill", Version: "2.0.0", Status: "published", RouteHints: map[string]string{"intent": "manual only"}},
+	})
+	if selectedUnavailable || !route.Matched || route.Skill.SkillID != "sk_selected" || route.Reason != "selected_skill_id" {
+		t.Fatalf("selected Skill should win before prompt route: route=%#v unavailable=%v", route, selectedUnavailable)
+	}
+}
+
+func TestRouteSkillFallsBackToPromptRouteWhenSelectedSkillUnavailable(t *testing.T) {
+	app := New(nil, nil, "test")
+	route, selectedUnavailable := app.routeSkill("lookup with web fetch", "sk_missing", []SkillSummaryDTO{
+		{SkillID: "sk_prompt", SkillName: "Prompt Skill", Version: "1.0.0", Status: "published", RouteHints: map[string]string{"intent": "lookup"}},
+	})
+	if !selectedUnavailable || !route.Matched || route.Skill.SkillID != "sk_prompt" || route.Reason != "route_hint:intent" {
+		t.Fatalf("missing selected Skill should fall back to prompt route: route=%#v unavailable=%v", route, selectedUnavailable)
+	}
+}
+
 func TestStreamingArtifactUploaderConsumesStream(t *testing.T) {
 	body := []byte("streamed artifact")
 	sum := sha256.Sum256(body)

@@ -16,6 +16,7 @@ owner：前端责任域；文档与契约责任域
 | [`2026-06-29-管理端功能API接入矩阵.md`](./2026-06-29-管理端功能API接入矩阵.md) | active | 管理端功能点、`/api/admin/**` API 接入矩阵和验收索引 |
 | [`2026-06-29-用户端首页前端设计.md`](./2026-06-29-用户端首页前端设计.md) | active | DORAIGC 用户端首页第一版视觉、主题 token、静态交互和验证记录。 |
 | [`2026-06-30-管理端前端基础架构设计.md`](./2026-06-30-管理端前端基础架构设计.md) | active | `admin_frontend` 管理端工程目录、路由、Provider、页面入口、服务层和基础模块边界。 |
+| [`2026-06-30-管理端Skill-Agent调试台前端设计.md`](./2026-06-30-管理端Skill-Agent调试台前端设计.md) | active | 管理端临时 Skill Agent 调试页、`selected_skill_id` 指定 Skill、Agent API 和 AG-UI 消费验证。 |
 
 ## 何时新增
 

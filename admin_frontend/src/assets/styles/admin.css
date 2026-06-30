@@ -1914,6 +1914,281 @@ a:focus-visible {
   align-items: start;
 }
 
+.admin-agent-test {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-agent-test__setup,
+.admin-agent-test__conversation,
+.admin-agent-test__debug,
+.admin-agent-test__panel,
+.admin-agent-test__summary article {
+  min-width: 0;
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: var(--admin-surface);
+}
+
+.admin-agent-test__setup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 16px;
+}
+
+.admin-agent-test__setup-main,
+.admin-agent-test__advanced,
+.admin-agent-test__debug-body {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-agent-test__grid,
+.admin-agent-test__split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-agent-test__grid--setup {
+  grid-template-columns: minmax(240px, 1.4fr) repeat(3, minmax(160px, 1fr));
+}
+
+.admin-agent-test__conversation {
+  display: grid;
+  grid-template-rows: auto minmax(360px, 1fr) auto auto;
+  gap: 14px;
+  padding: 16px;
+}
+
+.admin-agent-test__conversation-header,
+.admin-agent-test__debug-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-agent-test__conversation-header h2,
+.admin-agent-test__debug-header h2,
+.admin-agent-test__panel h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 22px;
+}
+
+.admin-agent-test__conversation-header p,
+.admin-agent-test__debug-header p {
+  margin: 2px 0 0;
+  color: var(--admin-text-tertiary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.admin-agent-test__conversation-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.admin-agent-test__chat-scroll {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 360px;
+  max-height: min(62vh, 720px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: 8px;
+  background: var(--admin-surface-muted);
+}
+
+.admin-agent-test__messages,
+.admin-agent-test__list,
+.admin-agent-test__confirm {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-agent-test__messages--chat {
+  align-content: start;
+}
+
+.admin-agent-test__message {
+  display: flex;
+  min-width: 0;
+}
+
+.admin-agent-test__message--user {
+  justify-content: flex-end;
+}
+
+.admin-agent-test__message--assistant {
+  justify-content: flex-start;
+}
+
+.admin-agent-test__message-bubble {
+  display: grid;
+  gap: 8px;
+  max-width: min(760px, 86%);
+  padding: 12px;
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: var(--admin-surface);
+}
+
+.admin-agent-test__message--user .admin-agent-test__message-bubble {
+  border-color: var(--admin-primary);
+  background: var(--admin-primary);
+  color: #ffffff;
+}
+
+.admin-agent-test__message--user .admin-badge {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.admin-agent-test__message p,
+.admin-agent-test__confirm p,
+.admin-agent-test__confirm-banner p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.admin-agent-test__confirm-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--admin-warning);
+  border-radius: 8px;
+  background: var(--admin-warning-soft);
+}
+
+.admin-agent-test__composer {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-agent-test__composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.admin-agent-test__debug {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.admin-agent-test__summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-agent-test__summary article {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.admin-agent-test__summary span,
+.admin-agent-test__events span,
+.admin-agent-test__list span,
+.admin-agent-test__confirm small {
+  color: var(--admin-text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.admin-agent-test__summary strong,
+.admin-agent-test__list strong,
+.admin-agent-test__events strong {
+  overflow-wrap: anywhere;
+}
+
+.admin-agent-test__panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.admin-agent-test__panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.admin-agent-test__thinking {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: 6px;
+  background: var(--admin-surface-muted);
+  color: var(--admin-text-secondary);
+}
+
+.admin-agent-test__list article {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: 6px;
+  background: var(--admin-surface-muted);
+}
+
+.admin-agent-test__json {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: 6px;
+  background: var(--admin-surface-muted);
+  color: var(--admin-text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+}
+
+.admin-agent-test__events {
+  display: grid;
+  gap: 0;
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: 6px;
+}
+
+.admin-agent-test__events li {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.45fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--admin-border-subtle);
+}
+
+.admin-agent-test__events li:last-child {
+  border-bottom: 0;
+}
+
 .admin-tooltip {
   position: relative;
   display: inline-flex;
@@ -2088,6 +2363,9 @@ a:focus-visible {
   .admin-page-header,
   .admin-filter-bar,
   .admin-two-column,
+  .admin-agent-test,
+  .admin-agent-test__summary,
+  .admin-agent-test__split,
   .admin-resource-split,
   .admin-skill-editor-page {
     display: grid;
@@ -2096,6 +2374,30 @@ a:focus-visible {
 
   .admin-skill-editor-page__side {
     position: static;
+  }
+
+  .admin-agent-test__setup,
+  .admin-agent-test__conversation-header,
+  .admin-agent-test__debug-header,
+  .admin-agent-test__confirm-banner {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-agent-test__setup,
+  .admin-agent-test__conversation-header,
+  .admin-agent-test__debug-header,
+  .admin-agent-test__confirm-banner,
+  .admin-agent-test__composer-actions {
+    display: grid;
+  }
+
+  .admin-agent-test__conversation-meta,
+  .admin-agent-test__composer-actions {
+    justify-content: stretch;
+  }
+
+  .admin-agent-test__message-bubble {
+    max-width: 100%;
   }
 
   .admin-search,
@@ -2109,6 +2411,7 @@ a:focus-visible {
   }
 
   .admin-form-grid,
+  .admin-agent-test__grid,
   .admin-form-section--dense .admin-form-grid,
   .admin-form-section--split .admin-form-grid,
   .admin-form-section--matrix .admin-form-grid {

@@ -344,6 +344,9 @@ components:
           type: string
         user_input:
           $ref: '#/components/schemas/UserInputDTO'
+        selected_skill_id:
+          type: string
+          description: 用户显式指定的已发布 Skill ID。命中当前空间可路由 Skill 时优先作为本次 run 的 Skill 上下文；为空或不可用时回退 prompt 路由。选择 Skill 不等于立即调用其 tool_refs。
         model_selection:
           $ref: '#/components/schemas/ModelSelectionDTO'
         referenced_assets:

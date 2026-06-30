@@ -42,8 +42,7 @@ func NewBusinessGateway(cfg config.AgentConfig) (*BusinessGateway, error) {
 	opts := []client.Option{client.WithMetaHandler(transmeta.MetainfoClientHandler)}
 	if len(cfg.BusinessHostPorts) > 0 {
 		opts = append(opts, client.WithHostPorts(cfg.BusinessHostPorts...))
-	}
-	if strings.ToLower(strings.TrimSpace(cfg.KitexRegistry)) == "etcd" {
+	} else if strings.ToLower(strings.TrimSpace(cfg.KitexRegistry)) == "etcd" {
 		resolver, err := etcd.NewEtcdResolver(cfg.EtcdEndpoints)
 		if err != nil {
 			return nil, fmt.Errorf("create etcd resolver: %w", err)

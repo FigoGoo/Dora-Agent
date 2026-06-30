@@ -7,6 +7,7 @@ import { DashboardPage } from '../pages/DashboardPage.jsx';
 import { ResourceListPage } from '../pages/ResourceListPage.jsx';
 import { CreditGrantPage } from '../pages/CreditGrantPage.jsx';
 import { SystemSkillEditorPage } from '../pages/SystemSkillEditorPage.jsx';
+import { SkillAgentTestPage } from '../pages/SkillAgentTestPage.jsx';
 import { pageConfigs } from '../features/resources/pageConfigs.jsx';
 
 export function AppRouter() {
@@ -19,6 +20,7 @@ export function AppRouter() {
         <Route path="/admin" element={<AdminShell />}>
           <Route index element={<DashboardPage />} />
           <Route path="skills/system/new" element={<SystemSkillEditorPage />} />
+          <Route path="agent/skill-test" element={<SkillAgentTestPage />} />
           {Object.entries(pageConfigs).map(([path, config]) => (
             <Route key={path} path={path} element={<ResourceListPage config={config} />} />
           ))}

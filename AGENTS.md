@@ -32,7 +32,7 @@ Dora-Agent 是面向 AIGC 智能体创作工作台的全栈项目，覆盖用户
 - 业务系统微服务入口以 `services/business/**`、`api/thrift/**`、`api/openapi/**`、`docs/contracts/rpc/**`、`docs/contracts/sql/**` 为准。
 - 核心边界：智能体微服务只保存 Agent Runtime 数据；业务事实由业务系统微服务和业务数据库维护，智能体微服务通过 RPC 改变业务事实。
 - 字段级契约事实源以 `docs/contracts/字段级契约索引.md` 指向的 Thrift、OpenAPI、AG-UI JSON Schema、migration 和 fixture 为准。
-
+- 在本地开发时，后端服务和前端都在本地启动，不使用docker启动。docker仅启动etcd\pgsql\redis
 ## 默认读取顺序
 
 1. `AGENTS.md`

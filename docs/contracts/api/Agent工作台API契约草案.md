@@ -81,9 +81,19 @@ owner：文档与契约责任域；Agent 服务责任域和前端责任域确认
 | session_id | body | string | 是 | Agent 会话 ID |
 | project_id | body | string | 是 | 业务项目 ID |
 | user_input | body | object | 是 | 用户输入 DTO，字段级以 OpenAPI `UserInputDTO` 为准 |
+| selected_skill_id | body | string | 否 | 用户显式指定的已发布 Skill ID；命中当前空间可路由 Skill 时优先作为本次 run 的 Skill 上下文，缺失或不可用时回退原 prompt 路由 |
 | model_selection | body | object | 否 | 用户选择模型 |
 | referenced_assets | body | array | 否 | 引用业务资产 DTO |
 | control_inputs | body | array | 否 | 前端控件输入 DTO |
+
+### 指定 Skill 规则
+
+- `selected_skill_id` 用于用户或调试台明确指定某个 Skill 参与本次 run，不依赖意图识别路由。
+- Agent 服务必须先在当前用户、当前空间的可路由已发布 Skill 列表中匹配 `selected_skill_id`。
+- 匹配成功时发送 `agent.skill.selected`，`payload.matched_reason=selected_skill_id`，并按该 Skill 的发布版 spec、输出元素和确认策略约束后续执行。
+- 选择 Skill 不等于立即调用其 `tool_refs`；问候、能力说明等文本类输入应直接返回 `agent.message.completed` 和 `agent.run.completed`，只有明确进入生成、编辑、检索或保存任务时才产生 `tool.call.*` 或 `confirmation.*`。
+- `selected_skill_id` 为空、找不到、非当前空间可见或非 `published` 时，不阻断 run；服务记录 `agent.skill.missing(reason=selected_skill_unavailable)` 后继续使用原 prompt 路由。
+- `control_inputs` 只承载前端控件输入，不再用来传递指定 Skill。
 
 响应：
 

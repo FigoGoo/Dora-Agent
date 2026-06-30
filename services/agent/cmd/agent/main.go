@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -47,17 +48,23 @@ func main() {
 		os.Exit(1)
 	}
 	app := workbench.New(repository.New(db), gateway, cfg.DefaultConfigVersion)
-	if cfg.DeepSeekAPIKey == "" {
-		logger.Error("deepseek api key is required", "env", "DEEPSEEK_API_KEY")
-		os.Exit(1)
+	if strings.TrimSpace(cfg.DeepSeekAPIKey) == "" {
+		if cfg.AppEnv == "local" || cfg.AppEnv == "dev" {
+			app.SetModelAdapter(modeltool.LocalAdapter{})
+			logger.Info("agent_model_adapter_enabled", "provider", "local", "reason", "DEEPSEEK_API_KEY empty")
+		} else {
+			logger.Error("deepseek api key is required", "env", "DEEPSEEK_API_KEY")
+			os.Exit(1)
+		}
+	} else {
+		app.SetModelAdapter(modeltool.DeepSeekAdapter{
+			BaseURL:   cfg.DeepSeekBaseURL,
+			APIKey:    cfg.DeepSeekAPIKey,
+			Model:     cfg.DeepSeekModel,
+			MaxTokens: cfg.DeepSeekMaxTokens,
+		})
+		logger.Info("agent_model_adapter_enabled", "provider", "deepseek", "model", cfg.DeepSeekModel, "base_url", cfg.DeepSeekBaseURL)
 	}
-	app.SetModelAdapter(modeltool.DeepSeekAdapter{
-		BaseURL:   cfg.DeepSeekBaseURL,
-		APIKey:    cfg.DeepSeekAPIKey,
-		Model:     cfg.DeepSeekModel,
-		MaxTokens: cfg.DeepSeekMaxTokens,
-	})
-	logger.Info("agent_model_adapter_enabled", "provider", "deepseek", "model", cfg.DeepSeekModel, "base_url", cfg.DeepSeekBaseURL)
 	var generationQueue *queue.RedisGenerationQueue
 	if cfg.GenerationQueue == "redis" {
 		generationQueue, err = queue.NewRedisGenerationQueue(queue.RedisGenerationQueueConfig{

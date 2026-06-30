@@ -45,6 +45,58 @@ func TestM6IndependentToolChargeClosesRPCChain(t *testing.T) {
 	}
 }
 
+func TestSelectedSkillCapabilityQuestionDoesNotStartToolCall(t *testing.T) {
+	app, gateway := newM6ServiceApp(t)
+	gateway.StaticGateway.SkillSpec.ToolRefs = []string{"image_generate:model_generation"}
+	gateway.StaticGateway.ToolPolicy = ToolExecutionPolicyDTO{Allowed: true, RiskLevel: "medium", RequiresConfirmation: true, TimeoutMS: 120000}
+	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
+	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "skill capability", IdempotencyKey: "idem-skill-cap-session"}, "trace-skill-cap")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	run, err := app.CreateRun(t.Context(), auth, CreateRunRequest{
+		SessionID: session.SessionID, ProjectID: "prj_active_1001", SelectedSkillID: "sk_tool", IdempotencyKey: "idem-skill-cap-run",
+		UserInput: UserInputDTO{ClientMessageID: "cm_skill_cap", ContentType: "text", Text: "你好，你有什么能力"},
+	}, "trace-skill-cap")
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	updated, err := app.repo.GetRun(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status != state.RunStatusCompleted {
+		t.Fatalf("capability question should complete as text response, got %s", updated.Status)
+	}
+	events, err := app.repo.ListEventsAfterSequence(t.Context(), run.RunID, 0, 100)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if hasEvent(events, "tool.call.started") || hasEvent(events, "confirmation.required") {
+		t.Fatalf("capability question must not start tool call or confirmation: %#v", events)
+	}
+	if !hasEvent(events, "agent.message.completed") || !hasEvent(events, "agent.run.completed") {
+		t.Fatalf("capability question should emit assistant text completion: %#v", events)
+	}
+	if containsCall(gateway.calls, "ListAvailableGenerationModels") || containsCall(gateway.calls, "EstimateGenerationCredits") || containsCall(gateway.calls, "EstimateToolCredits") {
+		t.Fatalf("capability question should not enter generation or billing RPC chain: %v", gateway.calls)
+	}
+	messages, err := app.repo.ListMessages(t.Context(), session.SessionID, 20, 0)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	var assistantText string
+	for _, message := range messages {
+		if message.Role == "assistant" {
+			assistantText = message.Content
+			break
+		}
+	}
+	if !strings.Contains(assistantText, "只有当你提出明确") {
+		t.Fatalf("assistant capability reply missing tool boundary explanation: %q", assistantText)
+	}
+}
+
 func TestM6IndependentToolChargeFailureReleasesFreeze(t *testing.T) {
 	app, gateway := newM6ServiceApp(t)
 	gateway.chargeErr = errors.New("STATE_CONFLICT: duplicate estimate item")

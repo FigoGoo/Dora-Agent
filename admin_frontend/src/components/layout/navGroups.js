@@ -26,6 +26,7 @@ export const navGroups = [
     title: '能力配置',
     items: [
       { to: '/admin/skills/system', label: '系统 Skill', icon: WandSparkles },
+      { to: '/admin/agent/skill-test', label: 'Skill 调试台', icon: WandSparkles },
       { to: '/admin/skills/reviews', label: 'Skill 审核', icon: BookOpenCheck },
       { to: '/admin/models/providers', label: '模型供应商', icon: Blocks },
       { to: '/admin/models', label: '模型管理', icon: Sparkles, end: true },
