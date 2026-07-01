@@ -67,10 +67,27 @@ jobs:
       - name: Run PR-0 CI gate
         run: scripts/validate-pr0-ci-gate.sh
 
+  pr5-full-http-smoke:
+    name: PR-5 full HTTP service smoke
+    runs-on: ubuntu-latest
+    needs: pr0-ci-gate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run PR-5 full HTTP service smoke
+        run: scripts/validate-pr5-full-http-smoke.sh
+
   pr5-browser-smoke:
     name: PR-5 browser smoke
     runs-on: ubuntu-latest
-    needs: pr0-ci-gate
+    needs: pr5-full-http-smoke
     steps:
       - name: Checkout
         uses: actions/checkout@v4

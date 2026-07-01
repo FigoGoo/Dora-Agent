@@ -20,6 +20,7 @@ owner：测试与验收责任域
 | Billing fixtures | `tests/fixtures/contracts/billing/**` | PR-4 |
 | Fake provider E2E | `tests/e2e/fake-provider/**` | PR-5 |
 | E2E fixtures | `tests/fixtures/e2e/**` | PR-5 |
+| Full HTTP service smoke | `services/agent/internal/e2e/pr5/full_http_service_smoke_test.go`、`scripts/validate-pr5-full-http-smoke.sh` | PR-5 |
 | Browser smoke | `tests/e2e/browser/**` | PR-5 |
 | JSON Schema validator | `tests/contract/validate_json_schema_contracts.py` | PR-1 ~ PR-5 |
 
@@ -30,6 +31,7 @@ PR-0 后，本地和 CI 的默认验证入口：
 ```text
 make active-contract-gate
 make pr0-ci-gate
+make pr5-full-http-smoke
 make pr5-browser-smoke
 ```
 
@@ -40,5 +42,6 @@ make pr5-browser-smoke
 - PR-5 已完成本地 Agent HTTP router + Redis container E2E：`go test ./services/agent/internal/e2e/pr5`。
 - PR-5 已完成本地 Agent 独立进程 HTTP smoke：`go test ./services/agent/internal/e2e/pr5 -run TestPR5AgentIndependentProcessHTTPSmoke -count=1 -v`。
 - PR-5 已完成本地 Business 独立进程 HTTP smoke：`go test ./services/business/internal/e2e/pr5 -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v`。
+- PR-5 已完成本地 Agent + Business 双服务 HTTP smoke：`scripts/validate-pr5-full-http-smoke.sh` 或 `make pr5-full-http-smoke`。
 - PR-5 已完成本地真实浏览器前端联动 smoke：`scripts/validate-pr5-browser-smoke.sh` 或 `make pr5-browser-smoke`。
 - PR-5 完整测试环境 HTTP 服务 E2E 执行和测试报告仍是发布前 gate。

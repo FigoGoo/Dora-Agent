@@ -16,7 +16,7 @@ M0 / PR-1 active 最小契约已冻结
 PR-2 Agent Runtime Contracts 字段级契约已冻结，本地真实 PostgreSQL dry-run / down-test 已完成，远端 CI gate 待 PR 运行确认
 PR-3 Tool/Credit/Asset Contracts 字段级契约已冻结，本地真实 PostgreSQL dry-run / down-test 已完成，远端 CI gate 待 PR 运行确认
 PR-4 Marketplace Contracts 字段级契约已冻结，本地真实 PostgreSQL dry-run / down-test 已完成，远端 CI gate 待 PR 运行确认
-PR-5 E2E Fixtures + Fake Provider + Release Gates 已冻结，本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地真实浏览器前端联动 smoke 已完成，完整测试环境 HTTP 服务 E2E 待 CI / 测试环境 gate
+PR-5 E2E Fixtures + Fake Provider + Release Gates 已冻结，本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 已完成，完整测试环境 HTTP 服务 E2E 待测试环境 gate
 PR-1 到 PR-5 active 拆分已完成
 PR-0 开发准备与 CI Gate 已启动
 M1 Creative Guide / ChatModel Router 基础业务闭环已实现，显式 M1 run_intent 不触发 Tool、积分、Board/Graph 生成
@@ -73,5 +73,5 @@ Contract index
 3. 新增字段必须同步 schema、fixture 和契约索引。
 4. 写 RPC、扣费、冻结、释放、确认类能力必须有幂等键和 trace。
 5. AG-UI 事件必须支持同一 run 内 `seq` 单调递增和 `dedupe_key` 去重。
-6. 真实 provider 流量必须等待 PR-5 fake provider、service-level E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地真实浏览器前端联动 smoke、完整测试环境 HTTP 服务 E2E 和 release gate 在测试环境通过。
-7. 本地开发默认先运行 `make active-contract-gate`；提交前运行 `make pr0-ci-gate`；涉及前后台联动、Skill 市场或管理端治理时运行 `make pr5-browser-smoke`。
+6. 真实 provider 流量必须等待 PR-5 fake provider、service-level E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke、完整测试环境 HTTP 服务 E2E 和 release gate 在测试环境通过。
+7. 本地开发默认先运行 `make active-contract-gate`；提交前运行 `make pr0-ci-gate`；涉及前后台联动、Skill 市场或管理端治理时运行 `make pr5-full-http-smoke` 和 `make pr5-browser-smoke`。

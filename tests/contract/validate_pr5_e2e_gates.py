@@ -17,6 +17,8 @@ FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "e2e"
 CONTRACT_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "contracts"
 RELEASE_GOVERNANCE_DOC = REPO_ROOT / "docs" / "active" / "technical" / "release-governance.md"
 BROWSER_SMOKE_SCRIPT = REPO_ROOT / "scripts" / "validate-pr5-browser-smoke.sh"
+FULL_HTTP_SMOKE_SCRIPT = REPO_ROOT / "scripts" / "validate-pr5-full-http-smoke.sh"
+FULL_HTTP_SMOKE_TEST = REPO_ROOT / "services" / "agent" / "internal" / "e2e" / "pr5" / "full_http_service_smoke_test.go"
 MAKEFILE = REPO_ROOT / "Makefile"
 ACTIVE_CONTRACT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "active-contract-gates.yml"
 
@@ -101,6 +103,19 @@ REQUIRED_BROWSER_SMOKE_TOKENS = {
     "/api/admin/settlements/",
     "settlement_release",
     "settlement_payout",
+}
+
+REQUIRED_FULL_HTTP_SMOKE_TOKENS = {
+    "TestPR5FullHTTPServiceE2ESmoke",
+    "./services/business/cmd/business",
+    "./services/agent/cmd/agent",
+    "/api/auth/login",
+    "/api/agent/sessions",
+    "/api/agent/runs",
+    "BUSINESS_HOSTPORTS",
+    "AGENT_RUNTIME_REDIS_MODE",
+    "testdb.StartPostgres",
+    "testredis.Start",
 }
 
 
@@ -266,12 +281,39 @@ def validate_browser_smoke() -> None:
     print("pr5 browser smoke artifacts ok")
 
 
+def validate_full_http_smoke() -> None:
+    for path in (FULL_HTTP_SMOKE_SCRIPT, FULL_HTTP_SMOKE_TEST, MAKEFILE, ACTIVE_CONTRACT_WORKFLOW):
+        if not path.exists():
+            fail(f"missing {path}")
+
+    test_text = FULL_HTTP_SMOKE_TEST.read_text(encoding="utf-8")
+    for token in REQUIRED_FULL_HTTP_SMOKE_TOKENS:
+        if token not in test_text:
+            fail(f"{FULL_HTTP_SMOKE_TEST}: missing full HTTP smoke token {token}")
+
+    shell_text = FULL_HTTP_SMOKE_SCRIPT.read_text(encoding="utf-8")
+    for token in ("TestPR5FullHTTPServiceE2ESmoke", "go test ./services/agent/internal/e2e/pr5"):
+        if token not in shell_text:
+            fail(f"{FULL_HTTP_SMOKE_SCRIPT}: missing full HTTP smoke token {token}")
+
+    makefile_text = MAKEFILE.read_text(encoding="utf-8")
+    if "pr5-full-http-smoke" not in makefile_text:
+        fail(f"{MAKEFILE}: missing pr5-full-http-smoke target")
+
+    workflow_text = ACTIVE_CONTRACT_WORKFLOW.read_text(encoding="utf-8")
+    for token in ("pr5-full-http-smoke", "scripts/validate-pr5-full-http-smoke.sh", "pr5-browser-smoke"):
+        if token not in workflow_text:
+            fail(f"{ACTIVE_CONTRACT_WORKFLOW}: missing full HTTP smoke token {token}")
+    print("pr5 full HTTP service smoke artifacts ok")
+
+
 def main() -> None:
     validate_fake_provider()
     validate_suite_indexes()
     validate_e2e_fixtures()
     validate_release_governance()
     validate_browser_smoke()
+    validate_full_http_smoke()
     print("pr5 e2e release gate validation ok")
 
 

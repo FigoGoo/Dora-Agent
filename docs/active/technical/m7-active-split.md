@@ -50,7 +50,7 @@ M7 active 文档拆分
 | PR-2 Done | Board、GraphPlan、Agent Runtime migration 和 fixtures 完成 |
 | PR-3 Done | ToolPlan、Credit、Asset RPC/schema/fixture 完成 |
 | PR-4 Done | Marketplace、SkillUsageRecord、installation、settlement、creator/user/admin API 完成 |
-| PR-5 Done | E2E fixtures、fake provider、release gate、rollback gate、本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地真实浏览器前端联动 smoke 完成；完整测试环境 HTTP 服务 E2E 待 CI / 测试环境 gate |
+| PR-5 Done | E2E fixtures、fake provider、release gate、rollback gate、本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 完成；完整测试环境 HTTP 服务 E2E 待测试环境 gate |
 
 ## 推进规则
 

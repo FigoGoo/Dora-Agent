@@ -9,7 +9,7 @@ owner：运维发布责任域 / 文档与契约责任域 / 测试与验收责任
 
 ## 背景
 
-Agent 核心重构横跨 Agent Runtime、业务微服务、前端、管理端、积分、Tool、Skill 市场和结算。review 文档已经完成，PR-1 到 PR-4 冻结字段级契约，PR-5 冻结发布前的端到端验收与治理 gate，并已完成本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke。
+Agent 核心重构横跨 Agent Runtime、业务微服务、前端、管理端、积分、Tool、Skill 市场和结算。review 文档已经完成，PR-1 到 PR-4 冻结字段级契约，PR-5 冻结发布前的端到端验收与治理 gate，并已完成本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke。
 
 ## 目标
 
@@ -61,7 +61,7 @@ Agent 核心重构横跨 Agent Runtime、业务微服务、前端、管理端、
 
 1. 确认 PR-1 到 PR-5 validator 全部通过。
 2. 在 test 环境重放 PR-2 / PR-3 / PR-4 PostgreSQL dry-run 和 down-test。
-3. 执行本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke，并在 test 环境以 fake provider 执行 PR-5 E2E 场景。
+3. 执行本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke，并在 test 环境以 fake provider 执行 PR-5 E2E 场景。
 4. 默认关闭所有新 feature flag 发布服务。
 5. 先灰度 `agent_runtime_v2`，确认 run、router、graph、board 指标稳定。
 6. 再灰度 `tool_generation_v2`，确认 provider worker、credit hold 和 asset commit 指标稳定。
