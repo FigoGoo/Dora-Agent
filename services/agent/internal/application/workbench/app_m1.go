@@ -10,6 +10,9 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/apperror"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state"
+	runtimestream "github.com/FigoGoo/Dora-Agent/services/agent/internal/events/stream"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/creation"
+	runtimeeino "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/eino"
 	runtimeguide "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/guide"
 	runtimerouter "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/router"
 )
@@ -88,7 +91,10 @@ func (a *App) recordM1RunEvents(ctx context.Context, auth AuthContextDTO, run *m
 			if err := a.appendM1SkillSelected(ctx, run, decision, decisionDigest, traceID); err != nil {
 				return err
 			}
-			return a.completeM1Run(ctx, run, traceID, map[string]any{"m1_result": decision.Decision, "router_decision_digest": decisionDigest})
+			if decision.RequiresSkillUsageConfirmation {
+				return a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusWaitingConfirmation, "", "")
+			}
+			return a.startM2BoardRuntime(ctx, auth, run, req.UserInput.Text, decisionDigest, traceID)
 		case pr1.RouterDecisionClarify:
 			if err := a.createM1AssistantMessage(ctx, run, m1ClarifyMessage(decision), map[string]any{
 				"message_kind":           "clarify",
@@ -118,6 +124,73 @@ func (a *App) recordM1RunEvents(ctx context.Context, auth AuthContextDTO, run *m
 			return a.completeM1Run(ctx, run, traceID, map[string]any{"m1_result": decision.Decision, "router_decision_digest": decisionDigest})
 		}
 	}
+}
+
+func (a *App) startM2BoardRuntime(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, routerDecisionDigest string, traceID string) error {
+	runner, err := runtimeeino.NewGenericCreationGraphRunner(ctx, nil)
+	if err != nil {
+		return err
+	}
+	result, err := runner.Execute(ctx, creation.GenericCreationInput{
+		RunID:                run.ID,
+		ProjectID:            run.ProjectID,
+		SessionID:            run.SessionID,
+		SpaceID:              run.SpaceID,
+		ActorUserID:          auth.ActorUserID,
+		TraceID:              traceID,
+		Prompt:               prompt,
+		RouterDecisionDigest: routerDecisionDigest,
+	})
+	if err != nil {
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "M2_BOARD_RUNTIME_FAILED", err.Error())
+		_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
+			"error_type": "agent_runtime", "error_code": "M2_BOARD_RUNTIME_FAILED", "user_message": "Creative Board 初始化失败",
+			"retryable": true, "support_trace_id": traceID,
+		})
+		return err
+	}
+	firstSeq, err := a.nextM2AGUISequence(ctx, run)
+	if err != nil {
+		return err
+	}
+	events, err := rebaseM2AGUIEvents(result.Events, firstSeq)
+	if err != nil {
+		return err
+	}
+	if err := a.repo.SaveGenericCreationForWorkbenchRun(ctx, run, result.GraphTemplate, result.GraphPlan, result.Board, result.Elements, events, routerDecisionDigest); err != nil {
+		return err
+	}
+	a.publishPR2AGUIEvents(ctx, events)
+	if a.snapshotCache != nil {
+		if body, err := json.Marshal(result.Snapshot); err == nil {
+			_ = a.snapshotCache.Set(ctx, runtimestream.BoardSnapshotKey(result.Board.BoardID, result.Board.Version), body, 30*time.Minute)
+		}
+	}
+	return nil
+}
+
+func (a *App) nextM2AGUISequence(ctx context.Context, run *model.Run) (int64, error) {
+	session, err := a.repo.GetSession(ctx, run.SessionID)
+	if err != nil {
+		return 0, err
+	}
+	return session.LastEventSequence + 1, nil
+}
+
+func rebaseM2AGUIEvents(events []pr1.AGUIEnvelope, firstSeq int64) ([]pr1.AGUIEnvelope, error) {
+	if len(events) == 0 {
+		return nil, apperror.New(apperror.CodeInternal, "M2 AG-UI events are required")
+	}
+	out := make([]pr1.AGUIEnvelope, 0, len(events))
+	for index, event := range events {
+		event.Seq = firstSeq + int64(index)
+		event.DedupeKey = pr1.DedupeKey(event.RunID, event.EventType, event.Seq)
+		if err := pr1.ValidateAGUIEnvelope(event); err != nil {
+			return nil, err
+		}
+		out = append(out, event)
+	}
+	return out, nil
 }
 
 func (a *App) appendM1Guide(ctx context.Context, run *model.Run, guide runtimeguide.CreativeGuideOutput, traceID string) error {

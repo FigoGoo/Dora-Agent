@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state"
@@ -46,7 +47,7 @@ func TestM1EntryGuideRunEmitsGuideOnly(t *testing.T) {
 	}
 }
 
-func TestM1NormalRunRoutesSystemDefaultSkillWithoutToolOrCredit(t *testing.T) {
+func TestM2NormalRunRoutesAndCreatesBoardWithoutToolOrCredit(t *testing.T) {
 	app, gateway := newM1App(t)
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
 	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{
@@ -63,8 +64,8 @@ func TestM1NormalRunRoutesSystemDefaultSkillWithoutToolOrCredit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create route run: %v", err)
 	}
-	if run.Status != state.RunStatusCompleted {
-		t.Fatalf("router-only run should complete after decision, got %#v", run)
+	if run.Status != state.RunStatusWaitingConfirmation {
+		t.Fatalf("M2 run should wait for Board review after decision, got %#v", run)
 	}
 	events := m1Events(t, app, run.RunID)
 	if !hasEvent(events, "creative.router.decided") || !hasEvent(events, "agent.skill.selected") {
@@ -88,8 +89,38 @@ func TestM1NormalRunRoutesSystemDefaultSkillWithoutToolOrCredit(t *testing.T) {
 		t.Fatalf("get run: %v", err)
 	}
 	selection := m1JSONMap(t, persisted.SkillSelection)
-	if selection["skill_id"] != "skill_city_tourism_video" || selection["router_decision_digest"] == "" {
-		t.Fatalf("router decision was not persisted in run skill_selection: %#v", selection)
+	boardID, _ := selection["current_board_id"].(string)
+	graphPlanID, _ := selection["current_graph_plan_id"].(string)
+	if selection["skill_id"] != "skill_city_tourism_video" || selection["router_decision_digest"] == "" || boardID == "" || graphPlanID == "" {
+		t.Fatalf("router decision and M2 board were not persisted in run skill_selection: %#v", selection)
+	}
+	board, err := app.repo.GetCreativeBoardV1(t.Context(), boardID)
+	if err != nil {
+		t.Fatalf("get created board: %v", err)
+	}
+	if board.Status != "ready" || board.Version != 1 || board.RunID != run.RunID || board.ToolPlanAllowed {
+		t.Fatalf("unexpected M2 board: %#v", board)
+	}
+	snapshot, err := app.repo.GetBoardSnapshotV1(t.Context(), boardID)
+	if err != nil {
+		t.Fatalf("get board snapshot: %v", err)
+	}
+	if snapshot.Status != "ready" || len(snapshot.Elements) == 0 {
+		t.Fatalf("unexpected M2 board snapshot: %#v", snapshot)
+	}
+	pr2Events, err := app.repo.ListRunEventsV1AfterSeq(t.Context(), run.RunID, 0, 10)
+	if err != nil {
+		t.Fatalf("list PR-2 events: %v", err)
+	}
+	if len(pr2Events) != 2 || pr2Events[0].EventType != pr2.EventTypeGraphPlanCreated || pr2Events[1].EventType != pr2.EventTypeBoardSnapshotUpdated {
+		t.Fatalf("M2 should persist graph+board AG-UI events, got %#v", pr2Events)
+	}
+	replay, err := app.ReplayEvents(t.Context(), auth, run.RunID, 0, 20, "trace-m1-route")
+	if err != nil {
+		t.Fatalf("replay merged events: %v", err)
+	}
+	if !m1HasReplayType(replay.Events, "creative.router.decided") || !m1HasReplayType(replay.Events, pr2.EventTypeGraphPlanCreated) || !m1HasReplayType(replay.Events, pr2.EventTypeBoardSnapshotUpdated) {
+		t.Fatalf("merged replay missing router or M2 events: %#v", replay.Events)
 	}
 	if containsCall(gateway.calls, "ListAvailableGenerationModels") || containsCall(gateway.calls, "EstimateGenerationCredits") || containsCall(gateway.calls, "FreezeCredits") {
 		t.Fatalf("M1 route must not call model/credit RPCs: %v", gateway.calls)
@@ -236,6 +267,15 @@ func m1EventTypes(events []model.Event) []string {
 func m1HasAssistantMessage(messages []model.Message) bool {
 	for _, message := range messages {
 		if message.Role == "assistant" && message.Content != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func m1HasReplayType(events []EventDTO, eventType string) bool {
+	for _, event := range events {
+		if event.Type == eventType {
 			return true
 		}
 	}

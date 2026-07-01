@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
 	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
@@ -75,12 +76,129 @@ func (r *Repository) SaveGenericCreationState(
 	})
 }
 
+func (r *Repository) SaveGenericCreationForWorkbenchRun(
+	ctx context.Context,
+	run *model.Run,
+	template pr2.GraphTemplate,
+	plan pr2.GraphPlan,
+	board pr2.CreativeBoard,
+	elements []pr2.CreativeElement,
+	events []pr1.AGUIEnvelope,
+	routerDecisionDigest string,
+) error {
+	if run == nil {
+		return errors.New("run is required")
+	}
+	if err := validateGenericCreationPersistence(template, plan, board, elements, events); err != nil {
+		return err
+	}
+	if plan.RunID != run.ID || board.RunID != run.ID {
+		return errors.New("graph plan and board must belong to workbench run")
+	}
+	now := board.UpdatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var currentRun model.Run
+		if err := tx.Where("id = ? AND deleted_at IS NULL", run.ID).First(&currentRun).Error; err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(graphTemplateRecord(template)).Error; err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(graphPlanRecord(plan)).Error; err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(creativeBoardRecord(board)).Error; err != nil {
+			return err
+		}
+		for _, element := range elements {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(creativeElementRecord(element)).Error; err != nil {
+				return err
+			}
+		}
+		for _, event := range events {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(runEventRecord(event)).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Model(&model.Run{}).
+			Where("id = ? AND deleted_at IS NULL", run.ID).
+			Updates(map[string]any{
+				"status":     pr1.RunStatusWaitingConfirmation,
+				"updated_at": now,
+			}).Error; err != nil {
+			return err
+		}
+		selection := map[string]any{}
+		if len(currentRun.SkillSelection) > 0 {
+			_ = json.Unmarshal(currentRun.SkillSelection, &selection)
+		}
+		selection["router_decision_digest"] = routerDecisionDigest
+		selection["current_board_id"] = board.BoardID
+		selection["current_graph_plan_id"] = plan.GraphPlanID
+		selection["board_status"] = board.Status
+		selection["board_version"] = board.Version
+		if err := tx.Model(&model.Run{}).
+			Where("id = ? AND deleted_at IS NULL", run.ID).
+			Update("skill_selection", mustJSON(selection)).Error; err != nil {
+			return err
+		}
+		if len(events) > 0 {
+			last := events[len(events)-1]
+			if err := tx.Model(&model.Session{}).
+				Where("id = ? AND deleted_at IS NULL", run.SessionID).
+				Updates(map[string]any{
+					"last_run_id":         run.ID,
+					"last_event_sequence": last.Seq,
+					"updated_at":          last.CreatedAt,
+				}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func validateGenericCreationPersistence(
+	template pr2.GraphTemplate,
+	plan pr2.GraphPlan,
+	board pr2.CreativeBoard,
+	elements []pr2.CreativeElement,
+	events []pr1.AGUIEnvelope,
+) error {
+	if err := pr2.ValidateGraphTemplate(template); err != nil {
+		return fmt.Errorf("graph_template: %w", err)
+	}
+	if err := pr2.ValidateGraphPlan(plan); err != nil {
+		return fmt.Errorf("graph_plan: %w", err)
+	}
+	if err := pr2.ValidateBoardCreation(board, elements); err != nil {
+		return fmt.Errorf("board: %w", err)
+	}
+	for index, event := range events {
+		if err := pr1.ValidateAGUIEnvelope(event); err != nil {
+			return fmt.Errorf("event %d: %w", index+1, err)
+		}
+	}
+	if len(events) == 0 || plan.RunID != board.RunID || plan.BoardID != board.BoardID || events[0].RunID != plan.RunID {
+		return errors.New("graph plan, board and events must belong to the same run")
+	}
+	return nil
+}
+
 func (r *Repository) GetAgentRunV1(ctx context.Context, runID string) (model.AgentRunRecord, error) {
 	var record model.AgentRunRecord
-	if err := r.db.WithContext(ctx).Where("run_id = ?", runID).First(&record).Error; err != nil {
+	err := r.db.WithContext(ctx).Where("run_id = ?", runID).First(&record).Error
+	if err == nil {
+		return record, nil
+	}
+	var run model.Run
+	if fallbackErr := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", runID).First(&run).Error; fallbackErr != nil {
 		return model.AgentRunRecord{}, err
 	}
-	return record, nil
+	return agentRunRecordFromWorkbenchRun(run), nil
 }
 
 func (r *Repository) GetGraphPlanV1(ctx context.Context, graphPlanID string) (pr2.GraphPlan, error) {
@@ -282,8 +400,16 @@ func (r *Repository) ApplyBoardPatchAfterStateV1(ctx context.Context, patch pr2.
 }
 
 func updateRunAfterBoardApproval(tx *gorm.DB, board pr2.CreativeBoard) error {
-	return tx.Model(&model.AgentRunRecord{}).
+	if err := tx.Model(&model.AgentRunRecord{}).
 		Where("run_id = ? AND current_board_id = ?", board.RunID, board.BoardID).
+		Updates(map[string]any{
+			"status":     pr1.RunStatusPlanning,
+			"updated_at": board.UpdatedAt,
+		}).Error; err == nil {
+		return nil
+	}
+	return tx.Model(&model.Run{}).
+		Where("id = ? AND deleted_at IS NULL", board.RunID).
 		Updates(map[string]any{
 			"status":     pr1.RunStatusPlanning,
 			"updated_at": board.UpdatedAt,
@@ -291,8 +417,13 @@ func updateRunAfterBoardApproval(tx *gorm.DB, board pr2.CreativeBoard) error {
 }
 
 func updateRunTouch(tx *gorm.DB, board pr2.CreativeBoard) error {
-	return tx.Model(&model.AgentRunRecord{}).
+	if err := tx.Model(&model.AgentRunRecord{}).
 		Where("run_id = ? AND current_board_id = ?", board.RunID, board.BoardID).
+		Update("updated_at", board.UpdatedAt).Error; err == nil {
+		return nil
+	}
+	return tx.Model(&model.Run{}).
+		Where("id = ? AND deleted_at IS NULL", board.RunID).
 		Update("updated_at", board.UpdatedAt).Error
 }
 
@@ -346,6 +477,18 @@ func agentRunRecord(plan pr2.GraphPlan, board pr2.CreativeBoard, events []pr1.AG
 		TraceID:            traceID,
 		CreatedAt:          createdAt,
 		UpdatedAt:          board.UpdatedAt,
+	}
+}
+
+func agentRunRecordFromWorkbenchRun(run model.Run) model.AgentRunRecord {
+	return model.AgentRunRecord{
+		RunID:     run.ID,
+		SessionID: run.SessionID,
+		ProjectID: run.ProjectID,
+		Status:    run.Status,
+		TraceID:   run.TraceID,
+		CreatedAt: run.CreatedAt,
+		UpdatedAt: run.UpdatedAt,
 	}
 }
 

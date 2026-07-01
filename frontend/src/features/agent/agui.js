@@ -2,6 +2,10 @@ export function reduceM1AguiEvents(events = []) {
   const state = {
     guide: null,
     routerDecision: null,
+    graphPlan: null,
+    board: null,
+    boardPatch: null,
+    boardPatches: [],
     suggestionChips: [],
     routerBanner: null,
     eventIds: []
@@ -25,6 +29,37 @@ export function reduceM1AguiEvents(events = []) {
     if (type === 'creative.router.decided') {
       state.routerDecision = payload.router_decision || null;
       state.routerBanner = buildRouterBanner(state.routerDecision);
+    }
+    if (type === 'graph.plan.created') {
+      state.graphPlan = {
+        graphPlanId: payload.graph_plan_id,
+        graphTemplateId: payload.graph_template_id,
+        status: payload.graph_plan_status,
+        digest: payload.graph_plan_digest,
+        boardId: payload.board_id,
+        valueDeliveredStage: payload.value_delivered_stage
+      };
+    }
+    if (type === 'board.patch.applied') {
+      state.boardPatch = {
+        boardId: payload.board_id,
+        patchId: payload.patch_id,
+        baseVersion: payload.base_version,
+        targetVersion: payload.target_version,
+        operation: payload.operation,
+        digest: payload.patch_digest
+      };
+      state.boardPatches = [...state.boardPatches, state.boardPatch];
+    }
+    if (type === 'board.snapshot.updated') {
+      state.board = {
+        boardId: payload.board_id,
+        version: payload.board_version,
+        status: payload.board_status,
+        digest: payload.board_digest,
+        changedElementIds: Array.isArray(payload.changed_element_ids) ? payload.changed_element_ids : [],
+        snapshotRequired: Boolean(payload.snapshot_required)
+      };
     }
   });
 

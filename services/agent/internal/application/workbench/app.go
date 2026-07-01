@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1317,15 +1318,37 @@ func (a *App) ReplayEvents(ctx context.Context, auth AuthContextDTO, runID strin
 	if err != nil {
 		return EventReplayResponse{}, err
 	}
-	hasMore := len(rows) > limit
-	if hasMore {
-		rows = rows[:limit]
-	}
 	items := make([]EventDTO, 0, len(rows))
-	next := afterSequence
 	for _, row := range rows {
 		items = append(items, eventDTO(row))
-		next = row.Sequence
+	}
+	if pr2Rows, pr2Err := a.repo.ListRunEventsV1AfterSeq(ctx, runID, afterSequence, limit+1); pr2Err == nil && len(pr2Rows) > 0 {
+		pr2Run := model.AgentRunRecord{
+			RunID:     run.ID,
+			SessionID: run.SessionID,
+			ProjectID: run.ProjectID,
+			Status:    run.Status,
+			TraceID:   run.TraceID,
+			CreatedAt: run.CreatedAt,
+			UpdatedAt: run.UpdatedAt,
+		}
+		for _, row := range pr2Rows {
+			items = append(items, pr2EventDTO(pr2Run, row))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Sequence == items[j].Sequence {
+			return items[i].EventID < items[j].EventID
+		}
+		return items[i].Sequence < items[j].Sequence
+	})
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	next := afterSequence
+	for _, item := range items {
+		next = item.Sequence
 	}
 	return EventReplayResponse{Events: items, NextSequence: next, HasMore: hasMore}, nil
 }
