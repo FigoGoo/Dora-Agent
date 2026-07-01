@@ -14,6 +14,7 @@ import (
 
 	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
 	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr3"
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/apperror"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
@@ -787,8 +788,9 @@ type ApproveCreativeBoardRequest struct {
 }
 
 type ApproveCreativeBoardResponse struct {
-	Board pr2.CreativeBoard `json:"board"`
-	Patch *pr2.BoardPatch   `json:"patch,omitempty"`
+	Board    pr2.CreativeBoard `json:"board"`
+	Patch    *pr2.BoardPatch   `json:"patch,omitempty"`
+	ToolPlan *pr3.ToolPlan     `json:"tool_plan,omitempty"`
 }
 
 type ApplyBoardPatchRequest struct {
@@ -1510,7 +1512,11 @@ func (a *App) ApproveCreativeBoard(ctx context.Context, auth AuthContextDTO, boa
 		return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodeStateConflict, "board project does not match run project")
 	}
 	if board.Status == "approved" && board.Version == req.BoardVersion+1 {
-		return ApproveCreativeBoardResponse{Board: board}, nil
+		toolPlan, err := a.ensureM4ToolPlanPreflight(ctx, auth, run, board, traceID)
+		if err != nil {
+			return ApproveCreativeBoardResponse{}, err
+		}
+		return ApproveCreativeBoardResponse{Board: board, ToolPlan: toolPlan}, nil
 	}
 	if board.Status != "ready" || board.Version != req.BoardVersion {
 		return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodeStateConflict, "board version or status is not approvable")
@@ -1538,7 +1544,11 @@ func (a *App) ApproveCreativeBoard(ctx context.Context, auth AuthContextDTO, boa
 	if err := a.appendBoardApprovalEvents(ctx, run, approval.Patch, approval.Board, actor, traceID); err != nil {
 		return ApproveCreativeBoardResponse{}, err
 	}
-	return ApproveCreativeBoardResponse{Board: approval.Board, Patch: &approval.Patch}, nil
+	toolPlan, err := a.ensureM4ToolPlanPreflight(ctx, auth, run, approval.Board, traceID)
+	if err != nil {
+		return ApproveCreativeBoardResponse{}, err
+	}
+	return ApproveCreativeBoardResponse{Board: approval.Board, Patch: &approval.Patch, ToolPlan: toolPlan}, nil
 }
 
 func (a *App) GetGraphPlan(ctx context.Context, auth AuthContextDTO, graphPlanID string, traceID string) (GraphPlanResponse, error) {
@@ -2240,6 +2250,11 @@ func (a *App) failIndependentToolAfterFreeze(ctx context.Context, auth AuthConte
 
 type m4ConfirmationPayload struct {
 	M4Flow            string                          `json:"m4_flow"`
+	ToolPlanID        string                          `json:"tool_plan_id"`
+	ToolPlanDigest    string                          `json:"tool_plan_digest"`
+	BoardID           string                          `json:"board_id"`
+	BoardVersion      int                             `json:"board_version"`
+	GraphPlanID       string                          `json:"graph_plan_id"`
 	EstimateID        string                          `json:"estimate_id"`
 	EstimatePoints    int64                           `json:"estimate_points"`
 	CreditAccountID   string                          `json:"credit_account_id"`
@@ -2286,6 +2301,10 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	if err != nil {
 		return err
 	}
+	toolTask, err := a.startM4ToolTaskForConfirmation(ctx, run, payload, task, idempotencyKey, traceID)
+	if err != nil {
+		return a.failGenerationTaskBeforeFreeze(ctx, run, task, "tool_task_start_failed", traceID, err)
+	}
 	prompt, err := a.latestUserPrompt(ctx, run.SessionID)
 	if err != nil {
 		return a.failGenerationTaskBeforeFreeze(ctx, run, task, "prompt_unavailable", traceID, err)
@@ -2313,15 +2332,16 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 			"estimate_points": payload.EstimatePoints,
 		})
 	}
+	freezeIdempotencyKey := m4FreezeIdempotencyKey(run.ID, payload, idempotencyKey)
 	_ = a.updateGenerationTaskStage(ctx, task, 20, "freeze_requested", map[string]any{
 		"estimate_id": payload.EstimateID, "estimate_points": payload.EstimatePoints,
 		"credit_account_id": payload.CreditAccountID, "confirmation_id": interrupt.ID,
-		"idempotency_key": idempotencyKey, "freeze_idempotency_key": idempotencyKey + ":freeze",
+		"idempotency_key": idempotencyKey, "freeze_idempotency_key": freezeIdempotencyKey,
 		"auth": generationTaskAuth(auth),
 	})
 	freeze, err := a.gateway.FreezeCredits(ctx, auth, FreezeCreditsRequest{
 		EstimateID: payload.EstimateID, Points: payload.EstimatePoints, RunID: run.ID,
-		ConfirmationID: interrupt.ID, AccountID: payload.CreditAccountID, IdempotencyKey: idempotencyKey + ":freeze",
+		ConfirmationID: interrupt.ID, AccountID: payload.CreditAccountID, IdempotencyKey: freezeIdempotencyKey,
 	}, traceID)
 	if err != nil {
 		_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusFailed, "CREDIT_FREEZE_FAILED")
@@ -2358,6 +2378,9 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	}
 	if len(result.Artifacts) == 0 {
 		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "generation_empty", idempotencyKey, traceID, apperror.New(apperror.CodeInternal, "generation produced no artifact"))
+	}
+	if err := a.completeM4ToolTaskFromResult(ctx, run, toolTask, result.Artifacts, traceID); err != nil {
+		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "tool_task_complete_failed", idempotencyKey, traceID, err)
 	}
 	_ = a.updateGenerationTaskStage(ctx, task, 55, "artifacts_generated", map[string]any{"artifact_count": len(result.Artifacts)})
 	for _, artifact := range result.Artifacts {
@@ -2489,6 +2512,9 @@ func (a *App) completeGenerationAfterCommit(ctx context.Context, run *model.Run,
 		"charged_line_items": commit.ChargedLineItems,
 	})
 	_ = a.updateGenerationTaskStage(ctx, task, 95, "asset_commit_completed", map[string]any{"charged_points": commit.ChargedPoints, "released_points": commit.ReleasedPoints})
+	if err := a.appendM4AssetCommitUpdatedFromTask(ctx, run, task, commit, traceID); err != nil {
+		return err
+	}
 	if commit.ReleasedPoints > 0 {
 		_ = a.appendRunEvent(ctx, run, "credits.released", traceID, map[string]any{
 			"freeze_id": freezeID, "released_points": commit.ReleasedPoints, "reason": "unused_after_asset_commit",

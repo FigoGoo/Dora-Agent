@@ -338,6 +338,90 @@ paths:
                 properties:
                   board:
                     type: object
+                  patch:
+                    type: object
+                    nullable: true
+                  tool_plan:
+                    type: object
+                    nullable: true
+                    description: Board approved 后生成的 ToolPlan；为空表示该 Board 不允许或尚不需要 Tool 生成。
+                    properties:
+                      schema_version:
+                        type: string
+                        enum:
+                        - tool_plan.v1
+                      tool_plan_id:
+                        type: string
+                      run_id:
+                        type: string
+                      board_id:
+                        type: string
+                      board_version:
+                        type: integer
+                        minimum: 1
+                      graph_plan_id:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                        - draft
+                        - estimated
+                        - confirmation_required
+                        - confirmed
+                        - frozen
+                        - queued
+                        - running
+                        - partially_completed
+                        - completed
+                        - failed
+                        - cancelled
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required:
+                          - tool_plan_item_id
+                          - tool_id
+                          - tool_version
+                          - resource_type
+                          - quantity
+                          - estimated_credits
+                          - input_digest
+                          properties:
+                            tool_plan_item_id:
+                              type: string
+                            tool_id:
+                              type: string
+                            tool_version:
+                              type: string
+                            resource_type:
+                              type: string
+                            quantity:
+                              type: integer
+                            estimated_credits:
+                              type: integer
+                            input_digest:
+                              type: string
+                      estimated_credits:
+                        type: integer
+                      currency:
+                        type: string
+                        enum:
+                        - credits
+                      confirmation_required:
+                        type: boolean
+                      expires_at:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      tool_plan_digest:
+                        type: string
+                      created_at:
+                        type: string
+                        format: date-time
+                      updated_at:
+                        type: string
+                        format: date-time
         default:
           $ref: '#/components/responses/Error'
   /graphs/{graph_plan_id}:

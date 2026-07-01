@@ -193,14 +193,16 @@ func validateGenericCreationPersistence(
 }
 
 func (r *Repository) GetAgentRunV1(ctx context.Context, runID string) (model.AgentRunRecord, error) {
-	var record model.AgentRunRecord
-	err := r.db.WithContext(ctx).Where("run_id = ?", runID).First(&record).Error
-	if err == nil {
-		return record, nil
+	if r.db.Migrator().HasColumn(&model.AgentRunRecord{}, "run_id") {
+		var record model.AgentRunRecord
+		err := r.db.WithContext(ctx).Where("run_id = ?", runID).First(&record).Error
+		if err == nil {
+			return record, nil
+		}
 	}
 	var run model.Run
 	if fallbackErr := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", runID).First(&run).Error; fallbackErr != nil {
-		return model.AgentRunRecord{}, err
+		return model.AgentRunRecord{}, fallbackErr
 	}
 	return agentRunRecordFromWorkbenchRun(run), nil
 }
@@ -311,6 +313,18 @@ func (r *Repository) AppendRunEventsV1(ctx context.Context, events []pr1.AGUIEnv
 				return err
 			}
 		}
+		last := events[len(events)-1]
+		if tx.Migrator().HasTable(&model.Session{}) {
+			if err := tx.Model(&model.Session{}).
+				Where("id = ? AND deleted_at IS NULL", last.SessionID).
+				Updates(map[string]any{
+					"last_run_id":         last.RunID,
+					"last_event_sequence": last.Seq,
+					"updated_at":          last.CreatedAt,
+				}).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 }
@@ -404,12 +418,15 @@ func (r *Repository) ApplyBoardPatchAfterStateV1(ctx context.Context, patch pr2.
 }
 
 func updateRunAfterBoardApproval(tx *gorm.DB, board pr2.CreativeBoard) error {
-	if err := tx.Model(&model.AgentRunRecord{}).
-		Where("run_id = ? AND current_board_id = ?", board.RunID, board.BoardID).
-		Updates(map[string]any{
-			"status":     pr1.RunStatusPlanning,
-			"updated_at": board.UpdatedAt,
-		}).Error; err == nil {
+	if tx.Migrator().HasColumn(&model.AgentRunRecord{}, "run_id") && tx.Migrator().HasColumn(&model.AgentRunRecord{}, "current_board_id") {
+		if err := tx.Model(&model.AgentRunRecord{}).
+			Where("run_id = ? AND current_board_id = ?", board.RunID, board.BoardID).
+			Updates(map[string]any{
+				"status":     pr1.RunStatusPlanning,
+				"updated_at": board.UpdatedAt,
+			}).Error; err != nil {
+			return err
+		}
 		return nil
 	}
 	return tx.Model(&model.Run{}).
@@ -421,9 +438,12 @@ func updateRunAfterBoardApproval(tx *gorm.DB, board pr2.CreativeBoard) error {
 }
 
 func updateRunTouch(tx *gorm.DB, board pr2.CreativeBoard) error {
-	if err := tx.Model(&model.AgentRunRecord{}).
-		Where("run_id = ? AND current_board_id = ?", board.RunID, board.BoardID).
-		Update("updated_at", board.UpdatedAt).Error; err == nil {
+	if tx.Migrator().HasColumn(&model.AgentRunRecord{}, "run_id") && tx.Migrator().HasColumn(&model.AgentRunRecord{}, "current_board_id") {
+		if err := tx.Model(&model.AgentRunRecord{}).
+			Where("run_id = ? AND current_board_id = ?", board.RunID, board.BoardID).
+			Update("updated_at", board.UpdatedAt).Error; err != nil {
+			return err
+		}
 		return nil
 	}
 	return tx.Model(&model.Run{}).

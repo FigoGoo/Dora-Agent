@@ -28,6 +28,17 @@ func (r *Repository) GetToolPlanV1(ctx context.Context, toolPlanID string) (pr3.
 	return toolPlanContract(record)
 }
 
+func (r *Repository) GetToolPlanByBoardVersionV1(ctx context.Context, boardID string, boardVersion int) (pr3.ToolPlan, error) {
+	var record model.ToolPlanRecord
+	if err := r.db.WithContext(ctx).
+		Where("board_id = ? AND board_version = ?", boardID, boardVersion).
+		Order("created_at DESC, tool_plan_id DESC").
+		First(&record).Error; err != nil {
+		return pr3.ToolPlan{}, err
+	}
+	return toolPlanContract(record)
+}
+
 func (r *Repository) SaveToolTaskV1(ctx context.Context, task pr3.ToolTask) error {
 	if err := pr3.ValidateToolTask(task); err != nil {
 		return fmt.Errorf("tool_task: %w", err)
