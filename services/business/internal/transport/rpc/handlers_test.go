@@ -34,6 +34,7 @@ func TestRegisterAllBusinessServices(t *testing.T) {
 		"FeaturedWorkAdminService",
 		"PublicContentService",
 		"NotificationService",
+		"BusinessSkillMarketplaceService",
 	}
 	if got := len(registered); got != len(expected) {
 		t.Fatalf("expected %d services, got %d", len(expected), got)

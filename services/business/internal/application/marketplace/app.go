@@ -190,6 +190,16 @@ type FreezeSkillUsageCreditsOutput struct {
 	Usage SkillUsageRecordDTO `json:"usage"`
 }
 
+type ReleaseSkillUsageFreezeInput struct {
+	Auth          AuthContext
+	UsageID       string
+	ReleaseReason string
+}
+
+type ReleaseSkillUsageFreezeOutput struct {
+	Usage SkillUsageRecordDTO `json:"usage"`
+}
+
 type CommitSkillUsageAndSettleInput struct {
 	Auth         AuthContext
 	UsageID      string
@@ -507,6 +517,17 @@ func (a *App) FreezeSkillUsageCredits(ctx context.Context, in FreezeSkillUsageCr
 		return FreezeSkillUsageCreditsOutput{}, mapStoreError(err)
 	}
 	return FreezeSkillUsageCreditsOutput{Usage: usageDTO(frozen)}, nil
+}
+
+func (a *App) ReleaseSkillUsageFreeze(ctx context.Context, in ReleaseSkillUsageFreezeInput) (ReleaseSkillUsageFreezeOutput, error) {
+	if err := requireAuth(in.Auth); err != nil {
+		return ReleaseSkillUsageFreezeOutput{}, err
+	}
+	released, err := a.repo.ReleaseSkillUsageFreezeV1(ctx, in.UsageID, in.ReleaseReason, a.now().UTC())
+	if err != nil {
+		return ReleaseSkillUsageFreezeOutput{}, mapStoreError(err)
+	}
+	return ReleaseSkillUsageFreezeOutput{Usage: usageDTO(released)}, nil
 }
 
 func (a *App) CommitSkillUsageAndSettle(ctx context.Context, in CommitSkillUsageAndSettleInput) (CommitSkillUsageAndSettleOutput, error) {

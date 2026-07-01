@@ -19,6 +19,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent/useradminservice"
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent/workservice"
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent/workshareservice"
+	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessskillmarketplace/businessskillmarketplaceservice"
 	"github.com/cloudwego/kitex/server"
 )
 
@@ -50,6 +51,9 @@ func RegisterAll(svr server.Server, handler *Handler) error {
 		},
 		func(s server.Server, h *Handler) error { return publiccontentservice.RegisterService(s, h) },
 		func(s server.Server, h *Handler) error { return notificationservice.RegisterService(s, h) },
+		func(s server.Server, h *Handler) error {
+			return businessskillmarketplaceservice.RegisterService(s, h)
+		},
 	}
 	for _, register := range registrars {
 		if err := register(svr, handler); err != nil {

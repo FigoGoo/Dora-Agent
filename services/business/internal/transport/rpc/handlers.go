@@ -11,6 +11,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetcommit"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetdict"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/credit"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/marketplace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/modelconfig"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/notification"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
@@ -21,18 +22,19 @@ import (
 )
 
 type Handler struct {
-	Account    *accountspace.App
-	Admin      *admin.App
-	Project    *project.App
-	Model      *modelconfig.App
-	Tool       *toolpolicy.App
-	Skill      *skillcatalog.App
-	Dictionary *assetdict.App
-	Credit     *credit.App
-	Asset      *asset.App
-	Commit     *assetcommit.App
-	Work       *work.App
-	Notify     *notification.App
+	Account     *accountspace.App
+	Admin       *admin.App
+	Project     *project.App
+	Model       *modelconfig.App
+	Tool        *toolpolicy.App
+	Skill       *skillcatalog.App
+	Dictionary  *assetdict.App
+	Credit      *credit.App
+	Asset       *asset.App
+	Commit      *assetcommit.App
+	Marketplace *marketplace.App
+	Work        *work.App
+	Notify      *notification.App
 }
 
 func NewUnimplementedHandler() *Handler {
@@ -59,6 +61,8 @@ func NewHandler(accountApp *accountspace.App, projectApp *project.App, optionalA
 			h.Asset = typed
 		case *assetcommit.App:
 			h.Commit = typed
+		case *marketplace.App:
+			h.Marketplace = typed
 		case *work.App:
 			h.Work = typed
 		case *notification.App:

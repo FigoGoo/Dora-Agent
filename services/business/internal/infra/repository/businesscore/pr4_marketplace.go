@@ -253,6 +253,54 @@ func (r *Repository) FreezeSkillUsageRecordV1(ctx context.Context, usageID strin
 	return frozen, nil
 }
 
+func (r *Repository) ReleaseSkillUsageFreezeV1(ctx context.Context, usageID string, releaseReason string, releasedAt time.Time) (pr4.SkillUsageRecord, error) {
+	if strings.TrimSpace(usageID) == "" || strings.TrimSpace(releaseReason) == "" {
+		return pr4.SkillUsageRecord{}, errors.New("usage_id and release_reason are required")
+	}
+	if releasedAt.IsZero() {
+		releasedAt = time.Now().UTC()
+	}
+	var released pr4.SkillUsageRecord
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var usageRecord PR4SkillUsageRecord
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("usage_id = ?", usageID).First(&usageRecord).Error; err != nil {
+			return err
+		}
+		current, err := skillUsageContract(usageRecord)
+		if err != nil {
+			return err
+		}
+		if current.UsageStatus == "released" && current.ChargeStatus == "released" {
+			released = current
+			return nil
+		}
+		if current.UsageStatus != "running" || current.ChargeStatus != "frozen" {
+			return errors.New("skill usage freeze can only be released from running/frozen")
+		}
+		next := current
+		next.UsageStatus = "released"
+		next.ChargeStatus = "released"
+		next.UpdatedAt = releasedAt.UTC()
+		if err := pr4.ValidateSkillUsageRecord(next); err != nil {
+			return fmt.Errorf("usage_after_release: %w", err)
+		}
+		updates := map[string]any{
+			"usage_status":  next.UsageStatus,
+			"charge_status": next.ChargeStatus,
+			"updated_at":    next.UpdatedAt,
+		}
+		if err := tx.Model(&PR4SkillUsageRecord{}).Where("usage_id = ?", usageID).Updates(updates).Error; err != nil {
+			return err
+		}
+		released = next
+		return nil
+	})
+	if err != nil {
+		return pr4.SkillUsageRecord{}, err
+	}
+	return released, nil
+}
+
 func (r *Repository) CommitSkillUsageAndSettleV1(ctx context.Context, afterCharge pr4.SkillUsageRecord, settlement pr4.SkillSettlement) (pr4.SkillUsageRecord, pr4.SkillSettlement, error) {
 	var committed pr4.SkillUsageRecord
 	var settled pr4.SkillSettlement
