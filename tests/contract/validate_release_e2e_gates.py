@@ -21,6 +21,7 @@ FULL_HTTP_SMOKE_SCRIPT = REPO_ROOT / "scripts" / "validate-release-full-http-smo
 FULL_HTTP_SMOKE_TEST = REPO_ROOT / "services" / "agent" / "internal" / "e2e" / "release" / "full_http_service_smoke_test.go"
 HTTP_SERVICE_E2E_SCRIPT = REPO_ROOT / "scripts" / "validate-release-http-service-e2e.sh"
 HTTP_SERVICE_E2E_TEST = E2E_ROOT / "http" / "validate_release_http_service_e2e.py"
+HTTP_SERVICE_E2E_SCRIPT_TEST = REPO_ROOT / "services" / "agent" / "internal" / "e2e" / "release" / "http_service_e2e_script_test.go"
 HTTP_SERVICE_E2E_REPORT = REPO_ROOT / "tests" / "reports" / "release-http-service-e2e-report.md"
 MAKEFILE = REPO_ROOT / "Makefile"
 ACTIVE_CONTRACT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "active-contract-gates.yml"
@@ -161,6 +162,17 @@ REQUIRED_HTTP_SERVICE_E2E_REPORT_TOKENS = {
     "agent.run.completed",
     "creative.router.decided",
     "agent.message.completed",
+}
+
+REQUIRED_HTTP_SERVICE_E2E_SCRIPT_TEST_TOKENS = {
+    "TestReleaseHTTPServiceE2EScript",
+    "scripts/validate-release-http-service-e2e.sh",
+    "RELEASE_BUSINESS_BASE_URL",
+    "RELEASE_AGENT_BASE_URL",
+    "RELEASE_HTTP_E2E_REPORT_PATH",
+    "testdb.StartPostgres",
+    "testredis.Start",
+    "status: passed",
 }
 
 
@@ -353,7 +365,7 @@ def validate_full_http_smoke() -> None:
 
 
 def validate_http_service_e2e() -> None:
-    for path in (HTTP_SERVICE_E2E_SCRIPT, HTTP_SERVICE_E2E_TEST, HTTP_SERVICE_E2E_REPORT, MAKEFILE):
+    for path in (HTTP_SERVICE_E2E_SCRIPT, HTTP_SERVICE_E2E_TEST, HTTP_SERVICE_E2E_SCRIPT_TEST, HTTP_SERVICE_E2E_REPORT, MAKEFILE):
         if not path.exists():
             fail(f"missing {path}")
 
@@ -383,6 +395,11 @@ def validate_http_service_e2e() -> None:
         fail(f"{HTTP_SERVICE_E2E_REPORT}: report status must be pending_environment or passed")
     if "status: passed" in report_text and "未执行项：无（release HTTP service E2E 范围内）" not in report_text:
         fail(f"{HTTP_SERVICE_E2E_REPORT}: passed report must declare no unexecuted release HTTP service E2E items")
+
+    script_test_text = HTTP_SERVICE_E2E_SCRIPT_TEST.read_text(encoding="utf-8")
+    for token in REQUIRED_HTTP_SERVICE_E2E_SCRIPT_TEST_TOKENS:
+        if token not in script_test_text:
+            fail(f"{HTTP_SERVICE_E2E_SCRIPT_TEST}: missing release HTTP service E2E local harness token {token}")
 
     makefile_text = MAKEFILE.read_text(encoding="utf-8")
     if "release-http-service-e2e" not in makefile_text:

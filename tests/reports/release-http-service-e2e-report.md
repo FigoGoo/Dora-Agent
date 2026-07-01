@@ -1,8 +1,8 @@
 # Release HTTP Service E2E Report
 
-status: pending_environment
-started_at: not_started
-finished_at: not_finished
+status: passed
+started_at: 2026-07-01T06:46:11Z
+finished_at: 2026-07-01T06:46:11Z
 
 ## Command
 
@@ -10,8 +10,8 @@ finished_at: not_finished
 
 ## Environment
 
-- RELEASE_BUSINESS_BASE_URL: `required`
-- RELEASE_AGENT_BASE_URL: `required`
+- RELEASE_BUSINESS_BASE_URL: `http://127.0.0.1:51401`
+- RELEASE_AGENT_BASE_URL: `http://127.0.0.1:51414`
 - RELEASE_TEST_PROJECT_ID: `prj_active_1001`
 - RELEASE_TEST_SPACE_ID: `sp_personal_1001`
 - RELEASE_TEST_TRACE_ID: `trace-release-http-service-e2e`
@@ -19,23 +19,23 @@ finished_at: not_finished
 
 ## Evidence
 
-- [ ] business /healthz
-- [ ] business /readyz
-- [ ] agent /healthz
-- [ ] agent /readyz
-- [ ] Business login - /api/auth/login
-- [ ] Agent session - /api/agent/sessions
-- [ ] entry guide run completed - /api/agent/runs
-- [ ] entry guide replay - creative.guide.presented, agent.run.completed
-- [ ] normal run waiting_input - /api/agent/runs
-- [ ] router replay - creative.router.decided, agent.message.completed
+- [x] business /healthz
+- [x] business /readyz
+- [x] agent /healthz
+- [x] agent /readyz
+- [x] Business login - /api/auth/login
+- [x] Agent session - /api/agent/sessions
+- [x] entry guide run completed - /api/agent/runs
+- [x] entry guide replay - creative.guide.presented, agent.run.completed
+- [x] normal run waiting_input - /api/agent/runs
+- [x] router replay - creative.router.decided, agent.message.completed
 
 ## Runtime IDs
 
-- session_id: `not_created`
-- guide_run_id: `not_created`
-- normal_run_id: `not_created`
+- session_id: `sess_djn16ipq9tvk`
+- guide_run_id: `run_djn16iqnugog`
+- normal_run_id: `run_djn16islfcls`
 
 ## Unexecuted
 
-未执行原因：当前本地未提供 `RELEASE_BUSINESS_BASE_URL` 和 `RELEASE_AGENT_BASE_URL`；完整测试环境执行后由 `scripts/validate-release-http-service-e2e.sh` 自动覆盖本报告。
+未执行项：无（release HTTP service E2E 范围内）

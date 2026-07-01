@@ -27,7 +27,7 @@ M0 / PR-1 active 最小契约已冻结
 PR-2 Agent Runtime Contracts 字段级契约已冻结，本地真实 PostgreSQL dry-run / down-test 已完成，远端 CI gate 待 PR 运行确认
 PR-3 Tool/Credit/Asset Contracts 字段级契约已冻结，本地真实 PostgreSQL dry-run / down-test 已完成，远端 CI gate 待 PR 运行确认
 PR-4 Marketplace Contracts 字段级契约已冻结，本地真实 PostgreSQL dry-run / down-test 已完成，远端 CI gate 待 PR 运行确认
-PR-5 E2E Fixtures + Fake Provider + Release Gates 已冻结，本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 已完成，测试环境 HTTP 服务 E2E 自动化入口和报告归档模板已完成，完整测试环境执行与通过报告待测试环境 gate
+PR-5 E2E Fixtures + Fake Provider + Release Gates 已冻结，本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 已完成，测试环境 HTTP 服务 E2E 自动化入口、本地地址执行和 `status: passed` 报告归档已完成；独立部署测试环境可按同一 gate 复跑
 PR-1 到 PR-5 active 拆分已完成
 已进入 PR-0 开发准备与 CI Gate
 PR-1 到 PR-5 共享契约运行时基础实现已完成并纳入 PR-0 gate
@@ -36,7 +36,7 @@ M2 Generic Creation Graph L0 fallback 已实现：generic_creation 路径创建 
 M3 Published Skill Graph 已实现：免费系统 Skill 的 select_skill 路径加载 Published SkillRuntimeSpec，经 Eino SkillGraphRunner 生成 Skill GraphPlan / Board / Snapshot；付费 Skill 仍停在 Skill 使用费确认门前
 M4 ToolPlan / Tool Generation CostDisclosure 已实现：Board approved 后生成 ToolPlan、披露 Tool 生成费、创建 tool_generation_confirmation；用户确认后按 tool_plan_digest 冻结积分，执行生成、ToolTask、资产提交、扣费和 PR-3 AG-UI 事件闭环
 M5 Marketplace / SkillUsage 已继续推进：Business Marketplace 应用层、用户端 Marketplace HTTP 主路径、Creator Portal HTTP 主路径、Admin Governance HTTP 主路径、真实 Marketplace RPC adapter、用户端 Skill 市场前台安装/使用路径、创作者 Skill 草稿/提交审核后台、管理端 Skill 审核 / listing 暂停 / 退款反转 / settlement hold 查看 / 内部出账确认页面、个人 latest 安装、SkillUsageRecord 预创建、确认后冻结、交付扣费、冻结释放、settlement hold 和内部 settlement ledger 出账治理已完成；外部真实打款通道仍待后续阶段
-M1-M6 业务代码开发按 PR-1 到 PR-5 顺序受控启动，真实 provider 流量必须等待完整测试环境 HTTP 服务 E2E 执行与报告归档 gate
+M1-M6 业务代码开发按 PR-1 到 PR-5 顺序受控启动，真实 provider 流量必须等待 release HTTP 服务 E2E gate 和报告归档通过
 ```
 
 ## 当前可读取文档

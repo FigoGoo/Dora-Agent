@@ -9,7 +9,7 @@ owner：运维发布责任域 / 文档与契约责任域 / 测试与验收责任
 
 ## 背景
 
-Agent 核心重构横跨 Agent Runtime、业务微服务、前端、管理端、积分、Tool、Skill 市场和结算。review 文档已经完成，PR-1 到 PR-4 冻结字段级契约，PR-5 冻结发布前的端到端验收与治理 gate，并已完成本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke，以及完整测试环境 HTTP 服务 E2E 自动化入口和报告归档模板。
+Agent 核心重构横跨 Agent Runtime、业务微服务、前端、管理端、积分、Tool、Skill 市场和结算。review 文档已经完成，PR-1 到 PR-4 冻结字段级契约，PR-5 冻结发布前的端到端验收与治理 gate，并已完成本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke，以及 release HTTP 服务 E2E 自动化入口、本地地址执行和报告归档。
 
 ## 目标
 
@@ -56,7 +56,7 @@ Agent 核心重构横跨 Agent Runtime、业务微服务、前端、管理端、
 | Local Full HTTP Service Gate | 发布前 | `make release-full-http-smoke` | 本地 Agent + Business 双服务 HTTP smoke 报告 | Business HTTP login、Business Kitex RPC、Agent HTTP run 或 AG-UI replay 失败 |
 | Browser Smoke Gate | 发布前 | `make release-browser-smoke` | 本地前后台浏览器 smoke 报告 | 用户端 Skill 市场、创作者提交或管理端结算治理页面失败 |
 | Fake Provider Gate | E2E | fake provider 场景套件 | 成功、失败、partial、超时报告 | 任一 required behavior 未覆盖或幂等失败 |
-| Test Environment HTTP Service Gate | 真实流量前 | `make release-http-service-e2e` | `tests/reports/release-http-service-e2e-report.md` 或 CI artifact 中的测试环境 HTTP E2E 报告 | 测试环境 health、ready、登录、Agent session/run、RouterDecision、AG-UI replay 失败，或报告不是 `status: passed` |
+| Test Environment HTTP Service Gate | 真实流量前 | `make release-http-service-e2e` 或本地 harness | `tests/reports/release-http-service-e2e-report.md` 或 CI artifact 中的 HTTP E2E 报告 | health、ready、登录、Agent session/run、RouterDecision、AG-UI replay 失败，或报告不是 `status: passed` |
 | Build Gate | 发布前 | 前端、Agent、业务服务构建命令 | 构建产物 | 任一服务构建失败 |
 | Release Gate | 灰度前 | 健康检查、关键 API/RPC/AG-UI smoke | 发布记录 | 指标、trace、日志、告警缺失 |
 

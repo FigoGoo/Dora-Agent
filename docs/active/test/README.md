@@ -22,6 +22,7 @@ owner：测试与验收责任域
 | E2E fixtures | `tests/fixtures/e2e/**` | PR-5 |
 | Full HTTP service smoke | `services/agent/internal/e2e/release/full_http_service_smoke_test.go`、`scripts/validate-release-full-http-smoke.sh` | PR-5 |
 | Test environment HTTP service E2E | `tests/e2e/http/validate_release_http_service_e2e.py`、`scripts/validate-release-http-service-e2e.sh` | PR-5 |
+| Local HTTP service E2E harness | `services/agent/internal/e2e/release/http_service_e2e_script_test.go` | PR-5 |
 | Test environment HTTP service E2E report | `tests/reports/release-http-service-e2e-report.md` | PR-5 |
 | Browser smoke | `tests/e2e/browser/**` | PR-5 |
 | JSON Schema validator | `tests/contract/validate_json_schema_contracts.py` | PR-1 ~ PR-5 |
@@ -53,4 +54,4 @@ make release-http-service-e2e
 - PR-5 已完成本地 Agent + Business 双服务 HTTP smoke：`scripts/validate-release-full-http-smoke.sh` 或 `make release-full-http-smoke`。
 - PR-5 已完成本地真实浏览器前端联动 smoke：`scripts/validate-release-browser-smoke.sh` 或 `make release-browser-smoke`。
 - PR-5 测试环境 HTTP 服务 E2E 自动化入口和报告模板已完成：`scripts/validate-release-http-service-e2e.sh` 或 `make release-http-service-e2e`，默认报告写入 `tests/reports/release-http-service-e2e-report.md`。
-- PR-5 完整测试环境 HTTP 服务 E2E 执行和 `status: passed` 测试报告仍是发布前 gate。
+- PR-5 本地地址 release HTTP 服务 E2E 已通过：`RELEASE_HTTP_E2E_REPORT_PATH=tests/reports/release-http-service-e2e-report.md go test ./services/agent/internal/e2e/release -run TestReleaseHTTPServiceE2EScript -count=1 -v`。

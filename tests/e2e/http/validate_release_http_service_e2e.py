@@ -384,7 +384,7 @@ def run_gate() -> None:
             session_id,
             run_intent="entry_guide",
             client_message_id=f"cm_release_http_guide_{suffix}",
-            text="",
+            text="进入工作台",
         )
         if status_value(guide_run) != "completed":
             raise ReleaseHTTPServiceE2EError(f"entry guide run should complete: {guide_run!r}")

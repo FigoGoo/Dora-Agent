@@ -48,7 +48,8 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 | Full HTTP Service Smoke | `services/agent/internal/e2e/release/full_http_service_smoke_test.go`、`scripts/validate-release-full-http-smoke.sh` | 本地真实 `cmd/business` + `cmd/agent` 双进程，验证 Business HTTP login、Business Kitex RPC、Agent HTTP run 和 AG-UI replay |
 | Browser Smoke | `scripts/validate-release-browser-smoke.sh`、`tests/e2e/browser/release-frontend-browser-smoke.mjs` | 构建用户端 / 管理端，Vite preview + 本地 Chrome 验证 PR-5 前后台联动主路径 |
 | Test Environment HTTP Service E2E | `tests/e2e/http/validate_release_http_service_e2e.py`、`scripts/validate-release-http-service-e2e.sh` | 对已部署测试环境执行 Business / Agent HTTP 主路径验收，需注入 `RELEASE_BUSINESS_BASE_URL` 和 `RELEASE_AGENT_BASE_URL` |
-| Test Environment HTTP Service E2E Report | `tests/reports/release-http-service-e2e-report.md` | 当前为 `pending_environment`；测试环境执行通过后由脚本写入 `status: passed`、运行 ID 和检查项 |
+| Local HTTP Service E2E Harness | `services/agent/internal/e2e/release/http_service_e2e_script_test.go` | 拉起当前源码的本地 Business / Agent / PostgreSQL / Redis，执行同一个 release HTTP service E2E 脚本 |
+| Test Environment HTTP Service E2E Report | `tests/reports/release-http-service-e2e-report.md` | 当前本地地址执行结果为 `status: passed`，包含运行 ID 和检查项 |
 | Marketplace Guard | `services/business/internal/infra/repository/businesscore/marketplace.go` | `MARKETPLACE_LISTING_SUSPENDED` 新安装守卫，已存在 installation 幂等重放不受影响 |
 
 ## 开发注意事项
@@ -74,8 +75,9 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 - [x] 本地真实浏览器前端联动 smoke 串联用户端 Skill 市场、创作者提交、管理端 settlement release / payout 页面通过。
 - [x] 测试环境 HTTP 服务 E2E 自动化入口覆盖 Business / Agent health、ready、登录、Agent session/run 和 AG-UI replay。
 - [x] 测试环境 HTTP 服务 E2E 报告模板和自动写入机制已完成。
+- [x] 本地地址 release HTTP 服务 E2E 已通过并归档 `status: passed` 报告。
 - [x] release governance feature flag、观测和回滚 token 校验通过。
-- [ ] 后续在完整测试环境执行 `make release-http-service-e2e` 并归档 `status: passed` 测试报告。
+- [x] `make release-http-service-e2e` 已通过本地地址 harness 执行并归档 `status: passed` 测试报告。
 
 ## 验证命令
 
@@ -144,4 +146,4 @@ active contract gate passed
 development CI gate passed
 ```
 
-完整测试环境 HTTP 服务 E2E 尚未执行，因为当前本地未提供 `RELEASE_BUSINESS_BASE_URL` 和 `RELEASE_AGENT_BASE_URL`；当前报告状态为 `pending_environment`。
+本地地址 release HTTP 服务 E2E 已执行并归档 `status: passed` 报告；独立部署测试环境可复用同一脚本和报告路径复跑。
