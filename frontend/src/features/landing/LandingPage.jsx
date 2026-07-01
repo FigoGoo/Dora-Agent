@@ -24,6 +24,7 @@ import { ContextHeader } from '../../components/layout/ContextHeader.jsx';
 import { SideNav } from '../../components/layout/SideNav.jsx';
 import { getPageFromPath, getPathForPage, normalizePath, WORKSPACE_ROUTE } from '../../app/routes.js';
 import { currentUser } from '../account/accountMock.js';
+import { reduceM1AguiEvents } from '../agent/agui.js';
 import { ProjectsPage } from '../projects/ProjectsPage.jsx';
 import { SkillsPage } from '../skills/SkillsPage.jsx';
 import {
@@ -394,6 +395,8 @@ function WorkspacePage({ onIntent }) {
 }
 
 export function AgentWorkspacePage() {
+  const m1Agui = useMemo(() => reduceM1AguiEvents(agentWorkspaceMock.m1AguiEvents), []);
+
   return (
     <div className="doraigc-shell agent-workspace-shell" style={themeStyle} data-testid="agent-workspace-shell">
       <header className="agent-workspace-topbar">
@@ -513,6 +516,24 @@ export function AgentWorkspacePage() {
             </button>
           </div>
           <div className="agent-chat-scroll">
+            {m1Agui.guide ? (
+              <article className="agent-m1-guide" aria-label="M1 创作引导">
+                <strong>创作引导</strong>
+                <div className="agent-m1-chip-row">
+                  {m1Agui.suggestionChips.map((item) => (
+                    <button type="button" key={item.prompt_id}>
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </article>
+            ) : null}
+            {m1Agui.routerBanner ? (
+              <article className="agent-m1-router" aria-label="M1 路由结果">
+                <strong>{m1Agui.routerBanner.text}</strong>
+                <span>{Math.round((m1Agui.routerBanner.confidence || 0) * 100)}% 置信度</span>
+              </article>
+            ) : null}
             <article className="agent-chat-message">
               <div className="agent-chat-thumbs">
                 {agentWorkspaceMock.files.slice(0, 3).map((file) => (

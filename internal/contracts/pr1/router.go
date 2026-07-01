@@ -14,6 +14,7 @@ const (
 	RouterDecisionReject           = "reject"
 
 	SkillSourceSystemDefault = "system_default"
+	SkillSourceSystemBuiltin = "system_builtin"
 	SkillSourceInstalled     = "installed"
 	SkillSourceMarketplace   = "marketplace"
 
@@ -74,6 +75,7 @@ func ValidateRouterDecision(decision RouterDecision) error {
 	}
 	if source := stringPtrValue(decision.SkillSource); source != "" && !isAllowed(source, []string{
 		SkillSourceSystemDefault,
+		SkillSourceSystemBuiltin,
 		SkillSourceInstalled,
 		SkillSourceMarketplace,
 	}) {

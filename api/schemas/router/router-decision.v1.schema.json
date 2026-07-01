@@ -37,6 +37,7 @@
       ],
       "enum": [
         "system_default",
+        "system_builtin",
         "installed",
         "marketplace",
         null

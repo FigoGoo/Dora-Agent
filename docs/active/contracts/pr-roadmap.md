@@ -8,7 +8,7 @@ owner：文档与契约责任域 / 测试与验收责任域
 
 ## 当前裁决
 
-本轮 review 已完成并通过。当前只进入 Contract-first active 拆分，不进入 M1-M6 业务代码开发。
+本轮 review 已完成并通过，Contract-first active 拆分已完成。当前已从 PR-0 / PR-1 基础实现进入 M1 业务代码开发，M1 Creative Guide / ChatModel Router 基础闭环已实现并保持在真实 provider gate 之前。
 
 ```text
 PR-1 Contract Index + StateEnum + RouterDecision + AG-UI Envelope
@@ -76,4 +76,4 @@ M0 active 最小契约冻结由 PR-1 承接，详见：
 
 PR-1 到 PR-5 的 active 冻结已按本路线图完成。PR-2 / PR-3 / PR-4 本地真实 PostgreSQL dry-run / down-test 已完成；PR-5 本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke 已完成。进入真实流量和 ready 标记前，仍必须完成 PR-5 真实浏览器、前端联动和完整测试环境 HTTP 服务 E2E 执行。
 
-开发阶段从 PR-0 开始，入口见 [`../technical/pr-0-development-ci-gate.md`](../technical/pr-0-development-ci-gate.md)。PR-0 只建立 CI gate 和本地验证入口，不实现业务逻辑。
+开发阶段从 PR-0 开始，入口见 [`../technical/pr-0-development-ci-gate.md`](../technical/pr-0-development-ci-gate.md)。M1 Router 实现入口见 [`../technical/router.md`](../technical/router.md)。PR-0 只建立 CI gate 和本地验证入口，不实现业务逻辑。

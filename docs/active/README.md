@@ -19,6 +19,7 @@ PR-4 Marketplace Contracts 字段级契约已冻结，本地真实 PostgreSQL dr
 PR-5 E2E Fixtures + Fake Provider + Release Gates 已冻结，本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke 已完成，真实浏览器、前端联动和完整测试环境 HTTP 服务 E2E 待 CI / 测试环境 gate
 PR-1 到 PR-5 active 拆分已完成
 PR-0 开发准备与 CI Gate 已启动
+M1 Creative Guide / ChatModel Router 基础业务闭环已实现，显式 M1 run_intent 不触发 Tool、积分、Board/Graph 生成
 M1-M6 业务代码开发按 PR-1 到 PR-5 顺序受控推进
 ```
 
@@ -54,6 +55,7 @@ Contract index
 | PR-4 拆分 | `docs/active/contracts/pr-4-marketplace-contracts.md` |
 | PR-5 拆分 | `docs/active/contracts/pr-5-e2e-fixtures-release-gates.md` |
 | PR-0 CI Gate | `docs/active/technical/pr-0-development-ci-gate.md` |
+| M1 Router 技术设计 | `docs/active/technical/router.md` |
 | 字段命名规范 | `docs/active/contracts/field-naming-standard.md` |
 | 状态枚举说明 | `docs/active/contracts/state-enum-registry.md` |
 | 数据所有权 | `docs/active/contracts/data-ownership.md` |

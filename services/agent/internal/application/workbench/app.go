@@ -22,6 +22,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/creation"
 	runtimeeino "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/eino"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/modeltool"
+	runtimerouter "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/router"
 	runtimesafety "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/safety"
 	runtimeskill "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skill"
 	runtimeskilltest "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skilltest"
@@ -460,6 +461,7 @@ type App struct {
 	configVersion    string
 	safetyEvaluator  runtimesafety.Evaluator
 	skillRouter      runtimeskill.Router
+	chatRouter       runtimerouter.ChatModelRouter
 	toolChecker      runtimetool.PolicyChecker
 	modelAdapter     modeltool.Adapter
 	artifactUploader ArtifactUploader
@@ -472,6 +474,13 @@ type App struct {
 
 var errToolConfirmationRequired = errors.New("tool confirmation required")
 
+const (
+	RunIntentEntryGuide         = "entry_guide"
+	RunIntentCapabilityQuestion = "capability_question"
+	RunIntentNormal             = "normal"
+	RunIntentSelectSkill        = "select_skill"
+)
+
 func New(repo *repository.Repository, gateway BusinessGateway, configVersion string) *App {
 	if configVersion == "" {
 		configVersion = "local-dev"
@@ -482,6 +491,7 @@ func New(repo *repository.Repository, gateway BusinessGateway, configVersion str
 		configVersion:    configVersion,
 		safetyEvaluator:  runtimesafety.NewEvaluator(nil),
 		skillRouter:      runtimeskill.NewRouter(),
+		chatRouter:       runtimerouter.NewChatModelRouter(),
 		toolChecker:      runtimetool.NewPolicyChecker(),
 		modelAdapter:     modeltool.LocalAdapter{},
 		artifactUploader: NewStreamingArtifactUploader(nil),
@@ -597,6 +607,7 @@ type CreateSessionRequest struct {
 type CreateRunRequest struct {
 	SessionID        string              `json:"session_id"`
 	ProjectID        string              `json:"project_id"`
+	RunIntent        string              `json:"run_intent"`
 	UserInput        UserInputDTO        `json:"user_input"`
 	ModelSelection   *ModelSelectionDTO  `json:"model_selection"`
 	ReferencedAssets []AssetReferenceDTO `json:"referenced_assets"`
@@ -874,7 +885,8 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	if req.SessionID == "" || req.ProjectID == "" || req.IdempotencyKey == "" {
 		return CreateRunResponse{}, apperror.New(apperror.CodeInvalidArgument, "session_id, project_id and idempotency_key are required")
 	}
-	if req.UserInput.ClientMessageID == "" || req.UserInput.ContentType == "" || strings.TrimSpace(req.UserInput.Text) == "" {
+	textRequired := req.RunIntent != RunIntentEntryGuide
+	if req.UserInput.ClientMessageID == "" || req.UserInput.ContentType == "" || (textRequired && strings.TrimSpace(req.UserInput.Text) == "") {
 		return CreateRunResponse{}, apperror.New(apperror.CodeInvalidArgument, "user_input is incomplete")
 	}
 	if err := validateRunInputs(req); err != nil {
@@ -919,9 +931,13 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 		return CreateRunResponse{}, err
 	}
 	runID := securityID("run_")
+	runStatus := state.RunStatusPending
+	if isM1RunIntent(req.RunIntent) {
+		runStatus = state.RunStatusRouting
+	}
 	run := &model.Run{
 		ID: runID, SessionID: session.ID, ProjectID: session.ProjectID, SpaceID: session.SpaceID, UserID: session.UserID,
-		TurnNo: 1, Status: state.RunStatusPending, InputSummary: jsonObject(runInputSummary(req)),
+		TurnNo: 1, Status: runStatus, InputSummary: jsonObject(runInputSummary(req)),
 		ModelSelectionSnapshot: jsonObject(req.ModelSelection), RuntimeConfigVersion: runtimeConfigVersion, IdempotencyKey: req.IdempotencyKey, TraceID: traceID,
 	}
 	if err := a.repo.CreateRun(ctx, run); err != nil {
@@ -953,6 +969,15 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	}
 	if err := a.repo.AppendEvent(ctx, event); err != nil {
 		return CreateRunResponse{}, err
+	}
+	if isM1RunIntent(req.RunIntent) {
+		if err := a.recordM1RunEvents(ctx, auth, run, req, traceID); err != nil {
+			return CreateRunResponse{}, err
+		}
+		if updated, err := a.repo.GetRun(ctx, run.ID); err == nil {
+			return runResponse(*updated), nil
+		}
+		return runResponse(*run), nil
 	}
 	if err := a.recordM3StartEvents(ctx, auth, run, req.UserInput.Text, traceID); err != nil {
 		return CreateRunResponse{}, err
@@ -3292,6 +3317,9 @@ func toolPolicyRiskContext(toolRef string) map[string]string {
 }
 
 func validateRunInputs(req CreateRunRequest) error {
+	if req.RunIntent != "" && !isM1RunIntent(req.RunIntent) {
+		return apperror.New(apperror.CodeInvalidArgument, "run_intent is invalid")
+	}
 	for i, asset := range req.ReferencedAssets {
 		if strings.TrimSpace(asset.AssetID) == "" || strings.TrimSpace(asset.Source) == "" || strings.TrimSpace(asset.Purpose) == "" {
 			return apperror.New(apperror.CodeInvalidArgument, fmt.Sprintf("referenced_assets[%d] requires asset_id, source and purpose", i))
@@ -3309,6 +3337,15 @@ func validateRunInputs(req CreateRunRequest) error {
 		}
 	}
 	return nil
+}
+
+func isM1RunIntent(intent string) bool {
+	switch strings.TrimSpace(intent) {
+	case RunIntentEntryGuide, RunIntentCapabilityQuestion, RunIntentNormal, RunIntentSelectSkill:
+		return true
+	default:
+		return false
+	}
 }
 
 func runInputSummary(req CreateRunRequest) map[string]any {
@@ -3329,6 +3366,7 @@ func runInputSummary(req CreateRunRequest) map[string]any {
 	}
 	return map[string]any{
 		"client_message_id":      req.UserInput.ClientMessageID,
+		"run_intent":             req.RunIntent,
 		"content_type":           req.UserInput.ContentType,
 		"language":               req.UserInput.Language,
 		"referenced_assets":      req.ReferencedAssets,

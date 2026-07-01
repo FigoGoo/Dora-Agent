@@ -263,6 +263,8 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByRole('region', { name: '对话' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'DORAIGC 导航' })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('请输入你的消息...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '城市文旅视频' })).toBeInTheDocument();
+    expect(screen.getByText('已选择 skill_city_tourism_video')).toBeInTheDocument();
   });
 
   it('navigates through skills, featured works, and credits mock pages', async () => {

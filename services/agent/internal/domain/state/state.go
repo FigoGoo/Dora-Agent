@@ -5,9 +5,15 @@ const (
 	SessionStatusArchived = "archived"
 	SessionStatusExpired  = "expired"
 
+	RunStatusCreated             = "created"
+	RunStatusRouting             = "routing"
 	RunStatusPending             = "pending"
+	RunStatusPlanning            = "planning"
+	RunStatusWaitingInput        = "waiting_input"
 	RunStatusRunning             = "running"
 	RunStatusWaitingConfirmation = "waiting_confirmation"
+	RunStatusFreezing            = "freezing"
+	RunStatusQueued              = "queued"
 	RunStatusResuming            = "resuming"
 	RunStatusCompleted           = "completed"
 	RunStatusFailed              = "failed"
@@ -32,14 +38,26 @@ const (
 
 func CanTransitionRun(from, to string) bool {
 	switch from {
+	case RunStatusCreated:
+		return to == RunStatusRouting || to == RunStatusCancelled || to == RunStatusFailed
 	case RunStatusPending:
-		return to == RunStatusRunning || to == RunStatusCancelled || to == RunStatusFailed
+		return to == RunStatusRouting || to == RunStatusRunning || to == RunStatusCancelled || to == RunStatusFailed
+	case RunStatusRouting:
+		return to == RunStatusPlanning || to == RunStatusWaitingInput || to == RunStatusCompleted || to == RunStatusFailed || to == RunStatusCancelled
+	case RunStatusPlanning:
+		return to == RunStatusWaitingInput || to == RunStatusWaitingConfirmation || to == RunStatusCompleted || to == RunStatusFailed || to == RunStatusCancelled
+	case RunStatusWaitingInput:
+		return to == RunStatusRouting || to == RunStatusCancelled || to == RunStatusFailed
+	case RunStatusFreezing:
+		return to == RunStatusQueued || to == RunStatusRunning || to == RunStatusFailed || to == RunStatusCancelled
+	case RunStatusQueued:
+		return to == RunStatusRunning || to == RunStatusFailed || to == RunStatusCancelled
 	case RunStatusRunning:
 		return to == RunStatusWaitingConfirmation || to == RunStatusCompleted || to == RunStatusFailed || to == RunStatusCancelled
 	case RunStatusWaitingConfirmation:
-		return to == RunStatusResuming || to == RunStatusCancelled || to == RunStatusFailed
+		return to == RunStatusFreezing || to == RunStatusResuming || to == RunStatusCancelled || to == RunStatusFailed
 	case RunStatusResuming:
-		return to == RunStatusRunning || to == RunStatusFailed || to == RunStatusCancelled
+		return to == RunStatusRouting || to == RunStatusRunning || to == RunStatusFailed || to == RunStatusCancelled
 	case RunStatusCompleted, RunStatusFailed, RunStatusCancelled:
 		return false
 	default:

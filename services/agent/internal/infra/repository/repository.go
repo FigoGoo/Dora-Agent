@@ -86,8 +86,13 @@ func (r *Repository) CountActiveRuns(ctx context.Context, sessionID string) (int
 		Model(&model.Run{}).
 		Where("session_id = ? AND status IN ? AND deleted_at IS NULL", sessionID, []string{
 			state.RunStatusPending,
+			state.RunStatusRouting,
+			state.RunStatusPlanning,
+			state.RunStatusWaitingInput,
 			state.RunStatusRunning,
 			state.RunStatusWaitingConfirmation,
+			state.RunStatusFreezing,
+			state.RunStatusQueued,
 			state.RunStatusResuming,
 		}).
 		Count(&count).Error

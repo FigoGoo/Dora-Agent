@@ -329,6 +329,37 @@ export const agentWorkspaceMock = {
     '夜市场景：城市夜市街头，橙黄色暖光与霓虹交织，烟火气更足'
   ],
   nextStep: '查看上方生成的三张图，确认角色色彩和场景氛围是否符合预期。',
+  m1AguiEvents: [
+    {
+      event_id: 'evt_workspace_m1_guide',
+      type: 'creative.guide.presented',
+      sequence: 1,
+      payload: {
+        creative_guide: {
+          guide_id: 'guide_workspace_mock',
+          suggested_prompts: [
+            { prompt_id: 'prompt_city_tourism_video', label: '城市文旅视频', text: '帮我做一个杭州文旅宣传视频', output_type: 'video' },
+            { prompt_id: 'prompt_short_drama', label: '短剧分镜', text: '把一句剧情拆成短剧分镜', output_type: 'storyboard' }
+          ],
+          supported_output_types: ['video', 'storyboard'],
+          default_actions: ['free_creation', 'skill_marketplace']
+        }
+      }
+    },
+    {
+      event_id: 'evt_workspace_m1_router',
+      type: 'creative.router.decided',
+      sequence: 2,
+      payload: {
+        router_decision: {
+          decision: 'select_skill',
+          skill_id: 'skill_city_tourism_video',
+          confidence: 0.92,
+          candidate_skills: [{ skill_id: 'skill_city_tourism_video', why: '命中城市文旅宣传视频场景' }]
+        }
+      }
+    }
+  ],
   confirmation: {
     title: '元素图像满意吗？确认后进入角色音色设置。',
     options: [

@@ -70,6 +70,8 @@ schema_version
 
 ## Router Fixture 覆盖
 
+RouterDecision / SkillCatalogSummary 的 `skill_source` 当前支持 `system_default`、`system_builtin`、`installed`、`marketplace`。其中 `system_builtin` 仅用于平台内置 L0 能力，例如 `skill_generic_creation`，不得映射到 Marketplace listing。
+
 | Fixture | 覆盖场景 |
 | --- | --- |
 | `select_system_city_tourism.json` | 默认系统 Skill 命中 |

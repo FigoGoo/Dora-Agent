@@ -465,6 +465,48 @@
   background: rgba(255, 255, 255, 0.048);
 }
 
+.agent-m1-guide,
+.agent-m1-router {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(207, 255, 36, 0.2);
+  border-radius: 10px;
+  background: rgba(207, 255, 36, 0.055);
+}
+
+.agent-m1-guide strong,
+.agent-m1-router strong {
+  color: #fff;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.agent-m1-router span {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
+}
+
+.agent-m1-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-m1-chip-row button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.agent-m1-chip-row button:hover {
+  border-color: rgba(207, 255, 36, 0.42);
+  color: #fff;
+}
+
 .agent-chat-message p,
 .agent-chat-message li,
 .agent-confirm-card label {
