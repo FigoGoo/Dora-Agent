@@ -104,4 +104,5 @@ make fixture-test
 - [x] PR-5 本地 Agent 独立进程 HTTP smoke 已完成。
 - [x] PR-5 本地 Business 独立进程 HTTP smoke 已完成。
 - [ ] 正式 JSON Schema validator 接入 CI。
-- [ ] PR-5 真实浏览器、前端联动和完整测试环境 HTTP 服务 E2E 环境执行完成前，不进入对应 M1-M6 后续真实流量发布。
+- [x] PR-5 本地真实浏览器前端联动 smoke 执行完成。
+- [ ] PR-5 完整测试环境 HTTP 服务 E2E 环境执行完成前，不进入对应 M1-M6 后续真实流量发布。

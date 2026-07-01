@@ -16,7 +16,7 @@ PR-1 到 PR-5 active 契约、fixture、fake provider 和 release gate 已冻结
 - 固定当前 active 契约总验证命令。
 - 固定 PR-0 开发准备总 gate。
 - 让 PR-1 到 PR-5 后续实现都能复用同一 CI 入口。
-- 明确 PR-2 / PR-3 / PR-4 本地真实 PostgreSQL dry-run / down-test 已归档，PR-5 本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E 和 Agent / Business 独立进程 HTTP smoke 已归档，真实浏览器、前端联动和完整测试环境 HTTP 服务 E2E 仍是后续 gate。
+- 明确 PR-2 / PR-3 / PR-4 本地真实 PostgreSQL dry-run / down-test 已归档，PR-5 本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke 和本地真实浏览器前端联动 smoke 已归档，完整测试环境 HTTP 服务 E2E 仍是后续 gate。
 
 ## 非目标
 
@@ -62,7 +62,7 @@ PR-0 开发准备与 CI Gate
 2. 涉及字段、状态、错误码、事件或 SQL 时，先更新 canonical contract 和 fixture。
 3. PR-1 到 PR-5 后续实现必须保留 `scripts/validate-active-contracts.sh` 通过。
 4. PR-2 / PR-3 / PR-4 真实 PostgreSQL dry-run / down-test 证据已归档；发布前仍需在 test 环境重放。
-5. PR-5 真实浏览器、前端联动和完整测试环境 HTTP 服务 E2E 环境执行前，禁止真实 provider 流量。
+5. PR-5 完整测试环境 HTTP 服务 E2E 环境执行前，禁止真实 provider 流量。
 
 ## Done Gate
 
@@ -78,7 +78,8 @@ PR-0 开发准备与 CI Gate
 - [x] PR-5 本地 Agent HTTP router + Redis container E2E 证据已由 `services/agent/internal/e2e/pr5` 归档。
 - [x] PR-5 本地 Agent 独立进程 HTTP smoke 证据已由 `services/agent/internal/e2e/pr5` 归档。
 - [x] PR-5 本地 Business 独立进程 HTTP smoke 证据已由 `services/business/internal/e2e/pr5` 归档。
-- [ ] PR-5 真实浏览器、前端联动和完整测试环境 HTTP 服务 E2E 证据归档。
+- [x] PR-5 本地真实浏览器前端联动 smoke 证据归档。
+- [ ] PR-5 完整测试环境 HTTP 服务 E2E 证据归档。
 
 ## 本地验证记录
 
@@ -117,4 +118,4 @@ PASS TestPR5BusinessIndependentProcessHTTPSmoke
 | 旧 M0-M6 脚本仍被误用 | 重新引入旧事实源和旧状态口径 | PR-0 明确当前 gate 为 active contract / PR-0 CI gate |
 | CI runner 工具链与本地不同 | PR 在远端失败 | workflow 固定 Python、Go、Node、pnpm 安装入口 |
 | test 环境尚未重放 migration gate | 发布环境兼容问题延后暴露 | 发布前必须重放 PR-2 / PR-3 / PR-4 dry-run / down-test |
-| fake provider 与真实 provider 差异 | 真实流量失败率上升 | 真实 provider 只允许在 PR-5 真实 E2E gate 后灰度 |
+| fake provider 与真实 provider 差异 | 真实流量失败率上升 | 真实 provider 只允许在 PR-5 完整测试环境 HTTP 服务 E2E gate 后灰度 |

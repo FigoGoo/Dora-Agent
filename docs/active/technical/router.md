@@ -93,7 +93,7 @@ M1 保留 ChatModel Router 的结构化输出边界，当前本地实现作为 f
 2. `safe_to_execute` 固定为 `false`。
 3. Router 失败降级为 `clarify` 或 `text_answer`。
 4. Guard 不允许选择未 published 或不可见 Skill。
-5. 真实 provider 流量必须等待 PR-5 真实浏览器、前端联动和完整测试环境 HTTP 服务 E2E gate。
+5. 真实 provider 流量必须等待 PR-5 完整测试环境 HTTP 服务 E2E gate。
 
 ## 验证
 
@@ -112,4 +112,4 @@ npm --prefix frontend test -- src/features/agent/agui.test.js src/app/App.test.j
 
 1. M1 当前不接真实 ChatModel provider。
 2. `waiting_input` 的追加输入恢复到 Router 的完整链路将在 M2/M3 交接时继续收口。
-3. 用户端真实 API/SSE 接入仍受 PR-5 前端联动与完整测试环境 HTTP 服务 E2E gate 控制。
+3. 用户端真实 API/SSE 接入仍受 PR-5 完整测试环境 HTTP 服务 E2E gate 控制。

@@ -12,6 +12,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FAKE_PROVIDER_DIR = REPO_ROOT / "tests" / "e2e" / "fake-provider"
 E2E_ROOT = REPO_ROOT / "tests" / "e2e"
+BROWSER_SMOKE_DIR = E2E_ROOT / "browser"
 FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "e2e"
 CONTRACT_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "contracts"
 RELEASE_GOVERNANCE_DOC = REPO_ROOT / "docs" / "active" / "technical" / "release-governance.md"
@@ -86,6 +87,17 @@ REQUIRED_METRICS = {
     "skill_usage_charge_error_count",
     "marketplace_install_failure_count",
     "settlement_reverse_count",
+}
+
+REQUIRED_BROWSER_SMOKE_TOKENS = {
+    "chromium.launch",
+    "frontend",
+    "admin_frontend",
+    "/api/marketplace/installations",
+    "/api/creator/skills",
+    "/api/admin/settlements/",
+    "settlement_release",
+    "settlement_payout",
 }
 
 
@@ -216,11 +228,33 @@ def validate_release_governance() -> None:
     print("pr5 release governance ok")
 
 
+def validate_browser_smoke() -> None:
+    package_json = BROWSER_SMOKE_DIR / "package.json"
+    package_lock = BROWSER_SMOKE_DIR / "package-lock.json"
+    smoke_script = BROWSER_SMOKE_DIR / "pr5-frontend-browser-smoke.mjs"
+    for path in (package_json, package_lock, smoke_script):
+        if not path.exists():
+            fail(f"missing {path}")
+
+    package = load_json(package_json)
+    if package.get("scripts", {}).get("smoke") != "node pr5-frontend-browser-smoke.mjs":
+        fail(f"{package_json}: missing smoke script")
+    if "playwright-core" not in package.get("devDependencies", {}):
+        fail(f"{package_json}: missing playwright-core dependency")
+
+    script_text = smoke_script.read_text(encoding="utf-8")
+    for token in REQUIRED_BROWSER_SMOKE_TOKENS:
+        if token not in script_text:
+            fail(f"{smoke_script}: missing browser smoke token {token}")
+    print("pr5 browser smoke artifacts ok")
+
+
 def main() -> None:
     validate_fake_provider()
     validate_suite_indexes()
     validate_e2e_fixtures()
     validate_release_governance()
+    validate_browser_smoke()
     print("pr5 e2e release gate validation ok")
 
 

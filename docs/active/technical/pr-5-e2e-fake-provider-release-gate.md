@@ -3,13 +3,13 @@
 状态：active  
 owner：测试与验收责任域 / Agent Runtime / Business Service / 前端 / 管理端 / 运维发布责任域 / 文档与契约责任域  
 更新时间：2026-07-01  
-适用范围：PR-5 测试事实源、Fake Provider、E2E suite index、fixture、service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、feature flag、观测和回滚 gate 的 Go 运行时基础校验  
-相关代码路径：`internal/contracts/pr5/**`、`services/business/internal/e2e/pr5/**`、`services/agent/internal/e2e/pr5/**`、`internal/testredis/**`、`services/agent/internal/events/stream/**`、`services/business/internal/infra/repository/businesscore/pr4_marketplace.go`  
+适用范围：PR-5 测试事实源、Fake Provider、E2E suite index、fixture、service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地真实浏览器前端联动 smoke、feature flag、观测和回滚 gate 的基础校验
+相关代码路径：`internal/contracts/pr5/**`、`services/business/internal/e2e/pr5/**`、`services/agent/internal/e2e/pr5/**`、`internal/testredis/**`、`services/agent/internal/events/stream/**`、`services/business/internal/infra/repository/businesscore/pr4_marketplace.go`、`tests/e2e/browser/**`
 相关契约：`docs/active/contracts/pr-5-e2e-fixtures-release-gates.md`、`tests/e2e/**`、`tests/fixtures/e2e/**`、`docs/active/technical/release-governance.md`
 
 ## 背景
 
-PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、可验证、可发布、可回滚的端到端事实源。进入真实浏览器、前端联动和完整测试环境 E2E 前，需要先让 fake provider 行为、suite index、fixture、release governance、本地 service-level PostgreSQL 主路径、Redis 容器事件语义以及 Agent / Business main 进程启动具备 Go 侧漂移防护。
+PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、可验证、可发布、可回滚的端到端事实源。进入完整测试环境 HTTP 服务 E2E 前，需要先让 fake provider 行为、suite index、fixture、release governance、本地 service-level PostgreSQL 主路径、Redis 容器事件语义、Agent / Business main 进程启动以及前后台真实浏览器联动具备漂移防护。
 
 ## 目标
 
@@ -21,12 +21,13 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 - 提供 Agent HTTP router + Redis container E2E harness，验证 `/healthz`、`/readyz`、AG-UI replay、Redis stream dedupe、snapshot cache 和 turn lock。
 - 提供 Agent 独立进程 HTTP smoke，验证真实 `cmd/agent` 二进制在 local model adapter、PostgreSQL 和 Redis runtime 下可启动并通过健康检查。
 - 提供 Business 独立进程 HTTP smoke，验证真实 `cmd/business` 二进制在 PostgreSQL、Kitex 和 HTTP server 下可启动并通过健康检查。
+- 提供本地真实浏览器前端联动 smoke，验证用户端 Skill 市场安装、创作者 Skill 草稿提交、管理端 settlement hold 释放和内部出账确认的 DOM / fetch / 幂等 key。
 - 提供 release governance 文本 gate 校验，覆盖 feature flag、观测指标和 rollback token。
 
 ## 非目标
 
 - 不连接真实 provider。
-- 不替代真实浏览器、前端联动和完整测试环境 HTTP 服务 E2E。
+- 不替代完整测试环境 HTTP 服务 E2E。
 - 不新增 PR-2 到 PR-4 之外的业务字段。
 - 不把人工验收作为唯一 release gate。
 
@@ -41,11 +42,12 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 | Agent HTTP/Redis E2E | `services/agent/internal/e2e/pr5/agent_http_redis_e2e_test.go` | `httptest` 走真实 Agent HTTP router，Redis 使用 testcontainers 真容器 |
 | Agent Process Smoke | `services/agent/internal/e2e/pr5/agent_process_smoke_test.go` | 构建并启动真实 `cmd/agent` 二进制，验证 Postgres + Redis + `/healthz` + `/readyz` |
 | Business Process Smoke | `services/business/internal/e2e/pr5/business_process_smoke_test.go` | 构建并启动真实 `cmd/business` 二进制，验证 Postgres + Kitex + `/healthz` + `/readyz` |
+| Browser Smoke | `tests/e2e/browser/pr5-frontend-browser-smoke.mjs` | 构建用户端 / 管理端，Vite preview + 本地 Chrome 验证 PR-5 前后台联动主路径 |
 | Marketplace Guard | `services/business/internal/infra/repository/businesscore/pr4_marketplace.go` | `MARKETPLACE_LISTING_SUSPENDED` 新安装守卫，已存在 installation 幂等重放不受影响 |
 
 ## 开发注意事项
 
-1. PR-5 gate 只允许 fake provider 覆盖真实 provider 前置验证；真实 provider 流量必须等待后续真实浏览器、前端联动和完整测试环境 HTTP 服务 gate。
+1. PR-5 gate 只允许 fake provider 覆盖真实 provider 前置验证；真实 provider 流量必须等待后续完整测试环境 HTTP 服务 gate。
 2. 所有 required E2E fixture 必须被 suite index 引用，且必须包含 `Fixture Gate`。
 3. E2E fixture 的 `contract_references` 只能指向 `tests/fixtures/contracts/**`。
 4. 发布必须默认关闭新 feature flag，并能独立回滚 `agent_runtime_v2`、`tool_generation_v2`、`marketplace_v2`。
@@ -62,8 +64,9 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 - [x] Agent HTTP router + Redis container E2E 串联 `/healthz`、`/readyz`、AG-UI replay、stream dedupe、cache 和 lock 通过。
 - [x] Agent 独立进程 HTTP smoke 串联真实 `cmd/agent` 二进制、PostgreSQL、Redis、`/healthz` 和 `/readyz` 通过。
 - [x] Business 独立进程 HTTP smoke 串联真实 `cmd/business` 二进制、PostgreSQL、Kitex、`/healthz` 和 `/readyz` 通过。
+- [x] 本地真实浏览器前端联动 smoke 串联用户端 Skill 市场、创作者提交、管理端 settlement release / payout 页面通过。
 - [x] release governance feature flag、观测和回滚 token 校验通过。
-- [ ] 后续接入真实浏览器、前端联动和完整测试环境 HTTP 服务 E2E 并归档测试报告。
+- [ ] 后续接入完整测试环境 HTTP 服务 E2E 并归档测试报告。
 
 ## 验证命令
 
@@ -74,6 +77,7 @@ go test ./services/agent/internal/e2e/pr5 -run TestPR5AgentIndependentProcessHTT
 go test ./services/business/internal/e2e/pr5 -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v
 go test ./internal/contracts/pr5 ./services/business/internal/infra/repository/businesscore ./services/business/internal/e2e/pr5
 go test ./internal/contracts/pr3 ./internal/contracts/pr4 ./internal/contracts/pr5 ./services/business/internal/e2e/pr5
+npm --prefix tests/e2e/browser run smoke
 make active-contract-gate
 make pr0-ci-gate
 ```
@@ -89,6 +93,7 @@ go test ./services/agent/internal/e2e/pr5 -run TestPR5AgentIndependentProcessHTT
 go test ./services/business/internal/e2e/pr5 -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v
 go test ./internal/contracts/pr5 ./services/business/internal/infra/repository/businesscore ./services/business/internal/e2e/pr5
 go test ./internal/contracts/pr3 ./internal/contracts/pr4 ./internal/contracts/pr5 ./services/business/internal/e2e/pr5
+npm --prefix tests/e2e/browser run smoke
 make active-contract-gate
 make pr0-ci-gate
 ```
@@ -103,6 +108,7 @@ PASS TestPR5AgentIndependentProcessHTTPSmoke
 PASS TestPR5BusinessIndependentProcessHTTPSmoke
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/e2e/pr5
+PR-5 frontend browser smoke passed
 active contract gate passed
 PR-0 CI gate passed
 ```
