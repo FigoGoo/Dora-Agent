@@ -575,7 +575,7 @@ components:
           - capability_question
           - normal
           - select_skill
-          description: M1 显式入口；为空时兼容旧生成链路。
+          description: 显式入口；为空时兼容旧生成链路。
         user_input:
           $ref: '#/components/schemas/UserInputDTO'
         model_selection:

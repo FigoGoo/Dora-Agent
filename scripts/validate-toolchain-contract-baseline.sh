@@ -191,7 +191,11 @@ if rg -n "JsonBody|ApiResponse|PageResponse" api/openapi; then
 fi
 
 echo "== SQL external constraint keyword scan =="
-if rg -n "FOREIGN KEY|REFERENCES" db/migrations api code-plan; then
+constraint_scan_paths=(db/migrations api)
+if [[ -d code-plan ]]; then
+  constraint_scan_paths+=(code-plan)
+fi
+if rg -n "FOREIGN KEY|REFERENCES" "${constraint_scan_paths[@]}"; then
   echo "SQL or contract area still contains blocked database-level external constraint keywords" >&2
   exit 1
 fi

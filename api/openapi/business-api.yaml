@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Dora Business API
   version: '2026-06-27'
-  description: Production M0 HTTP contract for user, public and admin business service APIs. Every operation uses named request
+  description: Production HTTP contract for user, public and admin business service APIs. Every operation uses named request
     and response DTOs; no placeholder body or generic response components are allowed.
 servers:
 - url: http://localhost:19080
@@ -27,20 +27,7 @@ paths:
       operationId: listMarketplaceSkills
       responses:
         '200':
-          description: Skill 市场列表
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - items
-                properties:
-                  items:
-                    type: array
-                    items:
-                      type: object
-                  next_cursor:
-                    type: string
+          $ref: '#/components/responses/ListMarketplaceSkillsOk'
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -62,16 +49,7 @@ paths:
           type: string
       responses:
         '200':
-          description: Skill 市场详情
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - listing
-                properties:
-                  listing:
-                    type: object
+          $ref: '#/components/responses/GetMarketplaceSkillOk'
         '404':
           $ref: '#/components/responses/NotFoundProblem'
         '500':
@@ -84,34 +62,10 @@ paths:
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-              - listing_id
-              - target_scope
-              properties:
-                listing_id:
-                  type: string
-                target_scope:
-                  type: string
-                  enum:
-                  - personal
-                  - enterprise
+        $ref: '#/components/requestBodies/InstallMarketplaceSkillBody'
       responses:
         '200':
-          description: 安装成功
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - installation
-                properties:
-                  installation:
-                    type: object
+          $ref: '#/components/responses/InstallMarketplaceSkillOk'
         '409':
           $ref: '#/components/responses/ConflictProblem'
         '500':
@@ -129,31 +83,10 @@ paths:
           type: string
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-              - target_version
-              - confirmed
-              properties:
-                target_version:
-                  type: string
-                confirmed:
-                  type: boolean
+        $ref: '#/components/requestBodies/UpgradeSkillInstallationBody'
       responses:
         '200':
-          description: 升级成功
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - installation
-                properties:
-                  installation:
-                    type: object
+          $ref: '#/components/responses/UpgradeSkillInstallationOk'
         '409':
           $ref: '#/components/responses/ConflictProblem'
         '500':
@@ -165,18 +98,7 @@ paths:
       operationId: listInstalledSkills
       responses:
         '200':
-          description: 已安装 Skill
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - items
-                properties:
-                  items:
-                    type: array
-                    items:
-                      type: object
+          $ref: '#/components/responses/ListInstalledSkillsOk'
         '500':
           $ref: '#/components/responses/SystemProblem'
   /api/auth/register:
@@ -2941,6 +2863,18 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ConfirmTakeDownPublicWorkRequest'
+    InstallMarketplaceSkillBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InstallMarketplaceSkillRequest'
+    UpgradeSkillInstallationBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UpgradeSkillInstallationRequest'
     LogoutBody:
       required: true
       content:
@@ -2984,6 +2918,36 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/LogoutOkEnvelope'
+    ListMarketplaceSkillsOk:
+      description: listMarketplaceSkills successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ListMarketplaceSkillsOkEnvelope'
+    GetMarketplaceSkillOk:
+      description: getMarketplaceSkill successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/GetMarketplaceSkillOkEnvelope'
+    InstallMarketplaceSkillOk:
+      description: installMarketplaceSkill successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InstallMarketplaceSkillOkEnvelope'
+    UpgradeSkillInstallationOk:
+      description: upgradeSkillInstallation successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UpgradeSkillInstallationOkEnvelope'
+    ListInstalledSkillsOk:
+      description: listInstalledSkills successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ListInstalledSkillsOkEnvelope'
     ValidationProblem:
       description: Invalid request fields.
       content:
@@ -3671,6 +3635,304 @@ components:
         resource_id:
           type: string
         support_trace_id:
+          type: string
+    MarketplaceListingDTO:
+      type: object
+      required:
+      - listing_id
+      - skill_id
+      - skill_version_id
+      - skill_version
+      - skill_name
+      - skill_description
+      - creator_user_id
+      - status
+      - pricing_model
+      - usage_credits
+      - value_delivered_stage
+      - pricing_policy_digest
+      - published_by
+      - created_at
+      - updated_at
+      additionalProperties: false
+      properties:
+        listing_id:
+          type: string
+        skill_id:
+          type: string
+        skill_version_id:
+          type: string
+        skill_version:
+          type: string
+        skill_name:
+          type: string
+        skill_description:
+          type: string
+        creator_user_id:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - pending_listing_review
+          - listed
+          - unlisted
+          - suspended
+          - removed
+        pricing_model:
+          type: string
+        usage_credits:
+          type: integer
+          format: int32
+        value_delivered_stage:
+          type: string
+        pricing_policy_digest:
+          type: string
+        published_by:
+          type: string
+        listed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    SkillInstallationDTO:
+      type: object
+      required:
+      - installation_id
+      - account_id
+      - account_scope
+      - listing_id
+      - skill_id
+      - installed_version
+      - version_strategy
+      - status
+      - upgrade_status
+      - created_at
+      - updated_at
+      additionalProperties: false
+      properties:
+        installation_id:
+          type: string
+        account_id:
+          type: string
+        account_scope:
+          type: string
+          enum:
+          - personal
+          - enterprise
+        listing_id:
+          type: string
+        skill_id:
+          type: string
+        skill_name:
+          type: string
+        installed_version:
+          type: string
+        version_strategy:
+          type: string
+          enum:
+          - latest
+          - pinned
+        status:
+          type: string
+          enum:
+          - active
+          - disabled
+          - removed
+        upgrade_status:
+          type: string
+          enum:
+          - up_to_date
+          - upgrade_available
+          - upgrade_pending_confirmation
+          - upgraded
+          - skipped
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ListMarketplaceSkillsData:
+      type: object
+      required:
+      - items
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MarketplaceListingDTO'
+        next_cursor:
+          type: string
+    GetMarketplaceSkillData:
+      type: object
+      required:
+      - listing
+      additionalProperties: false
+      properties:
+        listing:
+          $ref: '#/components/schemas/MarketplaceListingDTO'
+    InstallMarketplaceSkillRequest:
+      type: object
+      required:
+      - listing_id
+      - target_scope
+      - request_hash
+      additionalProperties: false
+      properties:
+        listing_id:
+          type: string
+        target_scope:
+          type: string
+          enum:
+          - personal
+          - enterprise
+        enterprise_id:
+          type: string
+        request_hash:
+          type: string
+    InstallMarketplaceSkillData:
+      type: object
+      required:
+      - installation
+      - idempotent_replay
+      additionalProperties: false
+      properties:
+        installation:
+          $ref: '#/components/schemas/SkillInstallationDTO'
+        idempotent_replay:
+          type: boolean
+    UpgradeSkillInstallationRequest:
+      type: object
+      required:
+      - target_version
+      - confirmed
+      - request_hash
+      additionalProperties: false
+      properties:
+        target_version:
+          type: string
+        confirmed:
+          type: boolean
+        request_hash:
+          type: string
+    UpgradeSkillInstallationData:
+      type: object
+      required:
+      - installation
+      additionalProperties: false
+      properties:
+        installation:
+          $ref: '#/components/schemas/SkillInstallationDTO'
+    ListInstalledSkillsData:
+      type: object
+      required:
+      - items
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillInstallationDTO'
+    ListMarketplaceSkillsOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ListMarketplaceSkillsData'
+        trace_id:
+          type: string
+    GetMarketplaceSkillOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/GetMarketplaceSkillData'
+        trace_id:
+          type: string
+    InstallMarketplaceSkillOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/InstallMarketplaceSkillData'
+        trace_id:
+          type: string
+    UpgradeSkillInstallationOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/UpgradeSkillInstallationData'
+        trace_id:
+          type: string
+    ListInstalledSkillsOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ListInstalledSkillsData'
+        trace_id:
           type: string
     CommandResultDTO:
       type: object

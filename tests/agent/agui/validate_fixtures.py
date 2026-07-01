@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate toolchain baseline AG-UI fixture shape and schema coverage."""
+"""Validate AG-UI fixture shape and active split schema coverage."""
 
 from __future__ import annotations
 
@@ -90,12 +90,52 @@ def load_events(path: Path) -> list[dict]:
 
 def schema_event_coverage() -> None:
     schema = json.loads(SCHEMA_PATH.read_text())
+    envelope_required = {
+        "event_id",
+        "event_type",
+        "schema_version",
+        "payload_schema_version",
+        "project_id",
+        "session_id",
+        "run_id",
+        "seq",
+        "created_at",
+        "dedupe_key",
+        "payload",
+    }
+    actual_envelope_required = set(schema.get("required", []))
+    missing_envelope_fields = envelope_required - actual_envelope_required
+    if missing_envelope_fields:
+        fail(f"AG-UI envelope schema missing fields: {sorted(missing_envelope_fields)}")
+
     seen: dict[str, str] = {}
     for item in schema.get("allOf", []):
         event_type = item.get("if", {}).get("properties", {}).get("type", {}).get("const")
         payload_ref = item.get("then", {}).get("properties", {}).get("payload", {}).get("$ref")
         if event_type and payload_ref:
             seen[event_type] = payload_ref.rsplit("/", 1)[-1]
+
+    if not seen:
+        event_schema_dir = SCHEMA_PATH.parent / "events"
+        event_schemas = sorted(event_schema_dir.glob("*.schema.json"))
+        if not event_schemas:
+            fail(f"AG-UI split event schema directory is empty: {event_schema_dir}")
+        for path in event_schemas:
+            event_schema = json.loads(path.read_text())
+            title = event_schema.get("title")
+            if not isinstance(title, str) or not title.endswith(".v1"):
+                fail(f"{path}: title must end with .v1")
+            if event_schema.get("type") != "object":
+                fail(f"{path}: split event schema type must be object")
+            if event_schema.get("additionalProperties") is not False:
+                fail(f"{path}: split event schema must set additionalProperties false")
+            required = set(event_schema.get("required", []))
+            properties = set(event_schema.get("properties", {}))
+            missing_properties = required - properties
+            if missing_properties:
+                fail(f"{path}: required fields missing properties {sorted(missing_properties)}")
+        return
+
     missing_events = set(PAYLOAD_REQUIRED) - set(seen)
     if missing_events:
         fail(f"AG-UI schema missing event payload branches: {sorted(missing_events)}")

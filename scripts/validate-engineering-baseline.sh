@@ -48,7 +48,11 @@ print(f"sql migration pairs ok: {len(ups)} pairs")
 PY
 
 echo "== SQL external constraint keyword scan =="
-if rg -n "FOREIGN KEY|REFERENCES" db/migrations api code-plan services internal; then
+constraint_scan_paths=(db/migrations api services internal)
+if [[ -d code-plan ]]; then
+  constraint_scan_paths+=(code-plan)
+fi
+if rg -n "FOREIGN KEY|REFERENCES" "${constraint_scan_paths[@]}"; then
   echo "blocked database-level external constraint keyword found" >&2
   exit 1
 fi
@@ -93,7 +97,7 @@ if missing:
 print(f"config keys ok: agent={len(agent_keys)} business={len(business_keys)}")
 PY
 
-echo "== engineering baseline semantic alignment with code-plan =="
+echo "== engineering baseline semantic alignment with active contracts =="
 python3 - <<'PY'
 from pathlib import Path
 
@@ -121,7 +125,7 @@ required_sql = [
 ]
 for needle in required_sql:
     if needle not in business_sql:
-        fail(f"business migration missing code-plan field/constraint: {needle}")
+        fail(f"business migration missing active contract field/constraint: {needle}")
 
 required_idempotency = [
     "TenantID",
@@ -166,12 +170,12 @@ required_audit = [
 ]
 for needle in required_audit:
     if needle not in audit_src:
-        fail(f"audit implementation missing code-plan field: {needle}")
+        fail(f"audit implementation missing active contract field: {needle}")
 
 required_states = [
-    'RunStatusWaitingConfirmation = "waiting_confirmation"',
+    "RunStatusWaitingConfirmation = foundation.RunStatusWaitingConfirmation",
     'RunStatusResuming            = "resuming"',
-    'RunStatusCancelled           = "cancelled"',
+    "RunStatusCancelled           = foundation.RunStatusCancelled",
     'InterruptStatusRequired = "required"',
     'InterruptStatusAccepted = "accepted"',
     'InterruptStatusRejected = "rejected"',
