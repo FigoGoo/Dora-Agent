@@ -1,12 +1,15 @@
 SHELL := /usr/bin/env bash
 
-.PHONY: active-contract-gate development-ci-gate release-full-http-smoke release-http-service-e2e release-browser-smoke go-test frontend-test admin-frontend-test
+.PHONY: active-contract-gate development-ci-gate release-governance-gate release-full-http-smoke release-http-service-e2e release-browser-smoke go-test frontend-test admin-frontend-test
 
 active-contract-gate:
 	scripts/validate-active-contracts.sh
 
 development-ci-gate:
 	scripts/validate-development-ci-gate.sh
+
+release-governance-gate:
+	scripts/validate-release-governance.sh
 
 release-browser-smoke:
 	scripts/validate-release-browser-smoke.sh

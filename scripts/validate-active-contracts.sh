@@ -10,6 +10,7 @@ python3 tests/contract/validate_board_graph_contracts.py
 python3 tests/contract/validate_tool_asset_contracts.py
 python3 tests/contract/validate_skill_market_contracts.py
 python3 tests/contract/validate_release_e2e_gates.py
+python3 tests/contract/validate_release_governance_manifest.py
 python3 tests/contract/validate_json_schema_contracts.py
 
 echo "== OpenAPI YAML parse =="

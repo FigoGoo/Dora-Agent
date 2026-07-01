@@ -21,6 +21,7 @@ PR-1 到 PR-5 active 拆分已完成
 PR-0 开发准备与 CI Gate 已启动
 M1 Creative Guide / ChatModel Router 基础业务闭环已实现，显式 M1 run_intent 不触发 Tool、积分、Board/Graph 生成
 M1-M6 业务代码开发按 PR-1 到 PR-5 顺序受控推进
+M7 Release Governance manifest、validator 和 `make release-governance-gate` 已启动，作为真实 provider 放量前的发布治理事实源
 ```
 
 PR-1 active 范围：
@@ -65,6 +66,7 @@ Contract index
 | Contract Fixtures | `tests/fixtures/contracts/**` |
 | E2E / Fake Provider | `tests/e2e/**`、`tests/fixtures/e2e/**` |
 | Release Governance | `docs/active/technical/release-governance.md` |
+| Release Governance Manifest | `configs/release/governance.json`、`tests/contract/validate_release_governance_manifest.py` |
 
 ## 使用规则
 
@@ -73,5 +75,5 @@ Contract index
 3. 新增字段必须同步 schema、fixture 和契约索引。
 4. 写 RPC、扣费、冻结、释放、确认类能力必须有幂等键和 trace。
 5. AG-UI 事件必须支持同一 run 内 `seq` 单调递增和 `dedupe_key` 去重。
-6. 真实 provider 流量必须等待 PR-5 fake provider、service-level E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke、完整测试环境 HTTP 服务 E2E 执行与报告归档和 release gate 在测试环境通过。
-7. 本地开发默认先运行 `make active-contract-gate`；提交前运行 `make development-ci-gate`；涉及前后台联动、Skill 市场或管理端治理时运行 `make release-full-http-smoke` 和 `make release-browser-smoke`。
+6. 真实 provider 流量必须等待 PR-5 fake provider、service-level E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke、release HTTP 服务 E2E `status: passed` 报告、`make release-governance-gate` 和 release gate 在目标环境通过。
+7. 本地开发默认先运行 `make active-contract-gate`；提交前运行 `make development-ci-gate`；涉及前后台联动、Skill 市场或管理端治理时运行 `make release-full-http-smoke`、`make release-browser-smoke` 和 `make release-governance-gate`。
