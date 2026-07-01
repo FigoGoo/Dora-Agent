@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr4"
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
@@ -178,6 +179,110 @@ DROP TABLE IF EXISTS skill_versions;
 	if submittedVersion["version_status"] != "submitted" || submittedVersion["review_status"] != "submitted" {
 		t.Fatalf("unexpected creator submit response: %#v", submittedVersion)
 	}
+	reviewID := submittedVersion["review_id"].(string)
+
+	adminToken := loginAdmin(t, router, "admin@dora.local", "local-admin-change-me")
+	reviews := requestJSON(t, router, http.MethodGet, "/api/admin/marketplace/skill-reviews?status=submitted&page_size=10", adminToken, "", nil)
+	reviewItems := reviews["data"].(map[string]any)["items"].([]any)
+	if len(reviewItems) != 1 || reviewItems[0].(map[string]any)["review_id"] != reviewID {
+		t.Fatalf("unexpected admin skill reviews: %#v", reviews)
+	}
+	approved := requestJSON(t, router, http.MethodPost, "/api/admin/skill-reviews/"+reviewID+"/approve", adminToken, "idem-admin-skill-review-approve-http", map[string]any{
+		"reason": "审核通过", "request_hash": "hash-admin-skill-review-approve-http",
+	})
+	approvedData := approved["data"].(map[string]any)
+	listing := approvedData["listing"].(map[string]any)
+	if listing["status"] != "listed" {
+		t.Fatalf("unexpected approved listing: %#v", approved)
+	}
+	listingID := listing["listing_id"].(string)
+
+	buyer := accountspace.AuthContext{UserID: "user_buyer_http_001", SpaceID: "sp_buyer_http_001", LoginIdentityType: accountspace.IdentityPersonal}
+	estimate, err := marketplaceApp.EstimateSkillUsageCredits(t.Context(), marketplace.EstimateSkillUsageCreditsInput{
+		Auth: buyer, RunID: "run_refund_http_001", ListingID: listingID,
+	})
+	if err != nil {
+		t.Fatalf("estimate http refund usage: %v", err)
+	}
+	createdUsage, err := marketplaceApp.CreateSkillUsageRecord(t.Context(), marketplace.CreateSkillUsageRecordInput{
+		Auth: buyer, Meta: accountspace.RequestMeta{IdempotencyKey: "run_refund_http_001:listing:v1"},
+		RunID: "run_refund_http_001", ListingID: listingID,
+		PricingPolicyDigest: estimate.PricingPolicyDigest, SkillUsageDigest: estimate.SkillUsageDigest,
+		EstimatedCredits: estimate.EstimatedCredits,
+	})
+	if err != nil {
+		t.Fatalf("create http refund usage: %v", err)
+	}
+	if _, err := marketplaceApp.FreezeSkillUsageCredits(t.Context(), marketplace.FreezeSkillUsageCreditsInput{
+		Auth: buyer, UsageID: createdUsage.Usage.UsageID, SkillUsageDigest: estimate.SkillUsageDigest,
+	}); err != nil {
+		t.Fatalf("freeze http refund usage: %v", err)
+	}
+	committed, err := marketplaceApp.CommitSkillUsageAndSettle(t.Context(), marketplace.CommitSkillUsageAndSettleInput{Auth: buyer, UsageID: createdUsage.Usage.UsageID})
+	if err != nil {
+		t.Fatalf("commit http refund usage: %v", err)
+	}
+	beforeRefund := pr4.SkillUsageRecord{
+		SchemaVersion:       pr4.SchemaVersionSkillUsageRecord,
+		UsageID:             committed.Usage.UsageID,
+		RunID:               committed.Usage.RunID,
+		ListingID:           committed.Usage.ListingID,
+		SkillID:             committed.Usage.SkillID,
+		SkillVersion:        committed.Usage.SkillVersion,
+		PricingPolicyDigest: committed.Usage.PricingPolicyDigest,
+		SkillUsageDigest:    committed.Usage.SkillUsageDigest,
+		UsageStatus:         "refund_pending",
+		ChargeStatus:        "charged",
+		RefundStatus:        "refund_requested",
+		SettlementStatus:    "pending_hold",
+		EstimatedCredits:    committed.Usage.EstimatedCredits,
+		CreditHoldID:        committed.Usage.CreditHoldID,
+		ValueDeliveredAt:    committed.Usage.ValueDeliveredAt,
+		CreatedAt:           committed.Usage.CreatedAt,
+		UpdatedAt:           time.Now().UTC(),
+	}
+	if _, err := repo.MarkSkillUsageRefundPendingV1(t.Context(), beforeRefund); err != nil {
+		t.Fatalf("mark http refund pending: %v", err)
+	}
+	settlementID := committed.Settlement.SettlementID
+	if err := repo.DB().Create(&businesscore.PR4SkillRefundCaseRecord{
+		RefundCaseID: "refund_case_http_001",
+		UsageID:      committed.Usage.UsageID,
+		SettlementID: &settlementID,
+		Status:       "refund_requested",
+		ReasonCode:   "delivery_mismatch",
+		RefundDigest: "sha256:3030303030303030303030303030303030303030303030303030303030303030",
+		CreatedBy:    buyer.UserID,
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create http refund case: %v", err)
+	}
+	refunds := requestJSON(t, router, http.MethodGet, "/api/admin/marketplace/refund-cases?status=refund_requested&page_size=10", adminToken, "", nil)
+	refundItems := refunds["data"].(map[string]any)["items"].([]any)
+	if len(refundItems) != 1 || refundItems[0].(map[string]any)["refund_case_id"] != "refund_case_http_001" {
+		t.Fatalf("unexpected admin refund cases: %#v", refunds)
+	}
+	settlements := requestJSON(t, router, http.MethodGet, "/api/admin/marketplace/settlements?status=pending_hold&page_size=10", adminToken, "", nil)
+	if len(settlements["data"].(map[string]any)["items"].([]any)) == 0 {
+		t.Fatalf("expected admin settlements: %#v", settlements)
+	}
+	refunded := requestJSON(t, router, http.MethodPost, "/api/admin/refund-cases/refund_case_http_001/approve", adminToken, "idem-admin-refund-approve-http", map[string]any{
+		"request_hash": "hash-admin-refund-approve-http",
+	})
+	if refunded["data"].(map[string]any)["usage"].(map[string]any)["refund_status"] != "refund_reversed" {
+		t.Fatalf("unexpected approved refund: %#v", refunded)
+	}
+	adminListings := requestJSON(t, router, http.MethodGet, "/api/admin/marketplace/listings?status=listed&page_size=10", adminToken, "", nil)
+	if len(adminListings["data"].(map[string]any)["items"].([]any)) == 0 {
+		t.Fatalf("expected admin marketplace listings: %#v", adminListings)
+	}
+	suspended := requestJSON(t, router, http.MethodPost, "/api/admin/listings/"+listingID+"/suspend", adminToken, "idem-admin-listing-suspend-http", map[string]any{
+		"reason_code": "policy_risk", "request_hash": "hash-admin-listing-suspend-http",
+	})
+	if suspended["data"].(map[string]any)["listing"].(map[string]any)["status"] != "suspended" {
+		t.Fatalf("unexpected suspended listing: %#v", suspended)
+	}
 
 	listings := requestJSON(t, router, http.MethodGet, "/api/creator/listings?page_size=10", userToken, "", nil)
 	items := listings["data"].(map[string]any)["items"].([]any)
@@ -186,8 +291,11 @@ DROP TABLE IF EXISTS skill_versions;
 	}
 	analytics := requestJSON(t, router, http.MethodGet, "/api/creator/analytics/skill-usage", userToken, "", nil)
 	analyticsData := analytics["data"].(map[string]any)
-	if analyticsData["usage_count"].(float64) != 0 || analyticsData["revenue_hold_amount"].(float64) != 0 {
+	if analyticsData["usage_count"].(float64) != 1 || analyticsData["revenue_hold_amount"].(float64) != 0 || analyticsData["refund_count"].(float64) != 1 {
 		t.Fatalf("unexpected creator analytics: %#v", analyticsData)
+	}
+	if analyticsData["failure_code_summary"].(map[string]any)["delivery_mismatch"].(float64) != 1 {
+		t.Fatalf("creator analytics should expose only aggregate failure codes: %#v", analyticsData)
 	}
 	if _, leaked := analyticsData["raw_provider_payload"]; leaked {
 		t.Fatalf("creator analytics leaked provider payload: %#v", analyticsData)

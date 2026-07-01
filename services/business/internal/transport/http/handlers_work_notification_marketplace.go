@@ -24,6 +24,14 @@ func registerM5Routes(router *gin.Engine, opts RouterOptions) {
 	router.GET("/api/creator/listings", auth.userAuth(), h.listCreatorListings)
 	router.GET("/api/creator/analytics/skill-usage", auth.userAuth(), h.creatorSkillUsageAnalytics)
 
+	router.GET("/api/admin/marketplace/skill-reviews", auth.adminAuth(false), h.adminListSkillReviews)
+	router.GET("/api/admin/marketplace/listings", auth.adminAuth(false), h.adminListMarketplaceListings)
+	router.GET("/api/admin/marketplace/refund-cases", auth.adminAuth(false), h.adminListRefundCases)
+	router.GET("/api/admin/marketplace/settlements", auth.adminAuth(false), h.adminListSettlements)
+	router.POST("/api/admin/skill-reviews/:review_id/approve", auth.adminAuth(false), requireIdempotency(), h.adminApproveSkillReview)
+	router.POST("/api/admin/listings/:listing_id/suspend", auth.adminAuth(false), requireIdempotency(), h.adminSuspendMarketplaceListing)
+	router.POST("/api/admin/refund-cases/:refund_case_id/approve", auth.adminAuth(false), requireIdempotency(), h.adminApproveSkillUsageRefund)
+
 	router.GET("/api/public/home", h.publicHome)
 	router.GET("/api/public/works", h.listPublicWorks)
 	router.GET("/api/public/works/:public_work_id", h.getPublicWork)
@@ -195,6 +203,122 @@ func (h m5Handler) creatorSkillUsageAnalytics(c *gin.Context) {
 		return
 	}
 	out, err := h.marketplace.GetCreatorSkillUsageAnalytics(c.Request.Context(), userAuth(c))
+	respond(c, out, err)
+}
+
+func (h m5Handler) adminListSkillReviews(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.marketplace.ListAdminSkillReviews(c.Request.Context(), marketplace.ListAdminSkillReviewsInput{
+		AdminID: adminAuth(c).AdminID,
+		Status:  c.Query("status"),
+		Keyword: c.Query("keyword"),
+		Limit:   adminPageLimit(c, 10),
+		Offset:  adminPageOffset(c),
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) adminApproveSkillReview(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		Reason      string `json:"reason"`
+		RequestHash string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	out, err := h.marketplace.ApproveSkillReview(c.Request.Context(), marketplace.ApproveSkillReviewInput{
+		AdminID:  adminAuth(c).AdminID,
+		ReviewID: c.Param("review_id"),
+		Reason:   req.Reason,
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) adminListMarketplaceListings(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.marketplace.ListAdminMarketplaceListings(c.Request.Context(), marketplace.ListAdminMarketplaceListingsInput{
+		AdminID: adminAuth(c).AdminID,
+		Status:  c.Query("status"),
+		Keyword: c.Query("keyword"),
+		Limit:   adminPageLimit(c, 10),
+		Offset:  adminPageOffset(c),
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) adminSuspendMarketplaceListing(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		ReasonCode  string `json:"reason_code"`
+		RequestHash string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	out, err := h.marketplace.SuspendMarketplaceListing(c.Request.Context(), marketplace.SuspendMarketplaceListingInput{
+		AdminID:    adminAuth(c).AdminID,
+		ListingID:  c.Param("listing_id"),
+		ReasonCode: req.ReasonCode,
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) adminListRefundCases(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.marketplace.ListAdminRefundCases(c.Request.Context(), marketplace.ListAdminRefundCasesInput{
+		AdminID: adminAuth(c).AdminID,
+		Status:  c.Query("status"),
+		Limit:   adminPageLimit(c, 10),
+		Offset:  adminPageOffset(c),
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) adminApproveSkillUsageRefund(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		RequestHash string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	out, err := h.marketplace.ApproveSkillUsageRefund(c.Request.Context(), marketplace.ApproveSkillUsageRefundInput{
+		AdminID:      adminAuth(c).AdminID,
+		RefundCaseID: c.Param("refund_case_id"),
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) adminListSettlements(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.marketplace.ListAdminSettlements(c.Request.Context(), marketplace.ListAdminSettlementsInput{
+		AdminID: adminAuth(c).AdminID,
+		Status:  c.Query("status"),
+		Limit:   adminPageLimit(c, 10),
+		Offset:  adminPageOffset(c),
+	})
 	respond(c, out, err)
 }
 

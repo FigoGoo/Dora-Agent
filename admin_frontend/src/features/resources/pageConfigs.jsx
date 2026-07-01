@@ -78,17 +78,47 @@ const publicWorkStatusOptions = [
   { label: '已取消', value: 'cancelled' }
 ];
 
+const marketplaceReviewStatusOptions = [
+  { label: '待审核', value: 'submitted' },
+  { label: '审核中', value: 'reviewing' },
+  { label: '已通过', value: 'approved' }
+];
+
+const marketplaceListingStatusOptions = [
+  { label: '上架中', value: 'listed' },
+  { label: '已暂停', value: 'suspended' },
+  { label: '未上架', value: 'not_listed' }
+];
+
+const refundCaseStatusOptions = [
+  { label: '退款申请', value: 'refund_requested' },
+  { label: '退款审核中', value: 'refund_reviewing' },
+  { label: '已反转', value: 'refund_reversed' },
+  { label: '已拒绝', value: 'refund_rejected' }
+];
+
+const settlementStatusOptions = [
+  { label: '待 hold', value: 'pending_hold' },
+  { label: '可结算', value: 'eligible' },
+  { label: '结算中', value: 'settling' },
+  { label: '已结算', value: 'settled' },
+  { label: '已反转', value: 'reversed' },
+  { label: '已冻结', value: 'frozen' },
+  { label: '失败', value: 'failed' }
+];
+
 const toolRowKey = (row) => row.tool_key || [row.tool_name, row.tool_type].filter(Boolean).join(':');
-const reviewRowKey = (row) => row.review_id || row.version_id;
+const reviewRowKey = (row) => row.review_id || row.skill_version_id || row.version_id;
 const optionLabel = (options, value) => options.find((option) => option.value === value)?.label || value || '-';
 const text = (key, title = key) => ({ key, title });
-const statusLabel = (value) => optionLabel([...statusOptions, ...publicWorkStatusOptions], value);
+const statusLabel = (value) =>
+  optionLabel([...statusOptions, ...publicWorkStatusOptions, ...marketplaceReviewStatusOptions, ...marketplaceListingStatusOptions, ...refundCaseStatusOptions, ...settlementStatusOptions], value);
 const statusTone = (value) =>
-  ['active', 'published', 'passed'].includes(value)
+  ['active', 'published', 'passed', 'approved', 'listed', 'eligible', 'settled'].includes(value)
     ? 'success'
-    : ['disabled', 'deprecated', 'rejected', 'failed', 'taken_down', 'cancelled'].includes(value)
+    : ['disabled', 'deprecated', 'rejected', 'failed', 'taken_down', 'cancelled', 'suspended', 'refund_rejected', 'reversed'].includes(value)
       ? 'danger'
-      : ['submitted', 'pending_review', 'timeout', 'blocked'].includes(value)
+      : ['submitted', 'pending_review', 'timeout', 'blocked', 'reviewing', 'refund_requested', 'refund_reviewing', 'pending_hold', 'settling', 'frozen'].includes(value)
         ? 'warning'
         : 'neutral';
 const statusColumn = { key: 'status', title: '状态', width: 120, render: (row) => <Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge> };
@@ -161,6 +191,20 @@ function ModelProviderRefCell(row) {
       <span className="admin-table-cell-meta">{row.provider_id}</span>
     </div>
   );
+}
+
+function MarketplaceSkillCell(row) {
+  return (
+    <div className="admin-table-cell-stack">
+      <span className="admin-table-cell-main">{row.skill_name || row.name || row.skill_id}</span>
+      <span className="admin-table-cell-meta">{[row.skill_version || row.version, row.skill_id].filter(Boolean).join(' · ')}</span>
+      {row.skill_description ? <span className="admin-table-cell-desc">{row.skill_description}</span> : null}
+    </div>
+  );
+}
+
+function MarketplaceStatusBadge({ value }) {
+  return <Badge tone={statusTone(value)}>{statusLabel(value)}</Badge>;
 }
 
 function ToolExecutionPolicyCell(row) {
@@ -431,49 +475,127 @@ export const pageConfigs = {
     ]
   },
   'skills/reviews': {
-    key: 'skill-reviews',
+    key: 'marketplace-skill-reviews',
     title: 'Skill 审核',
-    description: '审核用户或企业提交的 Skill，审核时不得篡改创建者内容。',
-    listPath: '/api/admin/skills/reviews',
+    description: '审核创作者提交的市场 Skill，审核通过后发布版本并生成 marketplace listing。',
+    listPath: '/api/admin/marketplace/skill-reviews',
     rowId: reviewRowKey,
-    emptyText: '暂无待审核 Skill',
+    emptyText: '暂无市场 Skill 审核单',
+    statusOptions: marketplaceReviewStatusOptions,
     columns: [
-      { key: 'skill_name', title: 'Skill', render: (row) => row.skill_name || row.skill_id || '-' },
-      { key: 'creator_id', title: '创建者' },
-      statusColumn,
-      { key: 'submitted_at', title: '提交时间', render: (row) => formatDateTime(row.submitted_at || row.created_at) }
+      { key: 'skill_name', title: 'Skill', render: MarketplaceSkillCell },
+      { key: 'creator_user_id', title: '创建者', width: 180 },
+      { key: 'status', title: '审核状态', width: 120, render: (row) => <MarketplaceStatusBadge value={row.status} /> },
+      { key: 'version_status', title: '版本状态', width: 120, render: (row) => <MarketplaceStatusBadge value={row.version_status} /> },
+      { key: 'usage_credits', title: '使用费', width: 100, render: (row) => formatPoints(row.usage_credits) },
+      { key: 'listing_status', title: 'Listing', width: 120, render: (row) => <MarketplaceStatusBadge value={row.listing_status} /> },
+      { key: 'submitted_at', title: '提交时间', width: 180, render: (row) => formatDateTime(row.submitted_at || row.created_at) }
     ],
+    detail: true,
     actions: [
-	      {
-	        label: '通过',
-	        requireReason: false,
-	        confirmPath: (row) => `/api/admin/skills/reviews/${reviewRowKey(row)}/confirm`,
-	        objectLabel: (row) => `Skill ${row.skill_name || row.skill_id || reviewRowKey(row)}`,
-	        impactItems: ['审核通过后将发布该 Skill 版本。', '操作会写入 Skill 审核记录。'],
-	        body: ({ reason }) => ({ decision: 'approve', reason }),
-	        reason: ({ reason }) => reason
-	      },
-	      {
-	        label: '拒绝',
-	        tone: 'danger',
-	        method: 'POST',
-	        path: (row) => `/api/admin/skills/reviews/${reviewRowKey(row)}/confirm`,
-	        fields: [
-	          {
-	            name: 'reason',
-	            label: '拒绝原因',
-	            group: '审核意见',
-	            groupHint: '拒绝原因会写入审核记录，用于创建者回看和修改。',
-	            groupLayout: 'single',
-	            textarea: true,
-	            rows: 4,
-	            required: true
-	          }
-	        ],
-	        body: ({ values }) => ({ decision: 'reject', reason: values.reason }),
-	        reason: ({ values }) => values.reason
-	      }
+      {
+        label: '通过',
+        requireReason: false,
+        visible: (row) => ['submitted', 'reviewing'].includes(row.status),
+        confirmPath: (row) => `/api/admin/skill-reviews/${reviewRowKey(row)}/approve`,
+        objectLabel: (row) => `Skill ${row.skill_name || row.skill_id || reviewRowKey(row)}`,
+        impactItems: ['审核通过后会发布该 Skill 版本。', '系统会创建或更新 marketplace listing。', '操作会写入 Skill 审核记录。'],
+        body: ({ reason }) => ({ reason }),
+        successNotice: () => 'Skill 已审核通过并发布'
+      }
     ]
+  },
+  'skills/marketplace': {
+    key: 'marketplace-listings',
+    title: 'Skill 市场',
+    description: '治理已发布市场 Skill listing；暂停后新安装会被拦截，历史 run 继续按快照恢复。',
+    listPath: '/api/admin/marketplace/listings',
+    rowId: 'listing_id',
+    emptyText: '暂无市场 listing',
+    statusOptions: marketplaceListingStatusOptions,
+    columns: [
+      { key: 'skill_name', title: 'Skill', render: MarketplaceSkillCell },
+      { key: 'creator_user_id', title: '创建者', width: 180 },
+      { key: 'status', title: 'Listing 状态', width: 130, render: (row) => <MarketplaceStatusBadge value={row.status} /> },
+      { key: 'usage_credits', title: '使用费', width: 100, render: (row) => formatPoints(row.usage_credits) },
+      { key: 'value_delivered_stage', title: '交付阶段', width: 140 },
+      { key: 'listed_at', title: '上架时间', width: 180, render: (row) => formatDateTime(row.listed_at || row.created_at) }
+    ],
+    detail: true,
+    actions: [
+      {
+        label: '暂停',
+        tone: 'danger',
+        method: 'POST',
+        visible: (row) => row.status !== 'suspended',
+        path: (row) => `/api/admin/listings/${row.listing_id}/suspend`,
+        fields: [
+          {
+            name: 'reason_code',
+            label: '暂停原因码',
+            required: true,
+            group: '治理原因',
+            groupHint: '原因码会进入治理记录，建议使用 policy_risk、quality_issue 或 abuse_report 等可追溯值。',
+            placeholder: 'policy_risk'
+          }
+        ],
+        body: ({ values }) => ({ reason_code: values.reason_code }),
+        successNotice: () => 'Listing 已暂停'
+      }
+    ]
+  },
+  'skills/refunds': {
+    key: 'skill-refunds',
+    title: 'Skill 退款',
+    description: '审核 Skill 使用费退款仲裁；通过后反转 usage charge 并把 settlement 置为 reversed。',
+    listPath: '/api/admin/marketplace/refund-cases',
+    rowId: 'refund_case_id',
+    emptyText: '暂无退款仲裁单',
+    keywordFilter: false,
+    statusOptions: refundCaseStatusOptions,
+    columns: [
+      { key: 'refund_case_id', title: '退款单', width: 220 },
+      { key: 'skill_name', title: 'Skill', render: MarketplaceSkillCell },
+      { key: 'status', title: '状态', width: 130, render: (row) => <MarketplaceStatusBadge value={row.status} /> },
+      { key: 'reason_code', title: '原因码', width: 150 },
+      { key: 'estimated_credits', title: '用户积分', width: 100, render: (row) => formatPoints(row.estimated_credits) },
+      { key: 'creator_credits', title: '创作者 hold', width: 120, render: (row) => formatPoints(row.creator_credits) },
+      { key: 'updated_at', title: '更新时间', width: 180, render: (row) => formatDateTime(row.updated_at) }
+    ],
+    detail: true,
+    actions: [
+      {
+        label: '通过退款',
+        tone: 'danger',
+        requireReason: false,
+        visible: (row) => ['refund_requested', 'refund_reviewing'].includes(row.status),
+        confirmPath: (row) => `/api/admin/refund-cases/${row.refund_case_id}/approve`,
+        objectLabel: (row) => `退款单 ${row.refund_case_id}`,
+        impactItems: ['usage 将进入 refunded / released / refund_reversed。', '对应 settlement 将置为 reversed。', '该操作会影响创作者 hold 金额。'],
+        body: () => ({}),
+        successNotice: () => '退款已通过并完成结算反转'
+      }
+    ]
+  },
+  'skills/settlements': {
+    key: 'skill-settlements',
+    title: 'Skill 结算',
+    description: '查看 Skill 使用费 settlement hold、平台分成、创作者收益和反转状态；当前阶段不做真实出账。',
+    listPath: '/api/admin/marketplace/settlements',
+    rowId: 'settlement_id',
+    emptyText: '暂无结算记录',
+    keywordFilter: false,
+    statusOptions: settlementStatusOptions,
+    columns: [
+      { key: 'settlement_id', title: '结算单', width: 220 },
+      { key: 'skill_name', title: 'Skill', render: MarketplaceSkillCell },
+      { key: 'status', title: '状态', width: 130, render: (row) => <MarketplaceStatusBadge value={row.status} /> },
+      { key: 'gross_credits', title: '总额', width: 90, render: (row) => formatPoints(row.gross_credits) },
+      { key: 'platform_fee_credits', title: '平台分成', width: 110, render: (row) => formatPoints(row.platform_fee_credits) },
+      { key: 'creator_credits', title: '创作者收益', width: 120, render: (row) => formatPoints(row.creator_credits) },
+      { key: 'hold_until', title: 'Hold 到期', width: 180, render: (row) => formatDateTime(row.hold_until) }
+    ],
+    detail: true
   },
   'models/providers': {
     key: 'model-providers',

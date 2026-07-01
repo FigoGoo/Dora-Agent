@@ -33,13 +33,15 @@ describe('admin resource page configs', () => {
       reason: '例行检查'
     });
 
-    const review = { version_id: 'skv_1' };
-    expect(pageConfigs['skills/reviews'].rowId(review)).toBe('skv_1');
-    expect(pageConfigs['skills/reviews'].actions[1].path(review)).toBe('/api/admin/skills/reviews/skv_1/confirm');
-    expect(pageConfigs['skills/reviews'].actions[1].body({ values: { reason: '内容不完整' } })).toEqual({
-      decision: 'reject',
-      reason: '内容不完整'
+    const review = { review_id: 'review_1', skill_version_id: 'skv_1' };
+    expect(pageConfigs['skills/reviews'].listPath).toBe('/api/admin/marketplace/skill-reviews');
+    expect(pageConfigs['skills/reviews'].rowId(review)).toBe('review_1');
+    expect(pageConfigs['skills/reviews'].actions[0].confirmPath(review)).toBe('/api/admin/skill-reviews/review_1/approve');
+    expect(pageConfigs['skills/reviews'].actions[0].body({ reason: '内容通过' })).toEqual({
+      reason: '内容通过'
     });
+    expect(pageConfigs['skills/marketplace'].actions[0].path({ listing_id: 'listing_1' })).toBe('/api/admin/listings/listing_1/suspend');
+    expect(pageConfigs['skills/refunds'].actions[0].confirmPath({ refund_case_id: 'refund_1' })).toBe('/api/admin/refund-cases/refund_1/approve');
   });
 
   test('describes tool management as a complete policy and pricing surface', () => {

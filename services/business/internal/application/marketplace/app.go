@@ -273,6 +273,135 @@ type CreatorSkillUsageAnalyticsOutput struct {
 	FailureCodeSummary map[string]int `json:"failure_code_summary"`
 }
 
+type AdminPage[T any] struct {
+	Items  []T   `json:"items"`
+	Limit  int   `json:"limit"`
+	Offset int   `json:"offset"`
+	Total  int64 `json:"total"`
+}
+
+type AdminSkillReviewDTO struct {
+	ReviewID            string     `json:"review_id"`
+	SkillID             string     `json:"skill_id"`
+	SkillVersionID      string     `json:"skill_version_id"`
+	SkillVersion        string     `json:"skill_version"`
+	SkillName           string     `json:"skill_name"`
+	SkillDescription    string     `json:"skill_description"`
+	CreatorUserID       string     `json:"creator_user_id"`
+	Status              string     `json:"status"`
+	VersionStatus       string     `json:"version_status"`
+	RuntimeSpecDigest   string     `json:"runtime_spec_digest"`
+	PricingPolicyDigest string     `json:"pricing_policy_digest"`
+	PricingModel        string     `json:"pricing_model"`
+	UsageCredits        int        `json:"usage_credits"`
+	ValueDeliveredStage string     `json:"value_delivered_stage"`
+	ListingID           string     `json:"listing_id,omitempty"`
+	ListingStatus       string     `json:"listing_status"`
+	ReviewerID          string     `json:"reviewer_id,omitempty"`
+	DecisionReason      string     `json:"decision_reason,omitempty"`
+	SubmittedAt         *time.Time `json:"submitted_at,omitempty"`
+	PublishedAt         *time.Time `json:"published_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+}
+
+type AdminRefundCaseDTO struct {
+	RefundCaseID     string    `json:"refund_case_id"`
+	UsageID          string    `json:"usage_id"`
+	SettlementID     string    `json:"settlement_id,omitempty"`
+	Status           string    `json:"status"`
+	ReasonCode       string    `json:"reason_code"`
+	CreatedBy        string    `json:"created_by"`
+	SkillID          string    `json:"skill_id"`
+	SkillName        string    `json:"skill_name"`
+	ListingID        string    `json:"listing_id"`
+	CreatorUserID    string    `json:"creator_user_id"`
+	UsageStatus      string    `json:"usage_status"`
+	ChargeStatus     string    `json:"charge_status"`
+	RefundStatus     string    `json:"refund_status"`
+	SettlementStatus string    `json:"settlement_status"`
+	EstimatedCredits int       `json:"estimated_credits"`
+	CreatorCredits   int       `json:"creator_credits"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type AdminSettlementDTO struct {
+	SettlementID       string    `json:"settlement_id"`
+	UsageID            string    `json:"usage_id"`
+	SkillID            string    `json:"skill_id"`
+	SkillName          string    `json:"skill_name"`
+	CreatorUserID      string    `json:"creator_user_id"`
+	Status             string    `json:"status"`
+	GrossCredits       int       `json:"gross_credits"`
+	PlatformFeeCredits int       `json:"platform_fee_credits"`
+	CreatorCredits     int       `json:"creator_credits"`
+	HoldUntil          time.Time `json:"hold_until"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type ListAdminSkillReviewsInput struct {
+	AdminID string
+	Status  string
+	Keyword string
+	Limit   int
+	Offset  int
+}
+
+type ApproveSkillReviewInput struct {
+	AdminID  string
+	ReviewID string
+	Reason   string
+}
+
+type ApproveSkillReviewOutput struct {
+	SkillVersion AdminSkillReviewDTO   `json:"skill_version"`
+	Listing      MarketplaceListingDTO `json:"listing"`
+}
+
+type ListAdminMarketplaceListingsInput struct {
+	AdminID string
+	Status  string
+	Keyword string
+	Limit   int
+	Offset  int
+}
+
+type SuspendMarketplaceListingInput struct {
+	AdminID    string
+	ListingID  string
+	ReasonCode string
+}
+
+type SuspendMarketplaceListingOutput struct {
+	Listing MarketplaceListingDTO `json:"listing"`
+}
+
+type ListAdminRefundCasesInput struct {
+	AdminID string
+	Status  string
+	Limit   int
+	Offset  int
+}
+
+type ApproveSkillUsageRefundInput struct {
+	AdminID      string
+	RefundCaseID string
+}
+
+type ApproveSkillUsageRefundOutput struct {
+	Usage      SkillUsageRecordDTO `json:"usage"`
+	Settlement SkillSettlementDTO  `json:"settlement"`
+}
+
+type ListAdminSettlementsInput struct {
+	AdminID string
+	Status  string
+	Limit   int
+	Offset  int
+}
+
 type listingRow struct {
 	ListingID           string     `gorm:"column:listing_id"`
 	SkillID             string     `gorm:"column:skill_id"`
@@ -290,6 +419,67 @@ type listingRow struct {
 	ListedAt            *time.Time `gorm:"column:listed_at"`
 	CreatedAt           time.Time  `gorm:"column:created_at"`
 	UpdatedAt           time.Time  `gorm:"column:updated_at"`
+}
+
+type adminSkillReviewRow struct {
+	ReviewID            string     `gorm:"column:review_id"`
+	SkillID             string     `gorm:"column:skill_id"`
+	SkillVersionID      string     `gorm:"column:skill_version_id"`
+	SkillVersion        string     `gorm:"column:skill_version"`
+	SkillName           string     `gorm:"column:skill_name"`
+	SkillDescription    string     `gorm:"column:skill_description"`
+	CreatorUserID       string     `gorm:"column:creator_user_id"`
+	Status              string     `gorm:"column:status"`
+	VersionStatus       string     `gorm:"column:version_status"`
+	RuntimeSpecDigest   string     `gorm:"column:runtime_spec_digest"`
+	PricingPolicyDigest string     `gorm:"column:pricing_policy_digest"`
+	PricingModel        string     `gorm:"column:pricing_model"`
+	UsageCredits        int        `gorm:"column:usage_credits"`
+	ValueDeliveredStage string     `gorm:"column:value_delivered_stage"`
+	ListingID           string     `gorm:"column:listing_id"`
+	ListingStatus       string     `gorm:"column:listing_status"`
+	ReviewerID          string     `gorm:"column:reviewer_id"`
+	DecisionReason      string     `gorm:"column:decision_reason"`
+	SubmittedAt         *time.Time `gorm:"column:submitted_at"`
+	PublishedAt         *time.Time `gorm:"column:published_at"`
+	CreatedAt           time.Time  `gorm:"column:created_at"`
+	UpdatedAt           time.Time  `gorm:"column:updated_at"`
+}
+
+type adminRefundCaseRow struct {
+	RefundCaseID     string    `gorm:"column:refund_case_id"`
+	UsageID          string    `gorm:"column:usage_id"`
+	SettlementID     string    `gorm:"column:settlement_id"`
+	Status           string    `gorm:"column:status"`
+	ReasonCode       string    `gorm:"column:reason_code"`
+	CreatedBy        string    `gorm:"column:created_by"`
+	SkillID          string    `gorm:"column:skill_id"`
+	SkillName        string    `gorm:"column:skill_name"`
+	ListingID        string    `gorm:"column:listing_id"`
+	CreatorUserID    string    `gorm:"column:creator_user_id"`
+	UsageStatus      string    `gorm:"column:usage_status"`
+	ChargeStatus     string    `gorm:"column:charge_status"`
+	RefundStatus     string    `gorm:"column:refund_status"`
+	SettlementStatus string    `gorm:"column:settlement_status"`
+	EstimatedCredits int       `gorm:"column:estimated_credits"`
+	CreatorCredits   int       `gorm:"column:creator_credits"`
+	CreatedAt        time.Time `gorm:"column:created_at"`
+	UpdatedAt        time.Time `gorm:"column:updated_at"`
+}
+
+type adminSettlementRow struct {
+	SettlementID       string    `gorm:"column:settlement_id"`
+	UsageID            string    `gorm:"column:usage_id"`
+	SkillID            string    `gorm:"column:skill_id"`
+	SkillName          string    `gorm:"column:skill_name"`
+	CreatorUserID      string    `gorm:"column:creator_user_id"`
+	Status             string    `gorm:"column:status"`
+	GrossCredits       int       `gorm:"column:gross_credits"`
+	PlatformFeeCredits int       `gorm:"column:platform_fee_credits"`
+	CreatorCredits     int       `gorm:"column:creator_credits"`
+	HoldUntil          time.Time `gorm:"column:hold_until"`
+	CreatedAt          time.Time `gorm:"column:created_at"`
+	UpdatedAt          time.Time `gorm:"column:updated_at"`
 }
 
 type installationRow struct {
@@ -570,6 +760,341 @@ func (a *App) GetCreatorSkillUsageAnalytics(ctx context.Context, auth AuthContex
 		RefundCount:        refundCount,
 		FailureCodeSummary: summary,
 	}, nil
+}
+
+func (a *App) ListAdminSkillReviews(ctx context.Context, in ListAdminSkillReviewsInput) (AdminPage[AdminSkillReviewDTO], error) {
+	if err := requireAdminID(in.AdminID); err != nil {
+		return AdminPage[AdminSkillReviewDTO]{}, err
+	}
+	limit := normalizeLimit(in.Limit)
+	offset := nonNegativeOffset(in.Offset)
+	var total int64
+	if err := a.adminSkillReviewBaseQuery(ctx, in.Status, in.Keyword).Count(&total).Error; err != nil {
+		return AdminPage[AdminSkillReviewDTO]{}, err
+	}
+	var rows []adminSkillReviewRow
+	if err := a.adminSkillReviewQuery(ctx, in.Status, in.Keyword).
+		Order("sr.updated_at DESC, sr.review_id ASC").
+		Limit(limit).
+		Offset(offset).
+		Scan(&rows).Error; err != nil {
+		return AdminPage[AdminSkillReviewDTO]{}, err
+	}
+	items := make([]AdminSkillReviewDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, adminSkillReviewDTO(row))
+	}
+	return AdminPage[AdminSkillReviewDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+}
+
+func (a *App) ApproveSkillReview(ctx context.Context, in ApproveSkillReviewInput) (ApproveSkillReviewOutput, error) {
+	adminID := strings.TrimSpace(in.AdminID)
+	if err := requireAdminID(adminID); err != nil {
+		return ApproveSkillReviewOutput{}, err
+	}
+	reviewID := strings.TrimSpace(in.ReviewID)
+	if reviewID == "" {
+		return ApproveSkillReviewOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "review_id is required")
+	}
+	now := a.now().UTC()
+	var listingID string
+	if err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var review businesscore.PR4SkillReviewRecord
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("review_id = ?", reviewID).
+			First(&review).Error; err != nil {
+			return err
+		}
+		if !isAllowed(review.Status, []string{"submitted", "reviewing", "approved"}) {
+			return bizerrors.New(bizerrors.CodeStateConflict, "skill review cannot be approved from current status")
+		}
+		var skillVersion businesscore.PR4SkillVersionRecord
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("skill_version_id = ?", review.SkillVersionID).
+			First(&skillVersion).Error; err != nil {
+			return err
+		}
+		if !isAllowed(skillVersion.Status, []string{"submitted", "reviewing", "published"}) {
+			return bizerrors.New(bizerrors.CodeStateConflict, "skill version cannot be published from current status")
+		}
+		var pkg businesscore.PR4SkillPackageRecord
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("skill_id = ?", review.SkillID).
+			First(&pkg).Error; err != nil {
+			return err
+		}
+		var policy businesscore.PR4SkillPricingPolicyRecord
+		if err := tx.Where("skill_id = ? AND skill_version = ? AND pricing_policy_digest = ?", review.SkillID, skillVersion.Version, skillVersion.PricingPolicyDigest).
+			First(&policy).Error; err != nil {
+			return err
+		}
+
+		reason := strings.TrimSpace(in.Reason)
+		currentVersion := skillVersion.Version
+		publishedAt := now
+		if skillVersion.PublishedAt != nil {
+			publishedAt = skillVersion.PublishedAt.UTC()
+		}
+		listedAt := now
+		listingID = prefixedStableID("listing_", review.SkillID, review.SkillVersionID)
+		listing := pr4.MarketplaceListing{
+			SchemaVersion:       pr4.SchemaVersionMarketplaceListing,
+			ListingID:           listingID,
+			SkillID:             review.SkillID,
+			SkillVersionID:      review.SkillVersionID,
+			Status:              "listed",
+			PricingPolicyDigest: skillVersion.PricingPolicyDigest,
+			PublishedBy:         adminID,
+			ListedAt:            &listedAt,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		}
+		if err := pr4.ValidateCreatorPublishFlow(
+			pr4.SkillPackage{
+				SchemaVersion:  pr4.SchemaVersionSkillPackage,
+				SkillID:        pkg.SkillID,
+				CreatorUserID:  pkg.CreatorUserID,
+				Name:           pkg.Name,
+				Description:    pkg.Description,
+				Visibility:     pr4.SkillVisibilityPublic,
+				CurrentVersion: &currentVersion,
+				CreatedAt:      pkg.CreatedAt.UTC(),
+				UpdatedAt:      now,
+			},
+			pr4.SkillVersion{
+				SchemaVersion:       pr4.SchemaVersionSkillVersion,
+				SkillVersionID:      skillVersion.SkillVersionID,
+				SkillID:             skillVersion.SkillID,
+				Version:             skillVersion.Version,
+				Status:              "published",
+				RuntimeSpecDigest:   skillVersion.RuntimeSpecDigest,
+				PricingPolicyDigest: skillVersion.PricingPolicyDigest,
+				SubmittedAt:         utcTimePointer(skillVersion.SubmittedAt),
+				PublishedAt:         &publishedAt,
+				CreatedAt:           skillVersion.CreatedAt.UTC(),
+				UpdatedAt:           now,
+			},
+			pr4.SkillPricingPolicy{
+				SchemaVersion:       pr4.SchemaVersionSkillPricingPolicy,
+				PricingPolicyID:     policy.PricingPolicyID,
+				SkillID:             policy.SkillID,
+				SkillVersion:        policy.SkillVersion,
+				PricingModel:        policy.PricingModel,
+				UsageCredits:        policy.UsageCredits,
+				ValueDeliveredStage: policy.ValueDeliveredStage,
+				PricingPolicyDigest: policy.PricingPolicyDigest,
+				CreatedAt:           policy.CreatedAt.UTC(),
+			},
+			listing,
+		); err != nil {
+			return err
+		}
+
+		if err := tx.Model(&businesscore.PR4SkillReviewRecord{}).
+			Where("review_id = ?", reviewID).
+			Updates(map[string]any{
+				"status":          "approved",
+				"reviewer_id":     adminID,
+				"decision_reason": nullableString(reason),
+				"updated_at":      now,
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&businesscore.PR4SkillVersionRecord{}).
+			Where("skill_version_id = ?", review.SkillVersionID).
+			Updates(map[string]any{"status": "published", "published_at": publishedAt, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&businesscore.PR4SkillPackageRecord{}).
+			Where("skill_id = ?", review.SkillID).
+			Updates(map[string]any{"visibility": pr4.SkillVisibilityPublic, "current_version": currentVersion, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		record := marketplaceListingRecordFromContract(listing)
+		return tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "listing_id"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"status":                "listed",
+				"pricing_policy_digest": listing.PricingPolicyDigest,
+				"published_by":          adminID,
+				"listed_at":             listedAt,
+				"updated_at":            now,
+			}),
+		}).Create(record).Error
+	}); err != nil {
+		return ApproveSkillReviewOutput{}, mapStoreError(err)
+	}
+	review, err := a.getAdminSkillReview(ctx, reviewID)
+	if err != nil {
+		return ApproveSkillReviewOutput{}, err
+	}
+	listing, err := a.getListingRow(ctx, listingID, false)
+	if err != nil {
+		return ApproveSkillReviewOutput{}, err
+	}
+	return ApproveSkillReviewOutput{SkillVersion: review, Listing: listingDTO(listing)}, nil
+}
+
+func (a *App) ListAdminMarketplaceListings(ctx context.Context, in ListAdminMarketplaceListingsInput) (AdminPage[MarketplaceListingDTO], error) {
+	if err := requireAdminID(in.AdminID); err != nil {
+		return AdminPage[MarketplaceListingDTO]{}, err
+	}
+	limit := normalizeLimit(in.Limit)
+	offset := nonNegativeOffset(in.Offset)
+	query := a.listingQuery(ctx)
+	if status := strings.TrimSpace(in.Status); status != "" {
+		query = query.Where("ml.status = ?", status)
+	}
+	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("sp.name ILIKE ? OR sp.description ILIKE ? OR ml.listing_id ILIKE ?", like, like, like)
+	}
+	var rows []listingRow
+	if err := query.Order("ml.updated_at DESC, ml.listing_id ASC").Limit(limit).Offset(offset).Scan(&rows).Error; err != nil {
+		return AdminPage[MarketplaceListingDTO]{}, err
+	}
+	items := make([]MarketplaceListingDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, listingDTO(row))
+	}
+	return AdminPage[MarketplaceListingDTO]{Items: items, Limit: limit, Offset: offset, Total: int64(offset + len(items))}, nil
+}
+
+func (a *App) SuspendMarketplaceListing(ctx context.Context, in SuspendMarketplaceListingInput) (SuspendMarketplaceListingOutput, error) {
+	if err := requireAdminID(in.AdminID); err != nil {
+		return SuspendMarketplaceListingOutput{}, err
+	}
+	if strings.TrimSpace(in.ReasonCode) == "" {
+		return SuspendMarketplaceListingOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "reason_code is required")
+	}
+	suspended, err := a.repo.SuspendMarketplaceListingV1(ctx, in.ListingID, a.now().UTC())
+	if err != nil {
+		return SuspendMarketplaceListingOutput{}, mapStoreError(err)
+	}
+	row, err := a.getListingRow(ctx, suspended.ListingID, false)
+	if err != nil {
+		return SuspendMarketplaceListingOutput{}, err
+	}
+	return SuspendMarketplaceListingOutput{Listing: listingDTO(row)}, nil
+}
+
+func (a *App) ListAdminRefundCases(ctx context.Context, in ListAdminRefundCasesInput) (AdminPage[AdminRefundCaseDTO], error) {
+	if err := requireAdminID(in.AdminID); err != nil {
+		return AdminPage[AdminRefundCaseDTO]{}, err
+	}
+	limit := normalizeLimit(in.Limit)
+	offset := nonNegativeOffset(in.Offset)
+	query := a.adminRefundCaseQuery(ctx)
+	if status := strings.TrimSpace(in.Status); status != "" {
+		query = query.Where("rc.status = ?", status)
+	}
+	var rows []adminRefundCaseRow
+	if err := query.Order("rc.updated_at DESC, rc.refund_case_id ASC").Limit(limit).Offset(offset).Scan(&rows).Error; err != nil {
+		return AdminPage[AdminRefundCaseDTO]{}, err
+	}
+	items := make([]AdminRefundCaseDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, adminRefundCaseDTO(row))
+	}
+	return AdminPage[AdminRefundCaseDTO]{Items: items, Limit: limit, Offset: offset, Total: int64(offset + len(items))}, nil
+}
+
+func (a *App) ApproveSkillUsageRefund(ctx context.Context, in ApproveSkillUsageRefundInput) (ApproveSkillUsageRefundOutput, error) {
+	if err := requireAdminID(in.AdminID); err != nil {
+		return ApproveSkillUsageRefundOutput{}, err
+	}
+	refundCaseID := strings.TrimSpace(in.RefundCaseID)
+	if refundCaseID == "" {
+		return ApproveSkillUsageRefundOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "refund_case_id is required")
+	}
+	now := a.now().UTC()
+	var usage pr4.SkillUsageRecord
+	var settlement pr4.SkillSettlement
+	if err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var refundCase businesscore.PR4SkillRefundCaseRecord
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("refund_case_id = ?", refundCaseID).
+			First(&refundCase).Error; err != nil {
+			return err
+		}
+		if !isAllowed(refundCase.Status, []string{"refund_requested", "refund_reviewing", "refund_reversed"}) {
+			return bizerrors.New(bizerrors.CodeStateConflict, "refund case cannot be approved from current status")
+		}
+		currentUsage, err := a.getUsageContractTx(tx, refundCase.UsageID)
+		if err != nil {
+			return err
+		}
+		currentSettlement, err := a.getSettlementContractTx(tx, refundCase.SettlementID, refundCase.UsageID)
+		if err != nil {
+			return err
+		}
+		if currentUsage.UsageStatus == "refunded" && currentUsage.RefundStatus == "refund_reversed" {
+			usage = currentUsage
+			settlement = currentSettlement
+			settlementID := currentSettlement.SettlementID
+			return tx.Model(&businesscore.PR4SkillRefundCaseRecord{}).
+				Where("refund_case_id = ?", refundCaseID).
+				Updates(map[string]any{"status": "refund_reversed", "settlement_id": settlementID, "updated_at": now}).Error
+		}
+		afterRefund := currentUsage
+		afterRefund.UsageStatus = "refunded"
+		afterRefund.ChargeStatus = "released"
+		afterRefund.RefundStatus = "refund_reversed"
+		afterRefund.SettlementStatus = "reversed"
+		afterRefund.UpdatedAt = now
+		afterSettlement := currentSettlement
+		afterSettlement.Status = "reversed"
+		afterSettlement.UpdatedAt = now
+		if err := pr4.ValidateSkillUsageRefundReversal(currentUsage, afterRefund, afterSettlement); err != nil {
+			return err
+		}
+		if err := tx.Model(&businesscore.PR4SkillUsageRecord{}).
+			Where("usage_id = ?", afterRefund.UsageID).
+			Updates(map[string]any{
+				"usage_status":      afterRefund.UsageStatus,
+				"charge_status":     afterRefund.ChargeStatus,
+				"refund_status":     afterRefund.RefundStatus,
+				"settlement_status": afterRefund.SettlementStatus,
+				"updated_at":        afterRefund.UpdatedAt,
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&businesscore.PR4SkillSettlementRecord{}).
+			Where("settlement_id = ?", afterSettlement.SettlementID).
+			Updates(map[string]any{"status": afterSettlement.Status, "updated_at": afterSettlement.UpdatedAt}).Error; err != nil {
+			return err
+		}
+		usage = afterRefund
+		settlement = afterSettlement
+		settlementID := afterSettlement.SettlementID
+		return tx.Model(&businesscore.PR4SkillRefundCaseRecord{}).
+			Where("refund_case_id = ?", refundCaseID).
+			Updates(map[string]any{"status": "refund_reversed", "settlement_id": settlementID, "updated_at": now}).Error
+	}); err != nil {
+		return ApproveSkillUsageRefundOutput{}, mapStoreError(err)
+	}
+	return ApproveSkillUsageRefundOutput{Usage: usageDTO(usage), Settlement: settlementDTO(settlement)}, nil
+}
+
+func (a *App) ListAdminSettlements(ctx context.Context, in ListAdminSettlementsInput) (AdminPage[AdminSettlementDTO], error) {
+	if err := requireAdminID(in.AdminID); err != nil {
+		return AdminPage[AdminSettlementDTO]{}, err
+	}
+	limit := normalizeLimit(in.Limit)
+	offset := nonNegativeOffset(in.Offset)
+	query := a.adminSettlementQuery(ctx)
+	if status := strings.TrimSpace(in.Status); status != "" {
+		query = query.Where("ss.status = ?", status)
+	}
+	var rows []adminSettlementRow
+	if err := query.Order("ss.updated_at DESC, ss.settlement_id ASC").Limit(limit).Offset(offset).Scan(&rows).Error; err != nil {
+		return AdminPage[AdminSettlementDTO]{}, err
+	}
+	items := make([]AdminSettlementDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, adminSettlementDTO(row))
+	}
+	return AdminPage[AdminSettlementDTO]{Items: items, Limit: limit, Offset: offset, Total: int64(offset + len(items))}, nil
 }
 
 func (a *App) ListMarketplaceSkills(ctx context.Context, in ListMarketplaceSkillsInput) (ListMarketplaceSkillsOutput, error) {
@@ -975,6 +1500,102 @@ func (a *App) creatorSkillQuery(ctx context.Context, creatorUserID string) *gorm
 		Where("sp.creator_user_id = ?", creatorUserID)
 }
 
+func (a *App) adminSkillReviewBaseQuery(ctx context.Context, status string, keyword string) *gorm.DB {
+	query := a.repo.DB().WithContext(ctx).Table("skill_review_records AS sr").
+		Joins("JOIN skill_packages AS sp ON sp.skill_id = sr.skill_id").
+		Joins("JOIN skill_versions AS sv ON sv.skill_version_id = sr.skill_version_id")
+	if normalized := strings.TrimSpace(status); normalized != "" {
+		query = query.Where("sr.status = ?", normalized)
+	}
+	if normalized := strings.TrimSpace(keyword); normalized != "" {
+		like := "%" + normalized + "%"
+		query = query.Where("sp.name ILIKE ? OR sp.description ILIKE ? OR sr.review_id ILIKE ? OR sr.skill_id ILIKE ?", like, like, like, like)
+	}
+	return query
+}
+
+func (a *App) adminSkillReviewQuery(ctx context.Context, status string, keyword string) *gorm.DB {
+	return a.adminSkillReviewBaseQuery(ctx, status, keyword).
+		Select(`sr.review_id,
+			sr.skill_id,
+			sr.skill_version_id,
+			sv.version AS skill_version,
+			sp.name AS skill_name,
+			sp.description AS skill_description,
+			sp.creator_user_id,
+			sr.status,
+			sv.status AS version_status,
+			sv.runtime_spec_digest,
+			sv.pricing_policy_digest,
+			COALESCE(pp.pricing_model, '') AS pricing_model,
+			COALESCE(pp.usage_credits, 0) AS usage_credits,
+			COALESCE(pp.value_delivered_stage, '') AS value_delivered_stage,
+			COALESCE(ml.listing_id, '') AS listing_id,
+			COALESCE(ml.status, 'not_listed') AS listing_status,
+			COALESCE(sr.reviewer_id, '') AS reviewer_id,
+			COALESCE(sr.decision_reason, '') AS decision_reason,
+			sv.submitted_at,
+			sv.published_at,
+			sr.created_at,
+			sr.updated_at`).
+		Joins("LEFT JOIN skill_pricing_policies AS pp ON pp.skill_id = sr.skill_id AND pp.skill_version = sv.version AND pp.pricing_policy_digest = sv.pricing_policy_digest").
+		Joins("LEFT JOIN marketplace_listings AS ml ON ml.skill_version_id = sr.skill_version_id")
+}
+
+func (a *App) adminRefundCaseQuery(ctx context.Context) *gorm.DB {
+	return a.repo.DB().WithContext(ctx).Table("skill_refund_cases AS rc").
+		Select(`rc.refund_case_id,
+			rc.usage_id,
+			COALESCE(rc.settlement_id, ss.settlement_id, '') AS settlement_id,
+			rc.status,
+			rc.reason_code,
+			rc.created_by,
+			su.skill_id,
+			sp.name AS skill_name,
+			su.listing_id,
+			sp.creator_user_id,
+			su.usage_status,
+			su.charge_status,
+			su.refund_status,
+			su.settlement_status,
+			su.estimated_credits,
+			COALESCE(ss.creator_credits, 0) AS creator_credits,
+			rc.created_at,
+			rc.updated_at`).
+		Joins("JOIN skill_usage_records AS su ON su.usage_id = rc.usage_id").
+		Joins("JOIN skill_packages AS sp ON sp.skill_id = su.skill_id").
+		Joins("LEFT JOIN skill_settlement_records AS ss ON ss.usage_id = su.usage_id")
+}
+
+func (a *App) adminSettlementQuery(ctx context.Context) *gorm.DB {
+	return a.repo.DB().WithContext(ctx).Table("skill_settlement_records AS ss").
+		Select(`ss.settlement_id,
+			ss.usage_id,
+			su.skill_id,
+			sp.name AS skill_name,
+			ss.creator_user_id,
+			ss.status,
+			ss.gross_credits,
+			ss.platform_fee_credits,
+			ss.creator_credits,
+			ss.hold_until,
+			ss.created_at,
+			ss.updated_at`).
+		Joins("JOIN skill_usage_records AS su ON su.usage_id = ss.usage_id").
+		Joins("JOIN skill_packages AS sp ON sp.skill_id = su.skill_id")
+}
+
+func (a *App) getAdminSkillReview(ctx context.Context, reviewID string) (AdminSkillReviewDTO, error) {
+	var row adminSkillReviewRow
+	err := a.adminSkillReviewQuery(ctx, "", "").
+		Where("sr.review_id = ?", reviewID).
+		First(&row).Error
+	if err != nil {
+		return AdminSkillReviewDTO{}, mapStoreError(err)
+	}
+	return adminSkillReviewDTO(row), nil
+}
+
 func (a *App) getCreatorSkill(ctx context.Context, auth AuthContext, skillID string) (CreatorSkillDTO, error) {
 	var row creatorSkillRow
 	err := a.creatorSkillQuery(ctx, auth.UserID).
@@ -1077,6 +1698,69 @@ func (a *App) getUsageContract(ctx context.Context, usageID string) (pr4.SkillUs
 	return usage, nil
 }
 
+func (a *App) getUsageContractTx(tx *gorm.DB, usageID string) (pr4.SkillUsageRecord, error) {
+	if strings.TrimSpace(usageID) == "" {
+		return pr4.SkillUsageRecord{}, bizerrors.New(bizerrors.CodeInvalidArgument, "usage_id is required")
+	}
+	var record businesscore.PR4SkillUsageRecord
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("usage_id = ?", usageID).First(&record).Error; err != nil {
+		return pr4.SkillUsageRecord{}, err
+	}
+	usage := pr4.SkillUsageRecord{
+		SchemaVersion:       pr4.SchemaVersionSkillUsageRecord,
+		UsageID:             record.UsageID,
+		RunID:               record.RunID,
+		ListingID:           record.ListingID,
+		SkillID:             record.SkillID,
+		SkillVersion:        record.SkillVersion,
+		PricingPolicyDigest: record.PricingPolicyDigest,
+		SkillUsageDigest:    record.SkillUsageDigest,
+		UsageStatus:         record.UsageStatus,
+		ChargeStatus:        record.ChargeStatus,
+		RefundStatus:        record.RefundStatus,
+		SettlementStatus:    record.SettlementStatus,
+		EstimatedCredits:    record.EstimatedCredits,
+		CreditHoldID:        record.CreditHoldID,
+		ValueDeliveredAt:    utcTimePointer(record.ValueDeliveredAt),
+		CreatedAt:           record.CreatedAt.UTC(),
+		UpdatedAt:           record.UpdatedAt.UTC(),
+	}
+	if err := pr4.ValidateSkillUsageRecord(usage); err != nil {
+		return pr4.SkillUsageRecord{}, err
+	}
+	return usage, nil
+}
+
+func (a *App) getSettlementContractTx(tx *gorm.DB, settlementID *string, usageID string) (pr4.SkillSettlement, error) {
+	var record businesscore.PR4SkillSettlementRecord
+	query := tx.Clauses(clause.Locking{Strength: "UPDATE"})
+	if settlementID != nil && strings.TrimSpace(*settlementID) != "" {
+		query = query.Where("settlement_id = ?", strings.TrimSpace(*settlementID))
+	} else {
+		query = query.Where("usage_id = ?", usageID)
+	}
+	if err := query.First(&record).Error; err != nil {
+		return pr4.SkillSettlement{}, err
+	}
+	settlement := pr4.SkillSettlement{
+		SchemaVersion:      pr4.SchemaVersionSkillSettlement,
+		SettlementID:       record.SettlementID,
+		UsageID:            record.UsageID,
+		CreatorUserID:      record.CreatorUserID,
+		Status:             record.Status,
+		GrossCredits:       record.GrossCredits,
+		PlatformFeeCredits: record.PlatformFeeCredits,
+		CreatorCredits:     record.CreatorCredits,
+		HoldUntil:          record.HoldUntil.UTC(),
+		CreatedAt:          record.CreatedAt.UTC(),
+		UpdatedAt:          record.UpdatedAt.UTC(),
+	}
+	if err := pr4.ValidateSkillSettlement(settlement); err != nil {
+		return pr4.SkillSettlement{}, err
+	}
+	return settlement, nil
+}
+
 func (a *App) getSkillCreatorUserID(ctx context.Context, skillID string) (string, error) {
 	var record businesscore.PR4SkillPackageRecord
 	if err := a.repo.DB().WithContext(ctx).Where("skill_id = ?", skillID).First(&record).Error; err != nil {
@@ -1104,6 +1788,13 @@ func validateUsageEstimateInput(in CreateSkillUsageRecordInput, row listingRow) 
 func requireAuth(auth AuthContext) error {
 	if strings.TrimSpace(auth.UserID) == "" {
 		return bizerrors.New(bizerrors.CodeUnauthenticated, "auth context is required")
+	}
+	return nil
+}
+
+func requireAdminID(adminID string) error {
+	if strings.TrimSpace(adminID) == "" {
+		return bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth context is required")
 	}
 	return nil
 }
@@ -1209,6 +1900,20 @@ func skillPricingPolicyRecordFromContract(policy pr4.SkillPricingPolicy) *busine
 	}
 }
 
+func marketplaceListingRecordFromContract(listing pr4.MarketplaceListing) *businesscore.PR4MarketplaceListingRecord {
+	return &businesscore.PR4MarketplaceListingRecord{
+		ListingID:           listing.ListingID,
+		SkillID:             listing.SkillID,
+		SkillVersionID:      listing.SkillVersionID,
+		Status:              listing.Status,
+		PricingPolicyDigest: listing.PricingPolicyDigest,
+		PublishedBy:         listing.PublishedBy,
+		ListedAt:            utcTimePointer(listing.ListedAt),
+		CreatedAt:           listing.CreatedAt.UTC(),
+		UpdatedAt:           listing.UpdatedAt.UTC(),
+	}
+}
+
 func prefixedStableID(prefix string, parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return prefix + hex.EncodeToString(sum[:])[:24]
@@ -1222,6 +1927,13 @@ func normalizeLimit(limit int) int {
 		return 100
 	}
 	return limit
+}
+
+func nonNegativeOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 func cursorOffset(cursor string) int {
@@ -1238,6 +1950,23 @@ func utcTimePointer(value *time.Time) *time.Time {
 	}
 	utc := value.UTC()
 	return &utc
+}
+
+func nullableString(value string) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func isAllowed(value string, allowed []string) bool {
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func listingDTO(row listingRow) MarketplaceListingDTO {
@@ -1283,6 +2012,73 @@ func creatorSkillDTO(row creatorSkillRow) CreatorSkillDTO {
 		PublishedAt:         utcTimePointer(row.PublishedAt),
 		CreatedAt:           row.CreatedAt.UTC(),
 		UpdatedAt:           row.UpdatedAt.UTC(),
+	}
+}
+
+func adminSkillReviewDTO(row adminSkillReviewRow) AdminSkillReviewDTO {
+	return AdminSkillReviewDTO{
+		ReviewID:            row.ReviewID,
+		SkillID:             row.SkillID,
+		SkillVersionID:      row.SkillVersionID,
+		SkillVersion:        row.SkillVersion,
+		SkillName:           row.SkillName,
+		SkillDescription:    row.SkillDescription,
+		CreatorUserID:       row.CreatorUserID,
+		Status:              row.Status,
+		VersionStatus:       row.VersionStatus,
+		RuntimeSpecDigest:   row.RuntimeSpecDigest,
+		PricingPolicyDigest: row.PricingPolicyDigest,
+		PricingModel:        row.PricingModel,
+		UsageCredits:        row.UsageCredits,
+		ValueDeliveredStage: row.ValueDeliveredStage,
+		ListingID:           row.ListingID,
+		ListingStatus:       row.ListingStatus,
+		ReviewerID:          row.ReviewerID,
+		DecisionReason:      row.DecisionReason,
+		SubmittedAt:         utcTimePointer(row.SubmittedAt),
+		PublishedAt:         utcTimePointer(row.PublishedAt),
+		CreatedAt:           row.CreatedAt.UTC(),
+		UpdatedAt:           row.UpdatedAt.UTC(),
+	}
+}
+
+func adminRefundCaseDTO(row adminRefundCaseRow) AdminRefundCaseDTO {
+	return AdminRefundCaseDTO{
+		RefundCaseID:     row.RefundCaseID,
+		UsageID:          row.UsageID,
+		SettlementID:     row.SettlementID,
+		Status:           row.Status,
+		ReasonCode:       row.ReasonCode,
+		CreatedBy:        row.CreatedBy,
+		SkillID:          row.SkillID,
+		SkillName:        row.SkillName,
+		ListingID:        row.ListingID,
+		CreatorUserID:    row.CreatorUserID,
+		UsageStatus:      row.UsageStatus,
+		ChargeStatus:     row.ChargeStatus,
+		RefundStatus:     row.RefundStatus,
+		SettlementStatus: row.SettlementStatus,
+		EstimatedCredits: row.EstimatedCredits,
+		CreatorCredits:   row.CreatorCredits,
+		CreatedAt:        row.CreatedAt.UTC(),
+		UpdatedAt:        row.UpdatedAt.UTC(),
+	}
+}
+
+func adminSettlementDTO(row adminSettlementRow) AdminSettlementDTO {
+	return AdminSettlementDTO{
+		SettlementID:       row.SettlementID,
+		UsageID:            row.UsageID,
+		SkillID:            row.SkillID,
+		SkillName:          row.SkillName,
+		CreatorUserID:      row.CreatorUserID,
+		Status:             row.Status,
+		GrossCredits:       row.GrossCredits,
+		PlatformFeeCredits: row.PlatformFeeCredits,
+		CreatorCredits:     row.CreatorCredits,
+		HoldUntil:          row.HoldUntil.UTC(),
+		CreatedAt:          row.CreatedAt.UTC(),
+		UpdatedAt:          row.UpdatedAt.UTC(),
 	}
 }
 

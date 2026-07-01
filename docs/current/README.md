@@ -35,7 +35,7 @@ M1 Creative Guide / ChatModel Router 基础业务闭环已实现：显式 run_in
 M2 Generic Creation Graph L0 fallback 已实现：generic_creation 路径创建 Board、GraphPlan、Snapshot 和 PR-2 AG-UI 事件，并停在 Board review / approve gate
 M3 Published Skill Graph 已实现：免费系统 Skill 的 select_skill 路径加载 Published SkillRuntimeSpec，经 Eino SkillGraphRunner 生成 Skill GraphPlan / Board / Snapshot；付费 Skill 仍停在 Skill 使用费确认门前
 M4 ToolPlan / Tool Generation CostDisclosure 已实现：Board approved 后生成 ToolPlan、披露 Tool 生成费、创建 tool_generation_confirmation；用户确认后按 tool_plan_digest 冻结积分，执行生成、ToolTask、资产提交、扣费和 PR-3 AG-UI 事件闭环
-M5 Marketplace / SkillUsage 已继续推进：Business Marketplace 应用层、用户端 Marketplace HTTP 主路径、Creator Portal HTTP 主路径、真实 Marketplace RPC adapter、用户端 Skill 市场前台安装/使用路径、创作者 Skill 草稿/提交审核后台、个人 latest 安装、SkillUsageRecord 预创建、确认后冻结、交付扣费、冻结释放和 settlement hold 已完成；管理端页面和结算出账治理待后续阶段
+M5 Marketplace / SkillUsage 已继续推进：Business Marketplace 应用层、用户端 Marketplace HTTP 主路径、Creator Portal HTTP 主路径、Admin Governance HTTP 主路径、真实 Marketplace RPC adapter、用户端 Skill 市场前台安装/使用路径、创作者 Skill 草稿/提交审核后台、管理端 Skill 审核 / listing 暂停 / 退款反转 / settlement hold 查看页面、个人 latest 安装、SkillUsageRecord 预创建、确认后冻结、交付扣费、冻结释放和 settlement hold 已完成；真实收益出账治理待后续阶段
 M1-M6 业务代码开发按 PR-1 到 PR-5 顺序受控启动，真实 provider 流量必须等待真实浏览器、前端联动和完整测试环境 HTTP 服务 E2E gate
 ```
 

@@ -315,6 +315,7 @@ const DETAIL_LABELS = {
   created_at: '创建时间',
   created_by: '创建人',
   creator_id: '创建者',
+  creator_user_id: '创作者用户 ID',
   credential_id: '凭证 ID',
   credit_expires_at: '积分过期时间',
   current_status: '当前状态',
@@ -337,10 +338,13 @@ const DETAIL_LABELS = {
   export_job_id: '导出任务 ID',
   final_enabled: '最终态可用',
   free_quota: '免费额度',
+  gross_credits: '总积分',
   impact_summary: '影响说明',
   input_schema_json: '输入 Schema',
   is_default: '默认',
   last_login_at: '最近登录时间',
+  listing_id: 'Listing ID',
+  listing_status: 'Listing 状态',
   metadata_summary: '摘要',
   memory_policy_json: 'Memory 策略',
   min_charge_points: '最低扣费积分',
@@ -354,6 +358,8 @@ const DETAIL_LABELS = {
   phone_masked: '手机号',
   points: '积分',
   personal_space_id: '个人空间 ID',
+  platform_fee_credits: '平台分成',
+  pricing_model: '定价模型',
   pricing_snapshot_id: '价格快照 ID',
   provider_code: '供应商编码',
   provider_id: '供应商 ID',
@@ -367,9 +373,12 @@ const DETAIL_LABELS = {
   referable: '可引用',
   registered_at: '注册时间',
   reason: '原因',
+  reason_code: '原因码',
   render_hint: '渲染提示',
   render_hint_json: '渲染提示 JSON',
   required: '必填',
+  refund_case_id: '退款单 ID',
+  refund_status: '退款状态',
   requires_confirmation: '需要确认',
   resource_id: '资源 ID',
   resource_type: '资源类型',
@@ -384,11 +393,15 @@ const DETAIL_LABELS = {
   schema_json: 'Schema JSON',
   schema_version: 'Schema 版本',
   secret_ref_status: '密钥状态',
+  settlement_id: '结算单 ID',
+  settlement_status: '结算状态',
   skill_id: 'Skill ID',
   skill_key: 'Skill Key',
   skill_name: 'Skill 名称',
   skill_scope: 'Skill 范围',
   skill_spec_json: 'Skill 定义',
+  skill_version: 'Skill 版本',
+  skill_version_id: 'Skill 版本 ID',
   sort_order: '排序',
   spaces: '空间',
   space_id: '空间 ID',
@@ -417,7 +430,9 @@ const DETAIL_LABELS = {
   use_final: '使用最终态',
   user_id: '用户 ID',
   version: '版本',
-  version_id: '版本 ID'
+  version_id: '版本 ID',
+  version_status: '版本状态',
+  value_delivered_stage: '交付计费阶段'
 };
 
 const HIDDEN_DETAIL_KEYS = new Set(['access_token', 'csrf_token', 'password_hash', 'secret_key_ref']);
@@ -493,6 +508,19 @@ const DETAIL_VALUE_LABELS = {
     submitted: '待审核',
     pending_review: '待审核',
     published: '已发布',
+    approved: '已通过',
+    reviewing: '审核中',
+    listed: '上架中',
+    suspended: '已暂停',
+    refund_requested: '退款申请',
+    refund_reviewing: '退款审核中',
+    refund_reversed: '已反转',
+    pending_hold: '待 hold',
+    eligible: '可结算',
+    settling: '结算中',
+    settled: '已结算',
+    reversed: '已反转',
+    frozen: '已冻结',
     deprecated: '废弃',
     rejected: '已拒绝',
     passed: '通过',
@@ -563,6 +591,34 @@ const DETAIL_VALUE_LABELS = {
   secret_ref_status: {
     configured: '已配置',
     missing: '未配置'
+  },
+  version_status: {
+    draft: '草稿',
+    submitted: '待审核',
+    reviewing: '审核中',
+    published: '已发布',
+    rejected: '已拒绝'
+  },
+  listing_status: {
+    listed: '上架中',
+    suspended: '已暂停',
+    not_listed: '未上架'
+  },
+  refund_status: {
+    none: '无退款',
+    refund_requested: '退款申请',
+    refund_reviewing: '退款审核中',
+    refund_reversed: '已反转',
+    refund_rejected: '已拒绝'
+  },
+  settlement_status: {
+    pending_hold: '待 hold',
+    eligible: '可结算',
+    settling: '结算中',
+    settled: '已结算',
+    reversed: '已反转',
+    frozen: '已冻结',
+    failed: '失败'
   }
 };
 

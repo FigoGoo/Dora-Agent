@@ -85,8 +85,13 @@ settlement_status: pending_hold | eligible | settling | settled | reversed | fro
 | `GET /api/marketplace/my-skills` | 用户端 | 已安装 Skill |
 | `POST /api/creator/skills` | 创作者端 | 创建 Skill 草稿 |
 | `POST /api/creator/skills/{skill_id}/submit` | 创作者端 | 提交审核 |
+| `GET /api/admin/marketplace/skill-reviews` | 管理端 | 查询市场 Skill 审核单 |
+| `GET /api/admin/marketplace/listings` | 管理端 | 查询市场 listing |
+| `GET /api/admin/marketplace/refund-cases` | 管理端 | 查询退款仲裁单 |
+| `GET /api/admin/marketplace/settlements` | 管理端 | 查询 settlement hold 和反转记录 |
 | `POST /api/admin/skill-reviews/{review_id}/approve` | 管理端 | 审核通过 |
 | `POST /api/admin/listings/{listing_id}/suspend` | 管理端 | 暂停 listing |
+| `POST /api/admin/refund-cases/{refund_case_id}/approve` | 管理端 | 退款通过并反转 settlement |
 
 ## RPC 范围
 
@@ -160,4 +165,6 @@ raw provider payload
 - [x] 真实 Marketplace RPC adapter 已接入 `BusinessSkillMarketplaceService`。
 - [x] 用户端 Skill 市场前台页面已接入市场列表、安装登录门、个人安装和已安装后使用入口。
 - [x] 创作者 Skill 发布后台页面已接入草稿创建、提交审核、创作者 listing 和脱敏 analytics。
-- [ ] 管理端页面和结算出账治理接入。
+- [x] 管理端 Skill 审核、Skill 市场、Skill 退款和 Skill 结算页面已接入。
+- [x] Admin Governance HTTP 主路径已接入审核通过、listing 暂停、退款通过反转和 settlement hold 查询。
+- [ ] 真实收益出账治理接入。

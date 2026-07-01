@@ -195,6 +195,160 @@ func TestMarketplaceAppCreatorDraftSubmitLifecycle(t *testing.T) {
 	}
 }
 
+func TestMarketplaceAppAdminGovernanceLifecycle(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_business_marketplace_admin_app")
+	testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/2026-07-01-marketplace-contracts/business")
+	repo := businesscore.New(db.DB)
+	app := New(repo)
+	app.now = func() time.Time { return time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC) }
+
+	creator := accountspace.AuthContext{UserID: "user_creator_admin_001", SpaceID: "sp_creator_admin_001", LoginIdentityType: accountspace.IdentityPersonal}
+	draft, err := app.CreateCreatorSkillDraft(t.Context(), CreateCreatorSkillDraftInput{
+		Auth:        creator,
+		Meta:        accountspace.RequestMeta{IdempotencyKey: "creator-skill-draft-admin-001"},
+		Name:        "审核治理 Skill",
+		Description: "用于验证 PR-4 管理端审核治理闭环。",
+	})
+	if err != nil {
+		t.Fatalf("create creator draft for admin: %v", err)
+	}
+	submitted, err := app.SubmitCreatorSkillVersion(t.Context(), SubmitCreatorSkillVersionInput{
+		Auth: creator, Meta: accountspace.RequestMeta{IdempotencyKey: "creator-skill-submit-admin-001"},
+		SkillID: draft.Skill.SkillID, Version: draft.Skill.Version,
+	})
+	if err != nil {
+		t.Fatalf("submit creator skill for admin: %v", err)
+	}
+
+	reviews, err := app.ListAdminSkillReviews(t.Context(), ListAdminSkillReviewsInput{AdminID: "admin_001", Status: "submitted", Limit: 10})
+	if err != nil {
+		t.Fatalf("list admin skill reviews: %v", err)
+	}
+	if len(reviews.Items) != 1 || reviews.Items[0].ReviewID != submitted.SkillVersion.ReviewID {
+		t.Fatalf("unexpected admin review list: %#v", reviews)
+	}
+	approved, err := app.ApproveSkillReview(t.Context(), ApproveSkillReviewInput{
+		AdminID: "admin_001", ReviewID: submitted.SkillVersion.ReviewID, Reason: "内容和定价通过",
+	})
+	if err != nil {
+		t.Fatalf("approve skill review: %v", err)
+	}
+	if approved.SkillVersion.Status != "approved" || approved.SkillVersion.VersionStatus != "published" || approved.Listing.Status != "listed" {
+		t.Fatalf("unexpected approved review: %#v", approved)
+	}
+	listings, err := app.ListAdminMarketplaceListings(t.Context(), ListAdminMarketplaceListingsInput{AdminID: "admin_001", Limit: 10})
+	if err != nil {
+		t.Fatalf("list admin marketplace listings: %v", err)
+	}
+	if len(listings.Items) != 1 || listings.Items[0].ListingID != approved.Listing.ListingID {
+		t.Fatalf("unexpected admin listing list: %#v", listings)
+	}
+	suspended, err := app.SuspendMarketplaceListing(t.Context(), SuspendMarketplaceListingInput{
+		AdminID: "admin_001", ListingID: approved.Listing.ListingID, ReasonCode: "policy_risk",
+	})
+	if err != nil {
+		t.Fatalf("suspend marketplace listing: %v", err)
+	}
+	if suspended.Listing.Status != "suspended" {
+		t.Fatalf("listing should be suspended: %#v", suspended)
+	}
+
+	var publishFixture struct {
+		SkillPackage  pr4.SkillPackage       `json:"skill_package"`
+		SkillVersion  pr4.SkillVersion       `json:"skill_version"`
+		PricingPolicy pr4.SkillPricingPolicy `json:"pricing_policy"`
+		Listing       pr4.MarketplaceListing `json:"listing"`
+	}
+	readMarketplaceFixture(t, "tests/fixtures/contracts/marketplace/creator_submit_approve_publish.json", &publishFixture)
+	if err := repo.SaveCreatorPublishFlowV1(t.Context(), publishFixture.SkillPackage, publishFixture.SkillVersion, publishFixture.PricingPolicy, publishFixture.Listing); err != nil {
+		t.Fatalf("seed published marketplace skill: %v", err)
+	}
+	buyer := accountspace.AuthContext{UserID: "user_buyer_admin_001", SpaceID: "acct_buyer_admin_001", LoginIdentityType: accountspace.IdentityPersonal}
+	estimate, err := app.EstimateSkillUsageCredits(t.Context(), EstimateSkillUsageCreditsInput{
+		Auth: buyer, RunID: "run_refund_admin_001", ListingID: publishFixture.Listing.ListingID,
+	})
+	if err != nil {
+		t.Fatalf("estimate refund usage: %v", err)
+	}
+	createdUsage, err := app.CreateSkillUsageRecord(t.Context(), CreateSkillUsageRecordInput{
+		Auth: buyer, Meta: accountspace.RequestMeta{IdempotencyKey: "run_refund_admin_001:listing:v1"},
+		RunID: "run_refund_admin_001", ListingID: publishFixture.Listing.ListingID,
+		PricingPolicyDigest: estimate.PricingPolicyDigest, SkillUsageDigest: estimate.SkillUsageDigest,
+		EstimatedCredits: estimate.EstimatedCredits,
+	})
+	if err != nil {
+		t.Fatalf("create refund usage: %v", err)
+	}
+	if _, err := app.FreezeSkillUsageCredits(t.Context(), FreezeSkillUsageCreditsInput{
+		Auth: buyer, UsageID: createdUsage.Usage.UsageID, SkillUsageDigest: estimate.SkillUsageDigest,
+	}); err != nil {
+		t.Fatalf("freeze refund usage: %v", err)
+	}
+	committed, err := app.CommitSkillUsageAndSettle(t.Context(), CommitSkillUsageAndSettleInput{Auth: buyer, UsageID: createdUsage.Usage.UsageID})
+	if err != nil {
+		t.Fatalf("commit refund usage: %v", err)
+	}
+	beforeRefund := pr4.SkillUsageRecord{
+		SchemaVersion:       pr4.SchemaVersionSkillUsageRecord,
+		UsageID:             committed.Usage.UsageID,
+		RunID:               committed.Usage.RunID,
+		ListingID:           committed.Usage.ListingID,
+		SkillID:             committed.Usage.SkillID,
+		SkillVersion:        committed.Usage.SkillVersion,
+		PricingPolicyDigest: committed.Usage.PricingPolicyDigest,
+		SkillUsageDigest:    committed.Usage.SkillUsageDigest,
+		UsageStatus:         "refund_pending",
+		ChargeStatus:        "charged",
+		RefundStatus:        "refund_requested",
+		SettlementStatus:    "pending_hold",
+		EstimatedCredits:    committed.Usage.EstimatedCredits,
+		CreditHoldID:        committed.Usage.CreditHoldID,
+		ValueDeliveredAt:    committed.Usage.ValueDeliveredAt,
+		CreatedAt:           committed.Usage.CreatedAt,
+		UpdatedAt:           app.now().UTC().Add(5 * time.Minute),
+	}
+	if _, err := repo.MarkSkillUsageRefundPendingV1(t.Context(), beforeRefund); err != nil {
+		t.Fatalf("mark refund pending: %v", err)
+	}
+	settlementID := committed.Settlement.SettlementID
+	if err := repo.DB().Create(&businesscore.PR4SkillRefundCaseRecord{
+		RefundCaseID: "refund_case_admin_001",
+		UsageID:      committed.Usage.UsageID,
+		SettlementID: &settlementID,
+		Status:       "refund_requested",
+		ReasonCode:   "delivery_mismatch",
+		RefundDigest: "sha256:2929292929292929292929292929292929292929292929292929292929292929",
+		CreatedBy:    buyer.UserID,
+		CreatedAt:    app.now().UTC(),
+		UpdatedAt:    app.now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create refund case: %v", err)
+	}
+	refunds, err := app.ListAdminRefundCases(t.Context(), ListAdminRefundCasesInput{AdminID: "admin_001", Status: "refund_requested", Limit: 10})
+	if err != nil {
+		t.Fatalf("list admin refund cases: %v", err)
+	}
+	if len(refunds.Items) != 1 || refunds.Items[0].RefundCaseID != "refund_case_admin_001" || refunds.Items[0].SkillName == "" {
+		t.Fatalf("unexpected refund case list: %#v", refunds)
+	}
+	settlements, err := app.ListAdminSettlements(t.Context(), ListAdminSettlementsInput{AdminID: "admin_001", Status: "pending_hold", Limit: 10})
+	if err != nil {
+		t.Fatalf("list admin settlements: %v", err)
+	}
+	if len(settlements.Items) == 0 || settlements.Items[0].SettlementID == "" {
+		t.Fatalf("unexpected settlement list: %#v", settlements)
+	}
+	refunded, err := app.ApproveSkillUsageRefund(t.Context(), ApproveSkillUsageRefundInput{
+		AdminID: "admin_001", RefundCaseID: "refund_case_admin_001",
+	})
+	if err != nil {
+		t.Fatalf("approve skill usage refund: %v", err)
+	}
+	if refunded.Usage.UsageStatus != "refunded" || refunded.Usage.RefundStatus != "refund_reversed" || refunded.Settlement.Status != "reversed" {
+		t.Fatalf("unexpected refund reversal: %#v", refunded)
+	}
+}
+
 func readMarketplaceFixture(t *testing.T, relativePath string, target any) {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join(testdb.RepoRoot(t), relativePath))

@@ -8,6 +8,112 @@ servers:
 security:
 - bearerAuth: []
 paths:
+  /marketplace/skill-reviews:
+    get:
+      operationId: listAdminMarketplaceSkillReviews
+      summary: 查询市场 Skill 审核单
+      parameters:
+      - $ref: '#/components/parameters/Status'
+      - $ref: '#/components/parameters/Keyword'
+      - $ref: '#/components/parameters/PageSize'
+      - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: 审核单列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+        default:
+          $ref: '#/components/responses/Error'
+  /marketplace/listings:
+    get:
+      operationId: listAdminMarketplaceListings
+      summary: 查询市场 Skill listing
+      parameters:
+      - $ref: '#/components/parameters/Status'
+      - $ref: '#/components/parameters/Keyword'
+      - $ref: '#/components/parameters/PageSize'
+      - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: listing 列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+        default:
+          $ref: '#/components/responses/Error'
+  /marketplace/refund-cases:
+    get:
+      operationId: listAdminSkillRefundCases
+      summary: 查询 Skill 使用费退款仲裁单
+      parameters:
+      - $ref: '#/components/parameters/Status'
+      - $ref: '#/components/parameters/PageSize'
+      - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: 退款仲裁单列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+        default:
+          $ref: '#/components/responses/Error'
+  /marketplace/settlements:
+    get:
+      operationId: listAdminSkillSettlements
+      summary: 查询 Skill 结算 hold 和反转记录
+      parameters:
+      - $ref: '#/components/parameters/Status'
+      - $ref: '#/components/parameters/PageSize'
+      - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: 结算记录列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+        default:
+          $ref: '#/components/responses/Error'
   /skill-reviews/{review_id}/approve:
     post:
       operationId: approveSkillReview
@@ -119,6 +225,33 @@ components:
       required: true
       schema:
         type: string
+    Status:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+    Keyword:
+      name: keyword
+      in: query
+      required: false
+      schema:
+        type: string
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    PageToken:
+      name: page_token
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
   responses:
     Error:
       description: 错误响应

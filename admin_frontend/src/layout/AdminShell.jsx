@@ -34,6 +34,7 @@ export const navGroups = [
     items: [
       { to: '/admin/skills/system', label: '系统 Skill', icon: WandSparkles },
       { to: '/admin/skills/reviews', label: 'Skill 审核', icon: BookOpenCheck },
+      { to: '/admin/skills/marketplace', label: 'Skill 市场', icon: Boxes },
       { to: '/admin/models/providers', label: '模型供应商', icon: Blocks },
       { to: '/admin/models', label: '模型管理', icon: Sparkles, end: true },
       { to: '/admin/tools', label: 'Tool 管理', icon: Wrench }
@@ -43,6 +44,8 @@ export const navGroups = [
     title: '运营与审计',
     items: [
       { to: '/admin/credits/grants', label: '积分发放', icon: Coins },
+      { to: '/admin/skills/refunds', label: 'Skill 退款', icon: ClipboardList },
+      { to: '/admin/skills/settlements', label: 'Skill 结算', icon: Coins },
       { to: '/admin/credits/codes', label: '兑换码', icon: ClipboardList },
       { to: '/admin/works/public', label: '精选作品', icon: Boxes },
       { to: '/admin/audit-logs', label: '审计日志', icon: Shield },

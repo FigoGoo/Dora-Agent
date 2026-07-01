@@ -3,8 +3,8 @@
 状态：active  
 owner：Business Skill Marketplace / Business Credit / Agent Runtime / 前端 / 管理端 / 文档与契约责任域 / 测试与验收责任域  
 更新时间：2026-07-01  
-适用范围：PR-4 字段级契约在 Go 运行时的 Skill 发布、市场上架、安装升级、SkillUsageRecord、结算、退款、数据隔离、Business repository、应用层、用户端 Marketplace HTTP 主路径、Creator Portal HTTP 主路径、真实 Marketplace RPC adapter、用户端 Skill 市场前台和创作者发布后台实现
-相关代码路径：`internal/contracts/pr4/**`、`services/business/internal/application/marketplace/**`、`services/business/internal/infra/repository/businesscore/**`、`services/business/internal/transport/http/**`、`services/business/internal/transport/rpc/**`、`kitex_gen/dora/api/businessskillmarketplace/**`、`frontend/src/lib/api/marketplace.js`、`frontend/src/lib/api/creator.js`、`frontend/src/features/skills/**`
+适用范围：PR-4 字段级契约在 Go 运行时的 Skill 发布、市场上架、安装升级、SkillUsageRecord、结算、退款、数据隔离、Business repository、应用层、用户端 Marketplace HTTP 主路径、Creator Portal HTTP 主路径、Admin Governance HTTP 主路径、真实 Marketplace RPC adapter、用户端 Skill 市场前台、创作者发布后台和管理端治理页面实现
+相关代码路径：`internal/contracts/pr4/**`、`services/business/internal/application/marketplace/**`、`services/business/internal/infra/repository/businesscore/**`、`services/business/internal/transport/http/**`、`services/business/internal/transport/rpc/**`、`kitex_gen/dora/api/businessskillmarketplace/**`、`frontend/src/lib/api/marketplace.js`、`frontend/src/lib/api/creator.js`、`frontend/src/features/skills/**`、`admin_frontend/src/features/resources/pageConfigs.jsx`、`admin_frontend/src/layout/AdminShell.jsx`
 相关契约：`docs/active/contracts/pr-4-marketplace-contracts.md`、`api/schemas/skill/**`、`api/schemas/settlement/**`、`api/agui/events/cost_disclosure.skill_usage.presented.schema.json`
 
 ## 背景
@@ -24,7 +24,6 @@ PR-4 已冻结开放 Skill 市场闭环。实现前需要先把 SkillUsageRecord
 - 不修改 PR-1 AG-UI Envelope。
 - 不修改 PR-3 Tool 生成费扣费规则。
 - 不做真实收益出账。
-- 不实现管理端页面。
 
 ## 实现范围
 
@@ -39,8 +38,10 @@ PR-4 已冻结开放 Skill 市场闭环。实现前需要先把 SkillUsageRecord
 | Business Application | `services/business/internal/application/marketplace/app.go` | Marketplace 列表/详情、安装、升级、usage 估算、预创建、冻结、交付扣费和 settlement hold |
 | User HTTP | `services/business/internal/transport/http/handlers_work_notification_marketplace.go` | `/api/marketplace/skills`、详情、安装、升级、已安装列表 |
 | Creator HTTP | `services/business/internal/transport/http/handlers_work_notification_marketplace.go` | `/api/creator/skills` 草稿、提交审核、创作者 listing 和脱敏 usage analytics |
+| Admin HTTP | `services/business/internal/transport/http/handlers_work_notification_marketplace.go` | `/api/admin/marketplace/*` 查询、`/api/admin/skill-reviews/*/approve`、`/api/admin/listings/*/suspend`、`/api/admin/refund-cases/*/approve` |
 | Business RPC | `services/business/internal/transport/rpc/handlers_marketplace.go`、`kitex_gen/dora/api/businessskillmarketplace/**` | `BusinessSkillMarketplaceService` 查询、安装、升级、usage 估算、预创建、冻结、扣费结算和释放冻结 |
 | User / Creator Frontend | `frontend/src/lib/api/marketplace.js`、`frontend/src/lib/api/creator.js`、`frontend/src/features/skills/SkillsPage.jsx` | 用户端市场列表、搜索筛选、安装登录门、个人安装、已安装后使用入口、创作者草稿和提交审核 |
+| Admin Frontend | `admin_frontend/src/features/resources/pageConfigs.jsx`、`admin_frontend/src/layout/AdminShell.jsx` | 管理端 Skill 审核、市场 listing、退款仲裁和 settlement hold 列表 |
 | Migration Tests | `services/business/internal/infra/repository/businesscore/pr4_marketplace_integration_test.go` | PR-4 business migration up/down、无外键、fixture 状态机验证 |
 
 ## 开发注意事项
@@ -69,7 +70,9 @@ PR-4 已冻结开放 Skill 市场闭环。实现前需要先把 SkillUsageRecord
 - [x] 真实 Marketplace RPC adapter 已接入 `BusinessSkillMarketplaceService` 并覆盖 usage 创建、冻结、扣费和释放冻结。
 - [x] 用户端 Skill 市场前台已接入市场列表、安装登录门、个人安装和已安装后使用入口。
 - [x] 创作者 Skill 发布后台已接入草稿创建、提交审核、创作者 listing 和脱敏 analytics。
-- [ ] 后续 PR 接入管理端页面和结算出账治理。
+- [x] Admin Governance HTTP 主路径已接入 Skill 审核通过、listing 暂停、退款通过反转和 settlement hold 查询。
+- [x] 管理端页面已接入 Skill 审核、Skill 市场、Skill 退款和 Skill 结算治理列表。
+- [ ] 后续 PR 接入真实收益出账治理。
 
 ## 验证命令
 
@@ -83,6 +86,8 @@ make active-contract-gate
 make pr0-ci-gate
 npm test --prefix frontend
 npm run build --prefix frontend
+npm test --prefix admin_frontend
+npm run build --prefix admin_frontend
 ```
 
 ## 本地验证记录
@@ -123,6 +128,16 @@ npm test --prefix frontend
 npm run build --prefix frontend
 make active-contract-gate
 make pr0-ci-gate
+```
+
+2026-07-01 管理端 Skill 治理和结算 hold 页面接入后已执行：
+
+```bash
+go test ./services/business/internal/application/marketplace
+go test ./services/business/internal/transport/http
+npm test --prefix admin_frontend
+npm run build --prefix admin_frontend
+make active-contract-gate
 ```
 
 结果：
