@@ -8,20 +8,29 @@ import (
 )
 
 type CreditBatch struct {
-	ID              string         `gorm:"column:id;primaryKey"`
-	AccountID       string         `gorm:"column:account_id"`
-	BatchType       string         `gorm:"column:batch_type"`
-	SourceType      string         `gorm:"column:source_type"`
-	SourceID        *string        `gorm:"column:source_id"`
-	TotalPoints     int64          `gorm:"column:total_points"`
-	RemainingPoints int64          `gorm:"column:remaining_points"`
-	ExpiresAt       *time.Time     `gorm:"column:expires_at"`
-	Status          string         `gorm:"column:status"`
-	CreatedBy       *string        `gorm:"column:created_by"`
-	UpdatedBy       *string        `gorm:"column:updated_by"`
-	CreatedAt       time.Time      `gorm:"column:created_at"`
-	UpdatedAt       time.Time      `gorm:"column:updated_at"`
-	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at"`
+	ID                 string         `gorm:"column:id;primaryKey"`
+	AccountID          string         `gorm:"column:account_id"`
+	BatchType          string         `gorm:"column:batch_type"`
+	SourceType         string         `gorm:"column:source_type"`
+	SourceID           *string        `gorm:"column:source_id"`
+	TotalPoints        int64          `gorm:"column:total_points"`
+	RemainingPoints    int64          `gorm:"column:remaining_points"`
+	OriginalPoints     int64          `gorm:"column:original_points"`
+	AvailablePoints    int64          `gorm:"column:available_points"`
+	FrozenPoints       int64          `gorm:"column:frozen_points"`
+	ConsumedPoints     int64          `gorm:"column:consumed_points"`
+	ExpiredPoints      int64          `gorm:"column:expired_points"`
+	GrantedAt          time.Time      `gorm:"column:granted_at"`
+	ExpiresAt          *time.Time     `gorm:"column:expires_at"`
+	ExpiryPolicyJSON   datatypes.JSON `gorm:"column:expiry_policy_json;type:jsonb"`
+	SpendScopeJSON     datatypes.JSON `gorm:"column:spend_scope_json;type:jsonb"`
+	SettlementEligible bool           `gorm:"column:settlement_eligible"`
+	Status             string         `gorm:"column:status"`
+	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
+	CreatedAt          time.Time      `gorm:"column:created_at"`
+	UpdatedAt          time.Time      `gorm:"column:updated_at"`
+	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (CreditBatch) TableName() string { return "credit_batches" }
@@ -245,6 +254,195 @@ type RedeemCodeRedemption struct {
 }
 
 func (RedeemCodeRedemption) TableName() string { return "redeem_code_redemptions" }
+
+type RechargePackage struct {
+	ID                  string         `gorm:"column:id;primaryKey"`
+	PackageID           string         `gorm:"column:package_id"`
+	PackageType         string         `gorm:"column:package_type"`
+	TargetScope         string         `gorm:"column:target_scope"`
+	BillingMode         string         `gorm:"column:billing_mode"`
+	DisplayName         string         `gorm:"column:display_name"`
+	Name                string         `gorm:"column:name"`
+	Points              int64          `gorm:"column:points"`
+	GrantedPoints       int64          `gorm:"column:granted_points"`
+	BonusPoints         int64          `gorm:"column:bonus_points"`
+	PriceCents          int64          `gorm:"column:price_cents"`
+	PriceAmount         int64          `gorm:"column:price_amount"`
+	Currency            string         `gorm:"column:currency"`
+	CreditValidDuration string         `gorm:"column:credit_valid_duration"`
+	CreditExpiryPolicy  string         `gorm:"column:credit_expiry_policy"`
+	SpendScopeJSON      datatypes.JSON `gorm:"column:spend_scope_json;type:jsonb"`
+	SettlementEligible  bool           `gorm:"column:settlement_eligible"`
+	EntitlementPolicy   datatypes.JSON `gorm:"column:entitlement_policy_json;type:jsonb"`
+	RenewalPolicy       datatypes.JSON `gorm:"column:renewal_policy_json;type:jsonb"`
+	RefundPolicy        datatypes.JSON `gorm:"column:refund_policy_json;type:jsonb"`
+	VisibleScope        string         `gorm:"column:visible_scope"`
+	Status              string         `gorm:"column:status"`
+	CreatedBy           *string        `gorm:"column:created_by"`
+	UpdatedBy           *string        `gorm:"column:updated_by"`
+	CreatedAt           time.Time      `gorm:"column:created_at"`
+	UpdatedAt           time.Time      `gorm:"column:updated_at"`
+	DeletedAt           gorm.DeletedAt `gorm:"column:deleted_at"`
+}
+
+func (RechargePackage) TableName() string { return "recharge_packages" }
+
+type BillingPackageSKU struct {
+	ID                  string         `gorm:"column:id;primaryKey"`
+	SKUID               string         `gorm:"column:sku_id"`
+	PackageID           string         `gorm:"column:package_id"`
+	ChannelCode         string         `gorm:"column:channel_code"`
+	PriceAmount         int64          `gorm:"column:price_amount"`
+	Currency            string         `gorm:"column:currency"`
+	ActivityPriceAmount *int64         `gorm:"column:activity_price_amount"`
+	EffectiveAt         time.Time      `gorm:"column:effective_at"`
+	ExpiredAt           *time.Time     `gorm:"column:expired_at"`
+	Status              string         `gorm:"column:status"`
+	CreatedBy           *string        `gorm:"column:created_by"`
+	UpdatedBy           *string        `gorm:"column:updated_by"`
+	CreatedAt           time.Time      `gorm:"column:created_at"`
+	UpdatedAt           time.Time      `gorm:"column:updated_at"`
+	DeletedAt           gorm.DeletedAt `gorm:"column:deleted_at"`
+}
+
+func (BillingPackageSKU) TableName() string { return "billing_package_skus" }
+
+type RechargeOrder struct {
+	ID                    string         `gorm:"column:id;primaryKey"`
+	OrderID               string         `gorm:"column:order_id"`
+	UserID                string         `gorm:"column:user_id"`
+	EnterpriseID          *string        `gorm:"column:enterprise_id"`
+	AccountID             string         `gorm:"column:account_id"`
+	PackageID             string         `gorm:"column:package_id"`
+	SKUID                 *string        `gorm:"column:sku_id"`
+	PackageType           string         `gorm:"column:package_type"`
+	TargetScope           string         `gorm:"column:target_scope"`
+	BillingMode           string         `gorm:"column:billing_mode"`
+	Points                int64          `gorm:"column:points"`
+	GrantedPoints         int64          `gorm:"column:granted_points"`
+	BonusPoints           int64          `gorm:"column:bonus_points"`
+	PriceCents            int64          `gorm:"column:price_cents"`
+	PriceAmount           int64          `gorm:"column:price_amount"`
+	Currency              string         `gorm:"column:currency"`
+	PaymentProvider       string         `gorm:"column:payment_provider"`
+	PaymentStatus         string         `gorm:"column:payment_status"`
+	CreditLotID           *string        `gorm:"column:credit_lot_id"`
+	EntitlementSnapshotID *string        `gorm:"column:entitlement_snapshot_id"`
+	OrderSource           string         `gorm:"column:order_source"`
+	IdempotencyKey        string         `gorm:"column:idempotency_key"`
+	TraceID               *string        `gorm:"column:trace_id"`
+	PaidAt                *time.Time     `gorm:"column:paid_at"`
+	FailedReason          *string        `gorm:"column:failed_reason"`
+	CreatedBy             *string        `gorm:"column:created_by"`
+	UpdatedBy             *string        `gorm:"column:updated_by"`
+	CreatedAt             time.Time      `gorm:"column:created_at"`
+	UpdatedAt             time.Time      `gorm:"column:updated_at"`
+	DeletedAt             gorm.DeletedAt `gorm:"column:deleted_at"`
+}
+
+func (RechargeOrder) TableName() string { return "recharge_orders" }
+
+type MockPaymentTransaction struct {
+	ID                 string         `gorm:"column:id;primaryKey"`
+	TransactionID      string         `gorm:"column:transaction_id"`
+	OrderID            string         `gorm:"column:order_id"`
+	PaymentResult      string         `gorm:"column:payment_result"`
+	PaymentStatus      string         `gorm:"column:payment_status"`
+	IdempotencyKey     string         `gorm:"column:idempotency_key"`
+	TraceID            *string        `gorm:"column:trace_id"`
+	RequestPayloadJSON datatypes.JSON `gorm:"column:request_payload_json;type:jsonb"`
+	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
+	CreatedAt          time.Time      `gorm:"column:created_at"`
+	UpdatedAt          time.Time      `gorm:"column:updated_at"`
+	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
+}
+
+func (MockPaymentTransaction) TableName() string { return "mock_payment_transactions" }
+
+type PackageEntitlementSnapshot struct {
+	ID                    string         `gorm:"column:id;primaryKey"`
+	EntitlementSnapshotID string         `gorm:"column:entitlement_snapshot_id"`
+	AccountID             string         `gorm:"column:account_id"`
+	UserID                *string        `gorm:"column:user_id"`
+	EnterpriseID          *string        `gorm:"column:enterprise_id"`
+	PackageID             string         `gorm:"column:package_id"`
+	OrderID               string         `gorm:"column:order_id"`
+	TargetScope           string         `gorm:"column:target_scope"`
+	EntitlementPolicy     datatypes.JSON `gorm:"column:entitlement_policy_json;type:jsonb"`
+	Status                string         `gorm:"column:status"`
+	EffectiveAt           time.Time      `gorm:"column:effective_at"`
+	ExpiresAt             *time.Time     `gorm:"column:expires_at"`
+	CreatedBy             *string        `gorm:"column:created_by"`
+	UpdatedBy             *string        `gorm:"column:updated_by"`
+	CreatedAt             time.Time      `gorm:"column:created_at"`
+	UpdatedAt             time.Time      `gorm:"column:updated_at"`
+	DeletedAt             gorm.DeletedAt `gorm:"column:deleted_at"`
+}
+
+func (PackageEntitlementSnapshot) TableName() string { return "package_entitlement_snapshots" }
+
+type EnterpriseContract struct {
+	ID                 string         `gorm:"column:id;primaryKey"`
+	ContractID         string         `gorm:"column:contract_id"`
+	EnterpriseID       string         `gorm:"column:enterprise_id"`
+	PackageID          string         `gorm:"column:package_id"`
+	OrderID            *string        `gorm:"column:order_id"`
+	ContractStatus     string         `gorm:"column:contract_status"`
+	BillingMode        string         `gorm:"column:billing_mode"`
+	PeriodStart        time.Time      `gorm:"column:period_start"`
+	PeriodEnd          *time.Time     `gorm:"column:period_end"`
+	SeatQuota          int            `gorm:"column:seat_quota"`
+	BudgetPoints       int64          `gorm:"column:budget_points"`
+	ApprovalPolicyJSON datatypes.JSON `gorm:"column:approval_policy_json;type:jsonb"`
+	InvoicePolicyJSON  datatypes.JSON `gorm:"column:invoice_policy_json;type:jsonb"`
+	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
+	CreatedAt          time.Time      `gorm:"column:created_at"`
+	UpdatedAt          time.Time      `gorm:"column:updated_at"`
+	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
+}
+
+func (EnterpriseContract) TableName() string { return "enterprise_contracts" }
+
+type BillingInvoice struct {
+	ID            string         `gorm:"column:id;primaryKey"`
+	InvoiceID     string         `gorm:"column:invoice_id"`
+	EnterpriseID  *string        `gorm:"column:enterprise_id"`
+	OrderID       *string        `gorm:"column:order_id"`
+	Amount        int64          `gorm:"column:amount"`
+	Currency      string         `gorm:"column:currency"`
+	InvoiceStatus string         `gorm:"column:invoice_status"`
+	IssuedAt      *time.Time     `gorm:"column:issued_at"`
+	DueAt         *time.Time     `gorm:"column:due_at"`
+	MetadataJSON  datatypes.JSON `gorm:"column:metadata_json;type:jsonb"`
+	CreatedBy     *string        `gorm:"column:created_by"`
+	UpdatedBy     *string        `gorm:"column:updated_by"`
+	CreatedAt     time.Time      `gorm:"column:created_at"`
+	UpdatedAt     time.Time      `gorm:"column:updated_at"`
+	DeletedAt     gorm.DeletedAt `gorm:"column:deleted_at"`
+}
+
+func (BillingInvoice) TableName() string { return "billing_invoices" }
+
+type BillingPromotion struct {
+	ID                 string         `gorm:"column:id;primaryKey"`
+	PromotionID        string         `gorm:"column:promotion_id"`
+	PromotionName      string         `gorm:"column:promotion_name"`
+	PackageID          *string        `gorm:"column:package_id"`
+	DiscountPolicyJSON datatypes.JSON `gorm:"column:discount_policy_json;type:jsonb"`
+	VisibleScope       string         `gorm:"column:visible_scope"`
+	Status             string         `gorm:"column:status"`
+	StartsAt           time.Time      `gorm:"column:starts_at"`
+	EndsAt             *time.Time     `gorm:"column:ends_at"`
+	CreatedBy          *string        `gorm:"column:created_by"`
+	UpdatedBy          *string        `gorm:"column:updated_by"`
+	CreatedAt          time.Time      `gorm:"column:created_at"`
+	UpdatedAt          time.Time      `gorm:"column:updated_at"`
+	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at"`
+}
+
+func (BillingPromotion) TableName() string { return "billing_promotions" }
 
 type Asset struct {
 	ID            string         `gorm:"column:id;primaryKey"`

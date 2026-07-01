@@ -9,6 +9,15 @@ INSERT INTO platform_admins (
   'adm_root', 'admin@dora.local', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS1sb2NhbC1zYWx0MQ$4jdN85WOR//36CwDBXmQQli7Mu8sYwHd+AM3HYmjPXI', 'Dora Root Admin', 'super_admin', 'active', true
 ) ON CONFLICT (admin_account) DO NOTHING;
 
+INSERT INTO platform_admins (
+  id, admin_account, password_hash, display_name, role, status, must_rotate_password
+) VALUES
+  ('adm_demo', 'admin_demo@dora.local', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS1sb2NhbC1zYWx0MQ$4jdN85WOR//36CwDBXmQQli7Mu8sYwHd+AM3HYmjPXI', 'Admin Demo', 'super_admin', 'active', false),
+  ('adm_reviewer_demo', 'reviewer_demo@dora.local', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS1sb2NhbC1zYWx0MQ$4jdN85WOR//36CwDBXmQQli7Mu8sYwHd+AM3HYmjPXI', 'Reviewer Demo', 'reviewer', 'active', false),
+  ('adm_finance_demo', 'finance_demo@dora.local', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS1sb2NhbC1zYWx0MQ$4jdN85WOR//36CwDBXmQQli7Mu8sYwHd+AM3HYmjPXI', 'Finance Demo', 'finance', 'active', false),
+  ('adm_qa_demo', 'qa_demo@dora.local', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS1sb2NhbC1zYWx0MQ$4jdN85WOR//36CwDBXmQQli7Mu8sYwHd+AM3HYmjPXI', 'QA Demo', 'qa_admin', 'active', false)
+ON CONFLICT (admin_account) DO NOTHING;
+
 INSERT INTO platform_admin_bootstraps (
   id, admin_id, bootstrap_account, initialized_by, credential_secret_ref, status
 ) VALUES (
@@ -21,6 +30,15 @@ INSERT INTO business_users (
   ('usr_1001', 'U1001', 'user1001@dora.local', '+10000000001', 'd354a6b859c939fdfde08f22baee6ebc7d7c5c6538398c905d2abddc43bad1ee', '1fb1f420856780a29719b994c8764b81770d79f97e2e1861ba938a7a5a15dfb9', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS11c2VyLXNhbHQwMQ$AfDQPdlOJ78pkBwqpH3UA0UMVwTpuKPCZTx+PvpD6Xw', 'Seed User', 'active', 'sp_personal_1001', 'seed'),
   ('usr_1002', 'U1002', 'user1002@dora.local', '+10000000002', 'c3a48846c3d4d3f2c72fa5a79c1bfd5d75647e43a93084625aa793a7bcca5a14', 'd9d0a321f73cff7a953a6e48ec25c035e515c54181193d5729dd995733af8467', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS11c2VyLXNhbHQwMQ$AfDQPdlOJ78pkBwqpH3UA0UMVwTpuKPCZTx+PvpD6Xw', 'Other Space User', 'active', 'sp_personal_1002', 'seed'),
   ('usr_admin_actor', 'UADMIN', 'admin.actor@dora.local', '+10000000999', '7b83f95f80ac466d0a4a969b3512096188ded5a287ed0c91cfecbf2a863b35ae', 'b7322332e5b9388014568a94f1730c771d9720ca4d8f88deb37c739d1ed2ea6a', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS11c2VyLXNhbHQwMQ$AfDQPdlOJ78pkBwqpH3UA0UMVwTpuKPCZTx+PvpD6Xw', 'Admin Actor User', 'active', 'sp_personal_admin_actor', 'seed')
+ON CONFLICT (account_no) DO NOTHING;
+
+INSERT INTO business_users (
+  id, account_no, email, phone, email_hash, phone_hash, password_hash, display_name, status, default_space_id, registered_source
+) VALUES
+  ('user_demo', 'UDEMO', 'user_demo@dora.local', '+10000001001', 'seed:user_demo_email', 'seed:user_demo_phone', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS11c2VyLXNhbHQwMQ$AfDQPdlOJ78pkBwqpH3UA0UMVwTpuKPCZTx+PvpD6Xw', 'User Demo', 'active', 'sp_user_demo', 'b0_seed'),
+  ('creator_demo', 'UCREATOR', 'creator_demo@dora.local', '+10000001002', 'seed:creator_demo_email', 'seed:creator_demo_phone', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS11c2VyLXNhbHQwMQ$AfDQPdlOJ78pkBwqpH3UA0UMVwTpuKPCZTx+PvpD6Xw', 'Creator Demo', 'active', 'sp_creator_demo', 'b0_seed'),
+  ('enterprise_admin_demo', 'UENTADMIN', 'enterprise_admin_demo@dora.local', '+10000001003', 'seed:enterprise_admin_demo_email', 'seed:enterprise_admin_demo_phone', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS11c2VyLXNhbHQwMQ$AfDQPdlOJ78pkBwqpH3UA0UMVwTpuKPCZTx+PvpD6Xw', 'Enterprise Admin Demo', 'active', 'sp_enterprise_admin_demo', 'b0_seed'),
+  ('enterprise_member_demo', 'UENTMEMBER', 'enterprise_member_demo@dora.local', '+10000001004', 'seed:enterprise_member_demo_email', 'seed:enterprise_member_demo_phone', '$argon2id$v=19$m=16384,t=1,p=1$ZG9yYS11c2VyLXNhbHQwMQ$AfDQPdlOJ78pkBwqpH3UA0UMVwTpuKPCZTx+PvpD6Xw', 'Enterprise Member Demo', 'active', 'sp_enterprise_member_demo', 'b0_seed')
 ON CONFLICT (account_no) DO NOTHING;
 
 INSERT INTO business_spaces (
@@ -40,10 +58,34 @@ ON CONFLICT (id) DO UPDATE SET
   updated_at = now(),
   updated_by = 'seed:business_core';
 
+INSERT INTO business_spaces (
+  id, owner_user_id, space_type, enterprise_id, display_name, status, credit_account_id
+) VALUES
+  ('sp_user_demo', 'user_demo', 'personal', null, 'User Demo Personal Space', 'active', 'ca_user_demo'),
+  ('sp_creator_demo', 'creator_demo', 'personal', null, 'Creator Demo Personal Space', 'active', 'ca_creator_demo'),
+  ('sp_enterprise_admin_demo', 'enterprise_admin_demo', 'personal', null, 'Enterprise Admin Demo Personal Space', 'active', 'ca_enterprise_admin_demo'),
+  ('sp_enterprise_member_demo', 'enterprise_member_demo', 'personal', null, 'Enterprise Member Demo Personal Space', 'active', 'ca_enterprise_member_demo'),
+  ('sp_ent_demo', 'enterprise_admin_demo', 'enterprise', 'ent_demo', 'Demo Enterprise Space', 'active', 'ca_ent_demo')
+ON CONFLICT (id) DO UPDATE SET
+  owner_user_id = EXCLUDED.owner_user_id,
+  space_type = EXCLUDED.space_type,
+  enterprise_id = EXCLUDED.enterprise_id,
+  display_name = EXCLUDED.display_name,
+  status = EXCLUDED.status,
+  credit_account_id = EXCLUDED.credit_account_id,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
+
 INSERT INTO enterprises (
   id, enterprise_no, name, owner_user_id, default_space_id, credit_account_id, status
 ) VALUES (
   'ent_1001', 'E1001', 'Seed Enterprise', 'usr_1001', 'sp_enterprise_1001', 'ca_enterprise_1001', 'active'
+) ON CONFLICT (enterprise_no) DO NOTHING;
+
+INSERT INTO enterprises (
+  id, enterprise_no, name, owner_user_id, default_space_id, credit_account_id, status
+) VALUES (
+  'ent_demo', 'EDEMO', 'Demo Enterprise', 'enterprise_admin_demo', 'sp_ent_demo', 'ca_ent_demo', 'active'
 ) ON CONFLICT (enterprise_no) DO NOTHING;
 
 INSERT INTO enterprise_members (
@@ -51,6 +93,13 @@ INSERT INTO enterprise_members (
 ) VALUES (
   'ent_mem_1001_owner', 'ent_1001', 'usr_1001', 'owner', 'active', '2026-06-27T12:00:00Z'
 ) ON CONFLICT (enterprise_id, user_id) DO NOTHING;
+
+INSERT INTO enterprise_members (
+  id, enterprise_id, user_id, role, status, joined_at
+) VALUES
+  ('ent_mem_demo_owner', 'ent_demo', 'enterprise_admin_demo', 'owner', 'active', '2026-07-01T00:00:00Z'),
+  ('ent_mem_demo_member', 'ent_demo', 'enterprise_member_demo', 'member', 'active', '2026-07-01T00:00:00Z')
+ON CONFLICT (enterprise_id, user_id) DO NOTHING;
 
 INSERT INTO projects (
   id, project_no, owner_user_id, space_id, enterprise_id, title, status, creative_status, cover_asset_id
@@ -259,13 +308,178 @@ ON CONFLICT (id) DO UPDATE SET
   updated_at = now(),
   updated_by = 'seed:business_core';
 
-INSERT INTO credit_batches (
-  id, account_id, batch_type, source_type, source_id, total_points, remaining_points, expires_at, status
+INSERT INTO credit_accounts (
+  id, account_type, owner_user_id, enterprise_id, status, available_points, frozen_points, expires_soon_points
 ) VALUES
-  ('cb_personal_1001_seed', 'ca_personal_1001', 'grant', 'seed', 'seed_credit_personal', 5000, 5000, '2026-12-31T23:59:59Z', 'active'),
-  ('cb_personal_1002_low', 'ca_personal_1002', 'grant', 'seed', 'seed_credit_low_balance', 5, 5, '2026-12-31T23:59:59Z', 'active'),
-  ('cb_enterprise_1001_seed', 'ca_enterprise_1001', 'grant', 'seed', 'seed_credit_enterprise', 100000, 100000, '2026-12-31T23:59:59Z', 'active')
+  ('ca_user_demo', 'personal', 'user_demo', null, 'active', 0, 0, 0),
+  ('ca_creator_demo', 'personal', 'creator_demo', null, 'active', 0, 0, 0),
+  ('ca_enterprise_admin_demo', 'personal', 'enterprise_admin_demo', null, 'active', 0, 0, 0),
+  ('ca_enterprise_member_demo', 'personal', 'enterprise_member_demo', null, 'active', 0, 0, 0),
+  ('ca_ent_demo', 'enterprise', null, 'ent_demo', 'active', 10000, 0, 0)
+ON CONFLICT (id) DO UPDATE SET
+  account_type = EXCLUDED.account_type,
+  owner_user_id = EXCLUDED.owner_user_id,
+  enterprise_id = EXCLUDED.enterprise_id,
+  status = EXCLUDED.status,
+  available_points = EXCLUDED.available_points,
+  frozen_points = EXCLUDED.frozen_points,
+  expires_soon_points = EXCLUDED.expires_soon_points,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
+
+INSERT INTO credit_batches (
+  id, account_id, batch_type, source_type, source_id, total_points, remaining_points,
+  original_points, available_points, frozen_points, consumed_points, expired_points,
+  granted_at, expires_at, expiry_policy_json, spend_scope_json, settlement_eligible, status
+) VALUES
+  ('cb_personal_1001_seed', 'ca_personal_1001', 'grant', 'seed', 'seed_credit_personal', 5000, 5000,
+   5000, 5000, 0, 0, 0, '2026-06-27T00:00:00Z', '2026-12-31T23:59:59Z',
+   '{"type":"fixed_date","expires_at":"2026-12-31T23:59:59Z"}'::jsonb, '["tool_generation","skill_usage"]'::jsonb, true, 'active'),
+  ('cb_personal_1002_low', 'ca_personal_1002', 'grant', 'seed', 'seed_credit_low_balance', 5, 5,
+   5, 5, 0, 0, 0, '2026-06-27T00:00:00Z', '2026-12-31T23:59:59Z',
+   '{"type":"fixed_date","expires_at":"2026-12-31T23:59:59Z"}'::jsonb, '["tool_generation","skill_usage"]'::jsonb, true, 'active'),
+  ('cb_enterprise_1001_seed', 'ca_enterprise_1001', 'grant', 'seed', 'seed_credit_enterprise', 100000, 100000,
+   100000, 100000, 0, 0, 0, '2026-06-27T00:00:00Z', '2026-12-31T23:59:59Z',
+  '{"type":"fixed_date","expires_at":"2026-12-31T23:59:59Z"}'::jsonb, '["tool_generation","skill_usage"]'::jsonb, true, 'active')
 ON CONFLICT DO NOTHING;
+
+INSERT INTO recharge_packages (
+  id, package_id, package_type, target_scope, billing_mode, display_name, name,
+  points, granted_points, bonus_points, price_cents, price_amount, currency,
+  credit_valid_duration, credit_expiry_policy, spend_scope_json, settlement_eligible,
+  entitlement_policy_json, renewal_policy_json, refund_policy_json, visible_scope,
+  status, created_by, updated_by
+) VALUES
+  ('rpkg_trial_100_7d', 'pkg_personal_trial_100_7d', 'personal_credit_pack', 'personal', 'one_time', '个人体验包', '个人体验包',
+   100, 100, 0, 990, 990, 'CNY',
+   'P7D', 'P7D', '["tool_generation","skill_usage"]'::jsonb, true,
+   '{"priority_queue":false,"watermark_free_export":false}'::jsonb, '{"mode":"none"}'::jsonb, '{"mode":"unused_refund"}'::jsonb, 'all_users',
+   'active', 'seed:business_core', 'seed:business_core'),
+  ('rpkg_1000_1m', 'pkg_1000_1m', 'personal_credit_pack', 'personal', 'one_time', '个人标准积分包', '个人标准积分包',
+   1000, 1000, 0, 9900, 9900, 'CNY', 'P1M', 'P1M', '["tool_generation","skill_usage"]'::jsonb, true,
+   '{"priority_queue":false,"watermark_free_export":false}'::jsonb, '{"mode":"none"}'::jsonb, '{"mode":"unused_refund"}'::jsonb, 'all_users',
+   'active', 'seed:business_core', 'seed:business_core'),
+  ('rpkg_5000_1m', 'pkg_5000_1m', 'personal_credit_pack', 'personal', 'one_time', '5000 积分包', '5000 积分包',
+   5000, 5000, 0, 39900, 39900, 'CNY', 'P1M', 'P1M', '["tool_generation","skill_usage"]'::jsonb, true,
+   '{"priority_queue":false,"watermark_free_export":false}'::jsonb, '{"mode":"none"}'::jsonb, '{"mode":"proportional_refund"}'::jsonb, 'all_users',
+   'active', 'seed:business_core', 'seed:business_core'),
+  ('rpkg_pro_monthly', 'pkg_personal_pro_monthly', 'personal_membership', 'personal', 'subscription', '个人 Pro 月卡', '个人 Pro 月卡',
+   2500, 2500, 0, 19900, 19900, 'CNY', 'P1M', 'P1M', '["tool_generation","skill_usage"]'::jsonb, true,
+   '{"period":"P1M","priority_queue":true,"watermark_free_export":true,"export_quota":100}'::jsonb, '{"mode":"manual_renewal"}'::jsonb, '{"mode":"proportional_refund"}'::jsonb, 'all_users',
+   'active', 'seed:business_core', 'seed:business_core'),
+  ('rpkg_video_addon_4000', 'pkg_video_addon_4000_1m', 'generation_addon', 'personal', 'one_time', '个人视频加购包', '个人视频加购包',
+   4000, 4000, 0, 29900, 29900, 'CNY', 'P1M', 'P1M', '["tool_generation"]'::jsonb, false,
+   '{"resource_type":"video","generation_quota":4000}'::jsonb, '{"mode":"none"}'::jsonb, '{"mode":"non_refundable"}'::jsonb, 'all_users',
+   'active', 'seed:business_core', 'seed:business_core'),
+  ('rpkg_enterprise_basic', 'pkg_enterprise_basic_monthly', 'enterprise_plan', 'enterprise', 'subscription', '企业基础版', '企业基础版',
+   30000, 30000, 0, 199900, 199900, 'CNY', 'P1M', 'P1M', '["tool_generation","skill_usage"]'::jsonb, true,
+   '{"period":"P1M","seat_quota":10,"department_budget":false,"approval_threshold_points":5000,"enterprise_asset":true,"enterprise_skill_install":true}'::jsonb, '{"mode":"manual_renewal"}'::jsonb, '{"mode":"proportional_refund"}'::jsonb, 'enterprise',
+   'active', 'seed:business_core', 'seed:business_core'),
+  ('rpkg_enterprise_pro', 'pkg_enterprise_pro_monthly', 'enterprise_plan', 'enterprise', 'subscription', '企业专业版', '企业专业版',
+   200000, 200000, 0, 999900, 999900, 'CNY', 'P1M', 'P1M', '["tool_generation","skill_usage"]'::jsonb, true,
+   '{"period":"P1M","seat_quota":50,"department_budget":true,"approval_threshold_points":20000,"private_skill":true,"invoice":true}'::jsonb, '{"mode":"manual_renewal"}'::jsonb, '{"mode":"proportional_refund"}'::jsonb, 'enterprise',
+   'active', 'seed:business_core', 'seed:business_core'),
+  ('rpkg_creator_growth', 'pkg_creator_growth', 'creator_benefit_pack', 'creator', 'one_time', '创作者权益包', '创作者权益包',
+   0, 0, 0, 9900, 9900, 'CNY', 'never_expire', 'never_expire', '["skill_usage"]'::jsonb, false,
+   '{"marketplace_publish":true,"analytics":true,"settlement_boost":true}'::jsonb, '{"mode":"none"}'::jsonb, '{"mode":"non_refundable"}'::jsonb, 'invite_only',
+   'draft', 'seed:business_core', 'seed:business_core')
+ON CONFLICT (package_id) DO UPDATE SET
+  package_type = EXCLUDED.package_type,
+  target_scope = EXCLUDED.target_scope,
+  billing_mode = EXCLUDED.billing_mode,
+  display_name = EXCLUDED.display_name,
+  name = EXCLUDED.name,
+  points = EXCLUDED.points,
+  granted_points = EXCLUDED.granted_points,
+  bonus_points = EXCLUDED.bonus_points,
+  price_cents = EXCLUDED.price_cents,
+  price_amount = EXCLUDED.price_amount,
+  currency = EXCLUDED.currency,
+  credit_valid_duration = EXCLUDED.credit_valid_duration,
+  credit_expiry_policy = EXCLUDED.credit_expiry_policy,
+  spend_scope_json = EXCLUDED.spend_scope_json,
+  settlement_eligible = EXCLUDED.settlement_eligible,
+  entitlement_policy_json = EXCLUDED.entitlement_policy_json,
+  renewal_policy_json = EXCLUDED.renewal_policy_json,
+  refund_policy_json = EXCLUDED.refund_policy_json,
+  visible_scope = EXCLUDED.visible_scope,
+  status = EXCLUDED.status,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
+
+INSERT INTO billing_package_skus (
+  id, sku_id, package_id, channel_code, price_amount, currency, activity_price_amount, effective_at, status, created_by, updated_by
+) VALUES
+  ('sku_pkg_personal_trial_100_7d_default', 'sku_personal_trial_100_7d_cny_default', 'pkg_personal_trial_100_7d', 'default', 990, 'CNY', null, '2026-06-27T00:00:00Z', 'active', 'seed:business_core', 'seed:business_core'),
+  ('sku_pkg_1000_1m_default', 'sku_pkg_1000_1m_cny_default', 'pkg_1000_1m', 'default', 9900, 'CNY', null, '2026-06-27T00:00:00Z', 'active', 'seed:business_core', 'seed:business_core'),
+  ('sku_pkg_5000_1m_default', 'sku_pkg_5000_1m_cny_default', 'pkg_5000_1m', 'default', 39900, 'CNY', 34900, '2026-06-27T00:00:00Z', 'active', 'seed:business_core', 'seed:business_core'),
+  ('sku_pkg_personal_pro_monthly_default', 'sku_personal_pro_monthly_cny_default', 'pkg_personal_pro_monthly', 'default', 19900, 'CNY', null, '2026-06-27T00:00:00Z', 'active', 'seed:business_core', 'seed:business_core'),
+  ('sku_pkg_video_addon_4000_default', 'sku_video_addon_4000_cny_default', 'pkg_video_addon_4000_1m', 'default', 29900, 'CNY', null, '2026-06-27T00:00:00Z', 'active', 'seed:business_core', 'seed:business_core'),
+  ('sku_pkg_enterprise_basic_default', 'sku_enterprise_basic_monthly_cny_default', 'pkg_enterprise_basic_monthly', 'default', 199900, 'CNY', null, '2026-06-27T00:00:00Z', 'active', 'seed:business_core', 'seed:business_core'),
+  ('sku_pkg_enterprise_pro_default', 'sku_enterprise_pro_monthly_cny_default', 'pkg_enterprise_pro_monthly', 'default', 999900, 'CNY', null, '2026-06-27T00:00:00Z', 'active', 'seed:business_core', 'seed:business_core')
+ON CONFLICT (sku_id) DO UPDATE SET
+  package_id = EXCLUDED.package_id,
+  channel_code = EXCLUDED.channel_code,
+  price_amount = EXCLUDED.price_amount,
+  currency = EXCLUDED.currency,
+  activity_price_amount = EXCLUDED.activity_price_amount,
+  effective_at = EXCLUDED.effective_at,
+  status = EXCLUDED.status,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
+
+INSERT INTO enterprise_contracts (
+  id, contract_id, enterprise_id, package_id, contract_status, billing_mode,
+  period_start, period_end, seat_quota, budget_points, approval_policy_json, invoice_policy_json, created_by, updated_by
+) VALUES
+  ('ect_ent_demo_basic', 'contract_ent_demo_basic', 'ent_demo', 'pkg_enterprise_basic_monthly', 'active', 'subscription',
+   '2026-07-01T00:00:00Z', '2026-08-01T00:00:00Z', 10, 30000,
+   '{"approval_threshold_points":5000,"department_budget":false}'::jsonb,
+   '{"invoice_type":"normal","billing_cycle":"monthly"}'::jsonb,
+   'seed:business_core', 'seed:business_core')
+ON CONFLICT (contract_id) DO UPDATE SET
+  package_id = EXCLUDED.package_id,
+  contract_status = EXCLUDED.contract_status,
+  billing_mode = EXCLUDED.billing_mode,
+  period_start = EXCLUDED.period_start,
+  period_end = EXCLUDED.period_end,
+  seat_quota = EXCLUDED.seat_quota,
+  budget_points = EXCLUDED.budget_points,
+  approval_policy_json = EXCLUDED.approval_policy_json,
+  invoice_policy_json = EXCLUDED.invoice_policy_json,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
+
+INSERT INTO billing_invoices (
+  id, invoice_id, enterprise_id, amount, currency, invoice_status, issued_at, due_at, metadata_json, created_by, updated_by
+) VALUES
+  ('inv_ent_demo_basic_202607', 'invoice_ent_demo_basic_202607', 'ent_demo', 199900, 'CNY', 'pending',
+   '2026-07-01T00:00:00Z', '2026-07-31T23:59:59Z', '{"contract_id":"contract_ent_demo_basic"}'::jsonb,
+   'seed:business_core', 'seed:business_core')
+ON CONFLICT (invoice_id) DO UPDATE SET
+  amount = EXCLUDED.amount,
+  currency = EXCLUDED.currency,
+  invoice_status = EXCLUDED.invoice_status,
+  metadata_json = EXCLUDED.metadata_json,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
+
+INSERT INTO billing_promotions (
+  id, promotion_id, promotion_name, package_id, discount_policy_json, visible_scope, status, starts_at, ends_at, created_by, updated_by
+) VALUES
+  ('promo_pkg_5000_seed', 'promo_pkg_5000_seed', '5000 积分包测试活动价', 'pkg_5000_1m',
+   '{"type":"fixed_price","activity_price_amount":34900}'::jsonb, 'all_users', 'active',
+   '2026-07-01T00:00:00Z', '2026-12-31T23:59:59Z', 'seed:business_core', 'seed:business_core')
+ON CONFLICT (promotion_id) DO UPDATE SET
+  promotion_name = EXCLUDED.promotion_name,
+  package_id = EXCLUDED.package_id,
+  discount_policy_json = EXCLUDED.discount_policy_json,
+  visible_scope = EXCLUDED.visible_scope,
+  status = EXCLUDED.status,
+  starts_at = EXCLUDED.starts_at,
+  ends_at = EXCLUDED.ends_at,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
 
 INSERT INTO redeem_code_batches (
   id, batch_no, target_type, account_type, bind_target_type, bind_target_id, target_user_id, target_enterprise_id, channel_code, total_codes, points_per_code, expires_at, credit_expires_at, status, created_by_admin_id, reason
@@ -274,12 +488,64 @@ INSERT INTO redeem_code_batches (
   ('rcb_enterprise_1001', 'RCB-ENT-1001', 'enterprise', 'enterprise', 'enterprise', 'ent_1001', null, 'ent_1001', 'enterprise-only', 1, 1000, '2026-12-31T23:59:59Z', '2026-12-31T23:59:59Z', 'active', 'adm_root', 'seed enterprise redeem code')
 ON CONFLICT (batch_no) DO NOTHING;
 
+INSERT INTO redeem_code_batches (
+  id, batch_no, target_type, account_type, bind_target_type, bind_target_id, target_user_id, target_enterprise_id, channel_code, total_codes, points_per_code, expires_at, credit_expires_at, status, created_by_admin_id, reason
+) VALUES
+  ('rcb_smoke1000', 'RCB-SMOKE1000', 'none', 'personal', 'none', null, null, null, 'smoke', 10000, 1000, '2026-12-31T23:59:59Z', '2026-12-31T23:59:59Z', 'active', 'adm_qa_demo', 'B0 fixed smoke code'),
+  ('rcb_gift300', 'RCB-GIFT300', 'none', 'personal', 'none', null, null, null, 'smoke', 10000, 300, '2026-12-31T23:59:59Z', null, 'active', 'adm_qa_demo', 'B0 fixed gift code'),
+  ('rcb_toolonly500', 'RCB-TOOLONLY500', 'none', 'personal', 'none', null, null, null, 'smoke', 10000, 500, '2026-12-31T23:59:59Z', '2026-12-31T23:59:59Z', 'active', 'adm_qa_demo', 'B0 fixed tool-only code')
+ON CONFLICT (batch_no) DO NOTHING;
+
 INSERT INTO redeem_codes (
   id, batch_id, code_digest, status, expires_at
 ) VALUES
   ('rc_user_1001', 'rcb_user_1001', 'sha256:seed-user-code', 'unused', '2026-12-31T23:59:59Z'),
   ('rc_enterprise_1001', 'rcb_enterprise_1001', 'sha256:seed-enterprise-only', 'unused', '2026-12-31T23:59:59Z')
 ON CONFLICT (code_digest) DO NOTHING;
+
+INSERT INTO redeem_codes (
+  id, batch_id, code_digest, status, expires_at
+) VALUES
+  ('rc_smoke1000', 'rcb_smoke1000', 'sha256:SMOKE1000', 'unused', '2026-12-31T23:59:59Z'),
+  ('rc_gift300', 'rcb_gift300', 'sha256:GIFT300', 'unused', '2026-12-31T23:59:59Z'),
+  ('rc_toolonly500', 'rcb_toolonly500', 'sha256:TOOLONLY500', 'unused', '2026-12-31T23:59:59Z')
+ON CONFLICT (code_digest) DO NOTHING;
+
+INSERT INTO system_feature_flags (
+  id, flag_key, enabled, default_enabled, description, created_by, updated_by
+) VALUES
+  ('flag_auth_enabled', 'auth.enabled', true, true, '登录注册开关', 'seed:business_core', 'seed:business_core'),
+  ('flag_credit_lot_enabled', 'credit_lot.enabled', true, true, '积分批次和有效期开关', 'seed:business_core', 'seed:business_core'),
+  ('flag_redeem_code_enabled', 'redeem_code.enabled', true, true, '兑换码入口', 'seed:business_core', 'seed:business_core'),
+  ('flag_mock_payment_enabled', 'mock_payment.enabled', true, true, '测试环境 Mock 支付', 'seed:business_core', 'seed:business_core'),
+  ('flag_fake_provider_enabled', 'fake_provider.enabled', true, true, 'Fake Provider 开关', 'seed:business_core', 'seed:business_core'),
+  ('flag_agent_core_refactor_enabled', 'agent_core_refactor.enabled', false, false, '新 Agent Runtime 主开关', 'seed:business_core', 'seed:business_core'),
+  ('flag_skill_marketplace_enabled', 'skill_marketplace.enabled', false, false, 'Skill 市场开关', 'seed:business_core', 'seed:business_core'),
+  ('flag_paid_marketplace_skill_enabled', 'paid_marketplace_skill.enabled', false, false, '付费 Skill 使用费开关', 'seed:business_core', 'seed:business_core')
+ON CONFLICT (flag_key) DO UPDATE SET
+  enabled = EXCLUDED.enabled,
+  default_enabled = EXCLUDED.default_enabled,
+  description = EXCLUDED.description,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
+
+INSERT INTO fake_provider_tasks (
+  id, provider_task_id, provider_key, tool_id, scenario, latency_ms, artifact_uri, status, result_json, created_by, updated_by
+) VALUES
+  ('fpt_image_success', 'fake_task_image_success', 'fake_image_provider', 'image_generate.default', 'success', 500, 'mock://artifact/image_001.png', 'succeeded', '{"resource_type":"image","preview_url":"mock://preview/image_001.png"}'::jsonb, 'seed:business_core', 'seed:business_core'),
+  ('fpt_video_timeout', 'fake_task_video_timeout', 'fake_video_provider', 'video_generate.default', 'timeout', 3000, null, 'failed', '{"error_code":"FAKE_TIMEOUT"}'::jsonb, 'seed:business_core', 'seed:business_core'),
+  ('fpt_music_partial', 'fake_task_music_partial', 'fake_music_provider', 'music_generate.default', 'partial_success', 800, 'mock://artifact/music_001.mp3', 'succeeded', '{"resource_type":"music","partial":true}'::jsonb, 'seed:business_core', 'seed:business_core'),
+  ('fpt_safety_blocked', 'fake_task_safety_blocked', 'fake_safety_provider', 'safety.postcheck', 'safety_blocked', 100, null, 'failed', '{"safety_status":"blocked"}'::jsonb, 'seed:business_core', 'seed:business_core')
+ON CONFLICT (provider_task_id) DO UPDATE SET
+  provider_key = EXCLUDED.provider_key,
+  tool_id = EXCLUDED.tool_id,
+  scenario = EXCLUDED.scenario,
+  latency_ms = EXCLUDED.latency_ms,
+  artifact_uri = EXCLUDED.artifact_uri,
+  status = EXCLUDED.status,
+  result_json = EXCLUDED.result_json,
+  updated_at = now(),
+  updated_by = 'seed:business_core';
 
 INSERT INTO asset_element_types (
   id, element_type, display_name, schema_version, schema_json, status

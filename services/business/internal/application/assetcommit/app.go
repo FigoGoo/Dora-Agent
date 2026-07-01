@@ -292,6 +292,11 @@ func (a *App) CommitGeneratedAssetAndCharge(ctx context.Context, in CommitInput)
 		if unsettled < 0 {
 			return bizerrors.New(bizerrors.CodeStateConflict, "asset commit charge exceeds frozen points")
 		}
+		if charged > 0 {
+			if _, err := a.consumeFrozenBatches(tx, freeze.FreezeID, charged, in.Auth.UserID, now); err != nil {
+				return err
+			}
+		}
 		released, err := a.releaseUnused(tx, &freeze, &account, unsettled, in.Auth.UserID, now)
 		if err != nil {
 			return err
@@ -555,14 +560,26 @@ func (a *App) releaseUnused(tx *gorm.DB, freeze *businesscore.CreditFreeze, acco
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", row.BatchID).First(&batch).Error; err != nil {
 			return 0, err
 		}
+		if batch.FrozenPoints < take {
+			return 0, bizerrors.New(bizerrors.CodeStateConflict, "credit lot frozen points are insufficient")
+		}
+		batch.FrozenPoints -= take
 		if batch.ExpiresAt == nil || batch.ExpiresAt.After(now) {
 			batch.RemainingPoints += take
+			batch.AvailablePoints += take
 			batch.UpdatedBy = optionalString(operatorID)
 			batch.UpdatedAt = now
 			if err := tx.Save(&batch).Error; err != nil {
 				return 0, err
 			}
 			account.AvailablePoints += take
+		} else {
+			batch.ExpiredPoints += take
+			batch.UpdatedBy = optionalString(operatorID)
+			batch.UpdatedAt = now
+			if err := tx.Save(&batch).Error; err != nil {
+				return 0, err
+			}
 		}
 		row.ReleasedPoints += take
 		if row.ChargedPoints+row.ReleasedPoints >= row.FrozenPoints {
@@ -581,6 +598,62 @@ func (a *App) releaseUnused(tx *gorm.DB, freeze *businesscore.CreditFreeze, acco
 		return 0, bizerrors.New(bizerrors.CodeStateConflict, "release points exceed freeze")
 	}
 	return released, nil
+}
+
+func (a *App) consumeFrozenBatches(tx *gorm.DB, freezeID string, points int64, operatorID string, now time.Time) (int64, error) {
+	if points <= 0 {
+		return 0, nil
+	}
+	var rows []businesscore.CreditFreezeBatchItem
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("freeze_id = ? AND status = ?", freezeID, "frozen").
+		Order("created_at ASC").Find(&rows).Error; err != nil {
+		return 0, err
+	}
+	remaining := points
+	var consumed int64
+	for _, row := range rows {
+		if remaining <= 0 {
+			break
+		}
+		available := row.FrozenPoints - row.ChargedPoints - row.ReleasedPoints
+		if available <= 0 {
+			continue
+		}
+		take := available
+		if take > remaining {
+			take = remaining
+		}
+		var batch businesscore.CreditBatch
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", row.BatchID).First(&batch).Error; err != nil {
+			return 0, err
+		}
+		if batch.FrozenPoints < take {
+			return 0, bizerrors.New(bizerrors.CodeStateConflict, "credit lot frozen points are insufficient")
+		}
+		batch.FrozenPoints -= take
+		batch.ConsumedPoints += take
+		batch.UpdatedBy = optionalString(operatorID)
+		batch.UpdatedAt = now
+		if err := tx.Save(&batch).Error; err != nil {
+			return 0, err
+		}
+		row.ChargedPoints += take
+		if row.ChargedPoints+row.ReleasedPoints >= row.FrozenPoints {
+			row.Status = "charged"
+		}
+		row.UpdatedBy = optionalString(operatorID)
+		row.UpdatedAt = now
+		if err := tx.Save(&row).Error; err != nil {
+			return 0, err
+		}
+		consumed += take
+		remaining -= take
+	}
+	if remaining > 0 {
+		return consumed, bizerrors.New(bizerrors.CodeStateConflict, "charge points exceed unsettled freeze allocations")
+	}
+	return consumed, nil
 }
 
 func ensureEstimateItemUnsettled(tx *gorm.DB, estimateItemID string) error {

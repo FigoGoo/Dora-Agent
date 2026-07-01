@@ -212,6 +212,9 @@ def validate_tool_credit_asset_fixtures() -> int:
     tool_task = schema_path("api/schemas/tool/tool-task.v1.schema.json")
     tool_result = schema_path("api/schemas/tool/tool-result.v1.schema.json")
     credit = schema_path("api/schemas/credit/credit-freeze.v1.schema.json")
+    credit_lot = schema_path("api/schemas/credit/credit-lot.v1.schema.json")
+    recharge_order = schema_path("api/schemas/credit/recharge-order.v1.schema.json")
+    mock_payment = schema_path("api/schemas/credit/mock-payment.v1.schema.json")
     generation_payload = schema_path("api/agui/events/cost_disclosure.generation.presented.schema.json")
 
     count = 0
@@ -227,6 +230,15 @@ def validate_tool_credit_asset_fixtures() -> int:
             if key.startswith("hold_after_"):
                 validate_instance(credit, value, f"{path.relative_to(REPO_ROOT)}:{key}")
                 count += 1
+        if "credit_lot" in data:
+            validate_value(path, data, credit_lot, "credit_lot")
+            count += 1
+        if "recharge_order" in data:
+            validate_value(path, data, recharge_order, "recharge_order")
+            count += 1
+        if "mock_payment_transaction" in data:
+            validate_value(path, data, mock_payment, "mock_payment_transaction")
+            count += 1
         if "tool_task_failure" in data:
             validate_value(path, data, tool_task, "tool_task_failure")
             count += 1

@@ -343,6 +343,8 @@ func appendSecondModelEstimateItem(t *testing.T, repo *businesscore.Repository, 
 		}
 		return tx.Model(&businesscore.CreditBatch{}).Where("id = ?", freezeItem.BatchID).Updates(map[string]any{
 			"remaining_points": gorm.Expr("remaining_points - ?", first.EstimatePoints),
+			"available_points": gorm.Expr("available_points - ?", first.EstimatePoints),
+			"frozen_points":    gorm.Expr("frozen_points + ?", first.EstimatePoints),
 			"updated_at":       now,
 		}).Error
 	}); err != nil {

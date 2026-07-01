@@ -1,0 +1,68 @@
+{
+  "case_id": "recharge_order_mock_paid_v1",
+  "create_order_request": {
+    "package_id": "pkg_1000_1m",
+    "idempotency_key": "usr_demo:recharge:pkg_1000_1m"
+  },
+  "mock_payment_request": {
+    "order_id": "ord_smoke_1000",
+    "payment_result": "success",
+    "provider_transaction_id": "mock_txn_recharge_1000_success",
+    "idempotency_key": "usr_demo:mock_pay:ord_smoke_1000"
+  },
+  "recharge_order": {
+    "schema_version": "recharge_order.v1",
+    "order_id": "ord_smoke_1000",
+    "account_id": "acct_personal_demo",
+    "package_id": "pkg_1000_1m",
+    "points": 1000,
+    "price_cents": 9900,
+    "currency": "CNY",
+    "payment_provider": "mock_payment",
+    "payment_status": "paid",
+    "credit_lot_id": "lot_recharge_1000",
+    "idempotency_key": "usr_demo:recharge:pkg_1000_1m",
+    "trace_id": "trace_recharge_smoke",
+    "created_at": "2026-07-01T10:00:00Z",
+    "paid_at": "2026-07-01T10:00:00Z"
+  },
+  "mock_payment_transaction": {
+    "schema_version": "mock_payment.v1",
+    "transaction_id": "mock_txn_recharge_1000_success",
+    "order_id": "ord_smoke_1000",
+    "payment_result": "success",
+    "payment_status": "paid",
+    "idempotency_key": "usr_demo:mock_pay:ord_smoke_1000",
+    "trace_id": "trace_recharge_smoke",
+    "created_at": "2026-07-01T10:00:00Z"
+  },
+  "credit_lot": {
+    "schema_version": "credit_lot.v1",
+    "lot_id": "lot_recharge_1000",
+    "account_id": "acct_personal_demo",
+    "source_type": "recharge_package",
+    "source_id": "ord_smoke_1000",
+    "original_points": 1000,
+    "available_points": 1000,
+    "frozen_points": 0,
+    "consumed_points": 0,
+    "expired_points": 0,
+    "granted_at": "2026-07-01T10:00:00Z",
+    "expires_at": "2026-08-01T10:00:00Z",
+    "expiry_policy": {
+      "type": "relative_duration",
+      "duration": "P1M"
+    },
+    "spend_scope": [
+      "tool_generation",
+      "skill_usage"
+    ],
+    "settlement_eligible": true,
+    "status": "active"
+  },
+  "expected": {
+    "ledger_entry_type": "recharge",
+    "balance_delta": 1000,
+    "replay_must_not_double_grant": true
+  }
+}

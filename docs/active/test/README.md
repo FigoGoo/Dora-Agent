@@ -18,6 +18,10 @@ owner：测试与验收责任域
 | Asset fixtures | `tests/fixtures/contracts/asset/**` | PR-3 |
 | Marketplace fixtures | `tests/fixtures/contracts/marketplace/**` | PR-4 |
 | Billing fixtures | `tests/fixtures/contracts/billing/**` | PR-4 |
+| B0 package billing seed | `tests/business/seed/business_core_seed.sql` | B0 |
+| B0 package billing HTTP smoke | `services/business/internal/transport/http/credit_b0_integration_test.go`、`services/business/internal/transport/http/smoke_b0_integration_test.go` | B0 |
+| B0 credit maintenance runtime | `services/business/internal/application/credit/**` | B0：expire / refund / reverse |
+| B0 package billing runtime | `services/business/internal/application/credit/**`、`services/business/internal/application/smoke/**` | B0 |
 | Fake provider E2E | `tests/e2e/fake-provider/**` | PR-5 |
 | E2E fixtures | `tests/fixtures/e2e/**` | PR-5 |
 | Full HTTP service smoke | `services/agent/internal/e2e/release/full_http_service_smoke_test.go`、`scripts/validate-release-full-http-smoke.sh` | PR-5 |
@@ -55,3 +59,4 @@ make release-http-service-e2e
 - PR-5 已完成本地真实浏览器前端联动 smoke：`scripts/validate-release-browser-smoke.sh` 或 `make release-browser-smoke`。
 - PR-5 测试环境 HTTP 服务 E2E 自动化入口和报告模板已完成：`scripts/validate-release-http-service-e2e.sh` 或 `make release-http-service-e2e`，默认报告写入 `tests/reports/release-http-service-e2e-report.md`。
 - PR-5 本地地址 release HTTP 服务 E2E 已通过：`RELEASE_HTTP_E2E_REPORT_PATH=tests/reports/release-http-service-e2e-report.md go test ./services/agent/internal/e2e/release -run TestReleaseHTTPServiceE2EScript -count=1 -v`。
+- B0 套餐账务基线已完成本地验证：`go test ./services/business/internal/application/credit ./services/business/internal/application/assetcommit ./services/business/internal/application/smoke ./services/business/internal/infra/repository/businesscore -count=1`、`go test ./services/business/internal/transport/http -count=1`、`python3 tests/contract/validate_json_schema_contracts.py && python3 tests/contract/validate_tool_asset_contracts.py`、`pnpm --dir admin_frontend lint && pnpm --dir admin_frontend build`。

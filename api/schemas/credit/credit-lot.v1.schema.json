@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/credit/credit-lot.v1.schema.json",
+  "title": "CreditLot.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "lot_id",
+    "account_id",
+    "source_type",
+    "source_id",
+    "original_points",
+    "available_points",
+    "frozen_points",
+    "consumed_points",
+    "expired_points",
+    "granted_at",
+    "expiry_policy",
+    "spend_scope",
+    "settlement_eligible",
+    "status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "credit_lot.v1"
+    },
+    "lot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "account_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "recharge_package",
+        "redeem_code",
+        "platform_gift",
+        "admin_grant",
+        "compensation",
+        "refund",
+        "creator_settlement",
+        "seed"
+      ]
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "original_points": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "available_points": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "frozen_points": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "consumed_points": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "expired_points": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "granted_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "expiry_policy": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "never_expire",
+            "fixed_date",
+            "relative_duration",
+            "inherit_original_lot"
+          ]
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "duration": {
+          "type": "string",
+          "pattern": "^P"
+        },
+        "original_lot_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "spend_scope": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "all",
+          "tool_generation",
+          "skill_usage",
+          "system_default_skill",
+          "marketplace_skill",
+          "marketplace_excluded"
+        ]
+      }
+    },
+    "settlement_eligible": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "frozen_only",
+        "exhausted",
+        "expired",
+        "revoked"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "expiry_policy": {
+            "properties": {
+              "type": {
+                "const": "fixed_date"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expiry_policy": {
+            "required": [
+              "expires_at"
+            ]
+          },
+          "expires_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expires_at"
+        ]
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "schema_version": "credit_lot.v1",
+      "lot_id": "lot_smoke_001",
+      "account_id": "acct_personal_001",
+      "source_type": "redeem_code",
+      "source_id": "redeem_smoke_001",
+      "original_points": 1000,
+      "available_points": 1000,
+      "frozen_points": 0,
+      "consumed_points": 0,
+      "expired_points": 0,
+      "granted_at": "2026-07-01T00:00:00Z",
+      "expires_at": "2026-12-31T23:59:59Z",
+      "expiry_policy": {
+        "type": "fixed_date",
+        "expires_at": "2026-12-31T23:59:59Z"
+      },
+      "spend_scope": [
+        "tool_generation",
+        "skill_usage"
+      ],
+      "settlement_eligible": true,
+      "status": "active"
+    }
+  ]
+}

@@ -21,6 +21,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/notification"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/skillcatalog"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/smoke"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/toolpolicy"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/work"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/config"
@@ -57,6 +58,7 @@ type App struct {
 	Marketplace  *marketplace.App
 	Work         *work.App
 	Notification *notification.App
+	Smoke        *smoke.App
 	Kitex        server.Server
 	HTTPServer   *http.Server
 }
@@ -88,6 +90,7 @@ func New(cfg config.BusinessConfig) (*App, error) {
 		AccessKeyID: cfg.TOS.AccessKeyID, SecretAccessKey: cfg.TOS.SecretAccessKey,
 	})
 	marketplaceApp := marketplace.New(repo)
+	smokeApp := smoke.New(repo, creditApp)
 	commitVerifier, err := assetcommit.NewTOSHeadObjectVerifier(cfg.TOS.Endpoint, cfg.TOS.Region, cfg.TOS.AccessKeyID, cfg.TOS.SecretAccessKey)
 	if err != nil {
 		return nil, fmt.Errorf("create tos object verifier: %w", err)
@@ -133,6 +136,7 @@ func New(cfg config.BusinessConfig) (*App, error) {
 			Marketplace:  marketplaceApp,
 			Work:         workApp,
 			Notification: notificationApp,
+			Smoke:        smokeApp,
 		})
 		httpServer = &http.Server{
 			Addr:              cfg.HTTPAddr,
@@ -159,6 +163,7 @@ func New(cfg config.BusinessConfig) (*App, error) {
 		Marketplace:  marketplaceApp,
 		Work:         workApp,
 		Notification: notificationApp,
+		Smoke:        smokeApp,
 		Kitex:        kitexServer,
 		HTTPServer:   httpServer,
 	}, nil

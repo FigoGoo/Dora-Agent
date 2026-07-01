@@ -1,0 +1,36 @@
+{
+  "case_id": "credit_lot_redeem_success_v1",
+  "redeem_request": {
+    "code": "SMOKE1000",
+    "target_account_type": "personal",
+    "idempotency_key": "usr_demo:redeem:SMOKE1000"
+  },
+  "credit_lot": {
+    "schema_version": "credit_lot.v1",
+    "lot_id": "lot_smoke_1000",
+    "account_id": "acct_personal_demo",
+    "source_type": "redeem_code",
+    "source_id": "SMOKE1000",
+    "original_points": 1000,
+    "available_points": 1000,
+    "frozen_points": 0,
+    "consumed_points": 0,
+    "expired_points": 0,
+    "granted_at": "2026-07-01T00:00:00Z",
+    "expires_at": "2026-12-31T23:59:59Z",
+    "expiry_policy": {
+      "type": "fixed_date",
+      "expires_at": "2026-12-31T23:59:59Z"
+    },
+    "spend_scope": [
+      "tool_generation",
+      "skill_usage"
+    ],
+    "settlement_eligible": true,
+    "status": "active"
+  },
+  "expected": {
+    "ledger_entry_type": "grant",
+    "balance_delta": 1000
+  }
+}

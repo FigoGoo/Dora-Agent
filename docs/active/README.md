@@ -17,6 +17,7 @@ PR-2 Agent Runtime Contracts 字段级契约已冻结，本地真实 PostgreSQL 
 PR-3 Tool/Credit/Asset Contracts 字段级契约已冻结，本地真实 PostgreSQL dry-run / down-test 已完成，远端 CI gate 待 PR 运行确认
 PR-4 Marketplace Contracts 字段级契约已冻结，本地真实 PostgreSQL dry-run / down-test 已完成，远端 CI gate 待 PR 运行确认
 PR-5 E2E Fixtures + Fake Provider + Release Gates 已冻结，本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 已完成，测试环境 HTTP 服务 E2E 自动化入口、本地地址执行和 `status: passed` 报告归档已完成；独立部署测试环境可按同一 gate 复跑
+B0 非 Agent 业务基线已补齐套餐账务链路：Package / SKU / Order / Mock Payment / Credit Lot / Entitlement / Enterprise Contract / Invoice / Promotion 已纳入 Business OpenAPI、SQL migration、Seed、管理端资源页和 Smoke 12/13；CreditMaintenance 覆盖 lot 过期、退款返还和 ledger 反转
 PR-1 到 PR-5 active 拆分已完成
 PR-0 开发准备与 CI Gate 已启动
 M1 Creative Guide / ChatModel Router 基础业务闭环已实现，显式 M1 run_intent 不触发 Tool、积分、Board/Graph 生成

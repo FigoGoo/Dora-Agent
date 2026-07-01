@@ -807,6 +807,175 @@ paths:
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         $ref: '#/components/requestBodies/RedeemCodeBody'
+  /api/credits/lots:
+    get:
+      tags:
+      - Credit
+      operationId: listCreditLots
+      responses:
+        '200':
+          $ref: '#/components/responses/ListCreditLotsOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: source_type
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+  /api/credits/expiring:
+    get:
+      tags:
+      - Credit
+      operationId: listExpiringCredits
+      responses:
+        '200':
+          $ref: '#/components/responses/ListExpiringCreditsOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: within_days
+        in: query
+        schema:
+          type: integer
+          default: 30
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+  /api/credits/recharge-packages:
+    get:
+      tags:
+      - Credit
+      operationId: listRechargePackages
+      responses:
+        '200':
+          $ref: '#/components/responses/ListRechargePackagesOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/credits/recharge-orders:
+    get:
+      tags:
+      - Credit
+      operationId: listRechargeOrders
+      responses:
+        '200':
+          $ref: '#/components/responses/ListRechargeOrdersOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: payment_status
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+    post:
+      tags:
+      - Credit
+      operationId: createRechargeOrder
+      responses:
+        '200':
+          $ref: '#/components/responses/CreateRechargeOrderOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/CreateRechargeOrderBody'
+  /api/credits/recharge-orders/{order_id}/mock-pay:
+    post:
+      tags:
+      - Credit
+      operationId: mockPayRechargeOrder
+      responses:
+        '200':
+          $ref: '#/components/responses/MockPayRechargeOrderOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/RechargeOrderId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/MockPayRechargeOrderBody'
   /api/enterprise/credits:
     get:
       tags:
@@ -2313,6 +2482,633 @@ paths:
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         $ref: '#/components/requestBodies/ExportRedeemCodesBody'
+  /api/admin/credits/accounts:
+    get:
+      tags:
+      - Credit
+      operationId: adminListCreditAccounts
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminListCreditAccountsOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: account_type
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+  /api/admin/credits/lots:
+    get:
+      tags:
+      - Credit
+      operationId: adminListCreditLots
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminListCreditLotsOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: source_type
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+  /api/admin/credits/lots/expire:
+    post:
+      tags:
+      - Credit
+      operationId: adminExpireCreditLots
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminCreditMaintenanceOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/AdminExpireCreditLotsBody'
+  /api/admin/credits/refunds:
+    post:
+      tags:
+      - Credit
+      operationId: adminRefundCredits
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminCreditMaintenanceOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/AdminRefundCreditsBody'
+  /api/admin/credits/ledger/{entry_id}/reverse:
+    post:
+      tags:
+      - Credit
+      operationId: adminReverseCreditLedgerEntry
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminCreditMaintenanceOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: entry_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/AdminReverseCreditLedgerEntryBody'
+  /api/admin/orders:
+    get:
+      tags:
+      - Credit
+      operationId: adminListRechargeOrders
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminListRechargeOrdersOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: payment_status
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+  /api/admin/billing/packages:
+    get:
+      tags:
+      - Credit
+      operationId: adminListBillingPackages
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminListBillingPackagesOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: target_scope
+        in: query
+        schema:
+          type: string
+      - name: package_type
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+    post:
+      tags:
+      - Credit
+      operationId: adminCreateBillingPackage
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminSaveBillingPackageOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/AdminSaveBillingPackageBody'
+  /api/admin/billing/packages/{package_id}:
+    patch:
+      tags:
+      - Credit
+      operationId: adminUpdateBillingPackage
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminSaveBillingPackageOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: package_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/AdminSaveBillingPackageBody'
+  /api/admin/billing/packages/{package_id}/status:
+    post:
+      tags:
+      - Credit
+      operationId: adminSetBillingPackageStatus
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminSaveBillingPackageOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: package_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/AdminSetBillingPackageStatusBody'
+  /api/admin/billing/skus:
+    get:
+      tags:
+      - Credit
+      operationId: adminListBillingSkus
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminListBillingSkusOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: package_id
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          type: string
+    post:
+      tags:
+      - Credit
+      operationId: adminCreateBillingSku
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminCreateBillingSkuOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/AdminCreateBillingSkuBody'
+  /api/admin/billing/orders:
+    get:
+      tags:
+      - Credit
+      operationId: adminListBillingOrders
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminListRechargeOrdersOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/admin/billing/redeem-codes:
+    get:
+      tags:
+      - Credit
+      operationId: adminListBillingRedeemCodes
+      responses:
+        '200':
+          $ref: '#/components/responses/ListRedeemCodesOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/admin/billing/credit-lots:
+    get:
+      tags:
+      - Credit
+      operationId: adminListBillingCreditLots
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminListCreditLotsOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/admin/billing/entitlements:
+    get:
+      tags:
+      - Credit
+      operationId: adminListBillingEntitlements
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminListEntitlementSnapshotsOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/admin/billing/enterprise-contracts:
+    get:
+      tags:
+      - Credit
+      operationId: adminListEnterpriseContracts
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminListEnterpriseContractsOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/admin/billing/invoices:
+    get:
+      tags:
+      - Credit
+      operationId: adminListBillingInvoices
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminListBillingInvoicesOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/admin/billing/promotions:
+    get:
+      tags:
+      - Credit
+      operationId: adminListBillingPromotions
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminListBillingPromotionsOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/admin/feature-flags:
+    get:
+      tags:
+      - Admin
+      operationId: listFeatureFlags
+      responses:
+        '200':
+          $ref: '#/components/responses/ListFeatureFlagsOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+  /api/admin/feature-flags/{flag_key}:
+    post:
+      tags:
+      - Admin
+      operationId: updateFeatureFlag
+      responses:
+        '200':
+          $ref: '#/components/responses/UpdateFeatureFlagOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/FeatureFlagKey'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/UpdateFeatureFlagBody'
+  /api/admin/fake-provider/tasks:
+    get:
+      tags:
+      - Admin
+      operationId: listFakeProviderTasks
+      responses:
+        '200':
+          $ref: '#/components/responses/ListFakeProviderTasksOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - name: provider_key
+        in: query
+        schema:
+          type: string
+      - name: scenario
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+  /api/admin/smoke/seed:
+    post:
+      tags:
+      - Admin
+      operationId: runSmokeSeed
+      responses:
+        '200':
+          $ref: '#/components/responses/RunSmokeSeedOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/RunSmokeSeedBody'
+  /api/admin/smoke/runs:
+    post:
+      tags:
+      - Admin
+      operationId: runSmokeSuite
+      responses:
+        '200':
+          $ref: '#/components/responses/RunSmokeSuiteOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/RunSmokeSuiteBody'
+  /api/admin/smoke/runs/{run_id}:
+    get:
+      tags:
+      - Admin
+      operationId: getSmokeRunResult
+      responses:
+        '200':
+          $ref: '#/components/responses/GetSmokeRunResultOk'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+      parameters:
+      - $ref: '#/components/parameters/SmokeRunId'
   /api/admin/asset-element-types:
     get:
       tags:
@@ -2514,6 +3310,24 @@ components:
       required: true
       schema:
         type: string
+    RechargeOrderId:
+      name: order_id
+      in: path
+      required: true
+      schema:
+        type: string
+    FeatureFlagKey:
+      name: flag_key
+      in: path
+      required: true
+      schema:
+        type: string
+    SmokeRunId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
   requestBodies:
     LoginBody:
       required: true
@@ -2629,6 +3443,18 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/RedeemCodeRequest'
+    CreateRechargeOrderBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CreateRechargeOrderRequest'
+    MockPayRechargeOrderBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MockPayRechargeOrderRequest'
     CreateUploadIntentBody:
       required: true
       content:
@@ -2833,6 +3659,24 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/AdminGrantCreditsRequest'
+    AdminExpireCreditLotsBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminExpireCreditLotsRequest'
+    AdminRefundCreditsBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminRefundCreditsRequest'
+    AdminReverseCreditLedgerEntryBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminReverseCreditLedgerEntryRequest'
     CreateRedeemCodesBody:
       required: true
       content:
@@ -2851,6 +3695,42 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ExportRedeemCodesRequest'
+    AdminSaveBillingPackageBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminSaveBillingPackageRequest'
+    AdminSetBillingPackageStatusBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminSetBillingPackageStatusRequest'
+    AdminCreateBillingSkuBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminCreateBillingSkuRequest'
+    UpdateFeatureFlagBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UpdateFeatureFlagRequest'
+    RunSmokeSeedBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RunSmokeSeedRequest'
+    RunSmokeSuiteBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RunSmokeSuiteRequest'
     PreviewTakeDownPublicWorkBody:
       required: true
       content:
@@ -3170,6 +4050,42 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/RedeemCodeOkEnvelope'
+    ListCreditLotsOk:
+      description: listCreditLots successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ListCreditLotsOkEnvelope'
+    ListExpiringCreditsOk:
+      description: listExpiringCredits successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ListCreditLotsOkEnvelope'
+    ListRechargePackagesOk:
+      description: listRechargePackages successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ListRechargePackagesOkEnvelope'
+    ListRechargeOrdersOk:
+      description: listRechargeOrders successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ListRechargeOrdersOkEnvelope'
+    CreateRechargeOrderOk:
+      description: createRechargeOrder successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RechargeOrderOkEnvelope'
+    MockPayRechargeOrderOk:
+      description: mockPayRechargeOrder successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RechargeOrderOkEnvelope'
     GetEnterpriseCreditsOk:
       description: getEnterpriseCredits successful response.
       content:
@@ -3548,6 +4464,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/AdminGrantCreditsOkEnvelope'
+    AdminCreditMaintenanceOk:
+      description: admin credit maintenance successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminCreditMaintenanceOkEnvelope'
     ListRedeemCodesOk:
       description: listRedeemCodes successful response.
       content:
@@ -3572,6 +4494,108 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ExportRedeemCodesOkEnvelope'
+    AdminListCreditAccountsOk:
+      description: adminListCreditAccounts successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminListCreditAccountsOkEnvelope'
+    AdminListCreditLotsOk:
+      description: adminListCreditLots successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ListCreditLotsOkEnvelope'
+    AdminListRechargeOrdersOk:
+      description: adminListRechargeOrders successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ListRechargeOrdersOkEnvelope'
+    AdminListBillingPackagesOk:
+      description: adminListBillingPackages successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminListBillingPackagesOkEnvelope'
+    AdminSaveBillingPackageOk:
+      description: adminSaveBillingPackage successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminSaveBillingPackageOkEnvelope'
+    AdminListBillingSkusOk:
+      description: adminListBillingSkus successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminListBillingSkusOkEnvelope'
+    AdminCreateBillingSkuOk:
+      description: adminCreateBillingSku successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminCreateBillingSkuOkEnvelope'
+    AdminListEntitlementSnapshotsOk:
+      description: adminListEntitlementSnapshots successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminListEntitlementSnapshotsOkEnvelope'
+    AdminListEnterpriseContractsOk:
+      description: adminListEnterpriseContracts successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminListEnterpriseContractsOkEnvelope'
+    AdminListBillingInvoicesOk:
+      description: adminListBillingInvoices successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminListBillingInvoicesOkEnvelope'
+    AdminListBillingPromotionsOk:
+      description: adminListBillingPromotions successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminListBillingPromotionsOkEnvelope'
+    ListFeatureFlagsOk:
+      description: listFeatureFlags successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ListFeatureFlagsOkEnvelope'
+    UpdateFeatureFlagOk:
+      description: updateFeatureFlag successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UpdateFeatureFlagOkEnvelope'
+    ListFakeProviderTasksOk:
+      description: listFakeProviderTasks successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ListFakeProviderTasksOkEnvelope'
+    RunSmokeSeedOk:
+      description: runSmokeSeed successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SmokeRunOkEnvelope'
+    RunSmokeSuiteOk:
+      description: runSmokeSuite successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SmokeRunOkEnvelope'
+    GetSmokeRunResultOk:
+      description: getSmokeRunResult successful response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SmokeRunOkEnvelope'
     AdminListAssetElementTypesOk:
       description: adminListAssetElementTypes successful response.
       content:
@@ -5330,6 +6354,37 @@ components:
         available_points:
           type: integer
           format: int64
+    CreditMaintenanceDTO:
+      type: object
+      required:
+      - operation_id
+      - status
+      - points
+      additionalProperties: false
+      properties:
+        operation_id:
+          type: string
+        status:
+          type: string
+        account_id:
+          type: string
+        lot_id:
+          type: string
+        ledger_entry_id:
+          type: string
+        reversed_ledger_entry_id:
+          type: string
+        affected_lots:
+          type: integer
+        points:
+          type: integer
+          format: int64
+        available_points:
+          type: integer
+          format: int64
+        frozen_points:
+          type: integer
+          format: int64
     RedeemCodeBatchDTO:
       type: object
       required:
@@ -5390,6 +6445,484 @@ components:
           type: string
         status:
           type: string
+    CreditLotDTO:
+      type: object
+      required:
+      - lot_id
+      - account_id
+      - source_type
+      - original_points
+      - available_points
+      - frozen_points
+      - consumed_points
+      - expired_points
+      - granted_at
+      - expiry_policy_json
+      - spend_scope_json
+      - settlement_eligible
+      - status
+      additionalProperties: false
+      properties:
+        lot_id:
+          type: string
+        account_id:
+          type: string
+        source_type:
+          type: string
+        source_id:
+          type: string
+        original_points:
+          type: integer
+          format: int64
+        available_points:
+          type: integer
+          format: int64
+        frozen_points:
+          type: integer
+          format: int64
+        consumed_points:
+          type: integer
+          format: int64
+        expired_points:
+          type: integer
+          format: int64
+        granted_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        expiry_policy_json:
+          type: string
+        spend_scope_json:
+          type: string
+        settlement_eligible:
+          type: boolean
+        status:
+          type: string
+    CreditAccountDTO:
+      type: object
+      required:
+      - account_id
+      - account_type
+      - available_points
+      - frozen_points
+      - expires_soon_points
+      - status
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        account_type:
+          type: string
+          enum:
+          - personal
+          - enterprise
+        owner_user_id:
+          type: string
+        enterprise_id:
+          type: string
+        available_points:
+          type: integer
+          format: int64
+        frozen_points:
+          type: integer
+          format: int64
+        expires_soon_points:
+          type: integer
+          format: int64
+        status:
+          type: string
+    RechargeOrderDTO:
+      type: object
+      required:
+      - order_id
+      - account_id
+      - package_id
+      - package_type
+      - target_scope
+      - billing_mode
+      - points
+      - granted_points
+      - bonus_points
+      - price_cents
+      - price_amount
+      - currency
+      - payment_provider
+      - payment_status
+      - created_at
+      additionalProperties: false
+      properties:
+        order_id:
+          type: string
+        account_id:
+          type: string
+        enterprise_id:
+          type: string
+        package_id:
+          type: string
+        sku_id:
+          type: string
+        package_type:
+          type: string
+        target_scope:
+          type: string
+        billing_mode:
+          type: string
+        points:
+          type: integer
+          format: int64
+        granted_points:
+          type: integer
+          format: int64
+        bonus_points:
+          type: integer
+          format: int64
+        price_cents:
+          type: integer
+          format: int64
+        price_amount:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        payment_provider:
+          type: string
+        payment_status:
+          type: string
+        credit_lot_id:
+          type: string
+        entitlement_snapshot_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        paid_at:
+          type: string
+          format: date-time
+    FeatureFlagDTO:
+      type: object
+      required:
+      - flag_key
+      - enabled
+      - default_enabled
+      - updated_at
+      additionalProperties: false
+      properties:
+        flag_key:
+          type: string
+        enabled:
+          type: boolean
+        default_enabled:
+          type: boolean
+        description:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+    FakeProviderTaskDTO:
+      type: object
+      required:
+      - provider_task_id
+      - provider_key
+      - tool_id
+      - scenario
+      - latency_ms
+      - status
+      - result
+      additionalProperties: false
+      properties:
+        provider_task_id:
+          type: string
+        provider_key:
+          type: string
+        tool_id:
+          type: string
+        scenario:
+          type: string
+        latency_ms:
+          type: integer
+        artifact_uri:
+          type: string
+        status:
+          type: string
+        result:
+          type: object
+    SmokeStepDTO:
+      type: object
+      required:
+      - step_key
+      - status
+      - evidence
+      - created_at
+      additionalProperties: false
+      properties:
+        step_key:
+          type: string
+        status:
+          type: string
+        evidence:
+          type: object
+        error_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    SmokeRunDTO:
+      type: object
+      required:
+      - run_id
+      - suite_key
+      - status
+      - started_at
+      - summary
+      additionalProperties: false
+      properties:
+        run_id:
+          type: string
+        suite_key:
+          type: string
+        status:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        summary:
+          type: object
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmokeStepDTO'
+    BillingPackageDTO:
+      type: object
+      required:
+      - package_id
+      - package_type
+      - name
+      - target_scope
+      - billing_mode
+      - points
+      - price_amount
+      - currency
+      - credit_expiry_policy
+      - status
+      additionalProperties: false
+      properties:
+        package_id:
+          type: string
+        package_type:
+          type: string
+        name:
+          type: string
+        display_name:
+          type: string
+        target_scope:
+          type: string
+        billing_mode:
+          type: string
+        points:
+          type: integer
+          format: int64
+        granted_points:
+          type: integer
+          format: int64
+        bonus_points:
+          type: integer
+          format: int64
+        price_amount:
+          type: integer
+          format: int64
+        price_cents:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        credit_expiry_policy:
+          type: string
+        spend_scope:
+          type: array
+          items:
+            type: string
+        settlement_eligible:
+          type: boolean
+        entitlement_policy:
+          type: object
+        renewal_policy:
+          type: object
+        refund_policy:
+          type: object
+        visible_scope:
+          type: string
+        status:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+    BillingPackageSkuDTO:
+      type: object
+      required:
+      - sku_id
+      - package_id
+      - price_amount
+      - currency
+      - status
+      additionalProperties: false
+      properties:
+        sku_id:
+          type: string
+        package_id:
+          type: string
+        channel_code:
+          type: string
+        price_amount:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        activity_price_amount:
+          type: integer
+          format: int64
+        effective_at:
+          type: string
+          format: date-time
+        expired_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+    EntitlementSnapshotDTO:
+      type: object
+      required:
+      - entitlement_snapshot_id
+      - account_id
+      - package_id
+      - order_id
+      - target_scope
+      - status
+      additionalProperties: false
+      properties:
+        entitlement_snapshot_id:
+          type: string
+        account_id:
+          type: string
+        user_id:
+          type: string
+        enterprise_id:
+          type: string
+        package_id:
+          type: string
+        order_id:
+          type: string
+        target_scope:
+          type: string
+        entitlement_policy:
+          type: object
+        status:
+          type: string
+        effective_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    EnterpriseContractDTO:
+      type: object
+      required:
+      - contract_id
+      - enterprise_id
+      - package_id
+      - contract_status
+      - seat_quota
+      - budget_points
+      additionalProperties: false
+      properties:
+        contract_id:
+          type: string
+        enterprise_id:
+          type: string
+        package_id:
+          type: string
+        order_id:
+          type: string
+        contract_status:
+          type: string
+        billing_mode:
+          type: string
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        seat_quota:
+          type: integer
+        budget_points:
+          type: integer
+          format: int64
+        approval_policy:
+          type: object
+        invoice_policy:
+          type: object
+    BillingInvoiceDTO:
+      type: object
+      required:
+      - invoice_id
+      - amount
+      - currency
+      - invoice_status
+      additionalProperties: false
+      properties:
+        invoice_id:
+          type: string
+        enterprise_id:
+          type: string
+        order_id:
+          type: string
+        amount:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        invoice_status:
+          type: string
+        issued_at:
+          type: string
+          format: date-time
+        due_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+    BillingPromotionDTO:
+      type: object
+      required:
+      - promotion_id
+      - promotion_name
+      - visible_scope
+      - status
+      additionalProperties: false
+      properties:
+        promotion_id:
+          type: string
+        promotion_name:
+          type: string
+        package_id:
+          type: string
+        discount_policy:
+          type: object
+        visible_scope:
+          type: string
+        status:
+          type: string
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
     TakeDownPublicWorkPreviewDTO:
       type: object
       required:
@@ -5948,6 +7481,226 @@ components:
           type: string
         has_more:
           type: boolean
+    CreditLotListDTO:
+      type: object
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreditLotDTO'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    CreditAccountListDTO:
+      type: object
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreditAccountDTO'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    RechargeOrderListDTO:
+      type: object
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RechargeOrderDTO'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    FeatureFlagListDTO:
+      type: object
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureFlagDTO'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    FakeProviderTaskListDTO:
+      type: object
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FakeProviderTaskDTO'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    BillingPackageListDTO:
+      type: object
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingPackageDTO'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    BillingSkuListDTO:
+      type: object
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingPackageSkuDTO'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    EntitlementSnapshotListDTO:
+      type: object
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntitlementSnapshotDTO'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    EnterpriseContractListDTO:
+      type: object
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnterpriseContractDTO'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    BillingInvoiceListDTO:
+      type: object
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingInvoiceDTO'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    BillingPromotionListDTO:
+      type: object
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingPromotionDTO'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          format: int64
     RegisterPersonalAccountRequest:
       type: object
       required:
@@ -6269,6 +8022,41 @@ components:
           - personal
           - enterprise
         redeem_channel:
+          type: string
+        request_hash:
+          type: string
+    CreateRechargeOrderRequest:
+      type: object
+      required:
+      - package_id
+      - request_hash
+      additionalProperties: false
+      properties:
+        package_id:
+          type: string
+        sku_id:
+          type: string
+        target_account_type:
+          type: string
+          enum:
+          - personal
+          - enterprise
+        request_hash:
+          type: string
+    MockPayRechargeOrderRequest:
+      type: object
+      required:
+      - payment_result
+      - provider_transaction_id
+      - request_hash
+      additionalProperties: false
+      properties:
+        payment_result:
+          type: string
+          enum:
+          - success
+          - failed
+        provider_transaction_id:
           type: string
         request_hash:
           type: string
@@ -6951,6 +8739,59 @@ components:
           format: date-time
         request_hash:
           type: string
+    AdminExpireCreditLotsRequest:
+      type: object
+      required:
+      - reason
+      - request_hash
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        lot_id:
+          type: string
+        limit:
+          type: integer
+          default: 100
+          maximum: 500
+        reason:
+          type: string
+        request_hash:
+          type: string
+    AdminRefundCreditsRequest:
+      type: object
+      required:
+      - reason
+      - request_hash
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        points:
+          type: integer
+          format: int64
+        original_lot_id:
+          type: string
+        original_ledger_entry_id:
+          type: string
+        grace_period_days:
+          type: integer
+          default: 7
+        reason:
+          type: string
+        request_hash:
+          type: string
+    AdminReverseCreditLedgerEntryRequest:
+      type: object
+      required:
+      - reason
+      - request_hash
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+        request_hash:
+          type: string
     CreateRedeemCodesRequest:
       type: object
       required:
@@ -7013,6 +8854,140 @@ components:
       additionalProperties: false
       properties:
         export_reason:
+          type: string
+        request_hash:
+          type: string
+    AdminSaveBillingPackageRequest:
+      type: object
+      required:
+      - package_id
+      - package_type
+      - name
+      - target_scope
+      - billing_mode
+      - price_amount
+      - granted_points
+      - credit_expiry_policy
+      - reason
+      additionalProperties: false
+      properties:
+        package_id:
+          type: string
+        package_type:
+          type: string
+        name:
+          type: string
+        target_scope:
+          type: string
+        billing_mode:
+          type: string
+        price_amount:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        granted_points:
+          type: integer
+          format: int64
+        bonus_points:
+          type: integer
+          format: int64
+        credit_expiry_policy:
+          type: string
+        spend_scope:
+          type: array
+          items:
+            type: string
+        settlement_eligible:
+          type: boolean
+        entitlement_policy:
+          type: object
+        renewal_policy:
+          type: object
+        refund_policy:
+          type: object
+        visible_scope:
+          type: string
+        status:
+          type: string
+        reason:
+          type: string
+        request_hash:
+          type: string
+    AdminSetBillingPackageStatusRequest:
+      type: object
+      required:
+      - status
+      - reason
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+        reason:
+          type: string
+        request_hash:
+          type: string
+    AdminCreateBillingSkuRequest:
+      type: object
+      required:
+      - package_id
+      - price_amount
+      - currency
+      - reason
+      additionalProperties: false
+      properties:
+        package_id:
+          type: string
+        sku_id:
+          type: string
+        channel_code:
+          type: string
+        price_amount:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        activity_price_amount:
+          type: integer
+          format: int64
+        effective_at:
+          type: string
+          format: date-time
+        expired_at:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        request_hash:
+          type: string
+    UpdateFeatureFlagRequest:
+      type: object
+      required:
+      - enabled
+      - request_hash
+      additionalProperties: false
+      properties:
+        enabled:
+          type: boolean
+        description:
+          type: string
+        request_hash:
+          type: string
+    RunSmokeSeedRequest:
+      type: object
+      required:
+      - request_hash
+      additionalProperties: false
+      properties:
+        request_hash:
+          type: string
+    RunSmokeSuiteRequest:
+      type: object
+      required:
+      - request_hash
+      additionalProperties: false
+      properties:
+        suite_key:
           type: string
         request_hash:
           type: string
@@ -8865,6 +10840,25 @@ components:
           $ref: '#/components/schemas/CreditGrantDTO'
         trace_id:
           type: string
+    AdminCreditMaintenanceOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/CreditMaintenanceDTO'
+        trace_id:
+          type: string
     ListRedeemCodesOkEnvelope:
       type: object
       required:
@@ -8939,6 +10933,329 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/RedeemCodeExportDTO'
+        trace_id:
+          type: string
+    ListCreditLotsOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/CreditLotListDTO'
+        trace_id:
+          type: string
+    ListRechargePackagesOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/BillingPackageListDTO'
+        trace_id:
+          type: string
+    ListRechargeOrdersOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/RechargeOrderListDTO'
+        trace_id:
+          type: string
+    RechargeOrderOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/RechargeOrderDTO'
+        trace_id:
+          type: string
+    AdminListCreditAccountsOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/CreditAccountListDTO'
+        trace_id:
+          type: string
+    AdminListBillingPackagesOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/BillingPackageListDTO'
+        trace_id:
+          type: string
+    AdminSaveBillingPackageOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/BillingPackageDTO'
+        trace_id:
+          type: string
+    AdminListBillingSkusOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/BillingSkuListDTO'
+        trace_id:
+          type: string
+    AdminCreateBillingSkuOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/BillingPackageSkuDTO'
+        trace_id:
+          type: string
+    AdminListEntitlementSnapshotsOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/EntitlementSnapshotListDTO'
+        trace_id:
+          type: string
+    AdminListEnterpriseContractsOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/EnterpriseContractListDTO'
+        trace_id:
+          type: string
+    AdminListBillingInvoicesOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/BillingInvoiceListDTO'
+        trace_id:
+          type: string
+    AdminListBillingPromotionsOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/BillingPromotionListDTO'
+        trace_id:
+          type: string
+    ListFeatureFlagsOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/FeatureFlagListDTO'
+        trace_id:
+          type: string
+    UpdateFeatureFlagOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/FeatureFlagDTO'
+        trace_id:
+          type: string
+    ListFakeProviderTasksOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/FakeProviderTaskListDTO'
+        trace_id:
+          type: string
+    SmokeRunOkEnvelope:
+      type: object
+      required:
+      - code
+      - message
+      - data
+      - trace_id
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/SmokeRunDTO'
         trace_id:
           type: string
     AdminListAssetElementTypesOkEnvelope:

@@ -20,6 +20,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/notification"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/skillcatalog"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/smoke"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/toolpolicy"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/work"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/logger"
@@ -47,6 +48,7 @@ type RouterOptions struct {
 	Marketplace  *marketplace.App
 	Work         *work.App
 	Notification *notification.App
+	Smoke        *smoke.App
 }
 
 func NewRouter(opts RouterOptions) *gin.Engine {
@@ -91,6 +93,7 @@ func NewRouter(opts RouterOptions) *gin.Engine {
 	registerCatalogAdminRoutes(router, opts)
 	registerCreditAssetRoutes(router, opts)
 	registerWorkNotificationMarketplaceRoutes(router, opts)
+	registerSmokeAdminRoutes(router, opts)
 
 	return router
 }

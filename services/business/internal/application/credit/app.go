@@ -71,6 +71,123 @@ type LedgerDTO struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+type CreditLotDTO struct {
+	LotID              string     `json:"lot_id"`
+	AccountID          string     `json:"account_id"`
+	SourceType         string     `json:"source_type"`
+	SourceID           string     `json:"source_id,omitempty"`
+	OriginalPoints     int64      `json:"original_points"`
+	AvailablePoints    int64      `json:"available_points"`
+	FrozenPoints       int64      `json:"frozen_points"`
+	ConsumedPoints     int64      `json:"consumed_points"`
+	ExpiredPoints      int64      `json:"expired_points"`
+	GrantedAt          time.Time  `json:"granted_at"`
+	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
+	ExpiryPolicyJSON   string     `json:"expiry_policy_json"`
+	SpendScopeJSON     string     `json:"spend_scope_json"`
+	SettlementEligible bool       `json:"settlement_eligible"`
+	Status             string     `json:"status"`
+}
+
+type RechargePackageDTO struct {
+	PackageID          string         `json:"package_id"`
+	PackageType        string         `json:"package_type"`
+	Name               string         `json:"name"`
+	DisplayName        string         `json:"display_name"`
+	TargetScope        string         `json:"target_scope"`
+	BillingMode        string         `json:"billing_mode"`
+	Points             int64          `json:"points"`
+	GrantedPoints      int64          `json:"granted_points"`
+	BonusPoints        int64          `json:"bonus_points"`
+	PriceCents         int64          `json:"price_cents"`
+	PriceAmount        int64          `json:"price_amount"`
+	Currency           string         `json:"currency"`
+	CreditExpiryPolicy string         `json:"credit_expiry_policy"`
+	SpendScope         []string       `json:"spend_scope"`
+	SettlementEligible bool           `json:"settlement_eligible"`
+	EntitlementPolicy  map[string]any `json:"entitlement_policy"`
+	RenewalPolicy      map[string]any `json:"renewal_policy"`
+	RefundPolicy       map[string]any `json:"refund_policy"`
+	VisibleScope       string         `json:"visible_scope"`
+	Status             string         `json:"status"`
+	UpdatedAt          time.Time      `json:"updated_at,omitempty"`
+}
+
+type BillingPackageSKUDTO struct {
+	SKUID               string     `json:"sku_id"`
+	PackageID           string     `json:"package_id"`
+	ChannelCode         string     `json:"channel_code"`
+	PriceAmount         int64      `json:"price_amount"`
+	Currency            string     `json:"currency"`
+	ActivityPriceAmount *int64     `json:"activity_price_amount,omitempty"`
+	Status              string     `json:"status"`
+	EffectiveAt         time.Time  `json:"effective_at"`
+	ExpiredAt           *time.Time `json:"expired_at,omitempty"`
+}
+
+type EntitlementSnapshotDTO struct {
+	EntitlementSnapshotID string         `json:"entitlement_snapshot_id"`
+	AccountID             string         `json:"account_id"`
+	UserID                string         `json:"user_id,omitempty"`
+	EnterpriseID          string         `json:"enterprise_id,omitempty"`
+	PackageID             string         `json:"package_id"`
+	OrderID               string         `json:"order_id"`
+	TargetScope           string         `json:"target_scope"`
+	EntitlementPolicy     map[string]any `json:"entitlement_policy"`
+	Status                string         `json:"status"`
+	EffectiveAt           time.Time      `json:"effective_at"`
+	ExpiresAt             *time.Time     `json:"expires_at,omitempty"`
+}
+
+type EnterpriseContractDTO struct {
+	ContractID     string         `json:"contract_id"`
+	EnterpriseID   string         `json:"enterprise_id"`
+	PackageID      string         `json:"package_id"`
+	OrderID        string         `json:"order_id,omitempty"`
+	ContractStatus string         `json:"contract_status"`
+	BillingMode    string         `json:"billing_mode"`
+	PeriodStart    time.Time      `json:"period_start"`
+	PeriodEnd      *time.Time     `json:"period_end,omitempty"`
+	SeatQuota      int            `json:"seat_quota"`
+	BudgetPoints   int64          `json:"budget_points"`
+	ApprovalPolicy map[string]any `json:"approval_policy"`
+	InvoicePolicy  map[string]any `json:"invoice_policy"`
+}
+
+type BillingInvoiceDTO struct {
+	InvoiceID     string         `json:"invoice_id"`
+	EnterpriseID  string         `json:"enterprise_id,omitempty"`
+	OrderID       string         `json:"order_id,omitempty"`
+	Amount        int64          `json:"amount"`
+	Currency      string         `json:"currency"`
+	InvoiceStatus string         `json:"invoice_status"`
+	IssuedAt      *time.Time     `json:"issued_at,omitempty"`
+	DueAt         *time.Time     `json:"due_at,omitempty"`
+	Metadata      map[string]any `json:"metadata"`
+}
+
+type BillingPromotionDTO struct {
+	PromotionID    string         `json:"promotion_id"`
+	PromotionName  string         `json:"promotion_name"`
+	PackageID      string         `json:"package_id,omitempty"`
+	DiscountPolicy map[string]any `json:"discount_policy"`
+	VisibleScope   string         `json:"visible_scope"`
+	Status         string         `json:"status"`
+	StartsAt       time.Time      `json:"starts_at"`
+	EndsAt         *time.Time     `json:"ends_at,omitempty"`
+}
+
+type CreditAccountDTO struct {
+	AccountID         string `json:"account_id"`
+	AccountType       string `json:"account_type"`
+	OwnerUserID       string `json:"owner_user_id,omitempty"`
+	EnterpriseID      string `json:"enterprise_id,omitempty"`
+	AvailablePoints   int64  `json:"available_points"`
+	FrozenPoints      int64  `json:"frozen_points"`
+	ExpiresSoonPoints int64  `json:"expires_soon_points"`
+	Status            string `json:"status"`
+}
+
 type EstimateLineItemDTO struct {
 	EstimateItemID  string            `json:"estimate_item_id"`
 	ItemType        string            `json:"item_type"`
@@ -214,6 +331,45 @@ type RedeemDTO struct {
 	AvailablePoints int64  `json:"available_points"`
 }
 
+type CreateRechargeOrderInput struct {
+	Auth              AuthContext
+	Meta              RequestMeta
+	PackageID         string
+	SKUID             string
+	TargetAccountType string
+}
+
+type MockPayRechargeOrderInput struct {
+	Auth                  AuthContext
+	Meta                  RequestMeta
+	OrderID               string
+	PaymentResult         string
+	ProviderTransactionID string
+}
+
+type RechargeOrderDTO struct {
+	OrderID               string     `json:"order_id"`
+	AccountID             string     `json:"account_id"`
+	EnterpriseID          string     `json:"enterprise_id,omitempty"`
+	PackageID             string     `json:"package_id"`
+	SKUID                 string     `json:"sku_id,omitempty"`
+	PackageType           string     `json:"package_type"`
+	TargetScope           string     `json:"target_scope"`
+	BillingMode           string     `json:"billing_mode"`
+	Points                int64      `json:"points"`
+	GrantedPoints         int64      `json:"granted_points"`
+	BonusPoints           int64      `json:"bonus_points"`
+	PriceCents            int64      `json:"price_cents"`
+	PriceAmount           int64      `json:"price_amount"`
+	Currency              string     `json:"currency"`
+	PaymentProvider       string     `json:"payment_provider"`
+	PaymentStatus         string     `json:"payment_status"`
+	CreditLotID           string     `json:"credit_lot_id,omitempty"`
+	EntitlementSnapshotID string     `json:"entitlement_snapshot_id,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	PaidAt                *time.Time `json:"paid_at,omitempty"`
+}
+
 type CreditTargetDTO struct {
 	TargetType  string `json:"target_type"`
 	TargetID    string `json:"target_id"`
@@ -237,6 +393,46 @@ type AdminGrantDTO struct {
 	AccountID       string `json:"account_id"`
 	GrantedPoints   int64  `json:"granted_points"`
 	AvailablePoints int64  `json:"available_points"`
+}
+
+type ExpireCreditLotsInput struct {
+	Auth      admin.AdminAuth
+	Meta      RequestMeta
+	AccountID string
+	LotID     string
+	Limit     int
+	Reason    string
+}
+
+type RefundCreditsInput struct {
+	Auth                  admin.AdminAuth
+	Meta                  RequestMeta
+	AccountID             string
+	Points                int64
+	OriginalLotID         string
+	OriginalLedgerEntryID string
+	Reason                string
+	GracePeriodDays       int
+}
+
+type ReverseCreditLedgerEntryInput struct {
+	Auth          admin.AdminAuth
+	Meta          RequestMeta
+	LedgerEntryID string
+	Reason        string
+}
+
+type CreditMaintenanceDTO struct {
+	OperationID           string `json:"operation_id"`
+	Status                string `json:"status"`
+	AccountID             string `json:"account_id,omitempty"`
+	LotID                 string `json:"lot_id,omitempty"`
+	LedgerEntryID         string `json:"ledger_entry_id,omitempty"`
+	ReversedLedgerEntryID string `json:"reversed_ledger_entry_id,omitempty"`
+	AffectedLots          int    `json:"affected_lots,omitempty"`
+	Points                int64  `json:"points"`
+	AvailablePoints       int64  `json:"available_points,omitempty"`
+	FrozenPoints          int64  `json:"frozen_points,omitempty"`
 }
 
 type CreateCodesInput struct {
@@ -275,6 +471,51 @@ type CreateCodesDTO struct {
 	Count   int      `json:"count"`
 }
 
+type SaveBillingPackageInput struct {
+	Auth               admin.AdminAuth
+	Meta               RequestMeta
+	PackageID          string
+	PackageType        string
+	Name               string
+	TargetScope        string
+	BillingMode        string
+	PriceAmount        int64
+	Currency           string
+	GrantedPoints      int64
+	BonusPoints        int64
+	CreditExpiryPolicy string
+	SpendScope         []string
+	SettlementEligible bool
+	EntitlementPolicy  map[string]any
+	RenewalPolicy      map[string]any
+	RefundPolicy       map[string]any
+	VisibleScope       string
+	Status             string
+	Reason             string
+}
+
+type BillingPackageStatusInput struct {
+	Auth      admin.AdminAuth
+	Meta      RequestMeta
+	PackageID string
+	Status    string
+	Reason    string
+}
+
+type CreateBillingSKUInput struct {
+	Auth                admin.AdminAuth
+	Meta                RequestMeta
+	PackageID           string
+	SKUID               string
+	ChannelCode         string
+	PriceAmount         int64
+	Currency            string
+	ActivityPriceAmount *int64
+	EffectiveAt         time.Time
+	ExpiredAt           *time.Time
+	Reason              string
+}
+
 func (a *App) GetSummary(ctx context.Context, auth AuthContext) (SummaryDTO, error) {
 	account, err := a.resolveAccount(ctx, a.repo.DB().WithContext(ctx), auth)
 	if err != nil {
@@ -296,6 +537,37 @@ func (a *App) ListLedger(ctx context.Context, auth AuthContext, limit, offset in
 		return Page[LedgerDTO]{}, err
 	}
 	return a.listLedgerForAccount(ctx, account.ID, limit, offset)
+}
+
+func (a *App) ListCreditLots(ctx context.Context, auth AuthContext, sourceType, status string, limit, offset int) (Page[CreditLotDTO], error) {
+	account, err := a.resolveAccount(ctx, a.repo.DB().WithContext(ctx), auth)
+	if err != nil {
+		return Page[CreditLotDTO]{}, err
+	}
+	return a.listCreditLots(ctx, account.ID, sourceType, status, limit, offset)
+}
+
+func (a *App) ListExpiringCredits(ctx context.Context, auth AuthContext, withinDays, limit, offset int) (Page[CreditLotDTO], error) {
+	account, err := a.resolveAccount(ctx, a.repo.DB().WithContext(ctx), auth)
+	if err != nil {
+		return Page[CreditLotDTO]{}, err
+	}
+	if withinDays <= 0 {
+		withinDays = 30
+	}
+	limit, offset = normalizePage(limit, offset, 100)
+	now := a.now()
+	db := a.repo.DB().WithContext(ctx).Model(&businesscore.CreditBatch{}).
+		Where("account_id = ? AND status = ? AND available_points > 0 AND expires_at > ? AND expires_at <= ?", account.ID, StatusActive, now, now.AddDate(0, 0, withinDays))
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return Page[CreditLotDTO]{}, err
+	}
+	var rows []businesscore.CreditBatch
+	if err := db.Order("expires_at ASC, granted_at ASC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[CreditLotDTO]{}, err
+	}
+	return Page[CreditLotDTO]{Items: creditLotDTOs(rows), Limit: limit, Offset: offset, Total: total}, nil
 }
 
 func (a *App) ListEnterpriseUsage(ctx context.Context, auth AuthContext, limit, offset int) (Page[LedgerDTO], error) {
@@ -573,6 +845,11 @@ func (a *App) ChargeToolUsageCredits(ctx context.Context, in ChargeToolInput) (C
 			return bizerrors.New(bizerrors.CodeStateConflict, "charged points exceed frozen points")
 		}
 		released := int64(0)
+		if charged > 0 {
+			if _, err := a.consumeFreezeRows(tx, freeze.FreezeID, charged, in.Auth.UserID, now); err != nil {
+				return err
+			}
+		}
 		if unsettled > 0 {
 			updated, releasedPoints, err := a.releaseFreezeRows(tx, &freeze, &account, unsettled, in.Auth.UserID, now)
 			if err != nil {
@@ -621,6 +898,600 @@ func (a *App) ChargeToolUsageCredits(ctx context.Context, in ChargeToolInput) (C
 	}
 	_ = a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "tool_charge", ID: dto.ToolChargeID})
 	return dto, nil
+}
+
+func (a *App) ListRechargePackages(ctx context.Context) (Page[RechargePackageDTO], error) {
+	var rows []businesscore.RechargePackage
+	if err := a.repo.DB().WithContext(ctx).Where("status = ?", StatusActive).Order("target_scope ASC, price_amount ASC").Find(&rows).Error; err != nil {
+		return Page[RechargePackageDTO]{}, err
+	}
+	items := make([]RechargePackageDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, rechargePackageDTO(row))
+	}
+	return Page[RechargePackageDTO]{Items: items, Limit: len(items), Total: int64(len(items))}, nil
+}
+
+func (a *App) CreateRechargeOrder(ctx context.Context, in CreateRechargeOrderInput) (RechargeOrderDTO, error) {
+	packageID := strings.TrimSpace(in.PackageID)
+	if packageID == "" || strings.TrimSpace(in.Meta.IdempotencyKey) == "" {
+		return RechargeOrderDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "package_id and idempotency_key are required")
+	}
+	var pkg businesscore.RechargePackage
+	if err := a.repo.DB().WithContext(ctx).Where("package_id = ? AND status = ?", packageID, StatusActive).First(&pkg).Error; err != nil {
+		return RechargeOrderDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "recharge package not found")
+	}
+	account, err := a.resolvePackagePurchaseAccount(ctx, in.Auth, pkg, in.TargetAccountType)
+	if err != nil {
+		return RechargeOrderDTO{}, err
+	}
+	sku, priceAmount, currency, err := a.resolvePackagePrice(ctx, pkg, strings.TrimSpace(in.SKUID))
+	if err != nil {
+		return RechargeOrderDTO{}, err
+	}
+	totalPoints := packageTotalPoints(pkg)
+	hash := requestHash(in.Meta, in.Auth, map[string]any{
+		"account_id": account.ID, "package_id": pkg.PackageID, "sku_id": stringPtrValue(sku), "points": totalPoints, "price_amount": priceAmount, "currency": currency,
+	})
+	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.recharge_order.create", IdempotencyKey: in.Meta.IdempotencyKey,
+		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
+	})
+	if err != nil {
+		return RechargeOrderDTO{}, err
+	}
+	if decision.Mode == idempotency.DecisionConflict {
+		return RechargeOrderDTO{}, bizerrors.New(bizerrors.CodeIdempotencyConflict, "recharge order idempotency key conflicts")
+	}
+	if decision.Mode == idempotency.DecisionProcessing {
+		return RechargeOrderDTO{}, bizerrors.New(bizerrors.CodeProcessing, "recharge order request is processing")
+	}
+	if decision.Mode == idempotency.DecisionReplay && decision.ReplayResult != nil {
+		return a.getRechargeOrderDTO(ctx, decision.ReplayResult.ID)
+	}
+	var dto RechargeOrderDTO
+	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := a.now()
+		orderID := security.RandomID("ord_")
+		row := businesscore.RechargeOrder{
+			ID: security.RandomID("ro_"), OrderID: orderID, UserID: in.Auth.UserID, AccountID: account.ID,
+			EnterpriseID: account.EnterpriseID, PackageID: pkg.PackageID, SKUID: sku,
+			PackageType: pkg.PackageType, TargetScope: pkg.TargetScope, BillingMode: pkg.BillingMode,
+			Points: totalPoints, GrantedPoints: pkg.GrantedPoints, BonusPoints: pkg.BonusPoints,
+			PriceCents: priceAmount, PriceAmount: priceAmount, Currency: currency,
+			PaymentProvider: "mock_payment", PaymentStatus: "pending", OrderSource: "user_purchase",
+			IdempotencyKey: in.Meta.IdempotencyKey, TraceID: optionalString(in.Meta.TraceID),
+			CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		dto = rechargeOrderDTO(row)
+		return nil
+	})
+	if err != nil {
+		_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
+		return RechargeOrderDTO{}, err
+	}
+	if err := a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "recharge_order", ID: dto.OrderID}); err != nil {
+		return RechargeOrderDTO{}, err
+	}
+	return dto, nil
+}
+
+func (a *App) ListRechargeOrders(ctx context.Context, auth AuthContext, status string, limit, offset int) (Page[RechargeOrderDTO], error) {
+	account, err := a.resolveAccount(ctx, a.repo.DB().WithContext(ctx), auth)
+	if err != nil {
+		return Page[RechargeOrderDTO]{}, err
+	}
+	limit, offset = normalizePage(limit, offset, 100)
+	db := a.repo.DB().WithContext(ctx).Model(&businesscore.RechargeOrder{}).Where("account_id = ?", account.ID)
+	if strings.TrimSpace(status) != "" {
+		db = db.Where("payment_status = ?", strings.TrimSpace(status))
+	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return Page[RechargeOrderDTO]{}, err
+	}
+	var rows []businesscore.RechargeOrder
+	if err := db.Order("created_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[RechargeOrderDTO]{}, err
+	}
+	items := make([]RechargeOrderDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, rechargeOrderDTO(row))
+	}
+	return Page[RechargeOrderDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+}
+
+func (a *App) MockPayRechargeOrder(ctx context.Context, in MockPayRechargeOrderInput) (RechargeOrderDTO, error) {
+	orderID := strings.TrimSpace(in.OrderID)
+	paymentResult := strings.TrimSpace(in.PaymentResult)
+	if orderID == "" || paymentResult == "" || strings.TrimSpace(in.Meta.IdempotencyKey) == "" {
+		return RechargeOrderDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "order_id, payment_result and idempotency_key are required")
+	}
+	if paymentResult != "success" && paymentResult != "failed" {
+		return RechargeOrderDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "payment_result must be success or failed")
+	}
+	account, err := a.resolveAccount(ctx, a.repo.DB().WithContext(ctx), in.Auth)
+	if err != nil {
+		return RechargeOrderDTO{}, err
+	}
+	transactionID := strings.TrimSpace(in.ProviderTransactionID)
+	if transactionID == "" {
+		transactionID = security.RandomID("mock_txn_")
+	}
+	hash := requestHash(in.Meta, in.Auth, map[string]any{
+		"account_id": account.ID, "order_id": orderID, "payment_result": paymentResult, "provider_transaction_id": transactionID,
+	})
+	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{
+		TenantID: "space:" + in.Auth.SpaceID, SpaceID: in.Auth.SpaceID, Scope: "credit.recharge_order.mock_pay", IdempotencyKey: in.Meta.IdempotencyKey,
+		RequestHash: hash, ActorUserID: in.Auth.UserID, EnterpriseID: optionalString(in.Auth.EnterpriseID),
+	})
+	if err != nil {
+		return RechargeOrderDTO{}, err
+	}
+	if decision.Mode == idempotency.DecisionConflict {
+		return RechargeOrderDTO{}, bizerrors.New(bizerrors.CodeIdempotencyConflict, "mock payment idempotency key conflicts")
+	}
+	if decision.Mode == idempotency.DecisionProcessing {
+		return RechargeOrderDTO{}, bizerrors.New(bizerrors.CodeProcessing, "mock payment request is processing")
+	}
+	if decision.Mode == idempotency.DecisionReplay && decision.ReplayResult != nil {
+		return a.getRechargeOrderDTO(ctx, decision.ReplayResult.ID)
+	}
+	var dto RechargeOrderDTO
+	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := a.now()
+		var order businesscore.RechargeOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_id = ?", orderID).First(&order).Error; err != nil {
+			return bizerrors.New(bizerrors.CodeResourceNotFound, "recharge order not found")
+		}
+		if order.AccountID != account.ID {
+			return bizerrors.New(bizerrors.CodePermissionDenied, "recharge order account does not match")
+		}
+		if order.PaymentStatus == "paid" && order.CreditLotID != nil {
+			dto = rechargeOrderDTO(order)
+			return nil
+		}
+		if order.PaymentStatus != "pending" {
+			return bizerrors.New(bizerrors.CodeStateConflict, "recharge order is not payable")
+		}
+		paymentStatus := "failed"
+		if paymentResult == "success" {
+			paymentStatus = "paid"
+		}
+		transaction := businesscore.MockPaymentTransaction{
+			ID: security.RandomID("mpt_"), TransactionID: transactionID, OrderID: order.OrderID,
+			PaymentResult: paymentResult, PaymentStatus: paymentStatus, IdempotencyKey: in.Meta.IdempotencyKey, TraceID: optionalString(in.Meta.TraceID),
+			RequestPayloadJSON: mustJSON(map[string]any{"order_id": order.OrderID, "payment_result": paymentResult, "provider_transaction_id": transactionID}),
+			CreatedBy:          optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
+		}
+		if err := tx.Create(&transaction).Error; err != nil {
+			return err
+		}
+		if paymentResult == "failed" {
+			order.PaymentStatus = "failed"
+			order.FailedReason = optionalString("mock payment failed")
+			order.UpdatedBy = optionalString(in.Auth.UserID)
+			order.UpdatedAt = now
+			if err := tx.Save(&order).Error; err != nil {
+				return err
+			}
+			dto = rechargeOrderDTO(order)
+			return nil
+		}
+		var pkg businesscore.RechargePackage
+		if err := tx.Where("package_id = ? AND status = ?", order.PackageID, StatusActive).First(&pkg).Error; err != nil {
+			return bizerrors.New(bizerrors.CodeResourceNotFound, "recharge package not found")
+		}
+		expiresAt, expiryPolicyJSON, err := packageCreditExpiry(now, pkg.CreditExpiryPolicy)
+		if err != nil {
+			return err
+		}
+		var lockedAccount businesscore.CreditAccount
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", account.ID).First(&lockedAccount).Error; err != nil {
+			return err
+		}
+		var creditLotID string
+		if order.Points > 0 {
+			creditLotID = security.RandomID("cb_")
+			sourceID := order.OrderID
+			batch := businesscore.CreditBatch{
+				ID: creditLotID, AccountID: lockedAccount.ID, BatchType: "recharge", SourceType: "recharge_package", SourceID: &sourceID,
+				TotalPoints: order.Points, RemainingPoints: order.Points, OriginalPoints: order.Points, AvailablePoints: order.Points, GrantedAt: now,
+				ExpiresAt: expiresAt, ExpiryPolicyJSON: expiryPolicyJSON, SpendScopeJSON: packageSpendScopeJSON(pkg),
+				SettlementEligible: pkg.SettlementEligible, Status: StatusActive, CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
+			}
+			if err := tx.Create(&batch).Error; err != nil {
+				return err
+			}
+			lockedAccount.AvailablePoints += order.Points
+		}
+		lockedAccount.UpdatedBy = optionalString(in.Auth.UserID)
+		lockedAccount.UpdatedAt = now
+		if err := tx.Save(&lockedAccount).Error; err != nil {
+			return err
+		}
+		entitlementID := security.RandomID("ents_")
+		entitlement := businesscore.PackageEntitlementSnapshot{
+			ID: security.RandomID("pes_"), EntitlementSnapshotID: entitlementID, AccountID: lockedAccount.ID,
+			UserID: optionalString(in.Auth.UserID), EnterpriseID: lockedAccount.EnterpriseID, PackageID: pkg.PackageID, OrderID: order.OrderID,
+			TargetScope: pkg.TargetScope, EntitlementPolicy: packageEntitlementPolicyJSON(pkg), Status: StatusActive,
+			EffectiveAt: now, ExpiresAt: expiresAt, CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
+		}
+		if err := tx.Create(&entitlement).Error; err != nil {
+			return err
+		}
+		if pkg.TargetScope == "enterprise" {
+			if err := a.createEnterpriseContractForPackage(tx, lockedAccount, pkg, order, now, in.Auth.UserID); err != nil {
+				return err
+			}
+		}
+		order.PaymentStatus = "paid"
+		order.CreditLotID = optionalString(creditLotID)
+		order.EntitlementSnapshotID = &entitlementID
+		order.PaidAt = &now
+		order.UpdatedBy = optionalString(in.Auth.UserID)
+		order.UpdatedAt = now
+		if err := tx.Save(&order).Error; err != nil {
+			return err
+		}
+		if order.Points > 0 {
+			if err := tx.Create(ledger(lockedAccount, "recharge", order.Points, "recharge_order", order.OrderID, "", "", in.Meta.TraceID, in.Meta.IdempotencyKey)).Error; err != nil {
+				return err
+			}
+		}
+		dto = rechargeOrderDTO(order)
+		return nil
+	})
+	if err != nil {
+		_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
+		return RechargeOrderDTO{}, err
+	}
+	if err := a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "recharge_order", ID: dto.OrderID}); err != nil {
+		return RechargeOrderDTO{}, err
+	}
+	return dto, nil
+}
+
+func (a *App) AdminListCreditAccounts(ctx context.Context, _ admin.AdminAuth, accountType, status string, limit, offset int) (Page[CreditAccountDTO], error) {
+	limit, offset = normalizePage(limit, offset, 100)
+	db := a.repo.DB().WithContext(ctx).Model(&businesscore.CreditAccount{})
+	if strings.TrimSpace(accountType) != "" {
+		db = db.Where("account_type = ?", strings.TrimSpace(accountType))
+	}
+	if strings.TrimSpace(status) != "" {
+		db = db.Where("status = ?", strings.TrimSpace(status))
+	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return Page[CreditAccountDTO]{}, err
+	}
+	var rows []businesscore.CreditAccount
+	if err := db.Order("created_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[CreditAccountDTO]{}, err
+	}
+	items := make([]CreditAccountDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, creditAccountDTO(row))
+	}
+	return Page[CreditAccountDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+}
+
+func (a *App) AdminListCreditLots(ctx context.Context, _ admin.AdminAuth, accountID, sourceType, status string, limit, offset int) (Page[CreditLotDTO], error) {
+	return a.listCreditLots(ctx, accountID, sourceType, status, limit, offset)
+}
+
+func (a *App) AdminListRechargeOrders(ctx context.Context, _ admin.AdminAuth, userID, accountID, status string, limit, offset int) (Page[RechargeOrderDTO], error) {
+	limit, offset = normalizePage(limit, offset, 100)
+	db := a.repo.DB().WithContext(ctx).Model(&businesscore.RechargeOrder{})
+	if strings.TrimSpace(userID) != "" {
+		db = db.Where("user_id = ?", strings.TrimSpace(userID))
+	}
+	if strings.TrimSpace(accountID) != "" {
+		db = db.Where("account_id = ?", strings.TrimSpace(accountID))
+	}
+	if strings.TrimSpace(status) != "" {
+		db = db.Where("payment_status = ?", strings.TrimSpace(status))
+	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return Page[RechargeOrderDTO]{}, err
+	}
+	var rows []businesscore.RechargeOrder
+	if err := db.Order("created_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[RechargeOrderDTO]{}, err
+	}
+	items := make([]RechargeOrderDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, rechargeOrderDTO(row))
+	}
+	return Page[RechargeOrderDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+}
+
+func (a *App) AdminListBillingPackages(ctx context.Context, auth admin.AdminAuth, targetScope, packageType, status string, limit, offset int) (Page[RechargePackageDTO], error) {
+	if auth.AdminID == "" {
+		return Page[RechargePackageDTO]{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	limit, offset = normalizePage(limit, offset, 100)
+	db := a.repo.DB().WithContext(ctx).Model(&businesscore.RechargePackage{})
+	if strings.TrimSpace(targetScope) != "" {
+		db = db.Where("target_scope = ?", strings.TrimSpace(targetScope))
+	}
+	if strings.TrimSpace(packageType) != "" {
+		db = db.Where("package_type = ?", strings.TrimSpace(packageType))
+	}
+	if strings.TrimSpace(status) != "" {
+		db = db.Where("status = ?", strings.TrimSpace(status))
+	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return Page[RechargePackageDTO]{}, err
+	}
+	var rows []businesscore.RechargePackage
+	if err := db.Order("updated_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[RechargePackageDTO]{}, err
+	}
+	items := make([]RechargePackageDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, rechargePackageDTO(row))
+	}
+	return Page[RechargePackageDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+}
+
+func (a *App) AdminSaveBillingPackage(ctx context.Context, in SaveBillingPackageInput) (RechargePackageDTO, error) {
+	if in.Auth.AdminID == "" {
+		return RechargePackageDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	packageID := strings.TrimSpace(in.PackageID)
+	if packageID == "" || strings.TrimSpace(in.Name) == "" || in.PriceAmount < 0 || in.GrantedPoints < 0 || in.BonusPoints < 0 || in.Meta.IdempotencyKey == "" {
+		return RechargePackageDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "invalid billing package request")
+	}
+	hash := requestHash(in.Meta, AuthContext{UserID: in.Auth.AdminID}, map[string]any{
+		"package_id": packageID, "package_type": in.PackageType, "target_scope": in.TargetScope, "billing_mode": in.BillingMode,
+		"name": in.Name, "price_amount": in.PriceAmount, "currency": in.Currency, "granted_points": in.GrantedPoints,
+		"bonus_points": in.BonusPoints, "credit_expiry_policy": in.CreditExpiryPolicy, "spend_scope": in.SpendScope,
+		"entitlement_policy": in.EntitlementPolicy, "renewal_policy": in.RenewalPolicy, "refund_policy": in.RefundPolicy,
+		"visible_scope": in.VisibleScope, "status": in.Status,
+	})
+	decision, err := a.guard.Begin(ctx, idempotency.BeginInput{TenantID: "admin:" + in.Auth.AdminID, Scope: "billing.package.save", IdempotencyKey: in.Meta.IdempotencyKey, RequestHash: hash, ActorUserID: in.Auth.AdminID})
+	if err != nil {
+		return RechargePackageDTO{}, err
+	}
+	if decision.Mode == idempotency.DecisionConflict {
+		return RechargePackageDTO{}, bizerrors.New(bizerrors.CodeIdempotencyConflict, "billing package idempotency key conflicts")
+	}
+	if decision.Mode == idempotency.DecisionReplay && decision.ReplayResult != nil {
+		return a.getBillingPackageDTO(ctx, decision.ReplayResult.ID)
+	}
+	now := a.now()
+	row := businesscore.RechargePackage{
+		ID: security.RandomID("rpkg_"), PackageID: packageID, PackageType: defaultString(in.PackageType, "personal_credit_pack"),
+		TargetScope: defaultString(in.TargetScope, "personal"), BillingMode: defaultString(in.BillingMode, "one_time"),
+		DisplayName: strings.TrimSpace(in.Name), Name: strings.TrimSpace(in.Name), Points: in.GrantedPoints + in.BonusPoints,
+		GrantedPoints: in.GrantedPoints, BonusPoints: in.BonusPoints, PriceCents: in.PriceAmount, PriceAmount: in.PriceAmount,
+		Currency: defaultString(in.Currency, "CNY"), CreditValidDuration: defaultString(in.CreditExpiryPolicy, "P1M"),
+		CreditExpiryPolicy: defaultString(in.CreditExpiryPolicy, "P1M"), SpendScopeJSON: spendScopeJSON(in.SpendScope),
+		SettlementEligible: in.SettlementEligible, EntitlementPolicy: mustJSON(in.EntitlementPolicy),
+		RenewalPolicy: mustJSON(defaultMap(in.RenewalPolicy, map[string]any{"mode": "none"})),
+		RefundPolicy:  mustJSON(defaultMap(in.RefundPolicy, map[string]any{"mode": "unused_refund"})),
+		VisibleScope:  defaultString(in.VisibleScope, "all_users"), Status: defaultString(in.Status, StatusActive),
+		CreatedBy: optionalString(in.Auth.AdminID), UpdatedBy: optionalString(in.Auth.AdminID), CreatedAt: now, UpdatedAt: now,
+	}
+	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var before businesscore.RechargePackage
+		_ = tx.Where("package_id = ?", packageID).First(&before).Error
+		if before.ID != "" {
+			row.ID = before.ID
+			row.CreatedBy = before.CreatedBy
+			row.CreatedAt = before.CreatedAt
+		}
+		if err := tx.Save(&row).Error; err != nil {
+			return err
+		}
+		return a.writeBillingAuditTx(tx, in.Auth.AdminID, in.Meta.TraceID, "billing.package.save", "billing_package", packageID, valueStatus(before.Status), row.Status, in.Reason)
+	})
+	if err != nil {
+		_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
+		return RechargePackageDTO{}, err
+	}
+	_ = a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "billing_package", ID: row.PackageID})
+	return rechargePackageDTO(row), nil
+}
+
+func (a *App) AdminSetBillingPackageStatus(ctx context.Context, in BillingPackageStatusInput) (RechargePackageDTO, error) {
+	if in.Auth.AdminID == "" {
+		return RechargePackageDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	status := strings.TrimSpace(in.Status)
+	if status == "" || in.Meta.IdempotencyKey == "" {
+		return RechargePackageDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "status and idempotency_key are required")
+	}
+	var row businesscore.RechargePackage
+	err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("package_id = ?", strings.TrimSpace(in.PackageID)).First(&row).Error; err != nil {
+			return bizerrors.New(bizerrors.CodeResourceNotFound, "billing package not found")
+		}
+		beforeStatus := row.Status
+		row.Status = status
+		row.UpdatedBy = optionalString(in.Auth.AdminID)
+		row.UpdatedAt = a.now()
+		if err := tx.Save(&row).Error; err != nil {
+			return err
+		}
+		return a.writeBillingAuditTx(tx, in.Auth.AdminID, in.Meta.TraceID, "billing.package.status", "billing_package", row.PackageID, beforeStatus, row.Status, in.Reason)
+	})
+	if err != nil {
+		return RechargePackageDTO{}, err
+	}
+	return rechargePackageDTO(row), nil
+}
+
+func (a *App) AdminListBillingPackageSKUs(ctx context.Context, auth admin.AdminAuth, packageID, status string, limit, offset int) (Page[BillingPackageSKUDTO], error) {
+	if auth.AdminID == "" {
+		return Page[BillingPackageSKUDTO]{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	limit, offset = normalizePage(limit, offset, 100)
+	db := a.repo.DB().WithContext(ctx).Model(&businesscore.BillingPackageSKU{})
+	if strings.TrimSpace(packageID) != "" {
+		db = db.Where("package_id = ?", strings.TrimSpace(packageID))
+	}
+	if strings.TrimSpace(status) != "" {
+		db = db.Where("status = ?", strings.TrimSpace(status))
+	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return Page[BillingPackageSKUDTO]{}, err
+	}
+	var rows []businesscore.BillingPackageSKU
+	if err := db.Order("updated_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[BillingPackageSKUDTO]{}, err
+	}
+	items := make([]BillingPackageSKUDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, billingPackageSKUDTO(row))
+	}
+	return Page[BillingPackageSKUDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+}
+
+func (a *App) AdminCreateBillingPackageSKU(ctx context.Context, in CreateBillingSKUInput) (BillingPackageSKUDTO, error) {
+	if in.Auth.AdminID == "" {
+		return BillingPackageSKUDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	if strings.TrimSpace(in.PackageID) == "" || in.PriceAmount < 0 || in.Meta.IdempotencyKey == "" {
+		return BillingPackageSKUDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "invalid billing sku request")
+	}
+	now := a.now()
+	effectiveAt := in.EffectiveAt
+	if effectiveAt.IsZero() {
+		effectiveAt = now
+	}
+	skuID := strings.TrimSpace(in.SKUID)
+	if skuID == "" {
+		skuID = security.RandomID("sku_")
+	}
+	row := businesscore.BillingPackageSKU{
+		ID: security.RandomID("bps_"), SKUID: skuID, PackageID: strings.TrimSpace(in.PackageID), ChannelCode: defaultString(in.ChannelCode, "default"),
+		PriceAmount: in.PriceAmount, Currency: defaultString(in.Currency, "CNY"), ActivityPriceAmount: in.ActivityPriceAmount,
+		EffectiveAt: effectiveAt, ExpiredAt: in.ExpiredAt, Status: StatusActive,
+		CreatedBy: optionalString(in.Auth.AdminID), UpdatedBy: optionalString(in.Auth.AdminID), CreatedAt: now, UpdatedAt: now,
+	}
+	if err := a.repo.DB().WithContext(ctx).Create(&row).Error; err != nil {
+		return BillingPackageSKUDTO{}, err
+	}
+	return billingPackageSKUDTO(row), nil
+}
+
+func (a *App) AdminListEntitlementSnapshots(ctx context.Context, auth admin.AdminAuth, accountID, enterpriseID, status string, limit, offset int) (Page[EntitlementSnapshotDTO], error) {
+	if auth.AdminID == "" {
+		return Page[EntitlementSnapshotDTO]{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	limit, offset = normalizePage(limit, offset, 100)
+	db := a.repo.DB().WithContext(ctx).Model(&businesscore.PackageEntitlementSnapshot{})
+	if strings.TrimSpace(accountID) != "" {
+		db = db.Where("account_id = ?", strings.TrimSpace(accountID))
+	}
+	if strings.TrimSpace(enterpriseID) != "" {
+		db = db.Where("enterprise_id = ?", strings.TrimSpace(enterpriseID))
+	}
+	if strings.TrimSpace(status) != "" {
+		db = db.Where("status = ?", strings.TrimSpace(status))
+	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return Page[EntitlementSnapshotDTO]{}, err
+	}
+	var rows []businesscore.PackageEntitlementSnapshot
+	if err := db.Order("effective_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[EntitlementSnapshotDTO]{}, err
+	}
+	items := make([]EntitlementSnapshotDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, entitlementSnapshotDTO(row))
+	}
+	return Page[EntitlementSnapshotDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+}
+
+func (a *App) AdminListEnterpriseContracts(ctx context.Context, auth admin.AdminAuth, enterpriseID, status string, limit, offset int) (Page[EnterpriseContractDTO], error) {
+	if auth.AdminID == "" {
+		return Page[EnterpriseContractDTO]{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	limit, offset = normalizePage(limit, offset, 100)
+	db := a.repo.DB().WithContext(ctx).Model(&businesscore.EnterpriseContract{})
+	if strings.TrimSpace(enterpriseID) != "" {
+		db = db.Where("enterprise_id = ?", strings.TrimSpace(enterpriseID))
+	}
+	if strings.TrimSpace(status) != "" {
+		db = db.Where("contract_status = ?", strings.TrimSpace(status))
+	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return Page[EnterpriseContractDTO]{}, err
+	}
+	var rows []businesscore.EnterpriseContract
+	if err := db.Order("period_start DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[EnterpriseContractDTO]{}, err
+	}
+	items := make([]EnterpriseContractDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, enterpriseContractDTO(row))
+	}
+	return Page[EnterpriseContractDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+}
+
+func (a *App) AdminListBillingInvoices(ctx context.Context, auth admin.AdminAuth, enterpriseID, status string, limit, offset int) (Page[BillingInvoiceDTO], error) {
+	if auth.AdminID == "" {
+		return Page[BillingInvoiceDTO]{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	limit, offset = normalizePage(limit, offset, 100)
+	db := a.repo.DB().WithContext(ctx).Model(&businesscore.BillingInvoice{})
+	if strings.TrimSpace(enterpriseID) != "" {
+		db = db.Where("enterprise_id = ?", strings.TrimSpace(enterpriseID))
+	}
+	if strings.TrimSpace(status) != "" {
+		db = db.Where("invoice_status = ?", strings.TrimSpace(status))
+	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return Page[BillingInvoiceDTO]{}, err
+	}
+	var rows []businesscore.BillingInvoice
+	if err := db.Order("created_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[BillingInvoiceDTO]{}, err
+	}
+	items := make([]BillingInvoiceDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, billingInvoiceDTO(row))
+	}
+	return Page[BillingInvoiceDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
+}
+
+func (a *App) AdminListBillingPromotions(ctx context.Context, auth admin.AdminAuth, packageID, status string, limit, offset int) (Page[BillingPromotionDTO], error) {
+	if auth.AdminID == "" {
+		return Page[BillingPromotionDTO]{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	limit, offset = normalizePage(limit, offset, 100)
+	db := a.repo.DB().WithContext(ctx).Model(&businesscore.BillingPromotion{})
+	if strings.TrimSpace(packageID) != "" {
+		db = db.Where("package_id = ?", strings.TrimSpace(packageID))
+	}
+	if strings.TrimSpace(status) != "" {
+		db = db.Where("status = ?", strings.TrimSpace(status))
+	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return Page[BillingPromotionDTO]{}, err
+	}
+	var rows []businesscore.BillingPromotion
+	if err := db.Order("starts_at DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[BillingPromotionDTO]{}, err
+	}
+	items := make([]BillingPromotionDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, billingPromotionDTO(row))
+	}
+	return Page[BillingPromotionDTO]{Items: items, Limit: limit, Offset: offset, Total: total}, nil
 }
 
 func (a *App) RedeemCode(ctx context.Context, in RedeemInput) (RedeemDTO, error) {
@@ -681,6 +1552,8 @@ func (a *App) RedeemCode(ctx context.Context, in RedeemInput) (RedeemDTO, error)
 		creditBatch := businesscore.CreditBatch{
 			ID: creditBatchID, AccountID: account.ID, BatchType: "redeem", SourceType: "redeem_code", SourceID: &code.ID,
 			TotalPoints: points, RemainingPoints: points, ExpiresAt: creditExpiry, Status: StatusActive,
+			OriginalPoints: points, AvailablePoints: points, GrantedAt: now,
+			ExpiryPolicyJSON: creditExpiryPolicyJSON(creditExpiry), SpendScopeJSON: defaultSpendScopeJSON(), SettlementEligible: true,
 			CreatedBy: optionalString(in.Auth.UserID), UpdatedBy: optionalString(in.Auth.UserID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&creditBatch).Error; err != nil {
@@ -797,6 +1670,8 @@ func (a *App) AdminGrantCredits(ctx context.Context, in AdminGrantInput) (AdminG
 		batch := businesscore.CreditBatch{
 			ID: batchID, AccountID: account.ID, BatchType: "grant", SourceType: "admin_grant", SourceID: &sourceID,
 			TotalPoints: in.Points, RemainingPoints: in.Points, ExpiresAt: &in.ExpiresAt, Status: StatusActive,
+			OriginalPoints: in.Points, AvailablePoints: in.Points, GrantedAt: now,
+			ExpiryPolicyJSON: creditExpiryPolicyJSON(&in.ExpiresAt), SpendScopeJSON: defaultSpendScopeJSON(), SettlementEligible: true,
 			CreatedBy: optionalString(in.Auth.AdminID), UpdatedBy: optionalString(in.Auth.AdminID), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&batch).Error; err != nil {
@@ -819,6 +1694,265 @@ func (a *App) AdminGrantCredits(ctx context.Context, in AdminGrantInput) (AdminG
 		return AdminGrantDTO{}, err
 	}
 	_ = a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "credit_batch", ID: dto.BatchID})
+	return dto, nil
+}
+
+func (a *App) AdminExpireCreditLots(ctx context.Context, in ExpireCreditLotsInput) (CreditMaintenanceDTO, error) {
+	if in.Auth.AdminID == "" {
+		return CreditMaintenanceDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	if in.Meta.IdempotencyKey == "" || strings.TrimSpace(in.Reason) == "" {
+		return CreditMaintenanceDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "reason and idempotency_key are required")
+	}
+	if strings.TrimSpace(in.LotID) == "" && strings.TrimSpace(in.AccountID) == "" {
+		return CreditMaintenanceDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "lot_id or account_id is required")
+	}
+	limit, _ := normalizePage(in.Limit, 0, 500)
+	hash := requestHash(in.Meta, AuthContext{UserID: in.Auth.AdminID}, map[string]any{"account_id": in.AccountID, "lot_id": in.LotID, "limit": limit, "reason": in.Reason})
+	decision, err := a.beginAdminMaintenance(ctx, in.Auth, in.Meta, "credit.lots.expire", hash)
+	if err != nil {
+		return CreditMaintenanceDTO{}, err
+	}
+	if replay, ok, err := maintenanceReplay(decision, "expire credit lots"); ok || err != nil {
+		return replay, err
+	}
+	operationID := security.RandomID("credit_expire_")
+	var dto CreditMaintenanceDTO
+	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := a.now()
+		var lots []businesscore.CreditBatch
+		q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("status = ? AND (available_points > 0 OR frozen_points > 0)", StatusActive).
+			Where("expires_at IS NOT NULL AND expires_at <= ?", now)
+		if strings.TrimSpace(in.LotID) != "" {
+			q = q.Where("id = ?", strings.TrimSpace(in.LotID))
+		}
+		if strings.TrimSpace(in.AccountID) != "" {
+			q = q.Where("account_id = ?", strings.TrimSpace(in.AccountID))
+		}
+		if err := q.Order("expires_at ASC, granted_at ASC").Limit(limit).Find(&lots).Error; err != nil {
+			return err
+		}
+		var totalExpired int64
+		for _, lot := range lots {
+			points := lot.AvailablePoints
+			if points <= 0 && lot.FrozenPoints > 0 {
+				lot.Status = "frozen_only"
+				lot.UpdatedBy = optionalString(in.Auth.AdminID)
+				lot.UpdatedAt = now
+				if err := tx.Save(&lot).Error; err != nil {
+					return err
+				}
+				dto.AccountID = lot.AccountID
+				dto.LotID = lot.ID
+				dto.AffectedLots++
+				continue
+			}
+			var account businesscore.CreditAccount
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", lot.AccountID).First(&account).Error; err != nil {
+				return err
+			}
+			lot.AvailablePoints -= points
+			lot.RemainingPoints -= points
+			if lot.RemainingPoints < 0 {
+				lot.RemainingPoints = 0
+			}
+			lot.ExpiredPoints += points
+			if lot.FrozenPoints > 0 {
+				lot.Status = "frozen_only"
+			} else {
+				lot.Status = "expired"
+			}
+			lot.UpdatedBy = optionalString(in.Auth.AdminID)
+			lot.UpdatedAt = now
+			account.AvailablePoints -= points
+			if account.AvailablePoints < 0 {
+				account.AvailablePoints = 0
+			}
+			account.UpdatedBy = optionalString(in.Auth.AdminID)
+			account.UpdatedAt = now
+			if err := tx.Save(&lot).Error; err != nil {
+				return err
+			}
+			if err := tx.Save(&account).Error; err != nil {
+				return err
+			}
+			entry := ledger(account, "expire", -points, "credit_lot", lot.ID, "", "", in.Meta.TraceID, in.Meta.IdempotencyKey+":"+lot.ID)
+			entry.BatchID = optionalString(lot.ID)
+			entry.MetadataJSON = mustJSON(map[string]any{"operation_id": operationID, "reason": in.Reason})
+			if err := tx.Create(entry).Error; err != nil {
+				return err
+			}
+			dto.AccountID = account.ID
+			dto.LotID = lot.ID
+			dto.AvailablePoints = account.AvailablePoints
+			dto.FrozenPoints = account.FrozenPoints
+			totalExpired += points
+			dto.AffectedLots++
+		}
+		dto.OperationID = operationID
+		dto.Status = "expired"
+		dto.Points = totalExpired
+		return a.writeBillingAuditTx(tx, in.Auth.AdminID, in.Meta.TraceID, "credit.lots.expire", "credit_lot", defaultString(in.LotID, in.AccountID), "", "expired", in.Reason)
+	})
+	if err != nil {
+		_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
+		return CreditMaintenanceDTO{}, err
+	}
+	_ = a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "credit_maintenance", ID: operationID})
+	return dto, nil
+}
+
+func (a *App) AdminRefundCredits(ctx context.Context, in RefundCreditsInput) (CreditMaintenanceDTO, error) {
+	if in.Auth.AdminID == "" {
+		return CreditMaintenanceDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	if in.Meta.IdempotencyKey == "" || strings.TrimSpace(in.Reason) == "" {
+		return CreditMaintenanceDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "reason and idempotency_key are required")
+	}
+	hash := requestHash(in.Meta, AuthContext{UserID: in.Auth.AdminID}, map[string]any{
+		"account_id": in.AccountID, "points": in.Points, "original_lot_id": in.OriginalLotID,
+		"original_ledger_entry_id": in.OriginalLedgerEntryID, "reason": in.Reason,
+	})
+	decision, err := a.beginAdminMaintenance(ctx, in.Auth, in.Meta, "credit.refund", hash)
+	if err != nil {
+		return CreditMaintenanceDTO{}, err
+	}
+	if replay, ok, err := maintenanceReplay(decision, "refund credits"); ok || err != nil {
+		return replay, err
+	}
+	operationID := security.RandomID("credit_refund_")
+	var dto CreditMaintenanceDTO
+	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		accountID := strings.TrimSpace(in.AccountID)
+		points := in.Points
+		originalLotID := strings.TrimSpace(in.OriginalLotID)
+		if strings.TrimSpace(in.OriginalLedgerEntryID) != "" {
+			var original businesscore.CreditLedgerEntry
+			if err := tx.Where("id = ?", strings.TrimSpace(in.OriginalLedgerEntryID)).First(&original).Error; err != nil {
+				return bizerrors.New(bizerrors.CodeResourceNotFound, "original ledger entry not found")
+			}
+			if original.PointsDelta >= 0 && points <= 0 {
+				return bizerrors.New(bizerrors.CodeStateConflict, "only debit ledger entries can infer refund points")
+			}
+			if accountID == "" {
+				accountID = original.AccountID
+			}
+			if points <= 0 {
+				points = -original.PointsDelta
+			}
+			if originalLotID == "" {
+				originalLotID = value(original.BatchID)
+			}
+		}
+		if accountID == "" || points <= 0 {
+			return bizerrors.New(bizerrors.CodeInvalidArgument, "account_id and positive points are required")
+		}
+		out, err := a.applyRefundCreditsTx(tx, accountID, originalLotID, points, operationID, "refund", "credit_refund", operationID, in.Auth.AdminID, in.Meta.TraceID, in.Meta.IdempotencyKey, in.Reason, in.GracePeriodDays)
+		if err != nil {
+			return err
+		}
+		dto = out
+		return a.writeBillingAuditTx(tx, in.Auth.AdminID, in.Meta.TraceID, "credit.refund", "credit_account", accountID, "", "refunded", in.Reason)
+	})
+	if err != nil {
+		_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
+		return CreditMaintenanceDTO{}, err
+	}
+	_ = a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "credit_maintenance", ID: operationID})
+	return dto, nil
+}
+
+func (a *App) AdminReverseCreditLedgerEntry(ctx context.Context, in ReverseCreditLedgerEntryInput) (CreditMaintenanceDTO, error) {
+	if in.Auth.AdminID == "" {
+		return CreditMaintenanceDTO{}, bizerrors.New(bizerrors.CodeUnauthenticated, "admin auth is required")
+	}
+	if strings.TrimSpace(in.LedgerEntryID) == "" || strings.TrimSpace(in.Reason) == "" || in.Meta.IdempotencyKey == "" {
+		return CreditMaintenanceDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "ledger_entry_id, reason and idempotency_key are required")
+	}
+	hash := requestHash(in.Meta, AuthContext{UserID: in.Auth.AdminID}, map[string]any{"ledger_entry_id": in.LedgerEntryID, "reason": in.Reason})
+	decision, err := a.beginAdminMaintenance(ctx, in.Auth, in.Meta, "credit.ledger.reverse", hash)
+	if err != nil {
+		return CreditMaintenanceDTO{}, err
+	}
+	if replay, ok, err := maintenanceReplay(decision, "reverse credit ledger"); ok || err != nil {
+		return replay, err
+	}
+	operationID := security.RandomID("credit_reverse_")
+	var dto CreditMaintenanceDTO
+	err = a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var original businesscore.CreditLedgerEntry
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", strings.TrimSpace(in.LedgerEntryID)).First(&original).Error; err != nil {
+			return bizerrors.New(bizerrors.CodeResourceNotFound, "ledger entry not found")
+		}
+		if original.EntryType == "reverse" || original.SourceType == "ledger_reversal" {
+			return bizerrors.New(bizerrors.CodeStateConflict, "ledger reversal cannot be reversed again")
+		}
+		var account businesscore.CreditAccount
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", original.AccountID).First(&account).Error; err != nil {
+			return err
+		}
+		reverseDelta := -original.PointsDelta
+		if reverseDelta > 0 {
+			out, err := a.applyRefundCreditsTx(tx, account.ID, value(original.BatchID), reverseDelta, operationID, "reverse", "ledger_reversal", original.ID, in.Auth.AdminID, in.Meta.TraceID, in.Meta.IdempotencyKey, in.Reason, 7)
+			if err != nil {
+				return err
+			}
+			dto = out
+		} else if reverseDelta < 0 {
+			points := -reverseDelta
+			lotID := value(original.BatchID)
+			if lotID == "" {
+				return bizerrors.New(bizerrors.CodeInvalidArgument, "positive ledger reversal requires original batch_id")
+			}
+			var lot businesscore.CreditBatch
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND account_id = ?", lotID, account.ID).First(&lot).Error; err != nil {
+				return bizerrors.New(bizerrors.CodeResourceNotFound, "original credit lot not found")
+			}
+			if account.AvailablePoints < points || lot.AvailablePoints < points {
+				return bizerrors.New(bizerrors.CodeStateConflict, "available points are insufficient for ledger reversal")
+			}
+			lot.AvailablePoints -= points
+			lot.RemainingPoints -= points
+			if lot.RemainingPoints < 0 {
+				lot.RemainingPoints = 0
+			}
+			lot.ConsumedPoints += points
+			if lot.AvailablePoints == 0 && lot.FrozenPoints == 0 {
+				lot.Status = "exhausted"
+			}
+			lot.UpdatedBy = optionalString(in.Auth.AdminID)
+			lot.UpdatedAt = a.now()
+			account.AvailablePoints -= points
+			account.UpdatedBy = optionalString(in.Auth.AdminID)
+			account.UpdatedAt = lot.UpdatedAt
+			if err := tx.Save(&lot).Error; err != nil {
+				return err
+			}
+			if err := tx.Save(&account).Error; err != nil {
+				return err
+			}
+			dto = CreditMaintenanceDTO{OperationID: operationID, Status: "reversed", AccountID: account.ID, LotID: lot.ID, Points: reverseDelta, AvailablePoints: account.AvailablePoints, FrozenPoints: account.FrozenPoints}
+		} else {
+			dto = CreditMaintenanceDTO{OperationID: operationID, Status: "reversed", AccountID: account.ID, Points: 0, AvailablePoints: account.AvailablePoints, FrozenPoints: account.FrozenPoints}
+		}
+		if reverseDelta <= 0 {
+			entry := ledger(account, "reverse", reverseDelta, "ledger_reversal", original.ID, value(original.ProjectID), value(original.RunID), in.Meta.TraceID, in.Meta.IdempotencyKey)
+			entry.BatchID = original.BatchID
+			entry.MetadataJSON = mustJSON(map[string]any{"operation_id": operationID, "reason": in.Reason, "original_entry_type": original.EntryType})
+			if err := tx.Create(entry).Error; err != nil {
+				return err
+			}
+			dto.LedgerEntryID = entry.ID
+		}
+		dto.ReversedLedgerEntryID = original.ID
+		return a.writeBillingAuditTx(tx, in.Auth.AdminID, in.Meta.TraceID, "credit.ledger.reverse", "credit_ledger_entry", original.ID, original.EntryType, "reverse", in.Reason)
+	})
+	if err != nil {
+		_ = a.guard.Fail(ctx, decision.Record.ID, errorCode(err))
+		return CreditMaintenanceDTO{}, err
+	}
+	_ = a.guard.Succeed(ctx, decision.Record.ID, idempotency.ResultRef{Type: "credit_maintenance", ID: operationID})
 	return dto, nil
 }
 
@@ -1062,6 +2196,49 @@ func (a *App) resolveGrantAccount(ctx context.Context, targetType, targetID stri
 	return account, nil
 }
 
+func (a *App) resolvePackagePurchaseAccount(ctx context.Context, auth AuthContext, pkg businesscore.RechargePackage, requestedAccountType string) (businesscore.CreditAccount, error) {
+	targetScope := strings.TrimSpace(pkg.TargetScope)
+	switch targetScope {
+	case "enterprise":
+		if auth.EnterpriseID == "" || auth.EnterpriseRole != accountspace.RoleOwner {
+			return businesscore.CreditAccount{}, bizerrors.New(bizerrors.CodePermissionDenied, "enterprise owner permission is required to buy enterprise packages")
+		}
+		return a.resolveRedeemAccount(ctx, auth, "enterprise")
+	case "personal", "creator", "":
+		if normalizeAccountType(requestedAccountType) == "enterprise" {
+			return businesscore.CreditAccount{}, bizerrors.New(bizerrors.CodeInvalidArgument, "personal package cannot be bought for enterprise account")
+		}
+		return a.resolveRedeemAccount(ctx, auth, "personal")
+	default:
+		return businesscore.CreditAccount{}, bizerrors.New(bizerrors.CodeInvalidArgument, "package target_scope is unsupported")
+	}
+}
+
+func (a *App) resolvePackagePrice(ctx context.Context, pkg businesscore.RechargePackage, skuID string) (*string, int64, string, error) {
+	priceAmount := pkg.PriceAmount
+	if priceAmount == 0 {
+		priceAmount = pkg.PriceCents
+	}
+	currency := defaultString(pkg.Currency, "CNY")
+	if skuID == "" {
+		return nil, priceAmount, currency, nil
+	}
+	now := a.now()
+	var sku businesscore.BillingPackageSKU
+	err := a.repo.DB().WithContext(ctx).
+		Where("sku_id = ? AND package_id = ? AND status = ?", skuID, pkg.PackageID, StatusActive).
+		Where("effective_at <= ? AND (expired_at IS NULL OR expired_at > ?)", now, now).
+		First(&sku).Error
+	if err != nil {
+		return nil, 0, "", bizerrors.New(bizerrors.CodeResourceNotFound, "billing package sku not found")
+	}
+	priceAmount = sku.PriceAmount
+	if sku.ActivityPriceAmount != nil {
+		priceAmount = *sku.ActivityPriceAmount
+	}
+	return &sku.SKUID, priceAmount, defaultString(sku.Currency, currency), nil
+}
+
 func (a *App) summaryDTO(ctx context.Context, account businesscore.CreditAccount) (SummaryDTO, error) {
 	var nearest *time.Time
 	var batch businesscore.CreditBatch
@@ -1083,6 +2260,29 @@ func (a *App) listLedgerForAccount(ctx context.Context, accountID string, limit,
 	var total int64
 	_ = a.repo.DB().WithContext(ctx).Model(&businesscore.CreditLedgerEntry{}).Where("account_id = ?", accountID).Count(&total).Error
 	return ledgerPage(rows, total, limit, offset), nil
+}
+
+func (a *App) listCreditLots(ctx context.Context, accountID, sourceType, status string, limit, offset int) (Page[CreditLotDTO], error) {
+	limit, offset = normalizePage(limit, offset, 100)
+	db := a.repo.DB().WithContext(ctx).Model(&businesscore.CreditBatch{})
+	if strings.TrimSpace(accountID) != "" {
+		db = db.Where("account_id = ?", strings.TrimSpace(accountID))
+	}
+	if strings.TrimSpace(sourceType) != "" {
+		db = db.Where("source_type = ?", strings.TrimSpace(sourceType))
+	}
+	if strings.TrimSpace(status) != "" {
+		db = db.Where("status = ?", strings.TrimSpace(status))
+	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return Page[CreditLotDTO]{}, err
+	}
+	var rows []businesscore.CreditBatch
+	if err := db.Order("expires_at ASC NULLS LAST, granted_at ASC, created_at ASC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return Page[CreditLotDTO]{}, err
+	}
+	return Page[CreditLotDTO]{Items: creditLotDTOs(rows), Limit: limit, Offset: offset, Total: total}, nil
 }
 
 // listLedgerForMember 仅返回成员本人在企业空间产生的流水(ACCT-3：成员只看自己的消耗明细)。
@@ -1110,6 +2310,85 @@ func ledgerPage(rows []businesscore.CreditLedgerEntry, total int64, limit, offse
 		items = append(items, LedgerDTO{EntryID: row.ID, EntryType: row.EntryType, Amount: row.PointsDelta, BalanceAfter: row.BalanceAfter, ResourceType: row.SourceType, ResourceID: row.SourceID, CreatedAt: row.CreatedAt})
 	}
 	return Page[LedgerDTO]{Items: items, Limit: limit, Offset: offset, Total: total}
+}
+
+func creditLotDTOs(rows []businesscore.CreditBatch) []CreditLotDTO {
+	items := make([]CreditLotDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, creditLotDTO(row))
+	}
+	return items
+}
+
+func creditLotDTO(row businesscore.CreditBatch) CreditLotDTO {
+	return CreditLotDTO{
+		LotID: row.ID, AccountID: row.AccountID, SourceType: row.SourceType, SourceID: value(row.SourceID),
+		OriginalPoints: row.OriginalPoints, AvailablePoints: row.AvailablePoints, FrozenPoints: row.FrozenPoints,
+		ConsumedPoints: row.ConsumedPoints, ExpiredPoints: row.ExpiredPoints, GrantedAt: row.GrantedAt, ExpiresAt: row.ExpiresAt,
+		ExpiryPolicyJSON: string(row.ExpiryPolicyJSON), SpendScopeJSON: string(row.SpendScopeJSON),
+		SettlementEligible: row.SettlementEligible, Status: row.Status,
+	}
+}
+
+func rechargePackageDTO(row businesscore.RechargePackage) RechargePackageDTO {
+	return RechargePackageDTO{
+		PackageID: row.PackageID, PackageType: row.PackageType, Name: defaultString(row.Name, row.DisplayName),
+		DisplayName: row.DisplayName, TargetScope: row.TargetScope, BillingMode: row.BillingMode,
+		Points: packageTotalPoints(row), GrantedPoints: row.GrantedPoints, BonusPoints: row.BonusPoints,
+		PriceCents: packagePriceAmount(row), PriceAmount: packagePriceAmount(row), Currency: row.Currency,
+		CreditExpiryPolicy: defaultString(row.CreditExpiryPolicy, row.CreditValidDuration),
+		SpendScope:         jsonStringSlice(row.SpendScopeJSON), SettlementEligible: row.SettlementEligible,
+		EntitlementPolicy: jsonObject(row.EntitlementPolicy), RenewalPolicy: jsonObject(row.RenewalPolicy),
+		RefundPolicy: jsonObject(row.RefundPolicy), VisibleScope: row.VisibleScope, Status: row.Status, UpdatedAt: row.UpdatedAt,
+	}
+}
+
+func creditAccountDTO(row businesscore.CreditAccount) CreditAccountDTO {
+	return CreditAccountDTO{
+		AccountID: row.ID, AccountType: row.AccountType, OwnerUserID: value(row.OwnerUserID), EnterpriseID: value(row.EnterpriseID),
+		AvailablePoints: row.AvailablePoints, FrozenPoints: row.FrozenPoints, ExpiresSoonPoints: row.ExpiresSoonPoints, Status: row.Status,
+	}
+}
+
+func billingPackageSKUDTO(row businesscore.BillingPackageSKU) BillingPackageSKUDTO {
+	return BillingPackageSKUDTO{
+		SKUID: row.SKUID, PackageID: row.PackageID, ChannelCode: row.ChannelCode, PriceAmount: row.PriceAmount,
+		Currency: row.Currency, ActivityPriceAmount: row.ActivityPriceAmount, Status: row.Status,
+		EffectiveAt: row.EffectiveAt, ExpiredAt: row.ExpiredAt,
+	}
+}
+
+func entitlementSnapshotDTO(row businesscore.PackageEntitlementSnapshot) EntitlementSnapshotDTO {
+	return EntitlementSnapshotDTO{
+		EntitlementSnapshotID: row.EntitlementSnapshotID, AccountID: row.AccountID, UserID: value(row.UserID),
+		EnterpriseID: value(row.EnterpriseID), PackageID: row.PackageID, OrderID: row.OrderID, TargetScope: row.TargetScope,
+		EntitlementPolicy: jsonObject(row.EntitlementPolicy), Status: row.Status, EffectiveAt: row.EffectiveAt, ExpiresAt: row.ExpiresAt,
+	}
+}
+
+func enterpriseContractDTO(row businesscore.EnterpriseContract) EnterpriseContractDTO {
+	return EnterpriseContractDTO{
+		ContractID: row.ContractID, EnterpriseID: row.EnterpriseID, PackageID: row.PackageID, OrderID: value(row.OrderID),
+		ContractStatus: row.ContractStatus, BillingMode: row.BillingMode, PeriodStart: row.PeriodStart, PeriodEnd: row.PeriodEnd,
+		SeatQuota: row.SeatQuota, BudgetPoints: row.BudgetPoints, ApprovalPolicy: jsonObject(row.ApprovalPolicyJSON),
+		InvoicePolicy: jsonObject(row.InvoicePolicyJSON),
+	}
+}
+
+func billingInvoiceDTO(row businesscore.BillingInvoice) BillingInvoiceDTO {
+	return BillingInvoiceDTO{
+		InvoiceID: row.InvoiceID, EnterpriseID: value(row.EnterpriseID), OrderID: value(row.OrderID),
+		Amount: row.Amount, Currency: row.Currency, InvoiceStatus: row.InvoiceStatus, IssuedAt: row.IssuedAt,
+		DueAt: row.DueAt, Metadata: jsonObject(row.MetadataJSON),
+	}
+}
+
+func billingPromotionDTO(row businesscore.BillingPromotion) BillingPromotionDTO {
+	return BillingPromotionDTO{
+		PromotionID: row.PromotionID, PromotionName: row.PromotionName, PackageID: value(row.PackageID),
+		DiscountPolicy: jsonObject(row.DiscountPolicyJSON), VisibleScope: row.VisibleScope, Status: row.Status,
+		StartsAt: row.StartsAt, EndsAt: row.EndsAt,
+	}
 }
 
 func (a *App) activeModelPrice(ctx context.Context, modelID, resourceType, pricingSnapshotID string) (businesscore.ModelPrice, error) {
@@ -1164,11 +2443,16 @@ func (a *App) allocateFreezeBatches(tx *gorm.DB, accountID, freezeID string, poi
 		if remaining <= 0 {
 			break
 		}
-		take := batch.RemainingPoints
+		take := batch.AvailablePoints
+		if take <= 0 {
+			take = batch.RemainingPoints
+		}
 		if take > remaining {
 			take = remaining
 		}
 		batch.RemainingPoints -= take
+		batch.AvailablePoints -= take
+		batch.FrozenPoints += take
 		batch.UpdatedBy = optionalString(operatorID)
 		batch.UpdatedAt = now
 		if err := tx.Save(&batch).Error; err != nil {
@@ -1187,6 +2471,62 @@ func (a *App) allocateFreezeBatches(tx *gorm.DB, accountID, freezeID string, poi
 		return bizerrors.New(bizerrors.CodeStateConflict, "insufficient unexpired credit batches")
 	}
 	return nil
+}
+
+func (a *App) consumeFreezeRows(tx *gorm.DB, freezeID string, points int64, operatorID string, now time.Time) (int64, error) {
+	if points <= 0 {
+		return 0, nil
+	}
+	var rows []businesscore.CreditFreezeBatchItem
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("freeze_id = ? AND status = ?", freezeID, StatusFrozen).
+		Order("created_at ASC").Find(&rows).Error; err != nil {
+		return 0, err
+	}
+	remaining := points
+	var consumed int64
+	for _, row := range rows {
+		if remaining <= 0 {
+			break
+		}
+		available := row.FrozenPoints - row.ChargedPoints - row.ReleasedPoints
+		if available <= 0 {
+			continue
+		}
+		take := available
+		if take > remaining {
+			take = remaining
+		}
+		var batch businesscore.CreditBatch
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", row.BatchID).First(&batch).Error; err != nil {
+			return 0, err
+		}
+		if batch.FrozenPoints < take {
+			return 0, bizerrors.New(bizerrors.CodeStateConflict, "credit lot frozen points are insufficient")
+		}
+		batch.FrozenPoints -= take
+		batch.ConsumedPoints += take
+		batch.UpdatedBy = optionalString(operatorID)
+		batch.UpdatedAt = now
+		if err := tx.Save(&batch).Error; err != nil {
+			return 0, err
+		}
+		row.ChargedPoints += take
+		if row.ChargedPoints+row.ReleasedPoints >= row.FrozenPoints {
+			row.Status = StatusCharged
+		}
+		row.UpdatedBy = optionalString(operatorID)
+		row.UpdatedAt = now
+		if err := tx.Save(&row).Error; err != nil {
+			return 0, err
+		}
+		consumed += take
+		remaining -= take
+	}
+	if remaining > 0 {
+		return consumed, bizerrors.New(bizerrors.CodeStateConflict, "charge points exceed unsettled freeze allocations")
+	}
+	return consumed, nil
 }
 
 func (a *App) lockFreezeAndAccount(tx *gorm.DB, freezeID string) (businesscore.CreditFreeze, businesscore.CreditAccount, error) {
@@ -1281,14 +2621,26 @@ func (a *App) releaseFreezeRows(tx *gorm.DB, freeze *businesscore.CreditFreeze, 
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", row.BatchID).First(&batch).Error; err != nil {
 			return *freeze, 0, err
 		}
+		if batch.FrozenPoints < take {
+			return *freeze, 0, bizerrors.New(bizerrors.CodeStateConflict, "credit lot frozen points are insufficient")
+		}
+		batch.FrozenPoints -= take
 		if batch.ExpiresAt == nil || batch.ExpiresAt.After(now) {
 			batch.RemainingPoints += take
+			batch.AvailablePoints += take
 			batch.UpdatedBy = optionalString(operatorID)
 			batch.UpdatedAt = now
 			if err := tx.Save(&batch).Error; err != nil {
 				return *freeze, 0, err
 			}
 			account.AvailablePoints += take
+		} else {
+			batch.ExpiredPoints += take
+			batch.UpdatedBy = optionalString(operatorID)
+			batch.UpdatedAt = now
+			if err := tx.Save(&batch).Error; err != nil {
+				return *freeze, 0, err
+			}
 		}
 		row.ReleasedPoints += take
 		if row.ChargedPoints+row.ReleasedPoints >= row.FrozenPoints {
@@ -1483,6 +2835,126 @@ func (a *App) getRedemptionDTO(ctx context.Context, redemptionID string) (Redeem
 	return RedeemDTO{AccountID: row.AccountID, RedeemedPoints: row.Points, RedemptionID: row.ID}, nil
 }
 
+func (a *App) getRechargeOrderDTO(ctx context.Context, orderID string) (RechargeOrderDTO, error) {
+	var row businesscore.RechargeOrder
+	if err := a.repo.DB().WithContext(ctx).Where("order_id = ?", orderID).First(&row).Error; err != nil {
+		return RechargeOrderDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "recharge order not found")
+	}
+	return rechargeOrderDTO(row), nil
+}
+
+func (a *App) getBillingPackageDTO(ctx context.Context, packageID string) (RechargePackageDTO, error) {
+	var row businesscore.RechargePackage
+	if err := a.repo.DB().WithContext(ctx).Where("package_id = ?", packageID).First(&row).Error; err != nil {
+		return RechargePackageDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "billing package not found")
+	}
+	return rechargePackageDTO(row), nil
+}
+
+func rechargeOrderDTO(row businesscore.RechargeOrder) RechargeOrderDTO {
+	return RechargeOrderDTO{
+		OrderID: row.OrderID, AccountID: row.AccountID, EnterpriseID: value(row.EnterpriseID), PackageID: row.PackageID, SKUID: value(row.SKUID),
+		PackageType: row.PackageType, TargetScope: row.TargetScope, BillingMode: row.BillingMode,
+		Points: row.Points, GrantedPoints: row.GrantedPoints, BonusPoints: row.BonusPoints,
+		PriceCents: packageOrderPriceAmount(row), PriceAmount: packageOrderPriceAmount(row), Currency: row.Currency,
+		PaymentProvider: row.PaymentProvider, PaymentStatus: row.PaymentStatus, CreditLotID: value(row.CreditLotID),
+		EntitlementSnapshotID: value(row.EntitlementSnapshotID), CreatedAt: row.CreatedAt, PaidAt: row.PaidAt,
+	}
+}
+
+func rechargePackageExpiresAt(now time.Time, duration string) (time.Time, error) {
+	switch strings.TrimSpace(duration) {
+	case "P7D":
+		return now.AddDate(0, 0, 7), nil
+	case "P1M":
+		return now.AddDate(0, 1, 0), nil
+	case "P1Y":
+		return now.AddDate(1, 0, 0), nil
+	default:
+		return time.Time{}, bizerrors.New(bizerrors.CodeInvalidArgument, "unsupported recharge package duration")
+	}
+}
+
+func packageCreditExpiry(now time.Time, policy string) (*time.Time, datatypes.JSON, error) {
+	policy = defaultString(policy, "P1M")
+	if policy == "never_expire" {
+		return nil, mustJSON(map[string]any{"type": "never_expire"}), nil
+	}
+	expiresAt, err := rechargePackageExpiresAt(now, policy)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &expiresAt, rechargeExpiryPolicyJSON(policy), nil
+}
+
+func rechargeExpiryPolicyJSON(duration string) datatypes.JSON {
+	return mustJSON(map[string]any{"type": "relative_duration", "duration": strings.TrimSpace(duration)})
+}
+
+func packageTotalPoints(row businesscore.RechargePackage) int64 {
+	if row.GrantedPoints+row.BonusPoints > 0 {
+		return row.GrantedPoints + row.BonusPoints
+	}
+	return row.Points
+}
+
+func packagePriceAmount(row businesscore.RechargePackage) int64 {
+	if row.PriceAmount > 0 {
+		return row.PriceAmount
+	}
+	return row.PriceCents
+}
+
+func packageOrderPriceAmount(row businesscore.RechargeOrder) int64 {
+	if row.PriceAmount > 0 {
+		return row.PriceAmount
+	}
+	return row.PriceCents
+}
+
+func packageSpendScopeJSON(row businesscore.RechargePackage) datatypes.JSON {
+	if len(row.SpendScopeJSON) > 0 {
+		return row.SpendScopeJSON
+	}
+	return defaultSpendScopeJSON()
+}
+
+func packageEntitlementPolicyJSON(row businesscore.RechargePackage) datatypes.JSON {
+	if len(row.EntitlementPolicy) > 0 {
+		return row.EntitlementPolicy
+	}
+	return datatypes.JSON([]byte(`{}`))
+}
+
+func (a *App) createEnterpriseContractForPackage(tx *gorm.DB, account businesscore.CreditAccount, pkg businesscore.RechargePackage, order businesscore.RechargeOrder, now time.Time, operatorID string) error {
+	enterpriseID := value(account.EnterpriseID)
+	if enterpriseID == "" {
+		return bizerrors.New(bizerrors.CodePermissionDenied, "enterprise account is required for enterprise package")
+	}
+	expiresAt, _, err := packageCreditExpiry(now, pkg.CreditExpiryPolicy)
+	if err != nil {
+		return err
+	}
+	policy := jsonObject(pkg.EntitlementPolicy)
+	contract := businesscore.EnterpriseContract{
+		ID: security.RandomID("ect_"), ContractID: security.RandomID("contract_"), EnterpriseID: enterpriseID,
+		PackageID: pkg.PackageID, OrderID: &order.OrderID, ContractStatus: StatusActive, BillingMode: defaultString(pkg.BillingMode, "subscription"),
+		PeriodStart: now, PeriodEnd: expiresAt, SeatQuota: intValue(policy["seat_quota"]), BudgetPoints: order.Points,
+		ApprovalPolicyJSON: mustJSON(map[string]any{
+			"department_budget":         policy["department_budget"],
+			"approval_threshold_points": policy["approval_threshold_points"],
+		}),
+		InvoicePolicyJSON: mustJSON(map[string]any{
+			"invoice":       policy["invoice"],
+			"billing_mode":  pkg.BillingMode,
+			"package_type":  pkg.PackageType,
+			"payment_order": order.OrderID,
+		}),
+		CreatedBy: optionalString(operatorID), UpdatedBy: optionalString(operatorID), CreatedAt: now, UpdatedAt: now,
+	}
+	return tx.Create(&contract).Error
+}
+
 func generationQuantity(resourceType string, quantity, duration int32) float64 {
 	switch resourceType {
 	case "video":
@@ -1509,6 +2981,120 @@ func estimatePoints(quantity, unitPoints float64, minPoints int64) int64 {
 	return points
 }
 
+func creditExpiryPolicyJSON(expiresAt *time.Time) datatypes.JSON {
+	if expiresAt == nil {
+		return mustJSON(map[string]any{"type": "never_expire"})
+	}
+	return mustJSON(map[string]any{
+		"type":       "fixed_date",
+		"expires_at": expiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+func defaultSpendScopeJSON() datatypes.JSON {
+	return mustJSON([]string{"tool_generation", "skill_usage"})
+}
+
+func (a *App) beginAdminMaintenance(ctx context.Context, auth admin.AdminAuth, meta RequestMeta, scope, hash string) (idempotency.Decision, error) {
+	return a.guard.Begin(ctx, idempotency.BeginInput{
+		TenantID: "admin:" + auth.AdminID, Scope: scope, IdempotencyKey: meta.IdempotencyKey, RequestHash: hash, ActorUserID: auth.AdminID,
+	})
+}
+
+func maintenanceReplay(decision idempotency.Decision, action string) (CreditMaintenanceDTO, bool, error) {
+	if decision.Mode == idempotency.DecisionConflict {
+		return CreditMaintenanceDTO{}, true, bizerrors.New(bizerrors.CodeIdempotencyConflict, action+" idempotency key conflicts")
+	}
+	if decision.Mode == idempotency.DecisionProcessing {
+		return CreditMaintenanceDTO{}, true, bizerrors.New(bizerrors.CodeProcessing, action+" request is processing")
+	}
+	if decision.Mode == idempotency.DecisionReplay && decision.ReplayResult != nil {
+		return CreditMaintenanceDTO{OperationID: decision.ReplayResult.ID, Status: "replayed"}, true, nil
+	}
+	return CreditMaintenanceDTO{}, false, nil
+}
+
+func (a *App) applyRefundCreditsTx(tx *gorm.DB, accountID, originalLotID string, points int64, operationID, entryType, sourceType, sourceID, operatorID, traceID, idempotencyKey, reason string, gracePeriodDays int) (CreditMaintenanceDTO, error) {
+	if points <= 0 {
+		return CreditMaintenanceDTO{}, bizerrors.New(bizerrors.CodeInvalidArgument, "positive refund points are required")
+	}
+	var account businesscore.CreditAccount
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", strings.TrimSpace(accountID)).First(&account).Error; err != nil {
+		return CreditMaintenanceDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "credit account not found")
+	}
+	now := a.now()
+	var lotID string
+	var original businesscore.CreditBatch
+	useOriginalLot := false
+	if strings.TrimSpace(originalLotID) != "" {
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND account_id = ?", strings.TrimSpace(originalLotID), account.ID).
+			First(&original).Error
+		if err != nil {
+			return CreditMaintenanceDTO{}, bizerrors.New(bizerrors.CodeResourceNotFound, "original credit lot not found")
+		}
+		useOriginalLot = original.ExpiresAt == nil || original.ExpiresAt.After(now)
+	}
+	if useOriginalLot {
+		original.AvailablePoints += points
+		original.RemainingPoints += points
+		if original.ConsumedPoints >= points {
+			original.ConsumedPoints -= points
+		} else {
+			original.ConsumedPoints = 0
+		}
+		original.Status = StatusActive
+		original.UpdatedBy = optionalString(operatorID)
+		original.UpdatedAt = now
+		if err := tx.Save(&original).Error; err != nil {
+			return CreditMaintenanceDTO{}, err
+		}
+		lotID = original.ID
+	} else {
+		if gracePeriodDays <= 0 {
+			gracePeriodDays = 7
+		}
+		expiresAt := now.AddDate(0, 0, gracePeriodDays)
+		source := defaultString(sourceID, operationID)
+		spendScope := defaultSpendScopeJSON()
+		settlementEligible := false
+		if original.ID != "" {
+			spendScope = original.SpendScopeJSON
+			settlementEligible = original.SettlementEligible
+			if source == operationID {
+				source = original.ID
+			}
+		}
+		refundLot := businesscore.CreditBatch{
+			ID: security.RandomID("cb_"), AccountID: account.ID, BatchType: "refund", SourceType: "refund", SourceID: optionalString(source),
+			TotalPoints: points, RemainingPoints: points, OriginalPoints: points, AvailablePoints: points, GrantedAt: now,
+			ExpiresAt: &expiresAt, ExpiryPolicyJSON: rechargeExpiryPolicyJSON(fmt.Sprintf("P%dD", gracePeriodDays)),
+			SpendScopeJSON: spendScope, SettlementEligible: settlementEligible, Status: StatusActive,
+			CreatedBy: optionalString(operatorID), UpdatedBy: optionalString(operatorID), CreatedAt: now, UpdatedAt: now,
+		}
+		if err := tx.Create(&refundLot).Error; err != nil {
+			return CreditMaintenanceDTO{}, err
+		}
+		lotID = refundLot.ID
+	}
+	account.AvailablePoints += points
+	account.UpdatedBy = optionalString(operatorID)
+	account.UpdatedAt = now
+	if err := tx.Save(&account).Error; err != nil {
+		return CreditMaintenanceDTO{}, err
+	}
+	entry := ledger(account, entryType, points, sourceType, defaultString(sourceID, operationID), "", "", traceID, idempotencyKey)
+	entry.BatchID = optionalString(lotID)
+	entry.MetadataJSON = mustJSON(map[string]any{"operation_id": operationID, "reason": reason, "original_lot_id": originalLotID})
+	if err := tx.Create(entry).Error; err != nil {
+		return CreditMaintenanceDTO{}, err
+	}
+	return CreditMaintenanceDTO{
+		OperationID: operationID, Status: defaultString(entryType, "refunded"), AccountID: account.ID, LotID: lotID,
+		LedgerEntryID: entry.ID, AffectedLots: 1, Points: points, AvailablePoints: account.AvailablePoints, FrozenPoints: account.FrozenPoints,
+	}, nil
+}
+
 func ledger(account businesscore.CreditAccount, entryType string, delta int64, sourceType, sourceID, projectID, runID, traceID, idempotencyKey string) *businesscore.CreditLedgerEntry {
 	return &businesscore.CreditLedgerEntry{
 		ID: security.RandomID("cled_"), AccountID: account.ID, EntryType: entryType, PointsDelta: delta,
@@ -1516,6 +3102,30 @@ func ledger(account businesscore.CreditAccount, entryType string, delta int64, s
 		ProjectID: optionalString(projectID), RunID: optionalString(runID), TraceID: optionalString(traceID), IdempotencyKey: optionalString(idempotencyKey),
 		MetadataJSON: datatypes.JSON([]byte(`{}`)), CreatedAt: time.Now().UTC(),
 	}
+}
+
+func (a *App) writeBillingAuditTx(tx *gorm.DB, adminID, traceID, action, resourceType, resourceID, beforeStatus, afterStatus, reason string) error {
+	if a.audit == nil {
+		return nil
+	}
+	return tx.Create(&auditlog.AuditRecord{
+		AuditID:        security.RandomID("audit_"),
+		TraceID:        traceID,
+		OperatorType:   "admin",
+		OperatorID:     optionalString(adminID),
+		TenantID:       "admin:" + adminID,
+		BusinessAction: action,
+		ResourceType:   resourceType,
+		ResourceID:     optionalString(resourceID),
+		BeforeStatus:   optionalString(beforeStatus),
+		AfterStatus:    optionalString(afterStatus),
+		Reason:         optionalString(reason),
+		Result:         "success",
+		MetadataSummary: mustJSON(map[string]any{
+			"resource_id": resourceID,
+		}),
+		CreatedAt: a.now(),
+	}).Error
 }
 
 func requestHash(meta RequestMeta, auth AuthContext, extra map[string]any) string {
@@ -1595,6 +3205,61 @@ func mustJSON(value any) datatypes.JSON {
 	return datatypes.JSON(data)
 }
 
+func defaultMap(value map[string]any, fallback map[string]any) map[string]any {
+	if len(value) > 0 {
+		return value
+	}
+	return fallback
+}
+
+func spendScopeJSON(scopes []string) datatypes.JSON {
+	cleaned := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope) != "" {
+			cleaned = append(cleaned, strings.TrimSpace(scope))
+		}
+	}
+	if len(cleaned) == 0 {
+		return defaultSpendScopeJSON()
+	}
+	return mustJSON(cleaned)
+}
+
+func jsonObject(raw datatypes.JSON) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return map[string]any{}
+	}
+	return data
+}
+
+func jsonStringSlice(raw datatypes.JSON) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var data []string
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil
+	}
+	return data
+}
+
+func intValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
+}
+
 func optionalString(value string) *string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -1614,6 +3279,10 @@ func defaultString(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback
 	}
+	return strings.TrimSpace(value)
+}
+
+func valueStatus(value string) string {
 	return strings.TrimSpace(value)
 }
 

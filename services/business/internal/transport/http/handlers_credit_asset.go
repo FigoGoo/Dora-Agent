@@ -16,8 +16,14 @@ func registerCreditAssetRoutes(router *gin.Engine, opts RouterOptions) {
 	h := creditAssetHandler{credit: opts.Credit, asset: opts.Asset, auth: auth}
 
 	router.GET("/api/credits/summary", auth.userAuth(), h.creditSummary)
+	router.GET("/api/credits/lots", auth.userAuth(), h.creditLots)
+	router.GET("/api/credits/expiring", auth.userAuth(), h.expiringCredits)
 	router.GET("/api/credits/ledger", auth.userAuth(), h.creditLedger)
 	router.POST("/api/credits/redeem", auth.userAuth(), requireIdempotency(), h.redeemCode)
+	router.GET("/api/credits/recharge-packages", auth.userAuth(), h.rechargePackages)
+	router.GET("/api/credits/recharge-orders", auth.userAuth(), h.rechargeOrders)
+	router.POST("/api/credits/recharge-orders", auth.userAuth(), requireIdempotency(), h.createRechargeOrder)
+	router.POST("/api/credits/recharge-orders/:order_id/mock-pay", auth.userAuth(), requireIdempotency(), h.mockPayRechargeOrder)
 	router.GET("/api/enterprise/credits", auth.userAuth(), h.enterpriseCredits)
 	router.GET("/api/enterprise/usage", auth.userAuth(), h.enterpriseUsage)
 
@@ -30,10 +36,32 @@ func registerCreditAssetRoutes(router *gin.Engine, opts RouterOptions) {
 
 	router.GET("/api/admin/credits/grants/targets", auth.adminAuth(false), h.searchCreditTargets)
 	router.POST("/api/admin/credits/grants", auth.adminAuth(false), requireIdempotency(), h.adminGrantCredits)
+	router.GET("/api/admin/credits/accounts", auth.adminAuth(false), h.adminCreditAccounts)
+	router.GET("/api/admin/credits/lots", auth.adminAuth(false), h.adminCreditLots)
+	router.POST("/api/admin/credits/lots/expire", auth.adminAuth(false), requireIdempotency(), h.adminExpireCreditLots)
+	router.POST("/api/admin/credits/refunds", auth.adminAuth(false), requireIdempotency(), h.adminRefundCredits)
+	router.POST("/api/admin/credits/ledger/:entry_id/reverse", auth.adminAuth(false), requireIdempotency(), h.adminReverseCreditLedgerEntry)
 	router.GET("/api/admin/credits/codes", auth.adminAuth(false), h.listRedeemCodes)
 	router.POST("/api/admin/credits/codes", auth.adminAuth(false), requireIdempotency(), h.createRedeemCodes)
 	router.POST("/api/admin/credits/codes/:batch_id/disable", auth.adminAuth(false), requireIdempotency(), h.disableRedeemCodeBatch)
 	router.POST("/api/admin/credits/codes/:batch_id/export", auth.adminAuth(false), requireIdempotency(), h.exportRedeemCodes)
+	router.GET("/api/admin/orders", auth.adminAuth(false), h.adminRechargeOrders)
+	router.GET("/api/admin/billing/packages", auth.adminAuth(false), h.adminBillingPackages)
+	router.POST("/api/admin/billing/packages", auth.adminAuth(false), requireIdempotency(), h.adminSaveBillingPackage)
+	router.PATCH("/api/admin/billing/packages/:package_id", auth.adminAuth(false), requireIdempotency(), h.adminSaveBillingPackage)
+	router.POST("/api/admin/billing/packages/:package_id/status", auth.adminAuth(false), requireIdempotency(), h.adminSetBillingPackageStatus)
+	router.GET("/api/admin/billing/skus", auth.adminAuth(false), h.adminBillingSKUs)
+	router.POST("/api/admin/billing/skus", auth.adminAuth(false), requireIdempotency(), h.adminCreateBillingSKU)
+	router.GET("/api/admin/billing/orders", auth.adminAuth(false), h.adminRechargeOrders)
+	router.GET("/api/admin/billing/redeem-codes", auth.adminAuth(false), h.listRedeemCodes)
+	router.GET("/api/admin/billing/credit-lots", auth.adminAuth(false), h.adminCreditLots)
+	router.POST("/api/admin/billing/credit-lots/expire", auth.adminAuth(false), requireIdempotency(), h.adminExpireCreditLots)
+	router.POST("/api/admin/billing/refunds", auth.adminAuth(false), requireIdempotency(), h.adminRefundCredits)
+	router.POST("/api/admin/billing/ledger/:entry_id/reverse", auth.adminAuth(false), requireIdempotency(), h.adminReverseCreditLedgerEntry)
+	router.GET("/api/admin/billing/entitlements", auth.adminAuth(false), h.adminEntitlementSnapshots)
+	router.GET("/api/admin/billing/enterprise-contracts", auth.adminAuth(false), h.adminEnterpriseContracts)
+	router.GET("/api/admin/billing/invoices", auth.adminAuth(false), h.adminBillingInvoices)
+	router.GET("/api/admin/billing/promotions", auth.adminAuth(false), h.adminBillingPromotions)
 }
 
 type creditAssetHandler struct {
@@ -60,6 +88,24 @@ func (h creditAssetHandler) creditLedger(c *gin.Context) {
 	respond(c, out, err)
 }
 
+func (h creditAssetHandler) creditLots(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.ListCreditLots(c.Request.Context(), userAuth(c), c.Query("source_type"), c.Query("status"), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) expiringCredits(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.ListExpiringCredits(c.Request.Context(), userAuth(c), intQuery(c, "within_days", 30), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	respond(c, out, err)
+}
+
 func (h creditAssetHandler) redeemCode(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
@@ -81,6 +127,70 @@ func (h creditAssetHandler) redeemCode(c *gin.Context) {
 	out, err := h.credit.RedeemCode(c.Request.Context(), credit.RedeemInput{
 		Auth: userAuth(c), Meta: meta, Code: req.RedeemCode,
 		TargetAccountType: req.TargetAccountType, RedeemChannel: req.RedeemChannel,
+	})
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) rechargePackages(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.ListRechargePackages(c.Request.Context())
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) rechargeOrders(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.ListRechargeOrders(c.Request.Context(), userAuth(c), c.Query("payment_status"), intQuery(c, "limit", 10), intQuery(c, "offset", 0))
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) createRechargeOrder(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		PackageID         string `json:"package_id"`
+		SKUID             string `json:"sku_id"`
+		TargetAccountType string `json:"target_account_type"`
+		RequestHash       string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.credit.CreateRechargeOrder(c.Request.Context(), credit.CreateRechargeOrderInput{Auth: userAuth(c), Meta: meta, PackageID: req.PackageID, SKUID: req.SKUID, TargetAccountType: req.TargetAccountType})
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) mockPayRechargeOrder(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		PaymentResult         string `json:"payment_result"`
+		ProviderTransactionID string `json:"provider_transaction_id"`
+		RequestHash           string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.credit.MockPayRechargeOrder(c.Request.Context(), credit.MockPayRechargeOrderInput{
+		Auth: userAuth(c), Meta: meta, OrderID: c.Param("order_id"),
+		PaymentResult: req.PaymentResult, ProviderTransactionID: req.ProviderTransactionID,
 	})
 	respond(c, out, err)
 }
@@ -249,6 +359,291 @@ func (h creditAssetHandler) adminGrantCredits(c *gin.Context) {
 	respond(c, out, err)
 }
 
+func (h creditAssetHandler) adminCreditAccounts(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.AdminListCreditAccounts(c.Request.Context(), adminAuth(c), c.Query("account_type"), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminCreditLots(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.AdminListCreditLots(c.Request.Context(), adminAuth(c), c.Query("account_id"), c.Query("source_type"), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminExpireCreditLots(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		AccountID   string `json:"account_id"`
+		LotID       string `json:"lot_id"`
+		Limit       int    `json:"limit"`
+		Reason      string `json:"reason"`
+		RequestHash string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.credit.AdminExpireCreditLots(c.Request.Context(), credit.ExpireCreditLotsInput{
+		Auth: adminAuth(c), Meta: meta, AccountID: req.AccountID, LotID: req.LotID, Limit: req.Limit, Reason: req.Reason,
+	})
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminRefundCredits(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		AccountID             string `json:"account_id"`
+		Points                int64  `json:"points"`
+		OriginalLotID         string `json:"original_lot_id"`
+		OriginalLedgerEntryID string `json:"original_ledger_entry_id"`
+		GracePeriodDays       int    `json:"grace_period_days"`
+		Reason                string `json:"reason"`
+		RequestHash           string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.credit.AdminRefundCredits(c.Request.Context(), credit.RefundCreditsInput{
+		Auth: adminAuth(c), Meta: meta, AccountID: req.AccountID, Points: req.Points,
+		OriginalLotID: req.OriginalLotID, OriginalLedgerEntryID: req.OriginalLedgerEntryID,
+		GracePeriodDays: req.GracePeriodDays, Reason: req.Reason,
+	})
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminReverseCreditLedgerEntry(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		Reason      string `json:"reason"`
+		RequestHash string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.credit.AdminReverseCreditLedgerEntry(c.Request.Context(), credit.ReverseCreditLedgerEntryInput{
+		Auth: adminAuth(c), Meta: meta, LedgerEntryID: c.Param("entry_id"), Reason: req.Reason,
+	})
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminRechargeOrders(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.AdminListRechargeOrders(c.Request.Context(), adminAuth(c), c.Query("user_id"), c.Query("account_id"), c.Query("payment_status"), adminPageLimit(c, 10), adminPageOffset(c))
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminBillingPackages(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.AdminListBillingPackages(c.Request.Context(), adminAuth(c), c.Query("target_scope"), c.Query("package_type"), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminSaveBillingPackage(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		PackageID           string         `json:"package_id"`
+		PackageType         string         `json:"package_type"`
+		Name                string         `json:"name"`
+		DisplayName         string         `json:"display_name"`
+		TargetScope         string         `json:"target_scope"`
+		BillingMode         string         `json:"billing_mode"`
+		PriceAmount         int64          `json:"price_amount"`
+		PriceCents          int64          `json:"price_cents"`
+		Currency            string         `json:"currency"`
+		GrantedPoints       int64          `json:"granted_points"`
+		BonusPoints         int64          `json:"bonus_points"`
+		Points              int64          `json:"points"`
+		CreditExpiryPolicy  string         `json:"credit_expiry_policy"`
+		CreditValidDuration string         `json:"credit_valid_duration"`
+		SpendScope          []string       `json:"spend_scope"`
+		SettlementEligible  bool           `json:"settlement_eligible"`
+		EntitlementPolicy   map[string]any `json:"entitlement_policy"`
+		RenewalPolicy       map[string]any `json:"renewal_policy"`
+		RefundPolicy        map[string]any `json:"refund_policy"`
+		VisibleScope        string         `json:"visible_scope"`
+		Status              string         `json:"status"`
+		Reason              string         `json:"reason"`
+		RequestHash         string         `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	if req.PackageID == "" {
+		req.PackageID = c.Param("package_id")
+	}
+	if req.Name == "" {
+		req.Name = req.DisplayName
+	}
+	if req.PriceAmount == 0 {
+		req.PriceAmount = req.PriceCents
+	}
+	if req.GrantedPoints == 0 && req.Points > 0 {
+		req.GrantedPoints = req.Points
+	}
+	if req.CreditExpiryPolicy == "" {
+		req.CreditExpiryPolicy = req.CreditValidDuration
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.credit.AdminSaveBillingPackage(c.Request.Context(), credit.SaveBillingPackageInput{
+		Auth: adminAuth(c), Meta: meta, PackageID: req.PackageID, PackageType: req.PackageType, Name: req.Name,
+		TargetScope: req.TargetScope, BillingMode: req.BillingMode, PriceAmount: req.PriceAmount, Currency: req.Currency,
+		GrantedPoints: req.GrantedPoints, BonusPoints: req.BonusPoints, CreditExpiryPolicy: req.CreditExpiryPolicy,
+		SpendScope: req.SpendScope, SettlementEligible: req.SettlementEligible, EntitlementPolicy: req.EntitlementPolicy,
+		RenewalPolicy: req.RenewalPolicy, RefundPolicy: req.RefundPolicy, VisibleScope: req.VisibleScope,
+		Status: req.Status, Reason: req.Reason,
+	})
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminSetBillingPackageStatus(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		Status      string `json:"status"`
+		Reason      string `json:"reason"`
+		RequestHash string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.credit.AdminSetBillingPackageStatus(c.Request.Context(), credit.BillingPackageStatusInput{
+		Auth: adminAuth(c), Meta: meta, PackageID: c.Param("package_id"), Status: req.Status, Reason: req.Reason,
+	})
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminBillingSKUs(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.AdminListBillingPackageSKUs(c.Request.Context(), adminAuth(c), c.Query("package_id"), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminCreateBillingSKU(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		PackageID           string `json:"package_id"`
+		SKUID               string `json:"sku_id"`
+		ChannelCode         string `json:"channel_code"`
+		PriceAmount         int64  `json:"price_amount"`
+		Currency            string `json:"currency"`
+		ActivityPriceAmount *int64 `json:"activity_price_amount"`
+		EffectiveAt         string `json:"effective_at"`
+		ExpiredAt           string `json:"expired_at"`
+		Reason              string `json:"reason"`
+		RequestHash         string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	effectiveAt, err := parseOptionalTime(req.EffectiveAt)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	expiredAt, err := parseOptionalTimePtr(req.ExpiredAt)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.credit.AdminCreateBillingPackageSKU(c.Request.Context(), credit.CreateBillingSKUInput{
+		Auth: adminAuth(c), Meta: meta, PackageID: req.PackageID, SKUID: req.SKUID, ChannelCode: req.ChannelCode,
+		PriceAmount: req.PriceAmount, Currency: req.Currency, ActivityPriceAmount: req.ActivityPriceAmount,
+		EffectiveAt: effectiveAt, ExpiredAt: expiredAt, Reason: req.Reason,
+	})
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminEntitlementSnapshots(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.AdminListEntitlementSnapshots(c.Request.Context(), adminAuth(c), c.Query("account_id"), c.Query("enterprise_id"), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminEnterpriseContracts(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.AdminListEnterpriseContracts(c.Request.Context(), adminAuth(c), c.Query("enterprise_id"), c.Query("contract_status"), adminPageLimit(c, 10), adminPageOffset(c))
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminBillingInvoices(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.AdminListBillingInvoices(c.Request.Context(), adminAuth(c), c.Query("enterprise_id"), c.Query("invoice_status"), adminPageLimit(c, 10), adminPageOffset(c))
+	respond(c, out, err)
+}
+
+func (h creditAssetHandler) adminBillingPromotions(c *gin.Context) {
+	if h.credit == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.credit.AdminListBillingPromotions(c.Request.Context(), adminAuth(c), c.Query("package_id"), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
+	respond(c, out, err)
+}
+
 func (h creditAssetHandler) listRedeemCodes(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
@@ -375,6 +770,24 @@ func parseRequiredTime(value string) (time.Time, error) {
 		return time.Time{}, bizerrors.New(bizerrors.CodeInvalidArgument, "invalid RFC3339 time")
 	}
 	return parsed.UTC(), nil
+}
+
+func parseOptionalTime(value string) (time.Time, error) {
+	if strings.TrimSpace(value) == "" {
+		return time.Time{}, nil
+	}
+	return parseRequiredTime(value)
+}
+
+func parseOptionalTimePtr(value string) (*time.Time, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	parsed, err := parseRequiredTime(value)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
 }
 
 func parseFutureTime(value string, fallback time.Duration) (time.Time, error) {

@@ -6,8 +6,11 @@ import {
   Boxes,
   ClipboardList,
   Coins,
+  CreditCard,
+  FileText,
   Gauge,
   LogOut,
+  Package,
   Shield,
   Sparkles,
   UserCog,
@@ -38,6 +41,19 @@ export const navGroups = [
       { to: '/admin/models/providers', label: '模型供应商', icon: Blocks },
       { to: '/admin/models', label: '模型管理', icon: Sparkles, end: true },
       { to: '/admin/tools', label: 'Tool 管理', icon: Wrench }
+    ]
+  },
+  {
+    title: '付费与财务',
+    items: [
+      { to: '/admin/billing/packages', label: '付费套餐', icon: Package },
+      { to: '/admin/billing/skus', label: 'SKU 管理', icon: CreditCard },
+      { to: '/admin/billing/orders', label: '订单管理', icon: ClipboardList },
+      { to: '/admin/billing/credit-lots', label: '积分批次', icon: Coins },
+      { to: '/admin/billing/redeem-codes', label: '兑换码', icon: ClipboardList },
+      { to: '/admin/billing/enterprise-contracts', label: '企业合同', icon: FileText },
+      { to: '/admin/billing/invoices', label: '发票财务', icon: FileText },
+      { to: '/admin/billing/promotions', label: '促销活动', icon: CreditCard }
     ]
   },
   {

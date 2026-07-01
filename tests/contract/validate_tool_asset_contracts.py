@@ -116,6 +116,9 @@ def validate_toolplan_fixture() -> None:
 
 def validate_credit_fixtures() -> None:
     required = required_fields("credit-freeze.v1.schema.json")
+    lot_required = required_fields("credit-lot.v1.schema.json")
+    recharge_required = required_fields("recharge-order.v1.schema.json")
+    mock_payment_required = required_fields("mock-payment.v1.schema.json")
 
     success_path = FIXTURE_ROOT / "credit" / "freeze_commit_success.json"
     success = load_json(success_path)
@@ -139,6 +142,26 @@ def validate_credit_fixtures() -> None:
         fail(f"{release_path}: hold must be released")
     if release["hold_after_release"]["released_credits"] != release["hold_after_freeze"]["frozen_credits"]:
         fail(f"{release_path}: released credits must equal frozen credits")
+
+    lot_path = FIXTURE_ROOT / "credit" / "redeem_lot_success.json"
+    lot = load_json(lot_path)
+    require_keys(lot_path, lot["credit_lot"], lot_required, "credit_lot")
+    if lot["credit_lot"]["source_type"] != "redeem_code":
+        fail(f"{lot_path}: credit lot source_type must be redeem_code")
+    if "skill_usage" not in lot["credit_lot"]["spend_scope"]:
+        fail(f"{lot_path}: SMOKE redeem lot must allow skill_usage")
+
+    recharge_path = FIXTURE_ROOT / "credit" / "recharge_order_mock_paid.json"
+    recharge = load_json(recharge_path)
+    require_keys(recharge_path, recharge["recharge_order"], recharge_required, "recharge_order")
+    require_keys(recharge_path, recharge["mock_payment_transaction"], mock_payment_required, "mock_payment_transaction")
+    require_keys(recharge_path, recharge["credit_lot"], lot_required, "credit_lot")
+    if recharge["recharge_order"]["payment_status"] != "paid":
+        fail(f"{recharge_path}: recharge order must be paid")
+    if recharge["mock_payment_transaction"]["payment_result"] != "success":
+        fail(f"{recharge_path}: mock payment result must be success")
+    if recharge["credit_lot"]["source_type"] != "recharge_package":
+        fail(f"{recharge_path}: recharge credit lot source_type must be recharge_package")
     print("tool asset credit fixtures ok")
 
 

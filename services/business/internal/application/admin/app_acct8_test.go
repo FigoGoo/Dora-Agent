@@ -202,6 +202,7 @@ func TestAdminUserStatusChangeDoesNotMutateUserPassword(t *testing.T) {
 
 func TestDisableAdminCannotRemoveLastActiveAdmin(t *testing.T) {
 	app := newAdminTestApp(t)
+	keepOnlyRootAdminActive(t, app)
 	err := app.repo.DB().WithContext(t.Context()).Transaction(func(tx *gorm.DB) error {
 		_, err := app.lockDisableTargetAdmin(tx, "adm_root")
 		return err
@@ -213,6 +214,7 @@ func TestDisableAdminCannotRemoveLastActiveAdmin(t *testing.T) {
 
 func TestDisableAdminAllowsNonLastActiveAdmin(t *testing.T) {
 	app := newAdminTestApp(t)
+	keepOnlyRootAdminActive(t, app)
 	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.PlatformAdmin{}).
 		Where("id = ?", "adm_root").Update("must_rotate_password", false).Error; err != nil {
 		t.Fatalf("prep admin: %v", err)
@@ -241,6 +243,14 @@ func TestDisableAdminAllowsNonLastActiveAdmin(t *testing.T) {
 	}
 	if activeCount != 1 {
 		t.Fatalf("expected exactly one active admin remaining, got %d", activeCount)
+	}
+}
+
+func keepOnlyRootAdminActive(t *testing.T, app *App) {
+	t.Helper()
+	if err := app.repo.DB().WithContext(t.Context()).Model(&businesscore.PlatformAdmin{}).
+		Where("id <> ?", "adm_root").Update("status", "disabled").Error; err != nil {
+		t.Fatalf("isolate root admin active state: %v", err)
 	}
 }
 

@@ -107,25 +107,74 @@ const settlementStatusOptions = [
   { label: '失败', value: 'failed' }
 ];
 
+const packageTypeOptions = [
+  { label: '个人积分包', value: 'personal_credit_pack' },
+  { label: '个人会员套餐', value: 'personal_membership' },
+  { label: '企业积分包', value: 'enterprise_credit_pack' },
+  { label: '企业套餐', value: 'enterprise_plan' },
+  { label: '生成加购包', value: 'generation_addon' },
+  { label: '创作者权益包', value: 'creator_benefit_pack' }
+];
+
+const packageTargetScopeOptions = [
+  { label: '个人', value: 'personal' },
+  { label: '企业', value: 'enterprise' },
+  { label: '创作者', value: 'creator' }
+];
+
+const billingModeOptions = [
+  { label: '一次性购买', value: 'one_time' },
+  { label: '订阅', value: 'subscription' },
+  { label: '合同', value: 'contract' }
+];
+
+const packageStatusOptions = [
+  { label: '草稿', value: 'draft' },
+  { label: '上架', value: 'active' },
+  { label: '暂停', value: 'paused' },
+  { label: '废弃', value: 'deprecated' },
+  { label: '归档', value: 'archived' }
+];
+
+const paymentStatusOptions = [
+  { label: '待支付', value: 'pending' },
+  { label: '已支付', value: 'paid' },
+  { label: '支付失败', value: 'failed' }
+];
+
+const contractStatusOptions = [
+  { label: '生效中', value: 'active' },
+  { label: '暂停', value: 'paused' },
+  { label: '已结束', value: 'ended' }
+];
+
+const invoiceStatusOptions = [
+  { label: '待开票', value: 'pending' },
+  { label: '已开票', value: 'issued' },
+  { label: '已作废', value: 'voided' }
+];
+
 const toolRowKey = (row) => row.tool_key || [row.tool_name, row.tool_type].filter(Boolean).join(':');
 const reviewRowKey = (row) => row.review_id || row.skill_version_id || row.version_id;
 const optionLabel = (options, value) => options.find((option) => option.value === value)?.label || value || '-';
 const text = (key, title = key) => ({ key, title });
 const statusLabel = (value) =>
-  optionLabel([...statusOptions, ...publicWorkStatusOptions, ...marketplaceReviewStatusOptions, ...marketplaceListingStatusOptions, ...refundCaseStatusOptions, ...settlementStatusOptions], value);
+  optionLabel([...statusOptions, ...publicWorkStatusOptions, ...marketplaceReviewStatusOptions, ...marketplaceListingStatusOptions, ...refundCaseStatusOptions, ...settlementStatusOptions, ...packageStatusOptions, ...paymentStatusOptions, ...contractStatusOptions, ...invoiceStatusOptions], value);
 const statusTone = (value) =>
-  ['active', 'published', 'passed', 'approved', 'listed', 'eligible', 'settled'].includes(value)
+  ['active', 'published', 'passed', 'approved', 'listed', 'eligible', 'settled', 'paid', 'issued'].includes(value)
     ? 'success'
-    : ['disabled', 'deprecated', 'rejected', 'failed', 'taken_down', 'cancelled', 'suspended', 'refund_rejected', 'reversed'].includes(value)
+    : ['disabled', 'deprecated', 'archived', 'rejected', 'failed', 'taken_down', 'cancelled', 'suspended', 'refund_rejected', 'reversed', 'voided'].includes(value)
       ? 'danger'
-      : ['submitted', 'pending_review', 'timeout', 'blocked', 'reviewing', 'refund_requested', 'refund_reviewing', 'pending_hold', 'settling', 'frozen'].includes(value)
+      : ['submitted', 'pending_review', 'timeout', 'blocked', 'reviewing', 'refund_requested', 'refund_reviewing', 'pending_hold', 'settling', 'frozen', 'pending', 'paused', 'draft'].includes(value)
         ? 'warning'
         : 'neutral';
 const statusColumn = { key: 'status', title: '状态', width: 120, render: (row) => <Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge> };
 const createdColumn = { key: 'created_at', title: '创建时间', width: 180, render: (row) => formatDateTime(row.created_at || row.registered_at || row.published_at) };
 const resourceTypeLabel = (value) => optionLabel(resourceTypeOptions, value);
-const billingUnitLabel = (value) => optionLabel(modelBillingUnitOptions, value);
 const toolBillingUnitLabel = (value) => optionLabel(toolBillingUnitOptions, value);
+const packageTypeLabel = (value) => optionLabel(packageTypeOptions, value);
+const targetScopeLabel = (value) => optionLabel(packageTargetScopeOptions, value);
+const billingModeLabel = (value) => optionLabel(billingModeOptions, value);
 const secretRefStatusLabel = (value) =>
   ({
     configured: '已配置',
@@ -148,6 +197,7 @@ const toolTypeLabel = (value) =>
 const affectedSkillLabel = (skill) => `${skill.skill_name || skill.skill_id}（${statusLabel(skill.status)}）`;
 const riskTone = (riskLevel) => (riskLevel === 'high' ? 'danger' : riskLevel === 'low' ? 'success' : 'warning');
 const formatPoints = (value) => (Number(value) ? `${Number(value)} 积分` : '免费');
+const formatCny = (value) => (Number(value) ? `¥${(Number(value) / 100).toFixed(2)}` : '免费');
 const formatTimeout = (value) => {
   const ms = Number(value);
   if (!ms) {
@@ -1219,6 +1269,242 @@ export const pageConfigs = {
         reason: ({ reason }) => reason,
         successNotice: (data) => `导出任务已创建：${data.export_job_id || data.status || '已提交'}`
       }
+    ]
+  },
+  'billing/packages': {
+    key: 'billing-packages',
+    title: '付费套餐管理',
+    description: '管理个人积分包、个人会员、企业套餐、生成加购包和创作者权益包。',
+    listPath: '/api/admin/billing/packages',
+    rowId: 'package_id',
+    emptyText: '暂无付费套餐',
+    keywordFilter: false,
+    statusOptions: packageStatusOptions,
+    filters: [
+      { name: 'package_type', label: '套餐类型', options: packageTypeOptions },
+      { name: 'target_scope', label: '面向对象', options: packageTargetScopeOptions }
+    ],
+    columns: [
+      { key: 'name', title: '套餐', render: (row) => row.name || row.display_name || row.package_id },
+      { key: 'package_type', title: '类型', render: (row) => packageTypeLabel(row.package_type) },
+      { key: 'target_scope', title: '对象', render: (row) => targetScopeLabel(row.target_scope) },
+      { key: 'billing_mode', title: '计费', render: (row) => billingModeLabel(row.billing_mode) },
+      { key: 'price_amount', title: '价格', render: (row) => formatCny(row.price_amount) },
+      { key: 'points', title: '积分', render: (row) => formatPoints(row.points) },
+      statusColumn
+    ],
+    create: {
+      title: '创建付费套餐',
+      path: '/api/admin/billing/packages',
+      fields: [
+        { name: 'package_id', label: '套餐 ID', group: '基础信息', groupLayout: 'dense', required: true },
+        { name: 'name', label: '套餐名称', group: '基础信息', groupLayout: 'dense', required: true },
+        { name: 'package_type', label: '套餐类型', group: '基础信息', groupLayout: 'dense', options: packageTypeOptions, defaultValue: 'personal_credit_pack', required: true },
+        { name: 'target_scope', label: '面向对象', group: '基础信息', groupLayout: 'dense', options: packageTargetScopeOptions, defaultValue: 'personal', required: true },
+        { name: 'billing_mode', label: '计费模式', group: '定价', groupLayout: 'dense', options: billingModeOptions, defaultValue: 'one_time', required: true },
+        { name: 'price_amount', label: '售价（分）', group: '定价', groupLayout: 'dense', type: 'number', required: true },
+        { name: 'currency', label: '币种', group: '定价', groupLayout: 'dense', defaultValue: 'CNY', required: true },
+        { name: 'granted_points', label: '发放积分', group: '积分', groupLayout: 'dense', type: 'number', required: true },
+        { name: 'bonus_points', label: '赠送积分', group: '积分', groupLayout: 'dense', type: 'number' },
+        { name: 'credit_expiry_policy', label: '积分有效期', group: '积分', groupLayout: 'dense', defaultValue: 'P1M', required: true },
+        { name: 'spend_scope', label: '消费范围', group: '积分', groupLayout: 'single', type: 'array', defaultValue: 'tool_generation\nskill_usage', required: true },
+        { name: 'settlement_eligible', label: '可用于创作者结算', group: '积分', groupLayout: 'dense', type: 'checkbox', defaultValue: true },
+        { name: 'entitlement_policy', label: '权益策略 JSON', group: '权益策略', groupLayout: 'single', type: 'json', defaultValue: '{"priority_queue":false}' },
+        { name: 'renewal_policy', label: '续费策略 JSON', group: '权益策略', groupLayout: 'single', type: 'json', defaultValue: '{"mode":"none"}' },
+        { name: 'refund_policy', label: '退款策略 JSON', group: '权益策略', groupLayout: 'single', type: 'json', defaultValue: '{"mode":"unused_refund"}' },
+        { name: 'visible_scope', label: '可见范围', group: '发布', groupLayout: 'dense', defaultValue: 'all_users' },
+        { name: 'status', label: '状态', group: '发布', groupLayout: 'dense', options: packageStatusOptions, defaultValue: 'draft', required: true },
+        { name: 'reason', label: '操作原因', group: '审计原因', groupLayout: 'single', textarea: true, required: true, rows: 3 }
+      ]
+    },
+    actions: [
+      {
+        label: '编辑',
+        method: 'PATCH',
+        path: (row) => `/api/admin/billing/packages/${row.package_id}`,
+        fields: [
+          { name: 'package_id', label: '套餐 ID', group: '基础信息', groupLayout: 'dense', disabled: true, required: true },
+          { name: 'name', label: '套餐名称', group: '基础信息', groupLayout: 'dense', required: true },
+          { name: 'package_type', label: '套餐类型', group: '基础信息', groupLayout: 'dense', options: packageTypeOptions, required: true },
+          { name: 'target_scope', label: '面向对象', group: '基础信息', groupLayout: 'dense', options: packageTargetScopeOptions, required: true },
+          { name: 'billing_mode', label: '计费模式', group: '定价', groupLayout: 'dense', options: billingModeOptions, required: true },
+          { name: 'price_amount', label: '售价（分）', group: '定价', groupLayout: 'dense', type: 'number', required: true },
+          { name: 'currency', label: '币种', group: '定价', groupLayout: 'dense', required: true },
+          { name: 'granted_points', label: '发放积分', group: '积分', groupLayout: 'dense', type: 'number', required: true },
+          { name: 'bonus_points', label: '赠送积分', group: '积分', groupLayout: 'dense', type: 'number' },
+          { name: 'credit_expiry_policy', label: '积分有效期', group: '积分', groupLayout: 'dense', required: true },
+          { name: 'spend_scope', label: '消费范围', group: '积分', groupLayout: 'single', type: 'array', required: true },
+          { name: 'settlement_eligible', label: '可用于创作者结算', group: '积分', groupLayout: 'dense', type: 'checkbox' },
+          { name: 'entitlement_policy', label: '权益策略 JSON', group: '权益策略', groupLayout: 'single', type: 'json' },
+          { name: 'renewal_policy', label: '续费策略 JSON', group: '权益策略', groupLayout: 'single', type: 'json' },
+          { name: 'refund_policy', label: '退款策略 JSON', group: '权益策略', groupLayout: 'single', type: 'json' },
+          { name: 'visible_scope', label: '可见范围', group: '发布', groupLayout: 'dense' },
+          { name: 'status', label: '状态', group: '发布', groupLayout: 'dense', options: packageStatusOptions, required: true },
+          { name: 'reason', label: '操作原因', group: '审计原因', groupLayout: 'single', textarea: true, required: true, rows: 3 }
+        ]
+      },
+      {
+        label: (row) => (row.status === 'active' ? '暂停' : '上架'),
+        tone: 'danger',
+        confirmPath: (row) => `/api/admin/billing/packages/${row.package_id}/status`,
+        body: ({ reason, row }) => ({ status: row.status === 'active' ? 'paused' : 'active', reason }),
+        reason: ({ reason }) => reason
+      }
+    ]
+  },
+  'billing/skus': {
+    key: 'billing-skus',
+    title: 'SKU 管理',
+    description: '管理套餐在不同渠道、币种和活动价下的 SKU。',
+    listPath: '/api/admin/billing/skus',
+    rowId: 'sku_id',
+    emptyText: '暂无 SKU',
+    keywordFilter: false,
+    statusOptions: activeStatusOptions,
+    filters: [{ name: 'package_id', label: '套餐 ID' }],
+    columns: [
+      { key: 'sku_id', title: 'SKU' },
+      { key: 'package_id', title: '套餐 ID' },
+      { key: 'channel_code', title: '渠道' },
+      { key: 'price_amount', title: '价格', render: (row) => formatCny(row.activity_price_amount || row.price_amount) },
+      statusColumn
+    ],
+    create: {
+      title: '创建 SKU',
+      path: '/api/admin/billing/skus',
+      fields: [
+        { name: 'package_id', label: '套餐 ID', required: true },
+        { name: 'sku_id', label: 'SKU ID' },
+        { name: 'channel_code', label: '渠道', defaultValue: 'default' },
+        { name: 'price_amount', label: '价格（分）', type: 'number', required: true },
+        { name: 'currency', label: '币种', defaultValue: 'CNY', required: true },
+        { name: 'activity_price_amount', label: '活动价（分）', type: 'number' },
+        { name: 'effective_at', label: '生效时间', type: 'datetime-local' },
+        { name: 'expired_at', label: '失效时间', type: 'datetime-local' },
+        { name: 'reason', label: '创建原因', required: true, rows: 3 }
+      ]
+    }
+  },
+  'billing/orders': {
+    key: 'billing-orders',
+    title: '订单管理',
+    description: '查看套餐订单、支付状态、积分批次和权益快照。',
+    listPath: '/api/admin/billing/orders',
+    rowId: 'order_id',
+    emptyText: '暂无订单',
+    keywordFilter: false,
+    filters: [
+      { name: 'payment_status', label: '支付状态', options: paymentStatusOptions },
+      { name: 'account_id', label: '积分账户 ID' },
+      { name: 'user_id', label: '用户 ID' }
+    ],
+    columns: [
+      { key: 'order_id', title: '订单' },
+      { key: 'package_id', title: '套餐' },
+      { key: 'target_scope', title: '对象', render: (row) => targetScopeLabel(row.target_scope) },
+      { key: 'price_amount', title: '金额', render: (row) => formatCny(row.price_amount) },
+      { key: 'points', title: '积分', render: (row) => formatPoints(row.points) },
+      { key: 'payment_status', title: '支付', render: (row) => <Badge tone={statusTone(row.payment_status)}>{statusLabel(row.payment_status)}</Badge> },
+      createdColumn
+    ]
+  },
+  'billing/credit-lots': {
+    key: 'billing-credit-lots',
+    title: '积分批次管理',
+    description: '查看由套餐、兑换码和后台发放生成的积分批次、有效期和结算资格。',
+    listPath: '/api/admin/billing/credit-lots',
+    rowId: 'lot_id',
+    emptyText: '暂无积分批次',
+    keywordFilter: false,
+    statusOptions: activeStatusOptions,
+    filters: [
+      { name: 'account_id', label: '账户 ID' },
+      { name: 'source_type', label: '来源类型' }
+    ],
+    columns: [
+      { key: 'lot_id', title: '批次 ID' },
+      { key: 'account_id', title: '账户 ID' },
+      { key: 'source_type', title: '来源' },
+      { key: 'available_points', title: '可用', render: (row) => formatPoints(row.available_points) },
+      { key: 'consumed_points', title: '已消耗', render: (row) => formatPoints(row.consumed_points) },
+      { key: 'expires_at', title: '过期时间', render: (row) => formatDateTime(row.expires_at) },
+      statusColumn
+    ]
+  },
+  'billing/redeem-codes': {
+    key: 'billing-redeem-codes',
+    title: '兑换码管理',
+    description: '财务视角查看和创建兑换码批次；不展示完整兑换码历史。',
+    listPath: '/api/admin/billing/redeem-codes',
+    rowId: 'batch_id',
+    emptyText: '暂无兑换码批次',
+    keywordFilter: false,
+    statusOptions: activeStatusOptions,
+    columns: [
+      { key: 'batch_no', title: '批次', render: (row) => row.batch_no || row.batch_id },
+      { key: 'account_type', title: '账户类型' },
+      { key: 'points', title: '积分', render: (row) => formatPoints(row.points) },
+      { key: 'count', title: '数量' },
+      statusColumn
+    ]
+  },
+  'billing/enterprise-contracts': {
+    key: 'billing-enterprise-contracts',
+    title: '企业合同管理',
+    description: '查看企业套餐合同、席位额度、预算和审批策略。',
+    listPath: '/api/admin/billing/enterprise-contracts',
+    rowId: 'contract_id',
+    emptyText: '暂无企业合同',
+    keywordFilter: false,
+    filters: [
+      { name: 'enterprise_id', label: '企业 ID' },
+      { name: 'contract_status', label: '合同状态', options: contractStatusOptions }
+    ],
+    columns: [
+      { key: 'contract_id', title: '合同 ID' },
+      { key: 'enterprise_id', title: '企业 ID' },
+      { key: 'package_id', title: '套餐 ID' },
+      { key: 'seat_quota', title: '席位' },
+      { key: 'budget_points', title: '预算积分', render: (row) => formatPoints(row.budget_points) },
+      { key: 'contract_status', title: '状态', render: (row) => <Badge tone={statusTone(row.contract_status)}>{statusLabel(row.contract_status)}</Badge> }
+    ]
+  },
+  'billing/invoices': {
+    key: 'billing-invoices',
+    title: '发票 / 财务管理',
+    description: '查看企业账单、发票状态和到期信息。',
+    listPath: '/api/admin/billing/invoices',
+    rowId: 'invoice_id',
+    emptyText: '暂无发票记录',
+    keywordFilter: false,
+    filters: [
+      { name: 'enterprise_id', label: '企业 ID' },
+      { name: 'invoice_status', label: '发票状态', options: invoiceStatusOptions }
+    ],
+    columns: [
+      { key: 'invoice_id', title: '发票 ID' },
+      { key: 'enterprise_id', title: '企业 ID' },
+      { key: 'amount', title: '金额', render: (row) => formatCny(row.amount) },
+      { key: 'invoice_status', title: '状态', render: (row) => <Badge tone={statusTone(row.invoice_status)}>{statusLabel(row.invoice_status)}</Badge> },
+      { key: 'due_at', title: '到期时间', render: (row) => formatDateTime(row.due_at) }
+    ]
+  },
+  'billing/promotions': {
+    key: 'billing-promotions',
+    title: '促销活动',
+    description: '查看测试环境套餐活动价和可见范围。',
+    listPath: '/api/admin/billing/promotions',
+    rowId: 'promotion_id',
+    emptyText: '暂无促销活动',
+    keywordFilter: false,
+    statusOptions: activeStatusOptions,
+    filters: [{ name: 'package_id', label: '套餐 ID' }],
+    columns: [
+      { key: 'promotion_name', title: '活动' },
+      { key: 'package_id', title: '套餐 ID' },
+      { key: 'visible_scope', title: '可见范围' },
+      { key: 'starts_at', title: '开始时间', render: (row) => formatDateTime(row.starts_at) },
+      statusColumn
     ]
   },
   'works/public': {
