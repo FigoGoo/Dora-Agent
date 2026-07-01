@@ -152,7 +152,7 @@ ok github.com/FigoGoo/Dora-Agent/services/business/internal/transport/http
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/transport/rpc
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/bootstrap
 active contract gate passed
-PR-0 CI gate passed
+development CI gate passed
 ```
 
 2026-07-01 内部 settlement 出账治理接入后已执行：

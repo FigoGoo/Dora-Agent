@@ -101,5 +101,5 @@ ok github.com/FigoGoo/Dora-Agent/services/agent/internal/api/http
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore
 active contract gate passed
-PR-0 CI gate passed
+development CI gate passed
 ```

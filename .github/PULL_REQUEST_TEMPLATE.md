@@ -41,9 +41,10 @@
 ## CI Gate
 
 - Active Contract Gate：通过 / 未执行 / 不适用
-- PR-0 CI Gate：通过 / 未执行 / 不适用
-- PR-5 Full HTTP Smoke：通过 / 未执行 / 不适用
-- PR-5 Browser Smoke：通过 / 未执行 / 不适用
+- Development CI Gate：通过 / 未执行 / 不适用
+- Release Full HTTP Smoke：通过 / 未执行 / 不适用
+- Release Browser Smoke：通过 / 未执行 / 不适用
+- Release HTTP Service E2E：通过 / 未执行 / 不适用
 - 真实 PostgreSQL dry-run / down-test：通过 / 未执行 / 不适用
 - 真实 E2E：通过 / 未执行 / 不适用
 

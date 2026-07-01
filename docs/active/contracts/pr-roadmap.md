@@ -26,7 +26,7 @@ PR-1 Contract Index + StateEnum + RouterDecision + AG-UI Envelope
 | PR-2 | active / contract frozen | [`pr-2-agent-runtime-contracts.md`](./pr-2-agent-runtime-contracts.md) | Agent Runtime、CreativeBoard、GraphPlan、Generic Creation Graph、agent migration 和 validator 已冻结；本地真实 PostgreSQL dry-run / down-test 已完成 |
 | PR-3 | active / contract frozen | [`pr-3-tool-credit-asset-contracts.md`](./pr-3-tool-credit-asset-contracts.md) | ToolPlan、ToolTask、Credit freeze/commit/release、Asset commit、provider async、RPC、migration 和 validator 已冻结；本地真实 PostgreSQL dry-run / down-test 已完成 |
 | PR-4 | active / contract frozen | [`pr-4-marketplace-contracts.md`](./pr-4-marketplace-contracts.md) | Marketplace、SkillUsageRecord、Installation、Settlement、Creator/User/Admin API、migration 和 validator 已冻结；本地真实 PostgreSQL dry-run / down-test 已完成 |
-| PR-5 | active / release gate frozen | [`pr-5-e2e-fixtures-release-gates.md`](./pr-5-e2e-fixtures-release-gates.md) | E2E fixtures、Fake Provider、release gates、rollback、观测、轻量 validator、本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 已冻结；完整测试环境 HTTP 服务 E2E 待测试环境 gate |
+| PR-5 | active / release gate frozen | [`pr-5-e2e-fixtures-release-gates.md`](./pr-5-e2e-fixtures-release-gates.md) | E2E fixtures、Fake Provider、release gates、rollback、观测、轻量 validator、本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 和测试环境 HTTP 服务 E2E 自动化入口已冻结；完整测试环境执行与报告归档待测试环境 gate |
 
 ## 全局拆分规则
 
@@ -55,7 +55,7 @@ PR-1 Contract Index + StateEnum + RouterDecision + AG-UI Envelope
 | 在 PR-2 前实现 Tool 生成扣费 | ToolPlan 依赖 Board / GraphPlan digest |
 | 在 PR-3 前实现 Marketplace usage 扣费结算 | Marketplace 结算依赖 Credit freeze/commit/release 契约 |
 | 在 PR-4 前开发创作者后台或用户市场前台 | 页面字段和操作流必须先由 Marketplace API / RPC / SQL fixture 冻结 |
-| 在 PR-5 完整测试环境 HTTP 服务 E2E gate 前发布真实 provider 流量 | release gate、fake provider、回滚和观测需要在真实测试环境复核 |
+| 在 PR-5 完整测试环境 HTTP 服务 E2E 执行与报告归档 gate 前发布真实 provider 流量 | release gate、fake provider、回滚和观测需要在真实测试环境复核 |
 
 ## 验证矩阵
 
@@ -65,7 +65,7 @@ PR-1 Contract Index + StateEnum + RouterDecision + AG-UI Envelope
 | PR-2 | `python3 tests/contract/validate_board_graph_contracts.py` | Board replay、GraphPlan digest、agent migration static guard 通过 |
 | PR-3 | `python3 tests/contract/validate_tool_asset_contracts.py`、`go test ./services/agent/internal/infra/repository ./services/business/internal/infra/repository/businesscore` | ToolPlan digest、freeze/commit/release、asset partial success、agent/business migration up/down 通过 |
 | PR-4 | `python3 tests/contract/validate_skill_market_contracts.py`、`go test ./services/business/internal/infra/repository/businesscore` | Marketplace API/RPC、usage record、installation、settlement fixture、business migration up/down 通过 |
-| PR-5 | `python3 tests/contract/validate_release_e2e_gates.py`、`go test ./services/business/internal/e2e/release`、`go test ./services/agent/internal/e2e/release`、`make release-full-http-smoke`、`make release-browser-smoke` | fake provider、E2E fixture、release/rollback gate、本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 通过 |
+| PR-5 | `python3 tests/contract/validate_release_e2e_gates.py`、`go test ./services/business/internal/e2e/release`、`go test ./services/agent/internal/e2e/release`、`make release-full-http-smoke`、`make release-browser-smoke`、测试环境 `make release-http-service-e2e` | fake provider、E2E fixture、release/rollback gate、本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 通过；完整测试环境执行需归档报告 |
 
 ## M0 冻结关系
 
@@ -74,6 +74,6 @@ M0 active 最小契约冻结由 PR-1 承接，详见：
 - [`m0-contract-freeze.md`](./m0-contract-freeze.md)
 - [`pr-1-contract-index-state-router-agui.md`](./pr-1-contract-index-state-router-agui.md)
 
-PR-1 到 PR-5 的 active 冻结已按本路线图完成。PR-2 / PR-3 / PR-4 本地真实 PostgreSQL dry-run / down-test 已完成；PR-5 本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 已完成。进入真实流量和 ready 标记前，仍必须完成 PR-5 完整测试环境 HTTP 服务 E2E 执行。
+PR-1 到 PR-5 的 active 冻结已按本路线图完成。PR-2 / PR-3 / PR-4 本地真实 PostgreSQL dry-run / down-test 已完成；PR-5 本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 已完成，测试环境 HTTP 服务 E2E 自动化入口已完成。进入真实流量和 ready 标记前，仍必须完成 PR-5 完整测试环境 HTTP 服务 E2E 执行与报告归档。
 
 开发阶段从 PR-0 开始，入口见 [`../technical/pr-0-development-ci-gate.md`](../technical/pr-0-development-ci-gate.md)。M1 Router 实现入口见 [`../technical/router.md`](../technical/router.md)。PR-0 只建立 CI gate 和本地验证入口，不实现业务逻辑。

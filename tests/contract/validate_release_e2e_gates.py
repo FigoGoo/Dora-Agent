@@ -19,6 +19,8 @@ RELEASE_GOVERNANCE_DOC = REPO_ROOT / "docs" / "active" / "technical" / "release-
 BROWSER_SMOKE_SCRIPT = REPO_ROOT / "scripts" / "validate-release-browser-smoke.sh"
 FULL_HTTP_SMOKE_SCRIPT = REPO_ROOT / "scripts" / "validate-release-full-http-smoke.sh"
 FULL_HTTP_SMOKE_TEST = REPO_ROOT / "services" / "agent" / "internal" / "e2e" / "release" / "full_http_service_smoke_test.go"
+HTTP_SERVICE_E2E_SCRIPT = REPO_ROOT / "scripts" / "validate-release-http-service-e2e.sh"
+HTTP_SERVICE_E2E_TEST = E2E_ROOT / "http" / "validate_release_http_service_e2e.py"
 MAKEFILE = REPO_ROOT / "Makefile"
 ACTIVE_CONTRACT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "active-contract-gates.yml"
 
@@ -71,6 +73,9 @@ REQUIRED_RELEASE_GATES = {
     "Migration Gate",
     "Fixture Gate",
     "Fake Provider Gate",
+    "Local Full HTTP Service Gate",
+    "Browser Smoke Gate",
+    "Test Environment HTTP Service Gate",
     "Feature Flag Gate",
     "Observability Gate",
     "Rollback Gate",
@@ -116,6 +121,25 @@ REQUIRED_FULL_HTTP_SMOKE_TOKENS = {
     "AGENT_RUNTIME_REDIS_MODE",
     "testdb.StartPostgres",
     "testredis.Start",
+}
+
+REQUIRED_HTTP_SERVICE_E2E_TOKENS = {
+    "RELEASE_BUSINESS_BASE_URL",
+    "RELEASE_AGENT_BASE_URL",
+    "RELEASE_TEST_PROJECT_ID",
+    "RELEASE_TEST_SPACE_ID",
+    "RELEASE_ACCESS_TOKEN",
+    "/healthz",
+    "/readyz",
+    "/api/auth/login",
+    "/api/agent/sessions",
+    "/api/agent/runs",
+    "/api/agent/runs/{encoded_run_id}/events",
+    "creative.guide.presented",
+    "agent.run.completed",
+    "creative.router.decided",
+    "agent.message.completed",
+    "waiting_input",
 }
 
 
@@ -243,7 +267,7 @@ def validate_release_governance() -> None:
     for token in required_rollback_tokens:
         if token not in text:
             fail(f"{RELEASE_GOVERNANCE_DOC}: missing rollback token {token}")
-    print("release release governance ok")
+    print("release governance ok")
 
 
 def validate_browser_smoke() -> None:
@@ -307,6 +331,32 @@ def validate_full_http_smoke() -> None:
     print("release full HTTP service smoke artifacts ok")
 
 
+def validate_http_service_e2e() -> None:
+    for path in (HTTP_SERVICE_E2E_SCRIPT, HTTP_SERVICE_E2E_TEST, MAKEFILE):
+        if not path.exists():
+            fail(f"missing {path}")
+
+    test_text = HTTP_SERVICE_E2E_TEST.read_text(encoding="utf-8")
+    for token in REQUIRED_HTTP_SERVICE_E2E_TOKENS:
+        if token not in test_text:
+            fail(f"{HTTP_SERVICE_E2E_TEST}: missing release HTTP service E2E token {token}")
+
+    shell_text = HTTP_SERVICE_E2E_SCRIPT.read_text(encoding="utf-8")
+    for token in (
+        "RELEASE_BUSINESS_BASE_URL",
+        "RELEASE_AGENT_BASE_URL",
+        "python3 tests/e2e/http/validate_release_http_service_e2e.py",
+    ):
+        if token not in shell_text:
+            fail(f"{HTTP_SERVICE_E2E_SCRIPT}: missing release HTTP service E2E token {token}")
+
+    makefile_text = MAKEFILE.read_text(encoding="utf-8")
+    if "release-http-service-e2e" not in makefile_text:
+        fail(f"{MAKEFILE}: missing release-http-service-e2e target")
+
+    print("release HTTP service E2E artifacts ok")
+
+
 def main() -> None:
     validate_fake_provider()
     validate_suite_indexes()
@@ -314,7 +364,8 @@ def main() -> None:
     validate_release_governance()
     validate_browser_smoke()
     validate_full_http_smoke()
-    print("release e2e release gate validation ok")
+    validate_http_service_e2e()
+    print("release gate validation ok")
 
 
 if __name__ == "__main__":

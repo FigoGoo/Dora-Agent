@@ -4,7 +4,7 @@
 owner：文档与契约责任域 / 测试与验收责任域 / 工程基础设施责任域  
 更新时间：2026-07-01  
 适用范围：M7 active 拆分完成后的开发准备、CI gate、本地验证入口和后续 PR-1 到 PR-5 开发准入  
-相关代码路径：`scripts/validate-active-contracts.sh`、`scripts/validate-development-ci-gate.sh`、`scripts/validate-release-full-http-smoke.sh`、`scripts/validate-release-browser-smoke.sh`、`tests/contract/validate_json_schema_contracts.py`、`requirements/contract-gates.txt`、`Makefile`、`.github/workflows/active-contract-gates.yml`
+相关代码路径：`scripts/validate-active-contracts.sh`、`scripts/validate-development-ci-gate.sh`、`scripts/validate-release-full-http-smoke.sh`、`scripts/validate-release-http-service-e2e.sh`、`scripts/validate-release-browser-smoke.sh`、`tests/e2e/http/**`、`tests/contract/validate_json_schema_contracts.py`、`requirements/contract-gates.txt`、`Makefile`、`.github/workflows/active-contract-gates.yml`
 相关契约：`docs/active/contracts/pr-roadmap.md`、`docs/active/contracts/index.md`、`docs/active/technical/release-governance.md`
 
 ## 背景
@@ -16,7 +16,7 @@ PR-1 到 PR-5 active 契约、fixture、fake provider 和 release gate 已冻结
 - 固定当前 active 契约总验证命令。
 - 固定 PR-0 开发准备总 gate。
 - 让 PR-1 到 PR-5 后续实现都能复用同一 CI 入口。
-- 明确 PR-2 / PR-3 / PR-4 本地真实 PostgreSQL dry-run / down-test 已归档，PR-5 本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke 和本地真实浏览器前端联动 smoke 已归档，完整测试环境 HTTP 服务 E2E 仍是后续 gate。
+- 明确 PR-2 / PR-3 / PR-4 本地真实 PostgreSQL dry-run / down-test 已归档，PR-5 本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke 和本地真实浏览器前端联动 smoke 已归档，测试环境 HTTP 服务 E2E 自动化入口已归档，完整测试环境执行与报告仍是后续 gate。
 
 ## 非目标
 
@@ -30,10 +30,11 @@ PR-1 到 PR-5 active 契约、fixture、fake provider 和 release gate 已冻结
 | Gate | 命令 | 覆盖范围 | 阻断条件 |
 | --- | --- | --- | --- |
 | Active Contract Gate | `scripts/validate-active-contracts.sh` | PR-1 到 PR-5 validator、正式 JSON Schema fixture validator、OpenAPI 解析、migration static guard、active 文档状态扫描 | 任一契约、fixture、OpenAPI、migration 或状态残留失败 |
-| PR-0 CI Gate | `scripts/validate-development-ci-gate.sh` | Active Contract Gate、Go 测试、用户端测试/build、管理端测试/build | 任一基础测试或构建失败 |
-| PR-5 Full HTTP Smoke | `scripts/validate-release-full-http-smoke.sh` | 本地真实 `cmd/business` + `cmd/agent` 双进程、PostgreSQL、Redis、Business HTTP login、Business Kitex RPC、Agent HTTP run 和 AG-UI replay | 进程启动、健康检查、认证、RPC、RouterDecision 或事件回放失败 |
-| PR-5 Browser Smoke | `scripts/validate-release-browser-smoke.sh` | 本地 Chrome + Vite preview 覆盖用户端 Skill 市场、创作者提交和管理端结算治理 | 前后台构建、真实 DOM、fetch 请求或幂等 key 断言失败 |
-| Makefile 快捷入口 | `make active-contract-gate`、`make development-ci-gate`、`make release-full-http-smoke`、`make release-browser-smoke` | 本地开发快速验证 | 同对应脚本 |
+| Development CI Gate | `scripts/validate-development-ci-gate.sh` | Active Contract Gate、Go 测试、用户端测试/build、管理端测试/build | 任一基础测试或构建失败 |
+| Release Full HTTP Smoke | `scripts/validate-release-full-http-smoke.sh` | 本地真实 `cmd/business` + `cmd/agent` 双进程、PostgreSQL、Redis、Business HTTP login、Business Kitex RPC、Agent HTTP run 和 AG-UI replay | 进程启动、健康检查、认证、RPC、RouterDecision 或事件回放失败 |
+| Release Browser Smoke | `scripts/validate-release-browser-smoke.sh` | 本地 Chrome + Vite preview 覆盖用户端 Skill 市场、创作者提交和管理端结算治理 | 前后台构建、真实 DOM、fetch 请求或幂等 key 断言失败 |
+| Release HTTP Service E2E | `scripts/validate-release-http-service-e2e.sh` | 已部署测试环境的 Business / Agent health、ready、登录、Agent session/run 和 AG-UI replay | 测试环境健康检查、认证、RouterDecision 或事件回放失败 |
+| Makefile 快捷入口 | `make active-contract-gate`、`make development-ci-gate`、`make release-full-http-smoke`、`make release-browser-smoke`、`make release-http-service-e2e` | 本地和测试环境快速验证；`release-http-service-e2e` 需要测试环境 URL | 同对应脚本 |
 | GitHub Actions | `.github/workflows/active-contract-gates.yml` | PR 和 main/master push | 任一 job 失败 |
 
 ## 后续开发顺序
@@ -64,14 +65,15 @@ PR-0 开发准备与 CI Gate
 2. 涉及字段、状态、错误码、事件或 SQL 时，先更新 canonical contract 和 fixture。
 3. PR-1 到 PR-5 后续实现必须保留 `scripts/validate-active-contracts.sh` 通过。
 4. PR-2 / PR-3 / PR-4 真实 PostgreSQL dry-run / down-test 证据已归档；发布前仍需在 test 环境重放。
-5. PR-5 完整测试环境 HTTP 服务 E2E 环境执行前，禁止真实 provider 流量。
+5. PR-5 完整测试环境 HTTP 服务 E2E 执行并归档报告前，禁止真实 provider 流量。
 
 ## Done Gate
 
 - [x] Active Contract Gate 脚本存在。
-- [x] PR-0 CI Gate 脚本存在。
-- [x] PR-5 Full HTTP Smoke 脚本存在。
-- [x] PR-5 Browser Smoke 脚本存在。
+- [x] Development CI Gate 脚本存在。
+- [x] Release Full HTTP Smoke 脚本存在。
+- [x] Release Browser Smoke 脚本存在。
+- [x] Release HTTP Service E2E 脚本存在。
 - [x] 正式 JSON Schema fixture validator 接入 Active Contract Gate 和 CI。
 - [x] Makefile 快捷入口存在。
 - [x] GitHub Actions workflow 存在。
@@ -85,7 +87,8 @@ PR-0 开发准备与 CI Gate
 - [x] PR-5 本地 Business 独立进程 HTTP smoke 证据已由 `services/business/internal/e2e/release` 归档。
 - [x] PR-5 本地 Agent + Business 双服务 HTTP smoke 证据已由 `services/agent/internal/e2e/release` 归档。
 - [x] PR-5 本地真实浏览器前端联动 smoke 证据归档。
-- [ ] PR-5 完整测试环境 HTTP 服务 E2E 证据归档。
+- [x] PR-5 测试环境 HTTP 服务 E2E 自动化入口归档。
+- [ ] PR-5 完整测试环境 HTTP 服务 E2E 执行证据归档。
 
 ## 本地验证记录
 
@@ -105,33 +108,41 @@ go test ./services/agent/internal/infra/repository
 go test ./services/business/internal/infra/repository/businesscore
 go test ./services/business/internal/e2e/release
 go test ./services/agent/internal/e2e/release
-go test ./services/agent/internal/e2e/release -run TestPR5FullHTTPServiceE2ESmoke -count=1 -v
-go test ./services/agent/internal/e2e/release -run TestPR5AgentIndependentProcessHTTPSmoke -count=1 -v
-go test ./services/business/internal/e2e/release -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v
+go test ./services/agent/internal/e2e/release -run TestReleaseFullHTTPServiceE2ESmoke -count=1 -v
+go test ./services/agent/internal/e2e/release -run TestReleaseAgentIndependentProcessHTTPSmoke -count=1 -v
+go test ./services/business/internal/e2e/release -run TestReleaseBusinessIndependentProcessHTTPSmoke -count=1 -v
 ```
 
 结果：
 
 ```text
 active contract gate passed
-PR-0 CI gate passed
-PR-5 frontend browser smoke passed
-PR-5 full HTTP service smoke passed
+development CI gate passed
+release browser smoke passed
+release full HTTP service smoke passed
 json schema contract validation ok
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/e2e/release
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/e2e/release
-PASS TestPR5FullHTTPServiceE2ESmoke
-PASS TestPR5AgentIndependentProcessHTTPSmoke
-PASS TestPR5BusinessIndependentProcessHTTPSmoke
+PASS TestReleaseFullHTTPServiceE2ESmoke
+PASS TestReleaseAgentIndependentProcessHTTPSmoke
+PASS TestReleaseBusinessIndependentProcessHTTPSmoke
+```
+
+完整测试环境 HTTP 服务 E2E 未纳入默认本地验证记录，执行时需要：
+
+```bash
+RELEASE_BUSINESS_BASE_URL=https://business.test.example.com \
+RELEASE_AGENT_BASE_URL=https://agent.test.example.com \
+make release-http-service-e2e
 ```
 
 ## 风险
 
 | 风险 | 影响 | 缓解方式 |
 | --- | --- | --- |
-| 旧 M0-M6 脚本仍被误用 | 重新引入旧事实源和旧状态口径 | PR-0 明确当前 gate 为 active contract / PR-0 CI gate |
+| 旧 M0-M6 脚本仍被误用 | 重新引入旧事实源和旧状态口径 | 当前 gate 明确为 active contract、development CI、release smoke 和 release HTTP service E2E |
 | CI runner 工具链与本地不同 | PR 在远端失败 | workflow 固定 Python、Go、Node、pnpm 安装入口 |
 | test 环境尚未重放 migration gate | 发布环境兼容问题延后暴露 | 发布前必须重放 PR-2 / PR-3 / PR-4 dry-run / down-test |
 | fake provider 与真实 provider 差异 | 真实流量失败率上升 | 真实 provider 只允许在 PR-5 完整测试环境 HTTP 服务 E2E gate 后灰度 |

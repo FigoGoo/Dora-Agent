@@ -57,3 +57,4 @@ fi
 echo "== release browser smoke =="
 echo "Chrome executable: $CHROME_EXECUTABLE"
 npm --prefix tests/e2e/browser run smoke
+echo "release browser smoke passed"

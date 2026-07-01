@@ -99,7 +99,7 @@ make development-ci-gate
 ```text
 ok github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph
 active contract gate passed
-PR-0 CI gate passed
+development CI gate passed
 ```
 
 2026-07-01 已新增 PR-2 Runtime Redis wiring 并执行：
@@ -137,7 +137,7 @@ ok github.com/FigoGoo/Dora-Agent/services/agent/internal/application/workbench
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/api/http
 ?  github.com/FigoGoo/Dora-Agent/services/agent/cmd/agent [no test files]
 active contract gate passed
-PR-0 CI gate passed
+development CI gate passed
 ```
 
 2026-07-01 已新增 M1 -> M2 工作台入口闭环并执行：
@@ -158,7 +158,7 @@ ok github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/api/http
 frontend AG-UI reducer tests passed
 active contract gate passed
-PR-0 CI gate passed
+development CI gate passed
 ```
 
 2026-07-01 已新增 PR-2 runtime 内核并执行：
@@ -266,7 +266,7 @@ ok github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/api/http
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/events/stream
 active contract gate passed
-PR-0 CI gate passed
+development CI gate passed
 ```
 
 2026-07-01 已新增 M3 Skill Graph runtime 并执行：
@@ -288,5 +288,5 @@ ok github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/creation
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/api/http
 active contract gate passed
-PR-0 CI gate passed
+development CI gate passed
 ```

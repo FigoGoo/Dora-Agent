@@ -77,5 +77,5 @@ make development-ci-gate
 ```text
 ok github.com/FigoGoo/Dora-Agent/internal/contracts/foundation
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state
-PR-0 CI gate passed
+development CI gate passed
 ```
