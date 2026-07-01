@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr4"
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
@@ -123,6 +124,21 @@ func TestPR4BusinessMarketplaceRepositoryWithActiveMigration(t *testing.T) {
 	}
 	if !reflect.DeepEqual(replayedUsageCreate, usageAfterCreate) {
 		t.Fatalf("unexpected replayed usage after create: %#v", replayedUsageCreate)
+	}
+	frozenAt := time.Date(2026, 7, 1, 5, 12, 0, 0, time.UTC)
+	frozenUsage, err := repo.FreezeSkillUsageRecordV1(t.Context(), usageAfterCreate.UsageID, usageAfterCreate.SkillUsageDigest, *chargeFixture.UsageAfterCharge.CreditHoldID, frozenAt)
+	if err != nil {
+		t.Fatalf("freeze skill usage record: %v", err)
+	}
+	if frozenUsage.UsageStatus != "running" || frozenUsage.ChargeStatus != "frozen" || frozenUsage.CreditHoldID == nil || *frozenUsage.CreditHoldID != *chargeFixture.UsageAfterCharge.CreditHoldID {
+		t.Fatalf("unexpected frozen skill usage: %#v", frozenUsage)
+	}
+	replayedFrozenUsage, err := repo.FreezeSkillUsageRecordV1(t.Context(), usageAfterCreate.UsageID, usageAfterCreate.SkillUsageDigest, *chargeFixture.UsageAfterCharge.CreditHoldID, frozenAt)
+	if err != nil {
+		t.Fatalf("freeze skill usage record idempotently: %v", err)
+	}
+	if !reflect.DeepEqual(replayedFrozenUsage, frozenUsage) {
+		t.Fatalf("unexpected replayed frozen usage: %#v", replayedFrozenUsage)
 	}
 	usageAfterCharge, settlement, err := repo.CommitSkillUsageAndSettleV1(t.Context(), chargeFixture.UsageAfterCharge, chargeFixture.Settlement)
 	if err != nil {

@@ -197,6 +197,62 @@ func (r *Repository) CreateSkillUsageRecordV1(ctx context.Context, usage pr4.Ski
 	return created, nil
 }
 
+func (r *Repository) FreezeSkillUsageRecordV1(ctx context.Context, usageID string, skillUsageDigest string, creditHoldID string, frozenAt time.Time) (pr4.SkillUsageRecord, error) {
+	if strings.TrimSpace(usageID) == "" || strings.TrimSpace(skillUsageDigest) == "" || strings.TrimSpace(creditHoldID) == "" {
+		return pr4.SkillUsageRecord{}, errors.New("usage_id, skill_usage_digest and credit_hold_id are required")
+	}
+	if frozenAt.IsZero() {
+		frozenAt = time.Now().UTC()
+	}
+	var frozen pr4.SkillUsageRecord
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var usageRecord PR4SkillUsageRecord
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("usage_id = ?", usageID).First(&usageRecord).Error; err != nil {
+			return err
+		}
+		current, err := skillUsageContract(usageRecord)
+		if err != nil {
+			return err
+		}
+		if current.SkillUsageDigest != skillUsageDigest {
+			return errors.New("skill usage digest does not match usage record")
+		}
+		if current.UsageStatus == "running" && current.ChargeStatus == "frozen" {
+			if current.CreditHoldID == nil || *current.CreditHoldID != creditHoldID {
+				return errors.New("idempotent skill usage freeze replay does not match credit hold")
+			}
+			frozen = current
+			return nil
+		}
+		if current.UsageStatus != "confirmation_required" || current.ChargeStatus != "not_frozen" || current.RefundStatus != "none" || current.CreditHoldID != nil {
+			return errors.New("skill usage must be precreated before freeze")
+		}
+		next := current
+		next.UsageStatus = "running"
+		next.ChargeStatus = "frozen"
+		next.CreditHoldID = &creditHoldID
+		next.UpdatedAt = frozenAt.UTC()
+		if err := pr4.ValidateSkillUsageRecord(next); err != nil {
+			return fmt.Errorf("usage_after_freeze: %w", err)
+		}
+		updates := map[string]any{
+			"usage_status":   next.UsageStatus,
+			"charge_status":  next.ChargeStatus,
+			"credit_hold_id": next.CreditHoldID,
+			"updated_at":     next.UpdatedAt,
+		}
+		if err := tx.Model(&PR4SkillUsageRecord{}).Where("usage_id = ?", usageID).Updates(updates).Error; err != nil {
+			return err
+		}
+		frozen = next
+		return nil
+	})
+	if err != nil {
+		return pr4.SkillUsageRecord{}, err
+	}
+	return frozen, nil
+}
+
 func (r *Repository) CommitSkillUsageAndSettleV1(ctx context.Context, afterCharge pr4.SkillUsageRecord, settlement pr4.SkillSettlement) (pr4.SkillUsageRecord, pr4.SkillSettlement, error) {
 	var committed pr4.SkillUsageRecord
 	var settled pr4.SkillSettlement
@@ -218,8 +274,14 @@ func (r *Repository) CommitSkillUsageAndSettleV1(ctx context.Context, afterCharg
 			settled = storedSettlement
 			return nil
 		}
-		if err := pr4.ValidateSkillUsagePrecreateConfirmCharge(pr4.SkillUsageChargeSequence, current, afterCharge, settlement); err != nil {
-			return err
+		if current.UsageStatus == "running" && current.ChargeStatus == "frozen" {
+			if err := validateFrozenSkillUsageCharge(current, afterCharge, settlement); err != nil {
+				return err
+			}
+		} else {
+			if err := pr4.ValidateSkillUsagePrecreateConfirmCharge(pr4.SkillUsageChargeSequence, current, afterCharge, settlement); err != nil {
+				return err
+			}
 		}
 		updates := map[string]any{
 			"usage_status":       afterCharge.UsageStatus,
@@ -392,6 +454,31 @@ func validatePrecreatedUsage(usage pr4.SkillUsageRecord, idempotencyKey string) 
 	}
 	if usage.UsageStatus != "confirmation_required" || usage.ChargeStatus != "not_frozen" || usage.RefundStatus != "none" || usage.CreditHoldID != nil || usage.ValueDeliveredAt != nil {
 		return errors.New("skill usage must be precreated before freeze or charge")
+	}
+	return nil
+}
+
+func validateFrozenSkillUsageCharge(current pr4.SkillUsageRecord, afterCharge pr4.SkillUsageRecord, settlement pr4.SkillSettlement) error {
+	if err := pr4.ValidateSkillUsageRecord(afterCharge); err != nil {
+		return fmt.Errorf("usage_after_charge: %w", err)
+	}
+	if err := pr4.ValidateSkillSettlement(settlement); err != nil {
+		return fmt.Errorf("settlement: %w", err)
+	}
+	if !sameSkillUsageIdentity(current, afterCharge) {
+		return errors.New("usage identity must be stable across frozen charge flow")
+	}
+	if afterCharge.UsageStatus != "value_delivered" || afterCharge.ChargeStatus != "charged" || afterCharge.RefundStatus != "none" {
+		return errors.New("usage after charge must be value_delivered and charged")
+	}
+	if current.CreditHoldID == nil || afterCharge.CreditHoldID == nil || *current.CreditHoldID != *afterCharge.CreditHoldID {
+		return errors.New("charged usage must keep frozen credit hold")
+	}
+	if settlement.UsageID != afterCharge.UsageID || settlement.Status != afterCharge.SettlementStatus {
+		return errors.New("settlement must match charged usage")
+	}
+	if settlement.GrossCredits != afterCharge.EstimatedCredits {
+		return errors.New("settlement gross credits must match usage estimated credits")
 	}
 	return nil
 }

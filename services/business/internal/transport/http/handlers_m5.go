@@ -2,6 +2,7 @@ package http
 
 import (
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/marketplace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/notification"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/work"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
@@ -10,7 +11,13 @@ import (
 
 func registerM5Routes(router *gin.Engine, opts RouterOptions) {
 	auth := m2Handler{account: opts.AccountSpace, admin: opts.Admin, project: opts.Project}
-	h := m5Handler{work: opts.Work, notification: opts.Notification, auth: auth}
+	h := m5Handler{work: opts.Work, notification: opts.Notification, marketplace: opts.Marketplace, auth: auth}
+
+	router.GET("/api/marketplace/skills", auth.userAuth(), h.listMarketplaceSkills)
+	router.GET("/api/marketplace/skills/:listing_id", auth.userAuth(), h.getMarketplaceSkill)
+	router.POST("/api/marketplace/installations", auth.userAuth(), requireIdempotency(), h.installMarketplaceSkill)
+	router.POST("/api/marketplace/installations/:installation_id/upgrade", auth.userAuth(), requireIdempotency(), h.upgradeSkillInstallation)
+	router.GET("/api/marketplace/my-skills", auth.userAuth(), h.listInstalledSkills)
 
 	router.GET("/api/public/home", h.publicHome)
 	router.GET("/api/public/works", h.listPublicWorks)
@@ -40,7 +47,86 @@ func registerM5Routes(router *gin.Engine, opts RouterOptions) {
 type m5Handler struct {
 	work         *work.App
 	notification *notification.App
+	marketplace  *marketplace.App
 	auth         m2Handler
+}
+
+func (h m5Handler) listMarketplaceSkills(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.marketplace.ListMarketplaceSkills(c.Request.Context(), marketplace.ListMarketplaceSkillsInput{
+		Auth: userAuth(c), Query: c.Query("query"), Limit: intQuery(c, "limit", intQuery(c, "page_size", 10)), Cursor: c.Query("cursor"),
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) getMarketplaceSkill(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.marketplace.GetMarketplaceSkill(c.Request.Context(), userAuth(c), c.Param("listing_id"))
+	respond(c, out, err)
+}
+
+func (h m5Handler) installMarketplaceSkill(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		ListingID    string `json:"listing_id"`
+		TargetScope  string `json:"target_scope"`
+		EnterpriseID string `json:"enterprise_id"`
+		RequestHash  string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.marketplace.InstallSkill(c.Request.Context(), marketplace.InstallSkillInput{
+		Auth: userAuth(c), Meta: meta, ListingID: req.ListingID, TargetScope: req.TargetScope, EnterpriseID: req.EnterpriseID,
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) upgradeSkillInstallation(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		TargetVersion string `json:"target_version"`
+		Confirmed     bool   `json:"confirmed"`
+		RequestHash   string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.marketplace.UpgradeSkillInstallation(c.Request.Context(), marketplace.UpgradeSkillInstallationInput{
+		Auth: userAuth(c), Meta: meta, InstallationID: c.Param("installation_id"), TargetVersion: req.TargetVersion, Confirmed: req.Confirmed,
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) listInstalledSkills(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.marketplace.ListInstalledSkills(c.Request.Context(), marketplace.ListInstalledSkillsInput{
+		Auth: userAuth(c), AccountScope: c.Query("account_scope"), Limit: intQuery(c, "limit", intQuery(c, "page_size", 10)), Offset: intQuery(c, "offset", 0),
+	})
+	respond(c, out, err)
 }
 
 func (h m5Handler) publicHome(c *gin.Context) {

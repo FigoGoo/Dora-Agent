@@ -3,8 +3,8 @@
 状态：active  
 owner：Business Skill Marketplace / Business Credit / Agent Runtime / 前端 / 管理端 / 文档与契约责任域 / 测试与验收责任域  
 更新时间：2026-07-01  
-适用范围：PR-4 字段级契约在 Go 运行时的 Skill 发布、市场上架、安装升级、SkillUsageRecord、结算、退款、数据隔离和 Business repository 基础实现  
-相关代码路径：`internal/contracts/pr4/**`、`services/business/internal/infra/repository/businesscore/**`  
+适用范围：PR-4 字段级契约在 Go 运行时的 Skill 发布、市场上架、安装升级、SkillUsageRecord、结算、退款、数据隔离、Business repository、应用层和用户端 Marketplace HTTP 主路径实现
+相关代码路径：`internal/contracts/pr4/**`、`services/business/internal/application/marketplace/**`、`services/business/internal/infra/repository/businesscore/**`、`services/business/internal/transport/http/**`
 相关契约：`docs/active/contracts/pr-4-marketplace-contracts.md`、`api/schemas/skill/**`、`api/schemas/settlement/**`、`api/agui/events/cost_disclosure.skill_usage.presented.schema.json`
 
 ## 背景
@@ -24,7 +24,7 @@ PR-4 已冻结开放 Skill 市场闭环。实现前需要先把 SkillUsageRecord
 - 不修改 PR-1 AG-UI Envelope。
 - 不修改 PR-3 Tool 生成费扣费规则。
 - 不做真实收益出账。
-- 不实现真实 Marketplace RPC、创作者后台、用户市场前台或管理端页面。
+- 不实现真实 Marketplace RPC adapter、创作者后台页面、用户市场前台页面或管理端页面。
 
 ## 实现范围
 
@@ -36,6 +36,8 @@ PR-4 已冻结开放 Skill 市场闭环。实现前需要先把 SkillUsageRecord
 | Visibility | `internal/contracts/pr4/visibility.go` | 创作者 API 安全摘要和私有字段泄露守卫 |
 | Tests | `internal/contracts/pr4/*_test.go` | 读取 PR-4 active fixture 做漂移防护 |
 | Business Repository | `services/business/internal/infra/repository/businesscore/pr4_marketplace.go` | 发布、安装、升级、usage 预创建、扣费结算、退款反转事务与幂等 |
+| Business Application | `services/business/internal/application/marketplace/app.go` | Marketplace 列表/详情、安装、升级、usage 估算、预创建、冻结、交付扣费和 settlement hold |
+| User HTTP | `services/business/internal/transport/http/handlers_m5.go` | `/api/marketplace/skills`、详情、安装、升级、已安装列表 |
 | Migration Tests | `services/business/internal/infra/repository/businesscore/pr4_marketplace_integration_test.go` | PR-4 business migration up/down、无外键、fixture 状态机验证 |
 
 ## 开发注意事项
@@ -58,13 +60,17 @@ PR-4 已冻结开放 Skill 市场闭环。实现前需要先把 SkillUsageRecord
 - [x] Skill 使用费 AG-UI payload 可使用 PR-1 Envelope 构造并校验。
 - [x] PR-4 Business PostgreSQL migration dry-run 和 down-test 已由 repository integration test 覆盖。
 - [x] Marketplace / SkillUsage / Settlement repository 已支持发布、安装、升级、预创建、扣费结算、退款反转和幂等重放。
-- [ ] 后续 PR 接入真实 Marketplace RPC、页面和结算出账治理。
+- [x] Marketplace 应用层已支持用户发现、详情、个人 latest 安装、已安装列表、usage 预创建、确认后冻结、交付扣费和 settlement hold。
+- [x] 用户端 Marketplace HTTP 主路径已接入 `business-api.yaml` 已冻结路径。
+- [ ] 后续 PR 接入真实 Marketplace RPC adapter、创作者/用户/管理端页面和结算出账治理。
 
 ## 验证命令
 
 ```bash
 go test ./internal/contracts/pr4
+go test ./services/business/internal/application/marketplace
 go test ./internal/contracts/pr4 ./services/business/internal/infra/repository/businesscore
+go test ./services/business/internal/transport/http
 make active-contract-gate
 make pr0-ci-gate
 ```
@@ -75,7 +81,9 @@ make pr0-ci-gate
 
 ```bash
 go test ./internal/contracts/pr4
+go test ./services/business/internal/application/marketplace
 go test ./services/business/internal/infra/repository/businesscore
+go test ./services/business/internal/transport/http
 go test ./internal/contracts/pr4 ./services/business/internal/infra/repository/businesscore
 make active-contract-gate
 make pr0-ci-gate
@@ -85,7 +93,9 @@ make pr0-ci-gate
 
 ```text
 ok github.com/FigoGoo/Dora-Agent/internal/contracts/pr4
+ok github.com/FigoGoo/Dora-Agent/services/business/internal/application/marketplace
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore
+ok github.com/FigoGoo/Dora-Agent/services/business/internal/transport/http
 active contract gate passed
 PR-0 CI gate passed
 ```

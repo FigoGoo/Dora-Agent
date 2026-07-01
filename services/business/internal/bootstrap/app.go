@@ -16,6 +16,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetcommit"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetdict"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/credit"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/marketplace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/modelconfig"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/notification"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
@@ -53,6 +54,7 @@ type App struct {
 	Credit       *credit.App
 	Asset        *asset.App
 	Commit       *assetcommit.App
+	Marketplace  *marketplace.App
 	Work         *work.App
 	Notification *notification.App
 	Kitex        server.Server
@@ -85,6 +87,7 @@ func New(cfg config.BusinessConfig) (*App, error) {
 		Endpoint: cfg.TOS.Endpoint, Region: cfg.TOS.Region,
 		AccessKeyID: cfg.TOS.AccessKeyID, SecretAccessKey: cfg.TOS.SecretAccessKey,
 	})
+	marketplaceApp := marketplace.New(repo)
 	commitVerifier, err := assetcommit.NewTOSHeadObjectVerifier(cfg.TOS.Endpoint, cfg.TOS.Region, cfg.TOS.AccessKeyID, cfg.TOS.SecretAccessKey)
 	if err != nil {
 		return nil, fmt.Errorf("create tos object verifier: %w", err)
@@ -127,6 +130,7 @@ func New(cfg config.BusinessConfig) (*App, error) {
 			Credit:       creditApp,
 			Asset:        assetApp,
 			Commit:       commitApp,
+			Marketplace:  marketplaceApp,
 			Work:         workApp,
 			Notification: notificationApp,
 		})
@@ -152,6 +156,7 @@ func New(cfg config.BusinessConfig) (*App, error) {
 		Credit:       creditApp,
 		Asset:        assetApp,
 		Commit:       commitApp,
+		Marketplace:  marketplaceApp,
 		Work:         workApp,
 		Notification: notificationApp,
 		Kitex:        kitexServer,

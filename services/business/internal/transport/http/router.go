@@ -15,6 +15,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetcommit"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/assetdict"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/credit"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/marketplace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/modelconfig"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/notification"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
@@ -43,6 +44,7 @@ type RouterOptions struct {
 	Credit       *credit.App
 	Asset        *asset.App
 	Commit       *assetcommit.App
+	Marketplace  *marketplace.App
 	Work         *work.App
 	Notification *notification.App
 }
