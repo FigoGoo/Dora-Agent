@@ -4,7 +4,7 @@
 owner：Agent Runtime / 文档与契约责任域 / 测试与验收责任域
 更新时间：2026-07-01
 适用范围：Published Skill Runtime Spec 加载、静态校验、Eino Graph runner、GraphPlan / Board / Snapshot / AG-UI 事件生成，以及工作台 `select_skill` 到 Board review gate 的闭环
-相关代码路径：`services/agent/internal/runtime/skillgraph/**`、`services/agent/internal/runtime/eino/skill_graph.go`、`services/agent/internal/application/workbench/app_m1.go`、`services/agent/internal/infra/repository/board_graph.go`
+相关代码路径：`services/agent/internal/runtime/skillgraph/**`、`services/agent/internal/runtime/eino/skill_graph.go`、`services/agent/internal/application/workbench/app_run_routing.go`、`services/agent/internal/infra/repository/board_graph.go`
 相关契约：`docs/active/contracts/pr-2-agent-runtime-contracts.md`、`api/schemas/graph/**`、`api/schemas/board/**`、`api/agui/events/graph.plan.created.schema.json`、`api/agui/events/board.snapshot.updated.schema.json`
 
 ## 目标

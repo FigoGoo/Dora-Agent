@@ -195,7 +195,7 @@ for directory in [
 if "github.com/cloudwego/eino v0.9.10" not in Path("go.mod").read_text():
     fail("go.mod missing pinned github.com/cloudwego/eino v0.9.10")
 
-skill_model = Path("services/business/internal/infra/repository/businesscore/models_m3.go").read_text()
+skill_model = Path("services/business/internal/infra/repository/businesscore/models_catalog.go").read_text()
 skill_app = Path("services/business/internal/application/skillcatalog/app.go").read_text()
 for needle in ["confirmation_policy_json", "ConfirmationPolicyJSON"]:
     if needle not in skill_model + skill_app:
@@ -231,7 +231,7 @@ for field in ["resource_type", "status", "usage_stage", "draft_enabled", "final_
 for field in ["resource_type", "status", "usage_stage", "draft_enabled", "final_enabled", "editable", "referable"]:
     if field not in asset_schema.get("required", []):
         fail(f"business OpenAPI AssetElementTypeDTO required list missing {field}")
-business_router = Path("services/business/internal/transport/http/handlers_m3.go").read_text()
+business_router = Path("services/business/internal/transport/http/handlers_catalog_admin.go").read_text()
 m3_routes = [
     ("get", "/api/models/generation", "/api/models/generation"),
     ("get", "/api/tools/bindable", "/api/tools/bindable"),

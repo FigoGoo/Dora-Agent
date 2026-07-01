@@ -143,7 +143,7 @@ notification_app = Path("services/business/internal/application/notification/app
 skill_app = Path("services/business/internal/application/skillcatalog/app.go").read_text()
 bootstrap = Path("services/business/internal/bootstrap/app.go").read_text()
 router = Path("services/business/internal/transport/http/router.go").read_text()
-handlers = Path("services/business/internal/transport/http/handlers_m5.go").read_text()
+handlers = Path("services/business/internal/transport/http/handlers_work_notification_marketplace.go").read_text()
 
 for needle in [
     "ShareTextDigest",

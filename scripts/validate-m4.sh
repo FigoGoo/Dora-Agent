@@ -188,7 +188,7 @@ for needle in [
     if needle not in assetcommit_app:
         fail(f"asset commit app missing strict M4 semantic {needle}")
 
-asset_http = Path("services/business/internal/transport/http/handlers_m4.go").read_text()
+asset_http = Path("services/business/internal/transport/http/handlers_credit_asset.go").read_text()
 if "httpSafetyEvidence" in asset_http or "SafetyEvidenceID" in asset_http:
     fail("business HTTP upload intent must not fabricate safety evidence from an id")
 if 'AccountType: "personal"' in asset_http:

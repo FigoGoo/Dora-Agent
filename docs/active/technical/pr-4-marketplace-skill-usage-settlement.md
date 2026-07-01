@@ -37,7 +37,7 @@ PR-4 已冻结开放 Skill 市场闭环。实现前需要先把 SkillUsageRecord
 | Tests | `internal/contracts/pr4/*_test.go` | 读取 PR-4 active fixture 做漂移防护 |
 | Business Repository | `services/business/internal/infra/repository/businesscore/pr4_marketplace.go` | 发布、安装、升级、usage 预创建、扣费结算、退款反转事务与幂等 |
 | Business Application | `services/business/internal/application/marketplace/app.go` | Marketplace 列表/详情、安装、升级、usage 估算、预创建、冻结、交付扣费和 settlement hold |
-| User HTTP | `services/business/internal/transport/http/handlers_m5.go` | `/api/marketplace/skills`、详情、安装、升级、已安装列表 |
+| User HTTP | `services/business/internal/transport/http/handlers_work_notification_marketplace.go` | `/api/marketplace/skills`、详情、安装、升级、已安装列表 |
 | Migration Tests | `services/business/internal/infra/repository/businesscore/pr4_marketplace_integration_test.go` | PR-4 business migration up/down、无外键、fixture 状态机验证 |
 
 ## 开发注意事项
