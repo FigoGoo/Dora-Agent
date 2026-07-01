@@ -127,6 +127,72 @@ func TestMarketplaceAppUserInstallAndSkillUsageLifecycle(t *testing.T) {
 	if committed.Settlement.CreatorUserID != publishFixture.SkillPackage.CreatorUserID || committed.Settlement.GrossCredits != estimate.EstimatedCredits {
 		t.Fatalf("unexpected settlement: %#v", committed.Settlement)
 	}
+
+	creatorAnalytics, err := app.GetCreatorSkillUsageAnalytics(t.Context(), accountspace.AuthContext{UserID: publishFixture.SkillPackage.CreatorUserID})
+	if err != nil {
+		t.Fatalf("creator analytics: %v", err)
+	}
+	if creatorAnalytics.UsageCount != 1 || creatorAnalytics.RevenueHoldAmount != int64(committed.Settlement.CreatorCredits) || creatorAnalytics.RefundCount != 0 {
+		t.Fatalf("unexpected creator analytics: %#v", creatorAnalytics)
+	}
+	if len(creatorAnalytics.FailureCodeSummary) != 0 {
+		t.Fatalf("creator analytics must not expose private failure details: %#v", creatorAnalytics)
+	}
+}
+
+func TestMarketplaceAppCreatorDraftSubmitLifecycle(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_business_marketplace_creator_app")
+	testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/2026-07-01-marketplace-contracts/business")
+	repo := businesscore.New(db.DB)
+	app := New(repo)
+	app.now = func() time.Time { return time.Date(2026, 7, 1, 7, 0, 0, 0, time.UTC) }
+
+	auth := accountspace.AuthContext{UserID: "user_creator_http_001", SpaceID: "sp_creator_http_001", LoginIdentityType: accountspace.IdentityPersonal}
+	created, err := app.CreateCreatorSkillDraft(t.Context(), CreateCreatorSkillDraftInput{
+		Auth:        auth,
+		Meta:        accountspace.RequestMeta{IdempotencyKey: "creator-skill-draft-001"},
+		Name:        "文旅脚本策划",
+		Description: "把城市卖点拆成 Storyboard 和提示词。",
+	})
+	if err != nil {
+		t.Fatalf("create creator draft: %v", err)
+	}
+	if created.Skill.VersionStatus != "draft" || created.Skill.ReviewStatus != "not_submitted" || created.Skill.ListingStatus != "not_listed" {
+		t.Fatalf("unexpected draft skill: %#v", created.Skill)
+	}
+	replayed, err := app.CreateCreatorSkillDraft(t.Context(), CreateCreatorSkillDraftInput{
+		Auth:        auth,
+		Meta:        accountspace.RequestMeta{IdempotencyKey: "creator-skill-draft-001"},
+		Name:        "不同标题应按幂等键返回原草稿",
+		Description: "不同描述",
+	})
+	if err != nil {
+		t.Fatalf("replay creator draft: %v", err)
+	}
+	if replayed.Skill.SkillID != created.Skill.SkillID || replayed.Skill.Name != created.Skill.Name {
+		t.Fatalf("unexpected replayed draft: %#v", replayed.Skill)
+	}
+
+	submitted, err := app.SubmitCreatorSkillVersion(t.Context(), SubmitCreatorSkillVersionInput{
+		Auth:    auth,
+		Meta:    accountspace.RequestMeta{IdempotencyKey: "creator-skill-submit-001"},
+		SkillID: created.Skill.SkillID,
+		Version: created.Skill.Version,
+	})
+	if err != nil {
+		t.Fatalf("submit creator skill: %v", err)
+	}
+	if submitted.SkillVersion.VersionStatus != "submitted" || submitted.SkillVersion.ReviewStatus != "submitted" || submitted.SkillVersion.SubmittedAt == nil {
+		t.Fatalf("unexpected submitted skill: %#v", submitted.SkillVersion)
+	}
+
+	list, err := app.ListCreatorListings(t.Context(), ListCreatorListingsInput{Auth: auth, Limit: 10})
+	if err != nil {
+		t.Fatalf("list creator listings: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0].SkillID != created.Skill.SkillID || list.Items[0].Description == "" {
+		t.Fatalf("unexpected creator listings: %#v", list)
+	}
 }
 
 func readMarketplaceFixture(t *testing.T, relativePath string, target any) {

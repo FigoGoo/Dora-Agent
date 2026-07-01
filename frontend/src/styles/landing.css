@@ -2823,6 +2823,222 @@
   font-weight: 760;
 }
 
+.creator-portal {
+  display: grid;
+  gap: 16px;
+}
+
+.creator-portal__login,
+.creator-portal__form,
+.creator-portal__summary,
+.creator-skill-card {
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018)),
+    rgba(8, 10, 12, 0.62);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 16px 38px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(18px);
+}
+
+.creator-portal__login {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  border-radius: 14px;
+}
+
+.creator-portal__login strong {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 15px;
+  font-weight: 820;
+}
+
+.creator-portal__login button,
+.creator-portal__form button,
+.creator-skill-card button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, rgba(207, 255, 36, 0.18), rgba(53, 224, 186, 0.16)),
+    rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.88);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 860;
+  cursor: pointer;
+}
+
+.creator-portal__form {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(260px, 1.4fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 16px;
+  border-radius: 14px;
+}
+
+.creator-portal__form label {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.creator-portal__form span {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.creator-portal__form input,
+.creator-portal__form textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  outline: 0;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.88);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.creator-portal__form input {
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.creator-portal__form textarea {
+  min-height: 72px;
+  resize: vertical;
+  padding: 10px 12px;
+  line-height: 20px;
+}
+
+.creator-portal__form button,
+.creator-skill-card button {
+  padding: 0 14px;
+}
+
+.creator-portal__form button:disabled,
+.creator-skill-card button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.creator-portal__summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.creator-portal__summary > div {
+  display: grid;
+  gap: 6px;
+  min-height: 88px;
+  align-content: center;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.032);
+}
+
+.creator-portal__summary svg {
+  color: rgba(207, 255, 36, 0.7);
+}
+
+.creator-portal__summary span,
+.creator-skill-card dt {
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 11px;
+  font-weight: 740;
+}
+
+.creator-portal__summary strong {
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 880;
+}
+
+.creator-portal__notice {
+  min-height: 34px;
+  padding: 9px 12px;
+  border: 1px solid rgba(207, 255, 36, 0.14);
+  border-radius: 12px;
+  background: rgba(207, 255, 36, 0.08);
+  color: rgba(232, 255, 156, 0.92);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.creator-portal__list {
+  display: grid;
+  gap: 12px;
+}
+
+.creator-skill-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px;
+  border-radius: 14px;
+}
+
+.creator-skill-card h2,
+.creator-skill-card p,
+.creator-skill-card dl {
+  margin: 0;
+}
+
+.creator-skill-card h2 {
+  margin-top: 7px;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.creator-skill-card p {
+  margin-top: 7px;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.creator-skill-card > div > span {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(207, 255, 36, 0.14);
+  color: rgba(232, 255, 156, 0.88);
+  font-size: 10px;
+  font-weight: 860;
+}
+
+.creator-skill-card dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.creator-skill-card dd {
+  margin: 5px 0 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  font-weight: 820;
+}
+
 @keyframes skill-spin {
   to {
     transform: rotate(360deg);
@@ -3222,6 +3438,11 @@
   .asset-card {
     align-items: stretch;
   }
+
+  .creator-portal__form,
+  .creator-skill-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 760px) {
@@ -3276,6 +3497,11 @@
   .agent-workspace-secondary-action {
     grid-column: span 1;
     min-width: 0;
+  }
+
+  .creator-portal__summary,
+  .creator-skill-card dl {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .agent-chat-composer__tools {

@@ -156,6 +156,8 @@ raw provider payload
 - [x] `python3 tests/contract/validate_pr4_contracts.py` 通过。
 - [x] 真实 PostgreSQL migration dry-run 和 down-test 已由 Business repository integration test 覆盖，并会被 PR-0 `go test ./services/... ./internal/...` 执行。
 - [x] Business Marketplace 应用层和用户端 Marketplace HTTP 主路径已接入。
+- [x] Creator Portal HTTP 主路径已接入草稿、提交审核、创作者 listing 和脱敏 analytics。
 - [x] 真实 Marketplace RPC adapter 已接入 `BusinessSkillMarketplaceService`。
 - [x] 用户端 Skill 市场前台页面已接入市场列表、安装登录门、个人安装和已安装后使用入口。
-- [ ] 创作者后台、管理端页面和结算出账治理接入。
+- [x] 创作者 Skill 发布后台页面已接入草稿创建、提交审核、创作者 listing 和脱敏 analytics。
+- [ ] 管理端页面和结算出账治理接入。

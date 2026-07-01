@@ -1,4 +1,4 @@
-export const skillLibraryTabs = ['市场', '已安装'];
+export const skillLibraryTabs = ['市场', '已安装', '创作台'];
 
 export const skillLibraryFilters = ['全部', '付费', '免费', '已安装'];
 

@@ -96,4 +96,82 @@ describe('SkillsPage marketplace integration', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(onIntent).toHaveBeenCalledWith(expect.stringContaining('安装'), '登录后安装并加入我的 Skill。', 'skills');
   });
+
+  it('creates a creator draft and submits it for review', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (url, init = {}) => {
+      const path = String(url);
+      if (path.startsWith('/api/marketplace/skills')) {
+        return ok({ items: [], next_cursor: '' });
+      }
+      if (path.startsWith('/api/marketplace/my-skills')) {
+        return ok({ items: [] });
+      }
+      if (path.startsWith('/api/creator/listings')) {
+        return ok({ items: [] });
+      }
+      if (path === '/api/creator/analytics/skill-usage') {
+        return ok({ usage_count: 0, revenue_hold_amount: 0, refund_count: 0, failure_code_summary: {} });
+      }
+      if (path === '/api/creator/skills' && init.method === 'POST') {
+        return ok({
+          skill: {
+            skill_id: 'skill_creator_city_001',
+            name: '文旅脚本策划',
+            description: '把城市卖点拆成 Storyboard 和提示词。',
+            visibility: 'review_only',
+            version: 'v1',
+            skill_version_id: 'skv_creator_city_001',
+            version_status: 'draft',
+            review_status: 'not_submitted',
+            listing_status: 'not_listed',
+            pricing_model: 'free',
+            usage_credits: 0,
+            value_delivered_stage: 'storyboard_ready'
+          }
+        });
+      }
+      if (path === '/api/creator/skills/skill_creator_city_001/versions/v1/submit' && init.method === 'POST') {
+        return ok({
+          skill_version: {
+            skill_id: 'skill_creator_city_001',
+            name: '文旅脚本策划',
+            description: '把城市卖点拆成 Storyboard 和提示词。',
+            visibility: 'review_only',
+            version: 'v1',
+            skill_version_id: 'skv_creator_city_001',
+            version_status: 'submitted',
+            review_status: 'submitted',
+            listing_status: 'not_listed',
+            pricing_model: 'free',
+            usage_credits: 0,
+            value_delivered_stage: 'storyboard_ready',
+            submitted_at: '2026-07-01T07:00:00Z'
+          }
+        });
+      }
+      throw new Error(`unexpected request ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<SkillsPage isLoggedIn onIntent={vi.fn()} onUseSkill={vi.fn()} />);
+    await user.click(screen.getByRole('tab', { name: '创作台' }));
+    await user.type(screen.getByLabelText('Skill 名称'), '文旅脚本策划');
+    await user.type(screen.getByLabelText('Skill 说明'), '把城市卖点拆成 Storyboard 和提示词。');
+    await user.click(screen.getByRole('button', { name: '保存草稿' }));
+
+    await screen.findByText('草稿已保存，可提交审核。');
+    const createCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/creator/skills' && init.method === 'POST');
+    expect(JSON.parse(createCall[1].body)).toEqual(expect.objectContaining({ name: '文旅脚本策划', description: '把城市卖点拆成 Storyboard 和提示词。' }));
+
+    const card = screen.getByTestId('creator-skill-card');
+    expect(within(card).getByText('未提交')).toBeInTheDocument();
+    await user.click(within(card).getByRole('button', { name: '提交审核' }));
+
+    await screen.findByText('已提交审核，等待平台确认。');
+    const submitCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/creator/skills/skill_creator_city_001/versions/v1/submit' && init.method === 'POST');
+    expect(submitCall[1].headers['Idempotency-Key']).toBe('creator-submit:skill_creator_city_001:v1');
+    expect(within(screen.getByTestId('creator-skill-card')).getByText('已提交')).toBeInTheDocument();
+    expect(within(screen.getByTestId('creator-skill-card')).getByRole('button', { name: '等待审核' })).toBeDisabled();
+  });
 });

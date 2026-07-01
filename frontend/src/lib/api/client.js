@@ -68,7 +68,7 @@ function storageValue(key) {
     return '';
   }
   try {
-    return window.localStorage.getItem(key) || '';
+    return storage.getItem(key) || '';
   } catch {
     return '';
   }

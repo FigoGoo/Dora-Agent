@@ -15,6 +15,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type AuthContext = accountspace.AuthContext
@@ -93,6 +94,29 @@ type SkillSettlementDTO struct {
 	HoldUntil          time.Time `json:"hold_until"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type CreatorSkillDTO struct {
+	SkillID             string     `json:"skill_id"`
+	Name                string     `json:"name"`
+	Description         string     `json:"description"`
+	Visibility          string     `json:"visibility"`
+	Version             string     `json:"version"`
+	SkillVersionID      string     `json:"skill_version_id"`
+	VersionStatus       string     `json:"version_status"`
+	RuntimeSpecDigest   string     `json:"runtime_spec_digest"`
+	PricingPolicyDigest string     `json:"pricing_policy_digest"`
+	PricingModel        string     `json:"pricing_model"`
+	UsageCredits        int        `json:"usage_credits"`
+	ValueDeliveredStage string     `json:"value_delivered_stage"`
+	ReviewID            string     `json:"review_id,omitempty"`
+	ReviewStatus        string     `json:"review_status"`
+	ListingID           string     `json:"listing_id,omitempty"`
+	ListingStatus       string     `json:"listing_status"`
+	SubmittedAt         *time.Time `json:"submitted_at,omitempty"`
+	PublishedAt         *time.Time `json:"published_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 type ListMarketplaceSkillsInput struct {
@@ -211,6 +235,44 @@ type CommitSkillUsageAndSettleOutput struct {
 	Settlement SkillSettlementDTO  `json:"settlement"`
 }
 
+type CreateCreatorSkillDraftInput struct {
+	Auth        AuthContext
+	Meta        RequestMeta
+	Name        string
+	Description string
+}
+
+type CreateCreatorSkillDraftOutput struct {
+	Skill CreatorSkillDTO `json:"skill"`
+}
+
+type SubmitCreatorSkillVersionInput struct {
+	Auth    AuthContext
+	Meta    RequestMeta
+	SkillID string
+	Version string
+}
+
+type SubmitCreatorSkillVersionOutput struct {
+	SkillVersion CreatorSkillDTO `json:"skill_version"`
+}
+
+type ListCreatorListingsInput struct {
+	Auth  AuthContext
+	Limit int
+}
+
+type ListCreatorListingsOutput struct {
+	Items []CreatorSkillDTO `json:"items"`
+}
+
+type CreatorSkillUsageAnalyticsOutput struct {
+	UsageCount         int64          `json:"usage_count"`
+	RevenueHoldAmount  int64          `json:"revenue_hold_amount"`
+	RefundCount        int64          `json:"refund_count"`
+	FailureCodeSummary map[string]int `json:"failure_code_summary"`
+}
+
 type listingRow struct {
 	ListingID           string     `gorm:"column:listing_id"`
 	SkillID             string     `gorm:"column:skill_id"`
@@ -243,6 +305,271 @@ type installationRow struct {
 	UpgradeStatus    string    `gorm:"column:upgrade_status"`
 	CreatedAt        time.Time `gorm:"column:created_at"`
 	UpdatedAt        time.Time `gorm:"column:updated_at"`
+}
+
+type creatorSkillRow struct {
+	SkillID             string     `gorm:"column:skill_id"`
+	Name                string     `gorm:"column:name"`
+	Description         string     `gorm:"column:description"`
+	Visibility          string     `gorm:"column:visibility"`
+	Version             string     `gorm:"column:version"`
+	SkillVersionID      string     `gorm:"column:skill_version_id"`
+	VersionStatus       string     `gorm:"column:version_status"`
+	RuntimeSpecDigest   string     `gorm:"column:runtime_spec_digest"`
+	PricingPolicyDigest string     `gorm:"column:pricing_policy_digest"`
+	PricingModel        string     `gorm:"column:pricing_model"`
+	UsageCredits        int        `gorm:"column:usage_credits"`
+	ValueDeliveredStage string     `gorm:"column:value_delivered_stage"`
+	ReviewID            string     `gorm:"column:review_id"`
+	ReviewStatus        string     `gorm:"column:review_status"`
+	ListingID           string     `gorm:"column:listing_id"`
+	ListingStatus       string     `gorm:"column:listing_status"`
+	SubmittedAt         *time.Time `gorm:"column:submitted_at"`
+	PublishedAt         *time.Time `gorm:"column:published_at"`
+	CreatedAt           time.Time  `gorm:"column:created_at"`
+	UpdatedAt           time.Time  `gorm:"column:updated_at"`
+}
+
+func (a *App) CreateCreatorSkillDraft(ctx context.Context, in CreateCreatorSkillDraftInput) (CreateCreatorSkillDraftOutput, error) {
+	if err := requireAuth(in.Auth); err != nil {
+		return CreateCreatorSkillDraftOutput{}, err
+	}
+	if strings.TrimSpace(in.Meta.IdempotencyKey) == "" {
+		return CreateCreatorSkillDraftOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "idempotency_key is required")
+	}
+	name := strings.TrimSpace(in.Name)
+	description := strings.TrimSpace(in.Description)
+	if name == "" {
+		return CreateCreatorSkillDraftOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "name is required")
+	}
+	if len([]rune(name)) > 80 {
+		return CreateCreatorSkillDraftOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "name must be <= 80 characters")
+	}
+	if len([]rune(description)) > 1000 {
+		return CreateCreatorSkillDraftOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "description must be <= 1000 characters")
+	}
+
+	now := a.now().UTC()
+	version := "v1"
+	skillID := prefixedStableID("skill_", in.Auth.UserID, in.Meta.IdempotencyKey)
+	skillVersionID := prefixedStableID("skv_", skillID, version)
+	pricingPolicyID := prefixedStableID("spp_", skillID, version)
+	runtimeDigest, err := pr1.CanonicalDigest(map[string]any{
+		"schema_version": "creator_skill_runtime_spec.v1",
+		"skill_id":       skillID,
+		"version":        version,
+		"name":           name,
+		"description":    description,
+	})
+	if err != nil {
+		return CreateCreatorSkillDraftOutput{}, err
+	}
+	pricingDigest, err := pr1.CanonicalDigest(map[string]any{
+		"schema_version":         "skill_pricing_policy.v1",
+		"skill_id":               skillID,
+		"skill_version":          version,
+		"pricing_model":          pr4.PricingModelFree,
+		"usage_credits":          0,
+		"value_delivered_stage":  "storyboard_ready",
+		"two_stage_confirmation": true,
+	})
+	if err != nil {
+		return CreateCreatorSkillDraftOutput{}, err
+	}
+
+	currentVersion := version
+	pkg := pr4.SkillPackage{
+		SchemaVersion:  pr4.SchemaVersionSkillPackage,
+		SkillID:        skillID,
+		CreatorUserID:  in.Auth.UserID,
+		Name:           name,
+		Description:    description,
+		Visibility:     pr4.SkillVisibilityReviewOnly,
+		CurrentVersion: &currentVersion,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	skillVersion := pr4.SkillVersion{
+		SchemaVersion:       pr4.SchemaVersionSkillVersion,
+		SkillVersionID:      skillVersionID,
+		SkillID:             skillID,
+		Version:             version,
+		Status:              "draft",
+		RuntimeSpecDigest:   runtimeDigest,
+		PricingPolicyDigest: pricingDigest,
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	policy := pr4.SkillPricingPolicy{
+		SchemaVersion:       pr4.SchemaVersionSkillPricingPolicy,
+		PricingPolicyID:     pricingPolicyID,
+		SkillID:             skillID,
+		SkillVersion:        version,
+		PricingModel:        pr4.PricingModelFree,
+		UsageCredits:        0,
+		ValueDeliveredStage: "storyboard_ready",
+		PricingPolicyDigest: pricingDigest,
+		CreatedAt:           now,
+	}
+	if err := pr4.ValidateSkillPackage(pkg); err != nil {
+		return CreateCreatorSkillDraftOutput{}, err
+	}
+	if err := pr4.ValidateSkillVersion(skillVersion); err != nil {
+		return CreateCreatorSkillDraftOutput{}, err
+	}
+	if err := pr4.ValidateSkillPricingPolicy(policy); err != nil {
+		return CreateCreatorSkillDraftOutput{}, err
+	}
+
+	if err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(skillPackageRecordFromContract(pkg)).Error; err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(skillVersionRecordFromContract(skillVersion)).Error; err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(skillPricingPolicyRecordFromContract(policy)).Error
+	}); err != nil {
+		return CreateCreatorSkillDraftOutput{}, mapStoreError(err)
+	}
+	skill, err := a.getCreatorSkill(ctx, in.Auth, skillID)
+	if err != nil {
+		return CreateCreatorSkillDraftOutput{}, err
+	}
+	return CreateCreatorSkillDraftOutput{Skill: skill}, nil
+}
+
+func (a *App) SubmitCreatorSkillVersion(ctx context.Context, in SubmitCreatorSkillVersionInput) (SubmitCreatorSkillVersionOutput, error) {
+	if err := requireAuth(in.Auth); err != nil {
+		return SubmitCreatorSkillVersionOutput{}, err
+	}
+	if strings.TrimSpace(in.Meta.IdempotencyKey) == "" {
+		return SubmitCreatorSkillVersionOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "idempotency_key is required")
+	}
+	skillID := strings.TrimSpace(in.SkillID)
+	version := strings.TrimSpace(in.Version)
+	if skillID == "" || version == "" {
+		return SubmitCreatorSkillVersionOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "skill_id and version are required")
+	}
+	now := a.now().UTC()
+	if err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var pkg businesscore.PR4SkillPackageRecord
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("skill_id = ? AND creator_user_id = ?", skillID, in.Auth.UserID).
+			First(&pkg).Error; err != nil {
+			return err
+		}
+		var skillVersion businesscore.PR4SkillVersionRecord
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("skill_id = ? AND version = ?", skillID, version).
+			First(&skillVersion).Error; err != nil {
+			return err
+		}
+		switch skillVersion.Status {
+		case "published", "deprecated", "removed":
+			return bizerrors.New(bizerrors.CodeStateConflict, "skill version cannot be submitted from current status")
+		case "submitted", "reviewing":
+		default:
+			if err := tx.Model(&businesscore.PR4SkillVersionRecord{}).
+				Where("skill_version_id = ?", skillVersion.SkillVersionID).
+				Updates(map[string]any{"status": "submitted", "submitted_at": now, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
+		review := businesscore.PR4SkillReviewRecord{
+			ReviewID:       prefixedStableID("review_", skillID, skillVersion.SkillVersionID),
+			SkillID:        skillID,
+			SkillVersionID: skillVersion.SkillVersionID,
+			Status:         "submitted",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&review).Error; err != nil {
+			return err
+		}
+		return tx.Model(&businesscore.PR4SkillPackageRecord{}).
+			Where("skill_id = ?", skillID).
+			Updates(map[string]any{"visibility": pr4.SkillVisibilityReviewOnly, "updated_at": now}).Error
+	}); err != nil {
+		return SubmitCreatorSkillVersionOutput{}, mapStoreError(err)
+	}
+	skill, err := a.getCreatorSkill(ctx, in.Auth, skillID)
+	if err != nil {
+		return SubmitCreatorSkillVersionOutput{}, err
+	}
+	return SubmitCreatorSkillVersionOutput{SkillVersion: skill}, nil
+}
+
+func (a *App) ListCreatorListings(ctx context.Context, in ListCreatorListingsInput) (ListCreatorListingsOutput, error) {
+	if err := requireAuth(in.Auth); err != nil {
+		return ListCreatorListingsOutput{}, err
+	}
+	limit := normalizeLimit(in.Limit)
+	var rows []creatorSkillRow
+	if err := a.creatorSkillQuery(ctx, in.Auth.UserID).
+		Order("sp.updated_at DESC, sv.updated_at DESC").
+		Limit(limit).
+		Scan(&rows).Error; err != nil {
+		return ListCreatorListingsOutput{}, err
+	}
+	items := make([]CreatorSkillDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, creatorSkillDTO(row))
+	}
+	return ListCreatorListingsOutput{Items: items}, nil
+}
+
+func (a *App) GetCreatorSkillUsageAnalytics(ctx context.Context, auth AuthContext) (CreatorSkillUsageAnalyticsOutput, error) {
+	if err := requireAuth(auth); err != nil {
+		return CreatorSkillUsageAnalyticsOutput{}, err
+	}
+	var usageCount int64
+	if err := a.repo.DB().WithContext(ctx).Table("skill_usage_records AS su").
+		Joins("JOIN skill_packages AS sp ON sp.skill_id = su.skill_id").
+		Where("sp.creator_user_id = ?", auth.UserID).
+		Count(&usageCount).Error; err != nil {
+		return CreatorSkillUsageAnalyticsOutput{}, err
+	}
+	var revenueHold struct {
+		Total int64 `gorm:"column:total"`
+	}
+	if err := a.repo.DB().WithContext(ctx).Table("skill_settlement_records").
+		Select("COALESCE(SUM(creator_credits), 0) AS total").
+		Where("creator_user_id = ? AND status = ?", auth.UserID, "pending_hold").
+		Scan(&revenueHold).Error; err != nil {
+		return CreatorSkillUsageAnalyticsOutput{}, err
+	}
+	var refundCount int64
+	if err := a.repo.DB().WithContext(ctx).Table("skill_refund_cases AS rc").
+		Joins("JOIN skill_usage_records AS su ON su.usage_id = rc.usage_id").
+		Joins("JOIN skill_packages AS sp ON sp.skill_id = su.skill_id").
+		Where("sp.creator_user_id = ?", auth.UserID).
+		Count(&refundCount).Error; err != nil {
+		return CreatorSkillUsageAnalyticsOutput{}, err
+	}
+	var reasons []struct {
+		ReasonCode string `gorm:"column:reason_code"`
+		Count      int    `gorm:"column:count"`
+	}
+	if err := a.repo.DB().WithContext(ctx).Table("skill_refund_cases AS rc").
+		Select("rc.reason_code, COUNT(*) AS count").
+		Joins("JOIN skill_usage_records AS su ON su.usage_id = rc.usage_id").
+		Joins("JOIN skill_packages AS sp ON sp.skill_id = su.skill_id").
+		Where("sp.creator_user_id = ?", auth.UserID).
+		Group("rc.reason_code").
+		Scan(&reasons).Error; err != nil {
+		return CreatorSkillUsageAnalyticsOutput{}, err
+	}
+	summary := map[string]int{}
+	for _, item := range reasons {
+		summary[item.ReasonCode] = item.Count
+	}
+	return CreatorSkillUsageAnalyticsOutput{
+		UsageCount:         usageCount,
+		RevenueHoldAmount:  revenueHold.Total,
+		RefundCount:        refundCount,
+		FailureCodeSummary: summary,
+	}, nil
 }
 
 func (a *App) ListMarketplaceSkills(ctx context.Context, in ListMarketplaceSkillsInput) (ListMarketplaceSkillsOutput, error) {
@@ -619,6 +946,47 @@ func (a *App) installationQuery(ctx context.Context) *gorm.DB {
 		Joins("LEFT JOIN skill_packages AS sp ON sp.skill_id = si.skill_id")
 }
 
+func (a *App) creatorSkillQuery(ctx context.Context, creatorUserID string) *gorm.DB {
+	return a.repo.DB().WithContext(ctx).Table("skill_packages AS sp").
+		Select(`sp.skill_id,
+			sp.name,
+			sp.description,
+			sp.visibility,
+			sv.version,
+			sv.skill_version_id,
+			sv.status AS version_status,
+			sv.runtime_spec_digest,
+			sv.pricing_policy_digest,
+			COALESCE(pp.pricing_model, '') AS pricing_model,
+			COALESCE(pp.usage_credits, 0) AS usage_credits,
+			COALESCE(pp.value_delivered_stage, '') AS value_delivered_stage,
+			COALESCE(sr.review_id, '') AS review_id,
+			COALESCE(sr.status, 'not_submitted') AS review_status,
+			COALESCE(ml.listing_id, '') AS listing_id,
+			COALESCE(ml.status, 'not_listed') AS listing_status,
+			sv.submitted_at,
+			sv.published_at,
+			sp.created_at,
+			sp.updated_at`).
+		Joins("JOIN skill_versions AS sv ON sv.skill_id = sp.skill_id").
+		Joins("LEFT JOIN skill_pricing_policies AS pp ON pp.skill_id = sp.skill_id AND pp.skill_version = sv.version AND pp.pricing_policy_digest = sv.pricing_policy_digest").
+		Joins("LEFT JOIN skill_review_records AS sr ON sr.skill_version_id = sv.skill_version_id").
+		Joins("LEFT JOIN marketplace_listings AS ml ON ml.skill_version_id = sv.skill_version_id").
+		Where("sp.creator_user_id = ?", creatorUserID)
+}
+
+func (a *App) getCreatorSkill(ctx context.Context, auth AuthContext, skillID string) (CreatorSkillDTO, error) {
+	var row creatorSkillRow
+	err := a.creatorSkillQuery(ctx, auth.UserID).
+		Where("sp.skill_id = ?", skillID).
+		Order("sv.updated_at DESC").
+		First(&row).Error
+	if err != nil {
+		return CreatorSkillDTO{}, mapStoreError(err)
+	}
+	return creatorSkillDTO(row), nil
+}
+
 func (a *App) getListingRow(ctx context.Context, listingID string, requireListed bool) (listingRow, error) {
 	if strings.TrimSpace(listingID) == "" {
 		return listingRow{}, bizerrors.New(bizerrors.CodeInvalidArgument, "listing_id is required")
@@ -800,6 +1168,47 @@ func skillUsageDigest(runID string, row listingRow) (string, error) {
 	})
 }
 
+func skillPackageRecordFromContract(pkg pr4.SkillPackage) *businesscore.PR4SkillPackageRecord {
+	return &businesscore.PR4SkillPackageRecord{
+		SkillID:        pkg.SkillID,
+		CreatorUserID:  pkg.CreatorUserID,
+		Name:           pkg.Name,
+		Description:    pkg.Description,
+		Visibility:     pkg.Visibility,
+		CurrentVersion: pkg.CurrentVersion,
+		CreatedAt:      pkg.CreatedAt.UTC(),
+		UpdatedAt:      pkg.UpdatedAt.UTC(),
+	}
+}
+
+func skillVersionRecordFromContract(version pr4.SkillVersion) *businesscore.PR4SkillVersionRecord {
+	return &businesscore.PR4SkillVersionRecord{
+		SkillVersionID:      version.SkillVersionID,
+		SkillID:             version.SkillID,
+		Version:             version.Version,
+		Status:              version.Status,
+		RuntimeSpecDigest:   version.RuntimeSpecDigest,
+		PricingPolicyDigest: version.PricingPolicyDigest,
+		SubmittedAt:         utcTimePointer(version.SubmittedAt),
+		PublishedAt:         utcTimePointer(version.PublishedAt),
+		CreatedAt:           version.CreatedAt.UTC(),
+		UpdatedAt:           version.UpdatedAt.UTC(),
+	}
+}
+
+func skillPricingPolicyRecordFromContract(policy pr4.SkillPricingPolicy) *businesscore.PR4SkillPricingPolicyRecord {
+	return &businesscore.PR4SkillPricingPolicyRecord{
+		PricingPolicyID:     policy.PricingPolicyID,
+		SkillID:             policy.SkillID,
+		SkillVersion:        policy.SkillVersion,
+		PricingModel:        policy.PricingModel,
+		UsageCredits:        policy.UsageCredits,
+		ValueDeliveredStage: policy.ValueDeliveredStage,
+		PricingPolicyDigest: policy.PricingPolicyDigest,
+		CreatedAt:           policy.CreatedAt.UTC(),
+	}
+}
+
 func prefixedStableID(prefix string, parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return prefix + hex.EncodeToString(sum[:])[:24]
@@ -847,6 +1256,31 @@ func listingDTO(row listingRow) MarketplaceListingDTO {
 		PricingPolicyDigest: row.PricingPolicyDigest,
 		PublishedBy:         row.PublishedBy,
 		ListedAt:            utcTimePointer(row.ListedAt),
+		CreatedAt:           row.CreatedAt.UTC(),
+		UpdatedAt:           row.UpdatedAt.UTC(),
+	}
+}
+
+func creatorSkillDTO(row creatorSkillRow) CreatorSkillDTO {
+	return CreatorSkillDTO{
+		SkillID:             row.SkillID,
+		Name:                row.Name,
+		Description:         row.Description,
+		Visibility:          row.Visibility,
+		Version:             row.Version,
+		SkillVersionID:      row.SkillVersionID,
+		VersionStatus:       row.VersionStatus,
+		RuntimeSpecDigest:   row.RuntimeSpecDigest,
+		PricingPolicyDigest: row.PricingPolicyDigest,
+		PricingModel:        row.PricingModel,
+		UsageCredits:        row.UsageCredits,
+		ValueDeliveredStage: row.ValueDeliveredStage,
+		ReviewID:            row.ReviewID,
+		ReviewStatus:        row.ReviewStatus,
+		ListingID:           row.ListingID,
+		ListingStatus:       row.ListingStatus,
+		SubmittedAt:         utcTimePointer(row.SubmittedAt),
+		PublishedAt:         utcTimePointer(row.PublishedAt),
 		CreatedAt:           row.CreatedAt.UTC(),
 		UpdatedAt:           row.UpdatedAt.UTC(),
 	}

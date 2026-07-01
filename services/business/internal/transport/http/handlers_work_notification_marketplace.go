@@ -19,6 +19,11 @@ func registerM5Routes(router *gin.Engine, opts RouterOptions) {
 	router.POST("/api/marketplace/installations/:installation_id/upgrade", auth.userAuth(), requireIdempotency(), h.upgradeSkillInstallation)
 	router.GET("/api/marketplace/my-skills", auth.userAuth(), h.listInstalledSkills)
 
+	router.POST("/api/creator/skills", auth.userAuth(), requireIdempotency(), h.createCreatorSkillDraft)
+	router.POST("/api/creator/skills/:skill_id/versions/:version/submit", auth.userAuth(), requireIdempotency(), h.submitCreatorSkillVersion)
+	router.GET("/api/creator/listings", auth.userAuth(), h.listCreatorListings)
+	router.GET("/api/creator/analytics/skill-usage", auth.userAuth(), h.creatorSkillUsageAnalytics)
+
 	router.GET("/api/public/home", h.publicHome)
 	router.GET("/api/public/works", h.listPublicWorks)
 	router.GET("/api/public/works/:public_work_id", h.getPublicWork)
@@ -126,6 +131,70 @@ func (h m5Handler) listInstalledSkills(c *gin.Context) {
 	out, err := h.marketplace.ListInstalledSkills(c.Request.Context(), marketplace.ListInstalledSkillsInput{
 		Auth: userAuth(c), AccountScope: c.Query("account_scope"), Limit: intQuery(c, "limit", intQuery(c, "page_size", 10)), Offset: intQuery(c, "offset", 0),
 	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) createCreatorSkillDraft(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		RequestHash string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.marketplace.CreateCreatorSkillDraft(c.Request.Context(), marketplace.CreateCreatorSkillDraftInput{
+		Auth: userAuth(c), Meta: meta, Name: req.Name, Description: req.Description,
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) submitCreatorSkillVersion(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		RequestHash string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.marketplace.SubmitCreatorSkillVersion(c.Request.Context(), marketplace.SubmitCreatorSkillVersionInput{
+		Auth: userAuth(c), Meta: meta, SkillID: c.Param("skill_id"), Version: c.Param("version"),
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) listCreatorListings(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.marketplace.ListCreatorListings(c.Request.Context(), marketplace.ListCreatorListingsInput{
+		Auth: userAuth(c), Limit: intQuery(c, "limit", intQuery(c, "page_size", 10)),
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) creatorSkillUsageAnalytics(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	out, err := h.marketplace.GetCreatorSkillUsageAnalytics(c.Request.Context(), userAuth(c))
 	respond(c, out, err)
 }
 

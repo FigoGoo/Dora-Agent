@@ -8,6 +8,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
+	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/marketplace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/notification"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/skillcatalog"
@@ -130,4 +131,65 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 		t.Fatalf("navigation response exposed stale target_id: %#v", navData)
 	}
 	requestJSON(t, router, http.MethodPost, "/api/notifications/"+notificationID+"/read", userToken, "idem-http-ntf-read", map[string]any{"request_hash": "hash-http-ntf-read"})
+}
+
+func TestM5CreatorSkillPortalHTTP(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_business_m5_creator_http")
+	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/2026-06-27-business-core/business")
+	t.Cleanup(func() {
+		srcErr, dbErr := migrator.Close()
+		if srcErr != nil || dbErr != nil {
+			t.Fatalf("close migrator source=%v database=%v", srcErr, dbErr)
+		}
+	})
+	testdb.ExecSQL(t, db.DB, testdb.MustReadSQL(t, "tests/business/seed/business_core_seed.sql"))
+	testdb.ExecSQL(t, db.DB, `
+DROP TABLE IF EXISTS skill_review_records;
+DROP TABLE IF EXISTS skill_versions;
+`)
+	testdb.ExecSQL(t, db.DB, testdb.MustReadSQL(t, "db/migrations/iterations/2026-07-01-marketplace-contracts/business/0001_skill_marketplace_settlement.up.sql"))
+
+	repo := businesscore.New(db.DB)
+	guard := idempotency.NewGuard(db.DB, time.Hour, time.Hour)
+	auditWriter := auditlog.NewGormWriter(db.DB)
+	accountApp := accountspace.New(repo, guard, auditWriter)
+	adminApp := admin.New(repo, guard, auditWriter)
+	projectApp := project.New(repo, guard, auditWriter)
+	marketplaceApp := marketplace.New(repo)
+	router := NewRouter(RouterOptions{
+		AccountSpace: accountApp, Admin: adminApp, Project: projectApp, Marketplace: marketplaceApp,
+	})
+
+	userToken := loginUser(t, router, "user1001@dora.local", "local-user-change-me")
+	created := requestJSON(t, router, http.MethodPost, "/api/creator/skills", userToken, "idem-creator-skill-draft-http", map[string]any{
+		"name": "文旅脚本策划", "description": "把城市卖点拆成 Storyboard 和提示词。", "request_hash": "hash-creator-skill-draft-http",
+	})
+	skill := created["data"].(map[string]any)["skill"].(map[string]any)
+	if skill["version_status"] != "draft" || skill["review_status"] != "not_submitted" || skill["listing_status"] != "not_listed" {
+		t.Fatalf("unexpected creator draft response: %#v", skill)
+	}
+	skillID := skill["skill_id"].(string)
+	version := skill["version"].(string)
+
+	submitted := requestJSON(t, router, http.MethodPost, "/api/creator/skills/"+skillID+"/versions/"+version+"/submit", userToken, "idem-creator-skill-submit-http", map[string]any{
+		"request_hash": "hash-creator-skill-submit-http",
+	})
+	submittedVersion := submitted["data"].(map[string]any)["skill_version"].(map[string]any)
+	if submittedVersion["version_status"] != "submitted" || submittedVersion["review_status"] != "submitted" {
+		t.Fatalf("unexpected creator submit response: %#v", submittedVersion)
+	}
+
+	listings := requestJSON(t, router, http.MethodGet, "/api/creator/listings?page_size=10", userToken, "", nil)
+	items := listings["data"].(map[string]any)["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["skill_id"] != skillID {
+		t.Fatalf("unexpected creator listings: %#v", listings)
+	}
+	analytics := requestJSON(t, router, http.MethodGet, "/api/creator/analytics/skill-usage", userToken, "", nil)
+	analyticsData := analytics["data"].(map[string]any)
+	if analyticsData["usage_count"].(float64) != 0 || analyticsData["revenue_hold_amount"].(float64) != 0 {
+		t.Fatalf("unexpected creator analytics: %#v", analyticsData)
+	}
+	if _, leaked := analyticsData["raw_provider_payload"]; leaked {
+		t.Fatalf("creator analytics leaked provider payload: %#v", analyticsData)
+	}
 }
