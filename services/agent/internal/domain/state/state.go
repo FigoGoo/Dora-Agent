@@ -1,23 +1,25 @@
 package state
 
+import "github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
+
 const (
 	SessionStatusActive   = "active"
 	SessionStatusArchived = "archived"
 	SessionStatusExpired  = "expired"
 
-	RunStatusCreated             = "created"
-	RunStatusRouting             = "routing"
+	RunStatusCreated             = pr1.RunStatusCreated
+	RunStatusRouting             = pr1.RunStatusRouting
 	RunStatusPending             = "pending"
-	RunStatusPlanning            = "planning"
-	RunStatusWaitingInput        = "waiting_input"
-	RunStatusRunning             = "running"
-	RunStatusWaitingConfirmation = "waiting_confirmation"
-	RunStatusFreezing            = "freezing"
-	RunStatusQueued              = "queued"
+	RunStatusPlanning            = pr1.RunStatusPlanning
+	RunStatusWaitingInput        = pr1.RunStatusWaitingInput
+	RunStatusRunning             = pr1.RunStatusRunning
+	RunStatusWaitingConfirmation = pr1.RunStatusWaitingConfirmation
+	RunStatusFreezing            = pr1.RunStatusFreezing
+	RunStatusQueued              = pr1.RunStatusQueued
 	RunStatusResuming            = "resuming"
-	RunStatusCompleted           = "completed"
-	RunStatusFailed              = "failed"
-	RunStatusCancelled           = "cancelled"
+	RunStatusCompleted           = pr1.RunStatusCompleted
+	RunStatusFailed              = pr1.RunStatusFailed
+	RunStatusCancelled           = pr1.RunStatusCancelled
 
 	TaskStatusPending   = "pending"
 	TaskStatusRunning   = "running"

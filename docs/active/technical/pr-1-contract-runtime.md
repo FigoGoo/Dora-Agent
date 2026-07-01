@@ -51,12 +51,13 @@ PR-1 已冻结 Contract Index、StateEnum、RouterDecision 和 AG-UI Envelope。
 - [x] RouterDecision fixture 校验通过。
 - [x] AG-UI fixture 校验通过。
 - [x] `go test ./internal/contracts/pr1` 通过。
-- [ ] 后续 PR 接入该包替代散落常量。
+- [x] Agent Runtime RunStatus 已通过 `services/agent/internal/domain/state` 复用 PR-1 状态常量；`pending` / `resuming` 保留为 Agent 本地恢复与兼容扩展态，并由单测约束不得误入 PR-1 契约。
 
 ## 验证命令
 
 ```bash
 go test ./internal/contracts/pr1
+go test ./services/agent/internal/domain/state
 make active-contract-gate
 make pr0-ci-gate
 ```
@@ -67,6 +68,7 @@ make pr0-ci-gate
 
 ```bash
 go test ./internal/contracts/pr1
+go test ./services/agent/internal/domain/state
 make pr0-ci-gate
 ```
 
@@ -74,5 +76,6 @@ make pr0-ci-gate
 
 ```text
 ok github.com/FigoGoo/Dora-Agent/internal/contracts/pr1
+ok github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state
 PR-0 CI gate passed
 ```
