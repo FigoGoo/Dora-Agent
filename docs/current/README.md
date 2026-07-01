@@ -27,7 +27,7 @@ M0 / PR-1 active 最小契约已冻结
 PR-2 Agent Runtime Contracts 字段级契约已冻结，本地真实 PostgreSQL dry-run / down-test 已完成，远端 CI gate 待 PR 运行确认
 PR-3 Tool/Credit/Asset Contracts 字段级契约已冻结，本地真实 PostgreSQL dry-run / down-test 已完成，远端 CI gate 待 PR 运行确认
 PR-4 Marketplace Contracts 字段级契约已冻结，本地真实 PostgreSQL dry-run / down-test 已完成，远端 CI gate 待 PR 运行确认
-PR-5 E2E Fixtures + Fake Provider + Release Gates 已冻结，本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 已完成，测试环境 HTTP 服务 E2E 自动化入口已完成，完整测试环境执行与报告归档待测试环境 gate
+PR-5 E2E Fixtures + Fake Provider + Release Gates 已冻结，本地 service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke 已完成，测试环境 HTTP 服务 E2E 自动化入口和报告归档模板已完成，完整测试环境执行与通过报告待测试环境 gate
 PR-1 到 PR-5 active 拆分已完成
 已进入 PR-0 开发准备与 CI Gate
 PR-1 到 PR-5 共享契约运行时基础实现已完成并纳入 PR-0 gate

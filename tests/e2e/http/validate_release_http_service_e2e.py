@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import os
+from pathlib import Path
 import sys
 from typing import Any
 from urllib import error, parse, request
@@ -37,6 +39,10 @@ class Config:
     access_token: str
 
 
+def utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def required_env(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
@@ -56,6 +62,97 @@ def load_config() -> Config:
         timeout_seconds=int(os.getenv("RELEASE_TEST_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS))),
         access_token=os.getenv("RELEASE_ACCESS_TOKEN", ""),
     )
+
+
+def new_report(config: Config) -> dict[str, Any]:
+    return {
+        "status": "running",
+        "started_at": utc_now(),
+        "finished_at": "",
+        "business_base_url": config.business_base_url,
+        "agent_base_url": config.agent_base_url,
+        "project_id": config.project_id,
+        "space_id": config.space_id,
+        "trace_id": config.trace_id,
+        "checks": [],
+        "session_id": "",
+        "guide_run_id": "",
+        "normal_run_id": "",
+        "error": "",
+    }
+
+
+def add_report_check(report: dict[str, Any], name: str, detail: str = "") -> None:
+    checks = report.setdefault("checks", [])
+    if isinstance(checks, list):
+        checks.append({"name": name, "detail": detail})
+
+
+def write_markdown_report(path: str, report: dict[str, Any]) -> None:
+    if not path:
+        return
+    report_path = Path(path)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Release HTTP Service E2E Report",
+        "",
+        f"status: {report['status']}",
+        f"started_at: {report['started_at']}",
+        f"finished_at: {report['finished_at']}",
+        "",
+        "## Command",
+        "",
+        "`make release-http-service-e2e`",
+        "",
+        "## Environment",
+        "",
+        f"- RELEASE_BUSINESS_BASE_URL: `{report['business_base_url']}`",
+        f"- RELEASE_AGENT_BASE_URL: `{report['agent_base_url']}`",
+        f"- RELEASE_TEST_PROJECT_ID: `{report['project_id']}`",
+        f"- RELEASE_TEST_SPACE_ID: `{report['space_id']}`",
+        f"- RELEASE_TEST_TRACE_ID: `{report['trace_id']}`",
+        "- RELEASE_ACCESS_TOKEN: not recorded",
+        "",
+        "## Evidence",
+        "",
+    ]
+
+    checks = report.get("checks", [])
+    if isinstance(checks, list) and checks:
+        for check in checks:
+            if not isinstance(check, dict):
+                continue
+            name = check.get("name", "")
+            detail = check.get("detail", "")
+            suffix = f" - {detail}" if detail else ""
+            lines.append(f"- [x] {name}{suffix}")
+    else:
+        lines.append("- [ ] No executed checks recorded.")
+
+    lines.extend(
+        [
+            "",
+            "## Runtime IDs",
+            "",
+            f"- session_id: `{report['session_id'] or 'not_created'}`",
+            f"- guide_run_id: `{report['guide_run_id'] or 'not_created'}`",
+            f"- normal_run_id: `{report['normal_run_id'] or 'not_created'}`",
+            "",
+            "## Unexecuted",
+            "",
+        ],
+    )
+    if report["status"] == "passed":
+        lines.append("未执行项：无（release HTTP service E2E 范围内）")
+    elif report["status"] == "failed":
+        lines.append(f"未执行原因：gate failed before completion: {report['error']}")
+    else:
+        lines.append("未执行原因：gate did not finish.")
+
+    if report["error"]:
+        lines.extend(["", "## Error", "", report["error"]])
+
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def build_url(base_url: str, path: str) -> str:
@@ -260,46 +357,70 @@ def replay_events(config: Config, token: str, run_id: str, limit: int) -> dict[s
 
 def run_gate() -> None:
     config = load_config()
+    report = new_report(config)
+    report_path = os.getenv("RELEASE_HTTP_E2E_REPORT_PATH", "")
     suffix = uuid.uuid4().hex[:12]
 
-    assert_endpoint_ok(config, "business", config.business_base_url, "/healthz")
-    assert_endpoint_ok(config, "business", config.business_base_url, "/readyz")
-    assert_endpoint_ok(config, "agent", config.agent_base_url, "/healthz")
-    assert_endpoint_ok(config, "agent", config.agent_base_url, "/readyz")
+    try:
+        assert_endpoint_ok(config, "business", config.business_base_url, "/healthz")
+        add_report_check(report, "business /healthz")
+        assert_endpoint_ok(config, "business", config.business_base_url, "/readyz")
+        add_report_check(report, "business /readyz")
+        assert_endpoint_ok(config, "agent", config.agent_base_url, "/healthz")
+        add_report_check(report, "agent /healthz")
+        assert_endpoint_ok(config, "agent", config.agent_base_url, "/readyz")
+        add_report_check(report, "agent /readyz")
 
-    token = login(config, suffix)
-    session_id = create_agent_session(config, token, suffix)
+        token = login(config, suffix)
+        add_report_check(report, "Business login", "/api/auth/login")
+        session_id = create_agent_session(config, token, suffix)
+        report["session_id"] = session_id
+        add_report_check(report, "Agent session", "/api/agent/sessions")
 
-    guide_run = create_run(
-        config,
-        token,
-        suffix,
-        session_id,
-        run_intent="entry_guide",
-        client_message_id=f"cm_release_http_guide_{suffix}",
-        text="",
-    )
-    if status_value(guide_run) != "completed":
-        raise ReleaseHTTPServiceE2EError(f"entry guide run should complete: {guide_run!r}")
-    guide_replay = replay_events(config, token, field(guide_run, "run_id"), 50)
-    assert_event_types(guide_replay, "creative.guide.presented", "agent.run.completed")
-    print("[release-http-e2e] entry guide run and replay ok")
+        guide_run = create_run(
+            config,
+            token,
+            suffix,
+            session_id,
+            run_intent="entry_guide",
+            client_message_id=f"cm_release_http_guide_{suffix}",
+            text="",
+        )
+        if status_value(guide_run) != "completed":
+            raise ReleaseHTTPServiceE2EError(f"entry guide run should complete: {guide_run!r}")
+        report["guide_run_id"] = field(guide_run, "run_id")
+        add_report_check(report, "entry guide run completed", "/api/agent/runs")
+        guide_replay = replay_events(config, token, report["guide_run_id"], 50)
+        assert_event_types(guide_replay, "creative.guide.presented", "agent.run.completed")
+        add_report_check(report, "entry guide replay", "creative.guide.presented, agent.run.completed")
+        print("[release-http-e2e] entry guide run and replay ok")
 
-    normal_run = create_run(
-        config,
-        token,
-        suffix,
-        session_id,
-        run_intent="normal",
-        client_message_id=f"cm_release_http_normal_{suffix}",
-        text="帮我做一个产品宣传片，年轻一点",
-    )
-    if status_value(normal_run) != "waiting_input":
-        raise ReleaseHTTPServiceE2EError(f"normal run should stop at router clarify gate: {normal_run!r}")
-    normal_replay = replay_events(config, token, field(normal_run, "run_id"), 100)
-    assert_event_types(normal_replay, "creative.router.decided", "agent.message.completed")
-    print("[release-http-e2e] router clarify run and replay ok")
-    print("[release-http-e2e] release HTTP service E2E passed")
+        normal_run = create_run(
+            config,
+            token,
+            suffix,
+            session_id,
+            run_intent="normal",
+            client_message_id=f"cm_release_http_normal_{suffix}",
+            text="帮我做一个产品宣传片，年轻一点",
+        )
+        if status_value(normal_run) != "waiting_input":
+            raise ReleaseHTTPServiceE2EError(f"normal run should stop at router clarify gate: {normal_run!r}")
+        report["normal_run_id"] = field(normal_run, "run_id")
+        add_report_check(report, "normal run waiting_input", "/api/agent/runs")
+        normal_replay = replay_events(config, token, report["normal_run_id"], 100)
+        assert_event_types(normal_replay, "creative.router.decided", "agent.message.completed")
+        add_report_check(report, "router replay", "creative.router.decided, agent.message.completed")
+        print("[release-http-e2e] router clarify run and replay ok")
+        print("[release-http-e2e] release HTTP service E2E passed")
+        report["status"] = "passed"
+    except ReleaseHTTPServiceE2EError as exc:
+        report["status"] = "failed"
+        report["error"] = str(exc)
+        raise
+    finally:
+        report["finished_at"] = utc_now()
+        write_markdown_report(report_path, report)
 
 
 def main() -> int:

@@ -21,6 +21,7 @@ FULL_HTTP_SMOKE_SCRIPT = REPO_ROOT / "scripts" / "validate-release-full-http-smo
 FULL_HTTP_SMOKE_TEST = REPO_ROOT / "services" / "agent" / "internal" / "e2e" / "release" / "full_http_service_smoke_test.go"
 HTTP_SERVICE_E2E_SCRIPT = REPO_ROOT / "scripts" / "validate-release-http-service-e2e.sh"
 HTTP_SERVICE_E2E_TEST = E2E_ROOT / "http" / "validate_release_http_service_e2e.py"
+HTTP_SERVICE_E2E_REPORT = REPO_ROOT / "tests" / "reports" / "release-http-service-e2e-report.md"
 MAKEFILE = REPO_ROOT / "Makefile"
 ACTIVE_CONTRACT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "active-contract-gates.yml"
 
@@ -140,6 +141,26 @@ REQUIRED_HTTP_SERVICE_E2E_TOKENS = {
     "creative.router.decided",
     "agent.message.completed",
     "waiting_input",
+    "RELEASE_HTTP_E2E_REPORT_PATH",
+    "write_markdown_report",
+}
+
+REQUIRED_HTTP_SERVICE_E2E_REPORT_TOKENS = {
+    "Release HTTP Service E2E Report",
+    "make release-http-service-e2e",
+    "RELEASE_BUSINESS_BASE_URL",
+    "RELEASE_AGENT_BASE_URL",
+    "business /healthz",
+    "business /readyz",
+    "agent /healthz",
+    "agent /readyz",
+    "/api/auth/login",
+    "/api/agent/sessions",
+    "/api/agent/runs",
+    "creative.guide.presented",
+    "agent.run.completed",
+    "creative.router.decided",
+    "agent.message.completed",
 }
 
 
@@ -332,7 +353,7 @@ def validate_full_http_smoke() -> None:
 
 
 def validate_http_service_e2e() -> None:
-    for path in (HTTP_SERVICE_E2E_SCRIPT, HTTP_SERVICE_E2E_TEST, MAKEFILE):
+    for path in (HTTP_SERVICE_E2E_SCRIPT, HTTP_SERVICE_E2E_TEST, HTTP_SERVICE_E2E_REPORT, MAKEFILE):
         if not path.exists():
             fail(f"missing {path}")
 
@@ -345,10 +366,23 @@ def validate_http_service_e2e() -> None:
     for token in (
         "RELEASE_BUSINESS_BASE_URL",
         "RELEASE_AGENT_BASE_URL",
+        "RELEASE_HTTP_E2E_REPORT_PATH",
+        "tests/reports/release-http-service-e2e-report.md",
         "python3 tests/e2e/http/validate_release_http_service_e2e.py",
     ):
         if token not in shell_text:
             fail(f"{HTTP_SERVICE_E2E_SCRIPT}: missing release HTTP service E2E token {token}")
+
+    report_text = HTTP_SERVICE_E2E_REPORT.read_text(encoding="utf-8")
+    for token in REQUIRED_HTTP_SERVICE_E2E_REPORT_TOKENS:
+        if token not in report_text:
+            fail(f"{HTTP_SERVICE_E2E_REPORT}: missing release HTTP service E2E report token {token}")
+    if "未执行但通过" in report_text or "未执行项通过" in report_text or "status: failed" in report_text:
+        fail(f"{HTTP_SERVICE_E2E_REPORT}: release HTTP service E2E report is not a valid releasable artifact")
+    if "status: pending_environment" not in report_text and "status: passed" not in report_text:
+        fail(f"{HTTP_SERVICE_E2E_REPORT}: report status must be pending_environment or passed")
+    if "status: passed" in report_text and "未执行项：无（release HTTP service E2E 范围内）" not in report_text:
+        fail(f"{HTTP_SERVICE_E2E_REPORT}: passed report must declare no unexecuted release HTTP service E2E items")
 
     makefile_text = MAKEFILE.read_text(encoding="utf-8")
     if "release-http-service-e2e" not in makefile_text:

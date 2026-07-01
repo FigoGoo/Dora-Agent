@@ -100,5 +100,5 @@ make active-contract-gate
 - [x] PR-5 本地 Agent + Business 双服务 HTTP smoke 已完成。
 - [x] 正式 JSON Schema validator 接入 CI。
 - [x] PR-5 本地真实浏览器前端联动 smoke 执行完成。
-- [x] PR-5 测试环境 HTTP 服务 E2E 自动化入口完成。
-- [ ] PR-5 完整测试环境 HTTP 服务 E2E 环境执行与报告归档完成前，不进入对应 M1-M6 后续真实流量发布。
+- [x] PR-5 测试环境 HTTP 服务 E2E 自动化入口和报告模板完成。
+- [ ] PR-5 完整测试环境 HTTP 服务 E2E 环境执行与 `status: passed` 报告归档完成前，不进入对应 M1-M6 后续真实流量发布。

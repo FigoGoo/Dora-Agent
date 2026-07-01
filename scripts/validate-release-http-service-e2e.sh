@@ -14,6 +14,9 @@ if [[ -z "${RELEASE_AGENT_BASE_URL:-}" ]]; then
   exit 1
 fi
 
+export RELEASE_HTTP_E2E_REPORT_PATH="${RELEASE_HTTP_E2E_REPORT_PATH:-tests/reports/release-http-service-e2e-report.md}"
+
 echo "== release HTTP service E2E =="
 python3 tests/e2e/http/validate_release_http_service_e2e.py
 echo "release HTTP service E2E passed"
+echo "release HTTP service E2E report: $RELEASE_HTTP_E2E_REPORT_PATH"

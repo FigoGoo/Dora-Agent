@@ -3,8 +3,8 @@
 状态：active  
 owner：测试与验收责任域 / Agent Runtime / Business Service / 前端 / 管理端 / 运维发布责任域 / 文档与契约责任域  
 更新时间：2026-07-01  
-适用范围：PR-5 测试事实源、Fake Provider、E2E suite index、fixture、service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke、测试环境 HTTP 服务 E2E 自动化入口、feature flag、观测和回滚 gate 的基础校验
-相关代码路径：`internal/contracts/releasegate/**`、`services/business/internal/e2e/release/**`、`services/agent/internal/e2e/release/**`、`internal/testredis/**`、`services/agent/internal/events/stream/**`、`services/business/internal/infra/repository/businesscore/marketplace.go`、`scripts/validate-release-full-http-smoke.sh`、`scripts/validate-release-http-service-e2e.sh`、`tests/e2e/http/**`、`tests/e2e/browser/**`
+适用范围：PR-5 测试事实源、Fake Provider、E2E suite index、fixture、service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke、测试环境 HTTP 服务 E2E 自动化入口、测试报告归档模板、feature flag、观测和回滚 gate 的基础校验
+相关代码路径：`internal/contracts/releasegate/**`、`services/business/internal/e2e/release/**`、`services/agent/internal/e2e/release/**`、`internal/testredis/**`、`services/agent/internal/events/stream/**`、`services/business/internal/infra/repository/businesscore/marketplace.go`、`scripts/validate-release-full-http-smoke.sh`、`scripts/validate-release-http-service-e2e.sh`、`tests/e2e/http/**`、`tests/e2e/browser/**`、`tests/reports/release-http-service-e2e-report.md`
 相关契约：`docs/active/contracts/pr-5-e2e-fixtures-release-gates.md`、`tests/e2e/**`、`tests/fixtures/e2e/**`、`docs/active/technical/release-governance.md`
 
 ## 背景
@@ -24,6 +24,7 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 - 提供本地 Agent + Business 双服务 HTTP smoke，验证 Business HTTP 登录、Agent 通过 Kitex 调 Business RPC、Agent HTTP session/run、RouterDecision 和 AG-UI replay。
 - 提供本地真实浏览器前端联动 smoke，验证用户端 Skill 市场安装、创作者 Skill 草稿提交、管理端 settlement hold 释放和内部出账确认的 DOM / fetch / 幂等 key。
 - 提供测试环境 HTTP 服务 E2E 入口，验证已部署 Business / Agent 的 health、ready、登录、Agent session/run、entry guide、RouterDecision 和 AG-UI replay。
+- 提供测试环境 HTTP 服务 E2E 报告模板和自动写入机制，执行时默认覆盖 `tests/reports/release-http-service-e2e-report.md`。
 - 提供 release governance 文本 gate 校验，覆盖 feature flag、观测指标和 rollback token。
 
 ## 非目标
@@ -47,6 +48,7 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 | Full HTTP Service Smoke | `services/agent/internal/e2e/release/full_http_service_smoke_test.go`、`scripts/validate-release-full-http-smoke.sh` | 本地真实 `cmd/business` + `cmd/agent` 双进程，验证 Business HTTP login、Business Kitex RPC、Agent HTTP run 和 AG-UI replay |
 | Browser Smoke | `scripts/validate-release-browser-smoke.sh`、`tests/e2e/browser/release-frontend-browser-smoke.mjs` | 构建用户端 / 管理端，Vite preview + 本地 Chrome 验证 PR-5 前后台联动主路径 |
 | Test Environment HTTP Service E2E | `tests/e2e/http/validate_release_http_service_e2e.py`、`scripts/validate-release-http-service-e2e.sh` | 对已部署测试环境执行 Business / Agent HTTP 主路径验收，需注入 `RELEASE_BUSINESS_BASE_URL` 和 `RELEASE_AGENT_BASE_URL` |
+| Test Environment HTTP Service E2E Report | `tests/reports/release-http-service-e2e-report.md` | 当前为 `pending_environment`；测试环境执行通过后由脚本写入 `status: passed`、运行 ID 和检查项 |
 | Marketplace Guard | `services/business/internal/infra/repository/businesscore/marketplace.go` | `MARKETPLACE_LISTING_SUSPENDED` 新安装守卫，已存在 installation 幂等重放不受影响 |
 
 ## 开发注意事项
@@ -71,8 +73,9 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 - [x] 本地 Agent + Business 双服务 HTTP smoke 串联 Business HTTP login、Business Kitex RPC、Agent HTTP run 和 AG-UI replay 通过。
 - [x] 本地真实浏览器前端联动 smoke 串联用户端 Skill 市场、创作者提交、管理端 settlement release / payout 页面通过。
 - [x] 测试环境 HTTP 服务 E2E 自动化入口覆盖 Business / Agent health、ready、登录、Agent session/run 和 AG-UI replay。
+- [x] 测试环境 HTTP 服务 E2E 报告模板和自动写入机制已完成。
 - [x] release governance feature flag、观测和回滚 token 校验通过。
-- [ ] 后续在完整测试环境执行 `make release-http-service-e2e` 并归档测试报告。
+- [ ] 后续在完整测试环境执行 `make release-http-service-e2e` 并归档 `status: passed` 测试报告。
 
 ## 验证命令
 
@@ -101,6 +104,8 @@ RELEASE_BUSINESS_BASE_URL=https://business.test.example.com \
 RELEASE_AGENT_BASE_URL=https://agent.test.example.com \
 make release-http-service-e2e
 ```
+
+默认报告路径：`tests/reports/release-http-service-e2e-report.md`。如需 CI artifact 路径，可覆盖 `RELEASE_HTTP_E2E_REPORT_PATH`。
 
 ## 本地验证记录
 
@@ -139,4 +144,4 @@ active contract gate passed
 development CI gate passed
 ```
 
-完整测试环境 HTTP 服务 E2E 尚未执行，因为当前本地未提供 `RELEASE_BUSINESS_BASE_URL` 和 `RELEASE_AGENT_BASE_URL`。
+完整测试环境 HTTP 服务 E2E 尚未执行，因为当前本地未提供 `RELEASE_BUSINESS_BASE_URL` 和 `RELEASE_AGENT_BASE_URL`；当前报告状态为 `pending_environment`。
