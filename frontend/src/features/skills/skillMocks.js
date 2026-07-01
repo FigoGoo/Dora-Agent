@@ -1,6 +1,6 @@
-export const skillLibraryTabs = ['我的', '精选'];
+export const skillLibraryTabs = ['市场', '已安装'];
 
-export const skillLibraryFilters = ['全部', '我的创建', '我的保存', '草稿'];
+export const skillLibraryFilters = ['全部', '付费', '免费', '已安装'];
 
 export const skillMocks = [
   {

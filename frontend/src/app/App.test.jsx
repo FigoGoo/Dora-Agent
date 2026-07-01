@@ -163,7 +163,7 @@ describe('DORAIGC static client pages', () => {
 
     const navigation = screen.getByRole('complementary', { name: 'DORAIGC 导航' });
     expect(screen.getByRole('heading', { name: 'Skill' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '我的', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '市场', selected: true })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建Skill' })).toBeInTheDocument();
     expect(screen.getAllByTestId('skill-card')).toHaveLength(10);
     expect(screen.getByText('塔可夫斯基风格诗意短片')).toBeInTheDocument();
@@ -277,10 +277,11 @@ describe('DORAIGC static client pages', () => {
     await user.click(screen.getByRole('button', { name: 'Skill' }));
     expect(window.location.pathname).toBe('/skill');
     expect(screen.getByRole('heading', { name: 'Skill' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '我的', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '市场', selected: true })).toBeInTheDocument();
     expect(screen.getAllByTestId('skill-card')).toHaveLength(10);
     expect(screen.getAllByText('剧情短片（音色参考）')).toHaveLength(2);
-    expect(screen.getByText('审核中')).toBeInTheDocument();
+    expect(screen.getAllByText('付费').length).toBeGreaterThan(0);
+    expect(screen.getByText('未上架')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '精选作品' }));
     expect(window.location.pathname).toBe('/');

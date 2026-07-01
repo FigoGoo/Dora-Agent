@@ -904,7 +904,7 @@ export function LandingPage() {
         {activePage === 'workspace' ? <WorkspacePage onIntent={requestLogin} /> : null}
         {activePage === 'projects' ? <ProjectsPage onIntent={requestLogin} /> : null}
         {activePage === 'assets' ? <AssetsPage onIntent={requestLogin} /> : null}
-        {activePage === 'skills' ? <SkillsPage onIntent={requestLogin} /> : null}
+        {activePage === 'skills' ? <SkillsPage isLoggedIn={isLoggedIn} onIntent={requestLogin} onUseSkill={openWorkspaceInNewTab} /> : null}
         {activePage === 'works' ? <WorksPage onIntent={requestLogin} /> : null}
         {activePage === 'credits' ? <CreditsPage onIntent={requestLogin} /> : null}
       </main>
