@@ -15,6 +15,7 @@ import (
 	runtimeeino "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/eino"
 	runtimeguide "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/guide"
 	runtimerouter "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/router"
+	runtimeskillgraph "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skillgraph"
 )
 
 func (a *App) recordM1RunEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, req CreateRunRequest, traceID string) error {
@@ -94,7 +95,16 @@ func (a *App) recordM1RunEvents(ctx context.Context, auth AuthContextDTO, run *m
 			if decision.RequiresSkillUsageConfirmation {
 				return a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusWaitingConfirmation, "", "")
 			}
-			return a.startM2BoardRuntime(ctx, auth, run, req.UserInput.Text, decisionDigest, traceID)
+			if decision.Decision == pr1.RouterDecisionGenericCreation {
+				return a.startM2BoardRuntime(ctx, auth, run, req.UserInput.Text, decisionDigest, traceID)
+			}
+			spec, err := a.loadM3PublishedSkillSpec(ctx, auth, decision, catalog, traceID)
+			if err != nil {
+				_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_spec_unavailable", err.Error())
+				_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "SKILL_SPEC_UNAVAILABLE", "published skill spec unavailable")
+				return err
+			}
+			return a.startM3SkillRuntime(ctx, auth, run, req.UserInput.Text, decision, decisionDigest, spec, traceID)
 		case pr1.RouterDecisionClarify:
 			if err := a.createM1AssistantMessage(ctx, run, m1ClarifyMessage(decision), map[string]any{
 				"message_kind":           "clarify",
@@ -126,6 +136,72 @@ func (a *App) recordM1RunEvents(ctx context.Context, auth AuthContextDTO, run *m
 	}
 }
 
+func (a *App) loadM3PublishedSkillSpec(ctx context.Context, auth AuthContextDTO, decision pr1.RouterDecision, catalog []runtimerouter.CatalogSkill, traceID string) (SkillSpecDTO, error) {
+	skillID := stringPtrValue(decision.SkillID)
+	if skillID == "" {
+		return SkillSpecDTO{}, apperror.New(apperror.CodeInvalidArgument, "selected skill_id is required")
+	}
+	version := ""
+	for _, skill := range catalog {
+		if skill.SkillID == skillID {
+			version = skill.SkillVersion
+			break
+		}
+	}
+	return a.gateway.GetPublishedSkillSpec(ctx, auth, skillID, version, traceID)
+}
+
+func (a *App) startM3SkillRuntime(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, decision pr1.RouterDecision, routerDecisionDigest string, spec SkillSpecDTO, traceID string) error {
+	runner, err := runtimeeino.NewSkillGraphRunner(ctx, nil)
+	if err != nil {
+		return err
+	}
+	result, err := runner.Execute(ctx, runtimeskillgraph.Input{
+		RunID:                run.ID,
+		ProjectID:            run.ProjectID,
+		SessionID:            run.SessionID,
+		SpaceID:              run.SpaceID,
+		ActorUserID:          auth.ActorUserID,
+		TraceID:              traceID,
+		Prompt:               prompt,
+		SkillID:              spec.SkillID,
+		SkillVersion:         spec.Version,
+		SkillSource:          stringPtrValue(decision.SkillSource),
+		SkillSpecJSON:        spec.SkillSpecJSON,
+		OutputElements:       m3SkillGraphOutputElements(spec.OutputElements),
+		RouterDecisionDigest: routerDecisionDigest,
+	})
+	if err != nil {
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "M3_SKILL_RUNTIME_FAILED", err.Error())
+		_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
+			"error_type": "agent_runtime", "error_code": "M3_SKILL_RUNTIME_FAILED", "user_message": "Skill Graph 编译失败",
+			"retryable": true, "support_trace_id": traceID,
+		})
+		return err
+	}
+	firstSeq, err := a.nextPR2AGUISequence(ctx, run)
+	if err != nil {
+		return err
+	}
+	events, err := rebasePR2AGUIEvents(result.Events, firstSeq)
+	if err != nil {
+		return err
+	}
+	if err := a.repo.SaveBoardGraphForWorkbenchRun(ctx, run, result.GraphTemplate, result.GraphPlan, result.Board, result.Elements, events, routerDecisionDigest, map[string]any{
+		"skill_spec_digest": result.SkillSpecDigest,
+		"skill_runtime":     "published_skill_graph",
+	}); err != nil {
+		return err
+	}
+	a.publishPR2AGUIEvents(ctx, events)
+	if a.snapshotCache != nil {
+		if body, err := json.Marshal(result.Snapshot); err == nil {
+			_ = a.snapshotCache.Set(ctx, runtimestream.BoardSnapshotKey(result.Board.BoardID, result.Board.Version), body, 30*time.Minute)
+		}
+	}
+	return nil
+}
+
 func (a *App) startM2BoardRuntime(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, routerDecisionDigest string, traceID string) error {
 	runner, err := runtimeeino.NewGenericCreationGraphRunner(ctx, nil)
 	if err != nil {
@@ -149,15 +225,15 @@ func (a *App) startM2BoardRuntime(ctx context.Context, auth AuthContextDTO, run 
 		})
 		return err
 	}
-	firstSeq, err := a.nextM2AGUISequence(ctx, run)
+	firstSeq, err := a.nextPR2AGUISequence(ctx, run)
 	if err != nil {
 		return err
 	}
-	events, err := rebaseM2AGUIEvents(result.Events, firstSeq)
+	events, err := rebasePR2AGUIEvents(result.Events, firstSeq)
 	if err != nil {
 		return err
 	}
-	if err := a.repo.SaveGenericCreationForWorkbenchRun(ctx, run, result.GraphTemplate, result.GraphPlan, result.Board, result.Elements, events, routerDecisionDigest); err != nil {
+	if err := a.repo.SaveBoardGraphForWorkbenchRun(ctx, run, result.GraphTemplate, result.GraphPlan, result.Board, result.Elements, events, routerDecisionDigest, nil); err != nil {
 		return err
 	}
 	a.publishPR2AGUIEvents(ctx, events)
@@ -169,7 +245,26 @@ func (a *App) startM2BoardRuntime(ctx context.Context, auth AuthContextDTO, run 
 	return nil
 }
 
-func (a *App) nextM2AGUISequence(ctx context.Context, run *model.Run) (int64, error) {
+func m3SkillGraphOutputElements(items []SkillOutputElementDTO) []runtimeskillgraph.OutputElement {
+	out := make([]runtimeskillgraph.OutputElement, 0, len(items))
+	for _, item := range items {
+		out = append(out, runtimeskillgraph.OutputElement{
+			ElementType:  item.ElementType,
+			ElementName:  item.ElementName,
+			Required:     item.Required,
+			UseDraft:     item.UseDraft,
+			UseFinal:     item.UseFinal,
+			Editable:     item.Editable,
+			Referable:    item.Referable,
+			DisplayOrder: item.DisplayOrder,
+			DisplaySlot:  item.DisplaySlot,
+			SchemaJSON:   item.SchemaJSON,
+		})
+	}
+	return out
+}
+
+func (a *App) nextPR2AGUISequence(ctx context.Context, run *model.Run) (int64, error) {
 	session, err := a.repo.GetSession(ctx, run.SessionID)
 	if err != nil {
 		return 0, err
@@ -177,9 +272,9 @@ func (a *App) nextM2AGUISequence(ctx context.Context, run *model.Run) (int64, er
 	return session.LastEventSequence + 1, nil
 }
 
-func rebaseM2AGUIEvents(events []pr1.AGUIEnvelope, firstSeq int64) ([]pr1.AGUIEnvelope, error) {
+func rebasePR2AGUIEvents(events []pr1.AGUIEnvelope, firstSeq int64) ([]pr1.AGUIEnvelope, error) {
 	if len(events) == 0 {
-		return nil, apperror.New(apperror.CodeInternal, "M2 AG-UI events are required")
+		return nil, apperror.New(apperror.CodeInternal, "PR-2 AG-UI events are required")
 	}
 	out := make([]pr1.AGUIEnvelope, 0, len(events))
 	for index, event := range events {

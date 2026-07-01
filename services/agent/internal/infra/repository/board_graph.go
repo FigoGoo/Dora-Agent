@@ -76,7 +76,7 @@ func (r *Repository) SaveGenericCreationState(
 	})
 }
 
-func (r *Repository) SaveGenericCreationForWorkbenchRun(
+func (r *Repository) SaveBoardGraphForWorkbenchRun(
 	ctx context.Context,
 	run *model.Run,
 	template pr2.GraphTemplate,
@@ -85,6 +85,7 @@ func (r *Repository) SaveGenericCreationForWorkbenchRun(
 	elements []pr2.CreativeElement,
 	events []pr1.AGUIEnvelope,
 	routerDecisionDigest string,
+	extraSelection map[string]any,
 ) error {
 	if run == nil {
 		return errors.New("run is required")
@@ -140,6 +141,9 @@ func (r *Repository) SaveGenericCreationForWorkbenchRun(
 		selection["current_graph_plan_id"] = plan.GraphPlanID
 		selection["board_status"] = board.Status
 		selection["board_version"] = board.Version
+		for key, value := range extraSelection {
+			selection[key] = value
+		}
 		if err := tx.Model(&model.Run{}).
 			Where("id = ? AND deleted_at IS NULL", run.ID).
 			Update("skill_selection", mustJSON(selection)).Error; err != nil {

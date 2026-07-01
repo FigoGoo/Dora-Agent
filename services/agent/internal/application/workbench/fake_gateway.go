@@ -2,6 +2,7 @@ package workbench
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
 )
@@ -104,8 +105,29 @@ func (g StaticGateway) GetPublishedSkillSpec(ctx context.Context, auth AuthConte
 	if g.SkillSpec.SkillID != "" {
 		return g.SkillSpec, nil
 	}
+	if version == "" {
+		version = "1.0.0"
+	}
+	specJSON := fmt.Sprintf(`{
+		"schema_version":"skill_runtime_spec.v1",
+		"skill_id":%q,
+		"version":%q,
+		"status":"published",
+		"level":"L0",
+		"scope":"system_default",
+		"stages":["brief","board_review"],
+		"graph_template":{
+			"entry_node":"brief_builder",
+			"nodes":[
+				{"node_key":"brief_builder","node_type":"llm","display_name":"生成 brief"},
+				{"node_key":"board_review_gate","node_type":"user_gate","display_name":"Board 审核"}
+			],
+			"edges":[{"from":"brief_builder","to":"board_review_gate"}],
+			"terminal_nodes":["board_review_gate"]
+		}
+	}`, skillID, version)
 	return SkillSpecDTO{
-		SkillID: skillID, Version: version, SkillSpecJSON: `{"name":"static"}`, OutputSchemaJSON: `{"type":"object"}`,
+		SkillID: skillID, Version: version, SkillSpecJSON: specJSON, OutputSchemaJSON: `{"type":"object"}`,
 		ToolRefs: []string{"image_generate:model_generation"}, MemoryPolicyJSON: `{"enabled":true}`,
 		ConfirmationPolicyJSON: `{"requires_confirmation":false}`, ExecutionPolicySummaryJSON: `{"tool_refs":["image_generate:model_generation"]}`,
 		OutputElements: []SkillOutputElementDTO{{

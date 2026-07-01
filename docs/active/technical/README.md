@@ -13,6 +13,7 @@ owner：文档与契约责任域 / Agent 服务责任域 / 业务服务责任域
 | `pr-0-development-ci-gate.md` | PR-0 开发准备、CI gate、本地验证和后续 PR 准入 |
 | `pr-1-contract-runtime.md` | PR-1 Contract Runtime 基础实现、共享 Go 类型和 fixture 漂移防护 |
 | `pr-2-agent-runtime-board-graph.md` | PR-2 Agent Runtime / Board / Graph 基础实现和 fixture 漂移防护 |
+| `eino-graph-runtime.md` | M3 Published Skill Runtime Spec 与 Eino Graph Runtime 实现 |
 | `pr-3-tool-credit-asset.md` | PR-3 Tool / Credit / Asset 基础实现和 fixture 漂移防护 |
 | `pr-4-marketplace-skill-usage-settlement.md` | PR-4 Marketplace / SkillUsage / Settlement 基础实现和 fixture 漂移防护 |
 | `pr-5-e2e-fake-provider-release-gate.md` | PR-5 E2E / Fake Provider / Release Gate 基础实现和 fixture 漂移防护 |

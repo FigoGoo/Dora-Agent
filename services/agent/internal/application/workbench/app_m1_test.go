@@ -47,7 +47,7 @@ func TestM1EntryGuideRunEmitsGuideOnly(t *testing.T) {
 	}
 }
 
-func TestM2NormalRunRoutesAndCreatesBoardWithoutToolOrCredit(t *testing.T) {
+func TestM3NormalRunRoutesPublishedSkillAndCreatesBoardWithoutToolOrCredit(t *testing.T) {
 	app, gateway := newM1App(t)
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
 	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{
@@ -65,7 +65,7 @@ func TestM2NormalRunRoutesAndCreatesBoardWithoutToolOrCredit(t *testing.T) {
 		t.Fatalf("create route run: %v", err)
 	}
 	if run.Status != state.RunStatusWaitingConfirmation {
-		t.Fatalf("M2 run should wait for Board review after decision, got %#v", run)
+		t.Fatalf("M3 run should wait for Board review after Skill graph, got %#v", run)
 	}
 	events := m1Events(t, app, run.RunID)
 	if !hasEvent(events, "creative.router.decided") || !hasEvent(events, "agent.skill.selected") {
@@ -91,8 +91,8 @@ func TestM2NormalRunRoutesAndCreatesBoardWithoutToolOrCredit(t *testing.T) {
 	selection := m1JSONMap(t, persisted.SkillSelection)
 	boardID, _ := selection["current_board_id"].(string)
 	graphPlanID, _ := selection["current_graph_plan_id"].(string)
-	if selection["skill_id"] != "skill_city_tourism_video" || selection["router_decision_digest"] == "" || boardID == "" || graphPlanID == "" {
-		t.Fatalf("router decision and M2 board were not persisted in run skill_selection: %#v", selection)
+	if selection["skill_id"] != "skill_city_tourism_video" || selection["router_decision_digest"] == "" || selection["skill_spec_digest"] == "" || boardID == "" || graphPlanID == "" {
+		t.Fatalf("router decision and M3 Skill graph metadata were not persisted in run skill_selection: %#v", selection)
 	}
 	board, err := app.repo.GetCreativeBoardV1(t.Context(), boardID)
 	if err != nil {
@@ -115,6 +115,13 @@ func TestM2NormalRunRoutesAndCreatesBoardWithoutToolOrCredit(t *testing.T) {
 	if len(pr2Events) != 2 || pr2Events[0].EventType != pr2.EventTypeGraphPlanCreated || pr2Events[1].EventType != pr2.EventTypeBoardSnapshotUpdated {
 		t.Fatalf("M2 should persist graph+board AG-UI events, got %#v", pr2Events)
 	}
+	plan, err := app.repo.GetGraphPlanV1(t.Context(), graphPlanID)
+	if err != nil {
+		t.Fatalf("get graph plan: %v", err)
+	}
+	if plan.GraphTemplateID == "gtemplate_generic_creation" || plan.ValueDeliveredStage != pr2.ValueDeliveredStageStoryboardReady {
+		t.Fatalf("expected compiled Skill graph plan, got %#v", plan)
+	}
 	replay, err := app.ReplayEvents(t.Context(), auth, run.RunID, 0, 20, "trace-m1-route")
 	if err != nil {
 		t.Fatalf("replay merged events: %v", err)
@@ -122,8 +129,11 @@ func TestM2NormalRunRoutesAndCreatesBoardWithoutToolOrCredit(t *testing.T) {
 	if !m1HasReplayType(replay.Events, "creative.router.decided") || !m1HasReplayType(replay.Events, pr2.EventTypeGraphPlanCreated) || !m1HasReplayType(replay.Events, pr2.EventTypeBoardSnapshotUpdated) {
 		t.Fatalf("merged replay missing router or M2 events: %#v", replay.Events)
 	}
+	if !containsCall(gateway.calls, "GetPublishedSkillSpec") {
+		t.Fatalf("M3 route must load published Skill spec, calls=%v", gateway.calls)
+	}
 	if containsCall(gateway.calls, "ListAvailableGenerationModels") || containsCall(gateway.calls, "EstimateGenerationCredits") || containsCall(gateway.calls, "FreezeCredits") {
-		t.Fatalf("M1 route must not call model/credit RPCs: %v", gateway.calls)
+		t.Fatalf("M3 route must not call model/credit RPCs: %v", gateway.calls)
 	}
 }
 
@@ -190,6 +200,38 @@ func newM1App(t *testing.T) (*App, *recordingGateway) {
 				SkillID: "skill_generic_creation", SkillName: "自由创作", SkillScope: "system_builtin", Version: "1.0.0", Status: "published",
 				RouteHints: map[string]string{"keywords": "自由创作,通用创作", "output_types": "brief,prompt", "priority": "1", "skill_source": "system_builtin"},
 			},
+		},
+		SkillSpec: SkillSpecDTO{
+			SkillID:  "skill_city_tourism_video",
+			Version:  "1.0.0",
+			ToolRefs: []string{},
+			SkillSpecJSON: `{
+				"schema_version":"skill_runtime_spec.v1",
+				"skill_id":"skill_city_tourism_video",
+				"version":"1.0.0",
+				"status":"published",
+				"level":"L3",
+				"scope":"system_default",
+				"stages":["brief","storyboard","board_review"],
+				"graph_template":{
+					"entry_node":"brief_builder",
+					"nodes":[
+						{"node_key":"brief_builder","node_type":"llm","display_name":"生成 brief"},
+						{"node_key":"storyboard_planner","node_type":"llm","display_name":"生成分镜"},
+						{"node_key":"board_review_gate","node_type":"user_gate","display_name":"Board 审核"}
+					],
+					"edges":[
+						{"from":"brief_builder","to":"storyboard_planner"},
+						{"from":"storyboard_planner","to":"board_review_gate"}
+					],
+					"terminal_nodes":["board_review_gate"]
+				}
+			}`,
+			OutputSchemaJSON:           `{"type":"object"}`,
+			ConfirmationPolicyJSON:     `{"requires_confirmation":false}`,
+			ExecutionPolicySummaryJSON: `{"tool_refs":[]}`,
+			OutputElements:             []SkillOutputElementDTO{{ElementType: "storyboard_frame", ElementName: "分镜", Required: true, UseDraft: true, UseFinal: true, Editable: true, Referable: true, DisplayOrder: 1, DisplaySlot: "board"}},
+			MemoryPolicyJSON:           `{"enabled":false}`,
 		},
 	}}
 	return New(repository.New(db.DB), gateway, "m1-service"), gateway
