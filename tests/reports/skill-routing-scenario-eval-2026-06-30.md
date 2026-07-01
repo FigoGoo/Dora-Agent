@@ -80,14 +80,15 @@ scripts/eval-skill-routing.sh
 
 - 本轮验证的是 Skill 语义路由与 seed 可发布结构，不声称文本类 Skill 已完成端到端文本资产生成。
 - Agent 当前生成链路仍偏 image-first；文本类 output elements 会进入 `skill_selection` snapshot，但最终产物组织仍需要后续支持文本/结构化 asset carrier。
-- `scripts/eval-skill-routing.sh` 内嵌了一份路由逻辑，本轮已与生产 Router 同步。后续建议改为直接调用 Go router 包，避免脚本和生产实现漂移。
+- `scripts/eval-skill-routing.sh` 已改为调用 `services/agent/cmd/skill-routing-eval`，评估命令内部复用生产 `services/agent/internal/runtime/skill` Router，不再维护脚本内嵌路由逻辑。
 
 ## 验证命令
 
 | 命令 | 结果 |
 | --- | --- |
 | `docker exec -i doraigc-postgres psql -v ON_ERROR_STOP=1 -U doraigc -d doraigc < tests/business/seed/business_core_seed.sql` | 通过 |
-| `scripts/eval-skill-routing.sh` | 通过，24/24 |
+| `scripts/eval-skill-routing.sh` | 2026-06-30 通过，24/24；2026-07-01 当前环境缺少 `doraigc-postgres` 容器，未重跑 DB 导出段 |
+| `go test ./services/agent/cmd/skill-routing-eval ./services/agent/internal/runtime/skill` | 通过 |
 | `go test ./services/agent/internal/runtime/skill -count=1` | 通过 |
 | `bash -n scripts/eval-skill-routing.sh` | 通过 |
 
