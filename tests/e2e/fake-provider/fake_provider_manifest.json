@@ -3,7 +3,7 @@
   "status": "active",
   "owner": "测试与验收责任域 / Tool Runtime",
   "updated_at": "2026-07-01",
-  "purpose": "PR-5 E2E 使用的确定性 fake provider 行为清单，禁止在 release gate 中直接依赖真实 provider。",
+  "purpose": "release E2E 使用的确定性 fake provider 行为清单，禁止在 release gate 中直接依赖真实 provider。",
   "providers": [
     {
       "provider_id": "fake_text_model",

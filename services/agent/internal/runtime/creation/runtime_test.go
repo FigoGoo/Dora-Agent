@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
 )
 
-func TestExecuteGenericCreationBuildsPR2Objects(t *testing.T) {
+func TestExecuteGenericCreationBuildsBoardGraphObjects(t *testing.T) {
 	runtime := New(fixedClock)
 
 	result, err := runtime.ExecuteGenericCreation(context.Background(), GenericCreationInput{
@@ -25,16 +25,16 @@ func TestExecuteGenericCreationBuildsPR2Objects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute generic creation: %v", err)
 	}
-	if err := pr2.ValidateGenericGraphFixture(result.GenericGraph, result.GraphTemplate, result.GraphPlan); err != nil {
+	if err := boardgraph.ValidateGenericGraphFixture(result.GenericGraph, result.GraphTemplate, result.GraphPlan); err != nil {
 		t.Fatalf("generic graph contract: %v", err)
 	}
-	if err := pr2.ValidateBoardCreation(result.Board, result.Elements); err != nil {
+	if err := boardgraph.ValidateBoardCreation(result.Board, result.Elements); err != nil {
 		t.Fatalf("board creation contract: %v", err)
 	}
-	if err := pr2.ValidateBoardSnapshot(result.Snapshot); err != nil {
+	if err := boardgraph.ValidateBoardSnapshot(result.Snapshot); err != nil {
 		t.Fatalf("board snapshot contract: %v", err)
 	}
-	if err := pr1.ValidateAGUISequence(result.Events); err != nil {
+	if err := foundation.ValidateAGUISequence(result.Events); err != nil {
 		t.Fatalf("agui sequence contract: %v", err)
 	}
 	if result.GenericGraph.MarketplaceListingID != nil || result.GenericGraph.UsageFee != 0 {
@@ -43,7 +43,7 @@ func TestExecuteGenericCreationBuildsPR2Objects(t *testing.T) {
 	if result.Board.ToolPlanAllowed {
 		t.Fatalf("board must not allow ToolPlan before approval")
 	}
-	if result.Events[0].EventType != pr2.EventTypeGraphPlanCreated || result.Events[1].EventType != pr2.EventTypeBoardSnapshotUpdated {
+	if result.Events[0].EventType != boardgraph.EventTypeGraphPlanCreated || result.Events[1].EventType != boardgraph.EventTypeBoardSnapshotUpdated {
 		t.Fatalf("unexpected event order: %s, %s", result.Events[0].EventType, result.Events[1].EventType)
 	}
 }
@@ -106,7 +106,7 @@ func TestApproveBoardEnablesToolPlanGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("approve board: %v", err)
 	}
-	if err := pr2.ValidateBoardApproval(created.Board, approved.Patch, approved.Board); err != nil {
+	if err := boardgraph.ValidateBoardApproval(created.Board, approved.Patch, approved.Board); err != nil {
 		t.Fatalf("approval contract: %v", err)
 	}
 	if approved.Board.Status != "approved" || !approved.Board.ToolPlanAllowed {

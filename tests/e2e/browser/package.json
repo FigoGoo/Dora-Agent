@@ -1,10 +1,10 @@
 {
-  "name": "dora-pr5-browser-e2e",
+  "name": "dora-release-browser-e2e",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "smoke": "node pr5-frontend-browser-smoke.mjs"
+    "smoke": "node release-frontend-browser-smoke.mjs"
   },
   "devDependencies": {
     "playwright-core": "1.61.1"

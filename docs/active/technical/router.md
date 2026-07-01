@@ -101,8 +101,8 @@ M1 保留 ChatModel Router 的结构化输出边界，当前本地实现作为 f
 
 ```bash
 go test ./services/agent/internal/application/workbench -run 'TestM1'
-go test ./services/agent/internal/application/workbench ./services/agent/internal/runtime/router ./services/agent/internal/runtime/guide ./internal/contracts/pr1
-python3 tests/contract/validate_pr1_contracts.py
+go test ./services/agent/internal/application/workbench ./services/agent/internal/runtime/router ./services/agent/internal/runtime/guide ./internal/contracts/foundation
+python3 tests/contract/validate_foundation_contracts.py
 npm --prefix frontend test -- src/features/agent/agui.test.js src/app/App.test.jsx
 ```
 

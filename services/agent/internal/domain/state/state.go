@@ -1,25 +1,25 @@
 package state
 
-import "github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
+import "github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
 
 const (
 	SessionStatusActive   = "active"
 	SessionStatusArchived = "archived"
 	SessionStatusExpired  = "expired"
 
-	RunStatusCreated             = pr1.RunStatusCreated
-	RunStatusRouting             = pr1.RunStatusRouting
+	RunStatusCreated             = foundation.RunStatusCreated
+	RunStatusRouting             = foundation.RunStatusRouting
 	RunStatusPending             = "pending"
-	RunStatusPlanning            = pr1.RunStatusPlanning
-	RunStatusWaitingInput        = pr1.RunStatusWaitingInput
-	RunStatusRunning             = pr1.RunStatusRunning
-	RunStatusWaitingConfirmation = pr1.RunStatusWaitingConfirmation
-	RunStatusFreezing            = pr1.RunStatusFreezing
-	RunStatusQueued              = pr1.RunStatusQueued
+	RunStatusPlanning            = foundation.RunStatusPlanning
+	RunStatusWaitingInput        = foundation.RunStatusWaitingInput
+	RunStatusRunning             = foundation.RunStatusRunning
+	RunStatusWaitingConfirmation = foundation.RunStatusWaitingConfirmation
+	RunStatusFreezing            = foundation.RunStatusFreezing
+	RunStatusQueued              = foundation.RunStatusQueued
 	RunStatusResuming            = "resuming"
-	RunStatusCompleted           = pr1.RunStatusCompleted
-	RunStatusFailed              = pr1.RunStatusFailed
-	RunStatusCancelled           = pr1.RunStatusCancelled
+	RunStatusCompleted           = foundation.RunStatusCompleted
+	RunStatusFailed              = foundation.RunStatusFailed
+	RunStatusCancelled           = foundation.RunStatusCancelled
 
 	TaskStatusPending   = "pending"
 	TaskStatusRunning   = "running"

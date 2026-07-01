@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/creation"
 	"github.com/cloudwego/eino/compose"
 )
@@ -122,7 +122,7 @@ func parseGenericBrief(ctx context.Context, input creation.GenericCreationInput)
 		return genericCreationStage{}, errors.New("prompt is required")
 	}
 	if input.RouterDecisionDigest != "" {
-		if err := pr1.ValidateDigest(input.RouterDecisionDigest); err != nil {
+		if err := foundation.ValidateDigest(input.RouterDecisionDigest); err != nil {
 			return genericCreationStage{}, fmt.Errorf("router_decision_digest: %w", err)
 		}
 	}
@@ -168,16 +168,16 @@ func recommendGenericSkills(ctx context.Context, result creation.GenericCreation
 }
 
 func validateGenericCreationOutput(result creation.GenericCreationResult) error {
-	if err := pr2.ValidateGenericGraphFixture(result.GenericGraph, result.GraphTemplate, result.GraphPlan); err != nil {
+	if err := boardgraph.ValidateGenericGraphFixture(result.GenericGraph, result.GraphTemplate, result.GraphPlan); err != nil {
 		return err
 	}
-	if err := pr2.ValidateBoardCreation(result.Board, result.Elements); err != nil {
+	if err := boardgraph.ValidateBoardCreation(result.Board, result.Elements); err != nil {
 		return err
 	}
-	if err := pr2.ValidateBoardSnapshot(result.Snapshot); err != nil {
+	if err := boardgraph.ValidateBoardSnapshot(result.Snapshot); err != nil {
 		return err
 	}
-	return pr1.ValidateAGUISequence(result.Events)
+	return foundation.ValidateAGUISequence(result.Events)
 }
 
 func summarizeGenericPrompt(prompt string) string {

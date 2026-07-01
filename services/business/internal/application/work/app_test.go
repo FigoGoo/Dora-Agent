@@ -429,7 +429,7 @@ func workShareEvidence(traceID, title, description string, tags []string) *busin
 		SafetyEvidenceId: "safe_work_share_" + strings.ReplaceAll(traceID, "-", "_"),
 		Scene:            "work_share", Result_: "passed", TargetType: "work_share_text",
 		EvaluatedObjectDigest: ShareTextDigest(title, description, tags),
-		PolicyVersion:         "local-m5", EvidenceVersion: "2026-06-28",
+		PolicyVersion:         "local-work", EvidenceVersion: "2026-06-28",
 		EvaluatedAt: time.Now().UTC().Format(time.RFC3339Nano), ExpiresAt: &expires, TraceId: traceID,
 	}
 }

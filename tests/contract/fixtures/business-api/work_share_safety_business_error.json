@@ -15,7 +15,7 @@
       "target_type": "work_share_text",
       "result": "passed",
       "evaluated_object_digest": "sha256:original-title-description-tags",
-      "policy_version": "local-m5",
+      "policy_version": "local-work_marketplace",
       "evidence_version": "2026-06-28",
       "evaluated_at": "2026-06-27T00:00:00Z",
       "expires_at": "2026-06-27T00:10:00Z",

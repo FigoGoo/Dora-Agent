@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr4"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/skillmarket"
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
 	marketplaceapi "github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessskillmarketplace"
@@ -21,10 +21,10 @@ func TestBusinessSkillMarketplaceRPCUsageLifecycle(t *testing.T) {
 	app := marketplaceapp.New(repo)
 
 	var fixture struct {
-		SkillPackage  pr4.SkillPackage       `json:"skill_package"`
-		SkillVersion  pr4.SkillVersion       `json:"skill_version"`
-		PricingPolicy pr4.SkillPricingPolicy `json:"pricing_policy"`
-		Listing       pr4.MarketplaceListing `json:"listing"`
+		SkillPackage  skillmarket.SkillPackage       `json:"skill_package"`
+		SkillVersion  skillmarket.SkillVersion       `json:"skill_version"`
+		PricingPolicy skillmarket.SkillPricingPolicy `json:"pricing_policy"`
+		Listing       skillmarket.MarketplaceListing `json:"listing"`
 	}
 	readMarketplaceRPCFixture(t, "tests/fixtures/contracts/marketplace/creator_submit_approve_publish.json", &fixture)
 	if err := repo.SaveCreatorPublishFlowV1(t.Context(), fixture.SkillPackage, fixture.SkillVersion, fixture.PricingPolicy, fixture.Listing); err != nil {
@@ -67,7 +67,7 @@ func TestBusinessSkillMarketplaceRPCUsageLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install marketplace skill: %v", err)
 	}
-	if installed.Installation.AccountScope != marketplaceapi.InstallationScope_PERSONAL || installed.Installation.VersionStrategy != pr4.VersionStrategyLatestPublished {
+	if installed.Installation.AccountScope != marketplaceapi.InstallationScope_PERSONAL || installed.Installation.VersionStrategy != skillmarket.VersionStrategyLatestPublished {
 		t.Fatalf("unexpected installation: %#v", installed.Installation)
 	}
 
@@ -145,10 +145,10 @@ func TestBusinessSkillMarketplaceRPCUsageLifecycle(t *testing.T) {
 }
 
 func createFrozenMarketplaceRPCUsage(t *testing.T, handler *Handler, auth *businessagent.AuthContext, fixture struct {
-	SkillPackage  pr4.SkillPackage       `json:"skill_package"`
-	SkillVersion  pr4.SkillVersion       `json:"skill_version"`
-	PricingPolicy pr4.SkillPricingPolicy `json:"pricing_policy"`
-	Listing       pr4.MarketplaceListing `json:"listing"`
+	SkillPackage  skillmarket.SkillPackage       `json:"skill_package"`
+	SkillVersion  skillmarket.SkillVersion       `json:"skill_version"`
+	PricingPolicy skillmarket.SkillPricingPolicy `json:"pricing_policy"`
+	Listing       skillmarket.MarketplaceListing `json:"listing"`
 }, runID string) (*marketplaceapi.EstimateSkillUsageCreditsResponse, *marketplaceapi.CreateSkillUsageRecordResponse) {
 	t.Helper()
 	estimate, err := handler.EstimateSkillUsageCredits(t.Context(), &marketplaceapi.EstimateSkillUsageCreditsRequest{

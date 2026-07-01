@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -24,8 +24,8 @@ const (
 var ErrLockNotOwned = errors.New("lock is not owned by caller")
 
 type AGUIEventBus interface {
-	PublishAGUI(ctx context.Context, event pr1.AGUIEnvelope) error
-	ReplayAGUI(ctx context.Context, runID string, afterSeq int64, limit int) ([]pr1.AGUIEnvelope, error)
+	PublishAGUI(ctx context.Context, event foundation.AGUIEnvelope) error
+	ReplayAGUI(ctx context.Context, runID string, afterSeq int64, limit int) ([]foundation.AGUIEnvelope, error)
 }
 
 type SnapshotCache interface {
@@ -61,22 +61,22 @@ func TurnLockKey(runID string) string {
 
 type MemoryAGUIEventBus struct {
 	mu     sync.RWMutex
-	events map[string][]pr1.AGUIEnvelope
+	events map[string][]foundation.AGUIEnvelope
 	seen   map[string]map[string]struct{}
 }
 
 func NewMemoryAGUIEventBus() *MemoryAGUIEventBus {
 	return &MemoryAGUIEventBus{
-		events: map[string][]pr1.AGUIEnvelope{},
+		events: map[string][]foundation.AGUIEnvelope{},
 		seen:   map[string]map[string]struct{}{},
 	}
 }
 
-func (b *MemoryAGUIEventBus) PublishAGUI(ctx context.Context, event pr1.AGUIEnvelope) error {
+func (b *MemoryAGUIEventBus) PublishAGUI(ctx context.Context, event foundation.AGUIEnvelope) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := pr1.ValidateAGUIEnvelope(event); err != nil {
+	if err := foundation.ValidateAGUIEnvelope(event); err != nil {
 		return err
 	}
 	b.mu.Lock()
@@ -92,16 +92,16 @@ func (b *MemoryAGUIEventBus) PublishAGUI(ctx context.Context, event pr1.AGUIEnve
 	return nil
 }
 
-func (b *MemoryAGUIEventBus) ReplayAGUI(ctx context.Context, runID string, afterSeq int64, limit int) ([]pr1.AGUIEnvelope, error) {
+func (b *MemoryAGUIEventBus) ReplayAGUI(ctx context.Context, runID string, afterSeq int64, limit int) ([]foundation.AGUIEnvelope, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	limit = normalizeReplayLimit(limit)
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	events := append([]pr1.AGUIEnvelope(nil), b.events[strings.TrimSpace(runID)]...)
+	events := append([]foundation.AGUIEnvelope(nil), b.events[strings.TrimSpace(runID)]...)
 	sort.Slice(events, func(i, j int) bool { return events[i].Seq < events[j].Seq })
-	out := make([]pr1.AGUIEnvelope, 0, min(limit, len(events)))
+	out := make([]foundation.AGUIEnvelope, 0, min(limit, len(events)))
 	for _, event := range events {
 		if event.Seq <= afterSeq {
 			continue
@@ -129,8 +129,8 @@ func NewRedisAGUIEventBus(client redis.Cmdable, maxLen int64) (*RedisAGUIEventBu
 	return &RedisAGUIEventBus{client: client, maxLen: maxLen}, nil
 }
 
-func (b *RedisAGUIEventBus) PublishAGUI(ctx context.Context, event pr1.AGUIEnvelope) error {
-	if err := pr1.ValidateAGUIEnvelope(event); err != nil {
+func (b *RedisAGUIEventBus) PublishAGUI(ctx context.Context, event foundation.AGUIEnvelope) error {
+	if err := foundation.ValidateAGUIEnvelope(event); err != nil {
 		return err
 	}
 	body, err := json.Marshal(event)
@@ -161,23 +161,23 @@ return 1
 	).Err()
 }
 
-func (b *RedisAGUIEventBus) ReplayAGUI(ctx context.Context, runID string, afterSeq int64, limit int) ([]pr1.AGUIEnvelope, error) {
+func (b *RedisAGUIEventBus) ReplayAGUI(ctx context.Context, runID string, afterSeq int64, limit int) ([]foundation.AGUIEnvelope, error) {
 	limit = normalizeReplayLimit(limit)
 	rows, err := b.client.XRange(ctx, RunEventsKey(runID), "-", "+").Result()
 	if err != nil {
 		return nil, err
 	}
-	events := make([]pr1.AGUIEnvelope, 0, min(limit, len(rows)))
+	events := make([]foundation.AGUIEnvelope, 0, min(limit, len(rows)))
 	for _, row := range rows {
 		raw, ok := row.Values["event"].(string)
 		if !ok {
 			return nil, fmt.Errorf("redis event %s missing event payload", row.ID)
 		}
-		var event pr1.AGUIEnvelope
+		var event foundation.AGUIEnvelope
 		if err := json.Unmarshal([]byte(raw), &event); err != nil {
 			return nil, err
 		}
-		if err := pr1.ValidateAGUIEnvelope(event); err != nil {
+		if err := foundation.ValidateAGUIEnvelope(event); err != nil {
 			return nil, err
 		}
 		if event.Seq <= afterSeq {

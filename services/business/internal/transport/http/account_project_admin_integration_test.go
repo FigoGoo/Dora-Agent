@@ -20,8 +20,8 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/transport/rpc"
 )
 
-func TestM2BusinessHTTPAndRPCIdentityProject(t *testing.T) {
-	db := testdb.StartPostgres(t, "dora_business_m2")
+func TestAccountProjectBusinessHTTPAndRPCIdentityProject(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_business_account-project")
 	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/2026-06-27-business-core/business")
 	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
 	testdb.ExecSQL(t, db.DB, testdb.MustReadSQL(t, "tests/business/seed/business_core_seed.sql"))
@@ -43,7 +43,7 @@ func TestM2BusinessHTTPAndRPCIdentityProject(t *testing.T) {
 	seedProject := requestJSON(t, router, http.MethodGet, "/api/projects/prj_active_1001", userToken, "", nil)
 	baseUpdatedAt := seedProject["data"].(map[string]any)["updated_at"].(string)
 	updated := requestJSON(t, router, http.MethodPatch, "/api/projects/prj_active_1001", userToken, "idem-project-update", map[string]any{
-		"title": "M2 Updated Project", "cover_asset_id": "ast_generated_1001", "base_updated_at": baseUpdatedAt,
+		"title": "Account Project Updated Project", "cover_asset_id": "ast_generated_1001", "base_updated_at": baseUpdatedAt,
 	})
 	if updated["data"].(map[string]any)["cover_asset_id"] != "ast_generated_1001" {
 		t.Fatalf("project update did not keep project cover: %#v", updated)
@@ -64,7 +64,7 @@ func TestM2BusinessHTTPAndRPCIdentityProject(t *testing.T) {
 	}
 
 	enterprise := requestJSON(t, router, http.MethodPost, "/api/enterprise/register", userToken, "idem-enterprise-create", map[string]any{
-		"enterprise_name": "M2 Enterprise", "owner_display_name": "Owner", "contact_email": "owner@dora.local",
+		"enterprise_name": "Account Project Enterprise", "owner_display_name": "Owner", "contact_email": "owner@dora.local",
 	})
 	enterpriseID := enterprise["data"].(map[string]any)["enterprise_id"].(string)
 	switched := requestJSON(t, router, http.MethodPost, "/api/account/switch-identity", userToken, "idem-enterprise-switch", map[string]any{
@@ -81,7 +81,7 @@ func TestM2BusinessHTTPAndRPCIdentityProject(t *testing.T) {
 		"target_identity_type": "personal",
 	})
 
-	created := requestJSON(t, router, http.MethodPost, "/api/projects", userToken, "idem-project-create", map[string]any{"title": "M2 Project"})
+	created := requestJSON(t, router, http.MethodPost, "/api/projects", userToken, "idem-project-create", map[string]any{"title": "Account Project Project"})
 	projectID := created["data"].(map[string]any)["project_id"].(string)
 	archived := requestJSON(t, router, http.MethodPost, "/api/projects/"+projectID+"/archive", userToken, "idem-project-archive", map[string]any{"reason": "done"})
 	if archived["data"].(map[string]any)["status"] != "archived" {
@@ -130,15 +130,15 @@ func TestM2BusinessHTTPAndRPCIdentityProject(t *testing.T) {
 
 	adminToken := loginAdmin(t, router, "admin@dora.local", "local-admin-change-me")
 	rotated := requestJSON(t, router, http.MethodPost, "/api/admin/auth/rotate-password", adminToken, "idem-admin-rotate", map[string]any{
-		"current_password": "local-admin-change-me", "new_password": "local-admin-change-me-rotated", "reason": "m2 forced rotation",
+		"current_password": "local-admin-change-me", "new_password": "local-admin-change-me-rotated", "reason": "account forced rotation",
 	})
 	adminToken = rotated["data"].(map[string]any)["access_token"].(string)
 	preview := requestJSON(t, router, http.MethodPost, "/api/admin/users/usr_1001/status/preview", adminToken, "", map[string]any{
-		"target_status": "disabled", "reason": "m2 disable user",
+		"target_status": "disabled", "reason": "account-project disable user",
 	})
 	previewToken := preview["data"].(map[string]any)["preview_token"].(string)
 	disabled := requestJSON(t, router, http.MethodPost, "/api/admin/users/usr_1001/status/confirm", adminToken, "idem-user-disable", map[string]any{
-		"target_status": "disabled", "preview_token": previewToken, "reason": "m2 disable user",
+		"target_status": "disabled", "preview_token": previewToken, "reason": "account-project disable user",
 	})
 	if disabled["data"].(map[string]any)["status"] != "disabled" {
 		t.Fatalf("user disable response = %#v", disabled)
@@ -200,7 +200,7 @@ func requestRaw(t *testing.T, router http.Handler, method, path, token, idem str
 	}
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Trace-Id", "trace-m2")
+	req.Header.Set("X-Trace-Id", "trace-account-project")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

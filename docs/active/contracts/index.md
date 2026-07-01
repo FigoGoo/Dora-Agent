@@ -58,7 +58,7 @@ Thrift / OpenAPI / JSON Schema / SQL / fixture = 字段级事实源
 | board.snapshot.updated | v1 | Agent Runtime + Frontend | `api/agui/events/board.snapshot.updated.schema.json` | Agent Runtime | Frontend / Test | `tests/fixtures/contracts/board/patch_replay_storyboard.json` | `03-M2` | active |
 | graph.plan.created | v1 | Agent Runtime + Frontend | `api/agui/events/graph.plan.created.schema.json` | Agent Runtime | Frontend / Test | `tests/fixtures/contracts/graph/generic_creation_graph_plan.json` | `04-M3` | active |
 | graph.node.updated | v1 | Agent Runtime + Frontend | `api/agui/events/graph.node.updated.schema.json` | Agent Runtime | Frontend / Test | `tests/fixtures/contracts/graph/generic_creation_graph_plan.json` | `04-M3` | active |
-| Agent Runtime Migration | v1 | Agent Runtime | `db/migrations/iterations/2026-07-01-agent-runtime-contracts/agent/**` | Agent Runtime | Agent Runtime / Test | `tests/contract/validate_pr2_contracts.py` | `03-M2` / `04-M3` | active |
+| Agent Runtime Migration | v1 | Agent Runtime | `db/migrations/iterations/2026-07-01-agent-runtime-contracts/agent/**` | Agent Runtime | Agent Runtime / Test | `tests/contract/validate_board_graph_contracts.py` | `03-M2` / `04-M3` | active |
 
 ## PR-3 契约索引
 
@@ -75,7 +75,7 @@ Thrift / OpenAPI / JSON Schema / SQL / fixture = 字段级事实源
 | BusinessCreditService | v1 | Business Credit | `api/thrift/business_credit_service.thrift` | Business Credit | Agent Runtime / Test | `tests/fixtures/contracts/credit/**` | `05-M4` | active |
 | BusinessAssetService | v1 | Business Asset | `api/thrift/business_asset_service.thrift` | Business Asset | Agent Runtime / Test | `tests/fixtures/contracts/asset/**` | `05-M4` | active |
 | BusinessToolService | v1 | Business Tool | `api/thrift/business_tool_service.thrift` | Business Tool | Agent Runtime / Test | `tests/fixtures/contracts/toolplan/**` | `05-M4` | active |
-| Tool/Credit/Asset Migration | v1 | Agent Runtime / Business Service | `db/migrations/iterations/2026-07-01-tool-credit-asset-contracts/**` | Agent Runtime / Business Service | Test | `tests/contract/validate_pr3_contracts.py` | `05-M4` | active |
+| Tool/Credit/Asset Migration | v1 | Agent Runtime / Business Service | `db/migrations/iterations/2026-07-01-tool-credit-asset-contracts/**` | Agent Runtime / Business Service | Test | `tests/contract/validate_tool_asset_contracts.py` | `05-M4` | active |
 
 ## PR-4 契约索引
 
@@ -93,7 +93,7 @@ Thrift / OpenAPI / JSON Schema / SQL / fixture = 字段级事实源
 | SkillSettlement | v1 | Business Settlement | `api/schemas/settlement/skill-settlement.v1.schema.json` | Business Settlement | Creator / Admin / Test | `tests/fixtures/contracts/billing/**` | `06-M5` / `10` | active |
 | BusinessSkillMarketplaceService | v1 | Business Skill Marketplace | `api/thrift/business_skill_marketplace_service.thrift` | Business Service | Agent Runtime / Test | `tests/fixtures/contracts/marketplace/**`、`tests/fixtures/contracts/billing/**` | `06-M5` | active |
 | BusinessSettlementService | v1 | Business Settlement | `api/thrift/business_settlement_service.thrift` | Business Settlement | Business Marketplace / Admin / Test | `tests/fixtures/contracts/billing/**` | `06-M5` / `10` | active |
-| Marketplace Migration | v1 | Business Service | `db/migrations/iterations/2026-07-01-marketplace-contracts/business/**` | Business Service | Test | `tests/contract/validate_pr4_contracts.py` | `06-M5` / `10` | active |
+| Marketplace Migration | v1 | Business Service | `db/migrations/iterations/2026-07-01-marketplace-contracts/business/**` | Business Service | Test | `tests/contract/validate_skill_market_contracts.py` | `06-M5` / `10` | active |
 
 ## PR-5 契约索引
 
@@ -104,15 +104,15 @@ Thrift / OpenAPI / JSON Schema / SQL / fixture = 字段级事实源
 | AgentWorkspaceE2ESuite | v1 | 测试与验收 / Agent Runtime / 前端 | `tests/e2e/agent-workspace/scenarios.json` | Test | Agent / Frontend / Test | `tests/fixtures/e2e/agent-workspace/**` | `07-M6` | active |
 | SkillMarketplaceE2ESuite | v1 | 测试与验收 / Business Service / 前端 | `tests/e2e/skill-marketplace/scenarios.json` | Test | Business / Frontend / Test | `tests/fixtures/e2e/skill-marketplace/**` | `06-M5` / `07-M6` | active |
 | AdminGovernanceE2ESuite | v1 | 测试与验收 / 管理端 / Business Service | `tests/e2e/admin-governance/scenarios.json` | Test | Admin / Business / Test | `tests/fixtures/e2e/admin-governance/**` | `07-M6` / `10` | active |
-| PR5ServiceLevelE2E | v1 | 测试与验收 / Business Service | `services/business/internal/e2e/pr5/service_e2e_test.go` | Test | CI / Agent / Business / Release | `tests/fixtures/contracts/**`、`tests/fixtures/e2e/**` | `07-M6` / `08-M7` | active |
-| PR5AgentHTTPRedisE2E | v1 | 测试与验收 / Agent Runtime | `services/agent/internal/e2e/pr5/agent_http_redis_e2e_test.go` | Test | CI / Agent / Release | `tests/fixtures/contracts/**`、`tests/fixtures/e2e/**` | `07-M6` / `08-M7` | active |
-| PR5AgentProcessSmoke | v1 | 测试与验收 / Agent Runtime | `services/agent/internal/e2e/pr5/agent_process_smoke_test.go` | Test | CI / Agent / Release | `db/migrations/iterations/2026-07-01-agent-runtime-contracts/agent/**` | `08-M7` | active |
-| PR5BusinessProcessSmoke | v1 | 测试与验收 / Business Service | `services/business/internal/e2e/pr5/business_process_smoke_test.go` | Test | CI / Business / Release | `db/migrations/iterations/2026-06-27-business-core/business/**` | `08-M7` | active |
-| PR5FullHTTPServiceSmoke | v1 | 测试与验收 / Agent Runtime / Business Service | `services/agent/internal/e2e/pr5/full_http_service_smoke_test.go`、`scripts/validate-pr5-full-http-smoke.sh` | Test | CI / Agent / Business / Release | `db/migrations/iterations/2026-06-27-business-core/business/**`、`db/migrations/iterations/20260627_agent_runtime/agent/**`、`tests/business/seed/business_core_seed.sql` | `08-M7` | active |
-| PR5BrowserSmoke | v1 | 测试与验收 / 前端 / 管理端 | `scripts/validate-pr5-browser-smoke.sh`、`tests/e2e/browser/pr5-frontend-browser-smoke.mjs` | Test | CI / Frontend / Admin / Release | `frontend/**`、`admin_frontend/**` | `07-M6` / `08-M7` | active |
-| RedisTestHarness | v1 | 测试与验收 / 工程基础设施 | `internal/testredis/redis.go` | Test | CI / Agent / Business | `services/agent/internal/e2e/pr5/**` | `08-M7` | active |
-| ReleaseGovernance | v1 | 运维发布 / 文档与契约 / 测试验收 | `docs/active/technical/release-governance.md` | 运维发布 / 文档与契约 | Agent / Business / Frontend / Test | `tests/contract/validate_pr5_e2e_gates.py` | `08-M7` | active |
-| PR5ReleaseGateValidator | v1 | 测试与验收 | `tests/contract/validate_pr5_e2e_gates.py` | Test | CI / Agent / Business / Frontend | `tests/e2e/**`、`tests/fixtures/e2e/**` | `08-M7` | active |
+| PR5ServiceLevelE2E | v1 | 测试与验收 / Business Service | `services/business/internal/e2e/release/service_e2e_test.go` | Test | CI / Agent / Business / Release | `tests/fixtures/contracts/**`、`tests/fixtures/e2e/**` | `07-M6` / `08-M7` | active |
+| PR5AgentHTTPRedisE2E | v1 | 测试与验收 / Agent Runtime | `services/agent/internal/e2e/release/agent_http_redis_e2e_test.go` | Test | CI / Agent / Release | `tests/fixtures/contracts/**`、`tests/fixtures/e2e/**` | `07-M6` / `08-M7` | active |
+| PR5AgentProcessSmoke | v1 | 测试与验收 / Agent Runtime | `services/agent/internal/e2e/release/agent_process_smoke_test.go` | Test | CI / Agent / Release | `db/migrations/iterations/2026-07-01-agent-runtime-contracts/agent/**` | `08-M7` | active |
+| PR5BusinessProcessSmoke | v1 | 测试与验收 / Business Service | `services/business/internal/e2e/release/business_process_smoke_test.go` | Test | CI / Business / Release | `db/migrations/iterations/2026-06-27-business-core/business/**` | `08-M7` | active |
+| PR5FullHTTPServiceSmoke | v1 | 测试与验收 / Agent Runtime / Business Service | `services/agent/internal/e2e/release/full_http_service_smoke_test.go`、`scripts/validate-release-full-http-smoke.sh` | Test | CI / Agent / Business / Release | `db/migrations/iterations/2026-06-27-business-core/business/**`、`db/migrations/iterations/20260627_agent_runtime/agent/**`、`tests/business/seed/business_core_seed.sql` | `08-M7` | active |
+| PR5BrowserSmoke | v1 | 测试与验收 / 前端 / 管理端 | `scripts/validate-release-browser-smoke.sh`、`tests/e2e/browser/release-frontend-browser-smoke.mjs` | Test | CI / Frontend / Admin / Release | `frontend/**`、`admin_frontend/**` | `07-M6` / `08-M7` | active |
+| RedisTestHarness | v1 | 测试与验收 / 工程基础设施 | `internal/testredis/redis.go` | Test | CI / Agent / Business | `services/agent/internal/e2e/release/**` | `08-M7` | active |
+| ReleaseGovernance | v1 | 运维发布 / 文档与契约 / 测试验收 | `docs/active/technical/release-governance.md` | 运维发布 / 文档与契约 | Agent / Business / Frontend / Test | `tests/contract/validate_release_e2e_gates.py` | `08-M7` | active |
+| PR5ReleaseGateValidator | v1 | 测试与验收 | `tests/contract/validate_release_e2e_gates.py` | Test | CI / Agent / Business / Frontend | `tests/e2e/**`、`tests/fixtures/e2e/**` | `08-M7` | active |
 
 ## P0 Contract Delta
 

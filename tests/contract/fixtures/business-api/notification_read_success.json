@@ -7,7 +7,7 @@
     "Idempotency-Key": "idem_notification_read_001"
   },
   "request_body": {
-    "request_hash": "sha256:m5-notification-read-request"
+    "request_hash": "sha256:work_marketplace-notification-read-request"
   },
   "response_status": 200,
   "response_body": {

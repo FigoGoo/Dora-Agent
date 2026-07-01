@@ -7,7 +7,7 @@ func TestStartTurnDecisions(t *testing.T) {
 	base := StartInput{RunID: "run_1", ProjectID: "prj_1", Prompt: "make image", ModelID: "mdl_1", SkillID: "sk_1", SafetyResult: "passed", IdempotencyKey: "idem_1"}
 
 	running, err := loop.StartTurn(t.Context(), base)
-	if err != nil || running.Status != "running" || running.Phase != "m3_runtime_ready" || running.Snapshot.IdempotencyKey != "idem_1" {
+	if err != nil || running.Status != "running" || running.Phase != "skill_runtime_ready" || running.Snapshot.IdempotencyKey != "idem_1" {
 		t.Fatalf("running decision = %#v err=%v", running, err)
 	}
 
@@ -63,7 +63,7 @@ func TestCancelRunRequiresIdempotencyAndSnapshotsReleaseBoundary(t *testing.T) {
 	if cancelled.Status != "cancelled" || cancelled.Phase != "cancel_requested" {
 		t.Fatalf("cancel decision = %#v", cancelled)
 	}
-	if len(cancelled.Snapshot.Steps) != 2 || cancelled.Snapshot.Steps[1].Status != "not_applicable_in_m3" {
-		t.Fatalf("cancel snapshot must mark M4 freeze release boundary: %#v", cancelled.Snapshot)
+	if len(cancelled.Snapshot.Steps) != 2 || cancelled.Snapshot.Steps[1].Status != "not_applicable_in_skill_runtime" {
+		t.Fatalf("cancel snapshot must mark tool generation freeze release boundary: %#v", cancelled.Snapshot)
 	}
 }

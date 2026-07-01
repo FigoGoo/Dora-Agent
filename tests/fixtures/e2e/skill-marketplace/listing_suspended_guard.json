@@ -2,8 +2,8 @@
   "case_id": "listing_suspended_guard_e2e_v1",
   "status": "active",
   "owner": "测试与验收责任域 / Business Marketplace / 管理端",
-  "depends_on_pr": [
-    "PR-4"
+  "depends_on_contracts": [
+    "skill market"
   ],
   "contract_references": [
     {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/apperror"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state"
@@ -18,7 +18,7 @@ import (
 	runtimeskillgraph "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skillgraph"
 )
 
-func (a *App) recordM1RunEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, req CreateRunRequest, traceID string) error {
+func (a *App) recordRouterRunEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, req CreateRunRequest, traceID string) error {
 	if a.gateway == nil {
 		return apperror.New(apperror.CodeNotImplemented, "business gateway is not configured")
 	}
@@ -31,34 +31,34 @@ func (a *App) recordM1RunEvents(ctx context.Context, auth AuthContextDTO, run *m
 		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "SKILL_CATALOG_UNAVAILABLE", "skill catalog unavailable")
 		return mapBusinessError(err)
 	}
-	catalog := m1RouterCatalog(skills)
+	catalog := creativeRouterCatalog(skills)
 	switch req.RunIntent {
 	case RunIntentEntryGuide:
-		guide := runtimeguide.Build(run.SessionID, m1GuideCatalog(catalog))
-		if err := a.appendM1Guide(ctx, run, guide, traceID); err != nil {
+		guide := runtimeguide.Build(run.SessionID, creativeGuideCatalog(catalog))
+		if err := a.appendRouterGuide(ctx, run, guide, traceID); err != nil {
 			return err
 		}
-		if err := a.createM1AssistantMessage(ctx, run, "我已根据当前空间的可用 Skill 准备好创作建议，你可以直接选择一个方向开始。", map[string]any{
+		if err := a.createRouterAssistantMessage(ctx, run, "我已根据当前空间的可用 Skill 准备好创作建议，你可以直接选择一个方向开始。", map[string]any{
 			"message_kind": "creative_guide",
 			"guide_id":     guide.GuideID,
 		}, traceID); err != nil {
 			return err
 		}
-		return a.completeM1Run(ctx, run, traceID, map[string]any{"m1_result": "guide_presented", "guide_id": guide.GuideID})
+		return a.completeRouterRun(ctx, run, traceID, map[string]any{"router_result": "guide_presented", "guide_id": guide.GuideID})
 	case RunIntentCapabilityQuestion:
-		guide := runtimeguide.Build(run.SessionID, m1GuideCatalog(catalog))
-		if err := a.createM1AssistantMessage(ctx, run, m1CapabilityAnswer(catalog), map[string]any{
+		guide := runtimeguide.Build(run.SessionID, creativeGuideCatalog(catalog))
+		if err := a.createRouterAssistantMessage(ctx, run, capabilityAnswer(catalog), map[string]any{
 			"message_kind": "capability_answer",
 			"skill_count":  len(catalog),
 		}, traceID); err != nil {
 			return err
 		}
-		if err := a.appendM1Guide(ctx, run, guide, traceID); err != nil {
+		if err := a.appendRouterGuide(ctx, run, guide, traceID); err != nil {
 			return err
 		}
-		return a.completeM1Run(ctx, run, traceID, map[string]any{"m1_result": "capability_answered"})
+		return a.completeRouterRun(ctx, run, traceID, map[string]any{"router_result": "capability_answered"})
 	default:
-		selectedSkillID, selectedListingID := m1SelectedSkillFromControls(req.ControlInputs)
+		selectedSkillID, selectedListingID := selectedSkillFromControls(req.ControlInputs)
 		decision, err := a.chatRouter.Decide(ctx, runtimerouter.Input{
 			UserInput:         req.UserInput.Text,
 			RunIntent:         req.RunIntent,
@@ -69,7 +69,7 @@ func (a *App) recordM1RunEvents(ctx context.Context, auth AuthContextDTO, run *m
 		if err != nil {
 			return err
 		}
-		if err := pr1.ValidateRouterDecision(decision); err != nil {
+		if err := foundation.ValidateRouterDecision(decision); err != nil {
 			_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "ROUTER_DECISION_INVALID", err.Error())
 			_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
 				"error_type": "agent_runtime", "error_code": "ROUTER_DECISION_INVALID", "user_message": "路由结果不符合契约",
@@ -77,36 +77,36 @@ func (a *App) recordM1RunEvents(ctx context.Context, auth AuthContextDTO, run *m
 			})
 			return apperror.New(apperror.CodeInternal, "router decision is invalid")
 		}
-		decisionDigest, err := pr1.CanonicalDigest(decision)
+		decisionDigest, err := foundation.CanonicalDigest(decision)
 		if err != nil {
 			return err
 		}
-		if err := a.persistM1RouterDecision(ctx, run, req.RunIntent, decision, decisionDigest, catalog); err != nil {
+		if err := a.persistRouterDecision(ctx, run, req.RunIntent, decision, decisionDigest, catalog); err != nil {
 			return err
 		}
-		if err := a.appendM1RouterDecision(ctx, run, decision, decisionDigest, traceID); err != nil {
+		if err := a.appendRouterDecision(ctx, run, decision, decisionDigest, traceID); err != nil {
 			return err
 		}
 		switch decision.Decision {
-		case pr1.RouterDecisionSelectSkill, pr1.RouterDecisionGenericCreation:
-			if err := a.appendM1SkillSelected(ctx, run, decision, decisionDigest, traceID); err != nil {
+		case foundation.RouterDecisionSelectSkill, foundation.RouterDecisionGenericCreation:
+			if err := a.appendRouterSkillSelected(ctx, run, decision, decisionDigest, traceID); err != nil {
 				return err
 			}
 			if decision.RequiresSkillUsageConfirmation {
 				return a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusWaitingConfirmation, "", "")
 			}
-			if decision.Decision == pr1.RouterDecisionGenericCreation {
-				return a.startM2BoardRuntime(ctx, auth, run, req.UserInput.Text, decisionDigest, traceID)
+			if decision.Decision == foundation.RouterDecisionGenericCreation {
+				return a.startBoardRuntime(ctx, auth, run, req.UserInput.Text, decisionDigest, traceID)
 			}
-			spec, err := a.loadM3PublishedSkillSpec(ctx, auth, decision, catalog, traceID)
+			spec, err := a.loadSkillGraphPublishedSkillSpec(ctx, auth, decision, catalog, traceID)
 			if err != nil {
 				_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_spec_unavailable", err.Error())
 				_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "SKILL_SPEC_UNAVAILABLE", "published skill spec unavailable")
 				return err
 			}
-			return a.startM3SkillRuntime(ctx, auth, run, req.UserInput.Text, decision, decisionDigest, spec, traceID)
-		case pr1.RouterDecisionClarify:
-			if err := a.createM1AssistantMessage(ctx, run, m1ClarifyMessage(decision), map[string]any{
+			return a.startSkillGraphRuntime(ctx, auth, run, req.UserInput.Text, decision, decisionDigest, spec, traceID)
+		case foundation.RouterDecisionClarify:
+			if err := a.createRouterAssistantMessage(ctx, run, clarifyMessage(decision), map[string]any{
 				"message_kind":           "clarify",
 				"missing_fields":         decision.MissingFields,
 				"router_decision_digest": decisionDigest,
@@ -114,16 +114,16 @@ func (a *App) recordM1RunEvents(ctx context.Context, auth AuthContextDTO, run *m
 				return err
 			}
 			return a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusWaitingInput, "", "")
-		case pr1.RouterDecisionCapabilityAnswer, pr1.RouterDecisionTextAnswer:
-			if err := a.createM1AssistantMessage(ctx, run, m1CapabilityAnswer(catalog), map[string]any{
+		case foundation.RouterDecisionCapabilityAnswer, foundation.RouterDecisionTextAnswer:
+			if err := a.createRouterAssistantMessage(ctx, run, capabilityAnswer(catalog), map[string]any{
 				"message_kind":           decision.Decision,
 				"router_decision_digest": decisionDigest,
 			}, traceID); err != nil {
 				return err
 			}
-			return a.completeM1Run(ctx, run, traceID, map[string]any{"m1_result": decision.Decision, "router_decision_digest": decisionDigest})
-		case pr1.RouterDecisionReject:
-			if err := a.createM1AssistantMessage(ctx, run, "这个请求暂时无法继续，请调整创作目标后再试。", map[string]any{
+			return a.completeRouterRun(ctx, run, traceID, map[string]any{"router_result": decision.Decision, "router_decision_digest": decisionDigest})
+		case foundation.RouterDecisionReject:
+			if err := a.createRouterAssistantMessage(ctx, run, "这个请求暂时无法继续，请调整创作目标后再试。", map[string]any{
 				"message_kind":           "reject",
 				"router_decision_digest": decisionDigest,
 			}, traceID); err != nil {
@@ -131,12 +131,12 @@ func (a *App) recordM1RunEvents(ctx context.Context, auth AuthContextDTO, run *m
 			}
 			return a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "ROUTER_REJECTED", "router rejected user input")
 		default:
-			return a.completeM1Run(ctx, run, traceID, map[string]any{"m1_result": decision.Decision, "router_decision_digest": decisionDigest})
+			return a.completeRouterRun(ctx, run, traceID, map[string]any{"router_result": decision.Decision, "router_decision_digest": decisionDigest})
 		}
 	}
 }
 
-func (a *App) loadM3PublishedSkillSpec(ctx context.Context, auth AuthContextDTO, decision pr1.RouterDecision, catalog []runtimerouter.CatalogSkill, traceID string) (SkillSpecDTO, error) {
+func (a *App) loadSkillGraphPublishedSkillSpec(ctx context.Context, auth AuthContextDTO, decision foundation.RouterDecision, catalog []runtimerouter.CatalogSkill, traceID string) (SkillSpecDTO, error) {
 	skillID := stringPtrValue(decision.SkillID)
 	if skillID == "" {
 		return SkillSpecDTO{}, apperror.New(apperror.CodeInvalidArgument, "selected skill_id is required")
@@ -151,7 +151,7 @@ func (a *App) loadM3PublishedSkillSpec(ctx context.Context, auth AuthContextDTO,
 	return a.gateway.GetPublishedSkillSpec(ctx, auth, skillID, version, traceID)
 }
 
-func (a *App) startM3SkillRuntime(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, decision pr1.RouterDecision, routerDecisionDigest string, spec SkillSpecDTO, traceID string) error {
+func (a *App) startSkillGraphRuntime(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, decision foundation.RouterDecision, routerDecisionDigest string, spec SkillSpecDTO, traceID string) error {
 	runner, err := runtimeeino.NewSkillGraphRunner(ctx, nil)
 	if err != nil {
 		return err
@@ -168,22 +168,22 @@ func (a *App) startM3SkillRuntime(ctx context.Context, auth AuthContextDTO, run 
 		SkillVersion:         spec.Version,
 		SkillSource:          stringPtrValue(decision.SkillSource),
 		SkillSpecJSON:        spec.SkillSpecJSON,
-		OutputElements:       m3SkillGraphOutputElements(spec.OutputElements),
+		OutputElements:       skillGraphOutputElements(spec.OutputElements),
 		RouterDecisionDigest: routerDecisionDigest,
 	})
 	if err != nil {
-		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "M3_SKILL_RUNTIME_FAILED", err.Error())
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "SKILL_RUNTIME_FAILED", err.Error())
 		_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
-			"error_type": "agent_runtime", "error_code": "M3_SKILL_RUNTIME_FAILED", "user_message": "Skill Graph 编译失败",
+			"error_type": "agent_runtime", "error_code": "SKILL_RUNTIME_FAILED", "user_message": "Skill Graph 编译失败",
 			"retryable": true, "support_trace_id": traceID,
 		})
 		return err
 	}
-	firstSeq, err := a.nextPR2AGUISequence(ctx, run)
+	firstSeq, err := a.nextBoardGraphAGUISequence(ctx, run)
 	if err != nil {
 		return err
 	}
-	events, err := rebasePR2AGUIEvents(result.Events, firstSeq)
+	events, err := rebaseBoardGraphAGUIEvents(result.Events, firstSeq)
 	if err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func (a *App) startM3SkillRuntime(ctx context.Context, auth AuthContextDTO, run 
 	}); err != nil {
 		return err
 	}
-	a.publishPR2AGUIEvents(ctx, events)
+	a.publishBoardGraphAGUIEvents(ctx, events)
 	if a.snapshotCache != nil {
 		if body, err := json.Marshal(result.Snapshot); err == nil {
 			_ = a.snapshotCache.Set(ctx, runtimestream.BoardSnapshotKey(result.Board.BoardID, result.Board.Version), body, 30*time.Minute)
@@ -202,7 +202,7 @@ func (a *App) startM3SkillRuntime(ctx context.Context, auth AuthContextDTO, run 
 	return nil
 }
 
-func (a *App) startM2BoardRuntime(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, routerDecisionDigest string, traceID string) error {
+func (a *App) startBoardRuntime(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, routerDecisionDigest string, traceID string) error {
 	runner, err := runtimeeino.NewGenericCreationGraphRunner(ctx, nil)
 	if err != nil {
 		return err
@@ -218,25 +218,25 @@ func (a *App) startM2BoardRuntime(ctx context.Context, auth AuthContextDTO, run 
 		RouterDecisionDigest: routerDecisionDigest,
 	})
 	if err != nil {
-		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "M2_BOARD_RUNTIME_FAILED", err.Error())
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "BOARD_RUNTIME_FAILED", err.Error())
 		_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
-			"error_type": "agent_runtime", "error_code": "M2_BOARD_RUNTIME_FAILED", "user_message": "Creative Board 初始化失败",
+			"error_type": "agent_runtime", "error_code": "BOARD_RUNTIME_FAILED", "user_message": "Creative Board 初始化失败",
 			"retryable": true, "support_trace_id": traceID,
 		})
 		return err
 	}
-	firstSeq, err := a.nextPR2AGUISequence(ctx, run)
+	firstSeq, err := a.nextBoardGraphAGUISequence(ctx, run)
 	if err != nil {
 		return err
 	}
-	events, err := rebasePR2AGUIEvents(result.Events, firstSeq)
+	events, err := rebaseBoardGraphAGUIEvents(result.Events, firstSeq)
 	if err != nil {
 		return err
 	}
 	if err := a.repo.SaveBoardGraphForWorkbenchRun(ctx, run, result.GraphTemplate, result.GraphPlan, result.Board, result.Elements, events, routerDecisionDigest, nil); err != nil {
 		return err
 	}
-	a.publishPR2AGUIEvents(ctx, events)
+	a.publishBoardGraphAGUIEvents(ctx, events)
 	if a.snapshotCache != nil {
 		if body, err := json.Marshal(result.Snapshot); err == nil {
 			_ = a.snapshotCache.Set(ctx, runtimestream.BoardSnapshotKey(result.Board.BoardID, result.Board.Version), body, 30*time.Minute)
@@ -245,7 +245,7 @@ func (a *App) startM2BoardRuntime(ctx context.Context, auth AuthContextDTO, run 
 	return nil
 }
 
-func m3SkillGraphOutputElements(items []SkillOutputElementDTO) []runtimeskillgraph.OutputElement {
+func skillGraphOutputElements(items []SkillOutputElementDTO) []runtimeskillgraph.OutputElement {
 	out := make([]runtimeskillgraph.OutputElement, 0, len(items))
 	for _, item := range items {
 		out = append(out, runtimeskillgraph.OutputElement{
@@ -264,7 +264,7 @@ func m3SkillGraphOutputElements(items []SkillOutputElementDTO) []runtimeskillgra
 	return out
 }
 
-func (a *App) nextPR2AGUISequence(ctx context.Context, run *model.Run) (int64, error) {
+func (a *App) nextBoardGraphAGUISequence(ctx context.Context, run *model.Run) (int64, error) {
 	session, err := a.repo.GetSession(ctx, run.SessionID)
 	if err != nil {
 		return 0, err
@@ -272,15 +272,15 @@ func (a *App) nextPR2AGUISequence(ctx context.Context, run *model.Run) (int64, e
 	return session.LastEventSequence + 1, nil
 }
 
-func rebasePR2AGUIEvents(events []pr1.AGUIEnvelope, firstSeq int64) ([]pr1.AGUIEnvelope, error) {
+func rebaseBoardGraphAGUIEvents(events []foundation.AGUIEnvelope, firstSeq int64) ([]foundation.AGUIEnvelope, error) {
 	if len(events) == 0 {
-		return nil, apperror.New(apperror.CodeInternal, "PR-2 AG-UI events are required")
+		return nil, apperror.New(apperror.CodeInternal, "board graph AG-UI events are required")
 	}
-	out := make([]pr1.AGUIEnvelope, 0, len(events))
+	out := make([]foundation.AGUIEnvelope, 0, len(events))
 	for index, event := range events {
 		event.Seq = firstSeq + int64(index)
-		event.DedupeKey = pr1.DedupeKey(event.RunID, event.EventType, event.Seq)
-		if err := pr1.ValidateAGUIEnvelope(event); err != nil {
+		event.DedupeKey = foundation.DedupeKey(event.RunID, event.EventType, event.Seq)
+		if err := foundation.ValidateAGUIEnvelope(event); err != nil {
 			return nil, err
 		}
 		out = append(out, event)
@@ -288,8 +288,8 @@ func rebasePR2AGUIEvents(events []pr1.AGUIEnvelope, firstSeq int64) ([]pr1.AGUIE
 	return out, nil
 }
 
-func (a *App) appendM1Guide(ctx context.Context, run *model.Run, guide runtimeguide.CreativeGuideOutput, traceID string) error {
-	digest, err := pr1.CanonicalDigest(guide)
+func (a *App) appendRouterGuide(ctx context.Context, run *model.Run, guide runtimeguide.CreativeGuideOutput, traceID string) error {
+	digest, err := foundation.CanonicalDigest(guide)
 	if err != nil {
 		return err
 	}
@@ -300,14 +300,14 @@ func (a *App) appendM1Guide(ctx context.Context, run *model.Run, guide runtimegu
 	})
 }
 
-func (a *App) appendM1RouterDecision(ctx context.Context, run *model.Run, decision pr1.RouterDecision, digest string, traceID string) error {
+func (a *App) appendRouterDecision(ctx context.Context, run *model.Run, decision foundation.RouterDecision, digest string, traceID string) error {
 	return a.appendRunEvent(ctx, run, "creative.router.decided", traceID, map[string]any{
 		"router_decision": decision,
 		"payload_digest":  digest,
 	})
 }
 
-func (a *App) appendM1SkillSelected(ctx context.Context, run *model.Run, decision pr1.RouterDecision, digest string, traceID string) error {
+func (a *App) appendRouterSkillSelected(ctx context.Context, run *model.Run, decision foundation.RouterDecision, digest string, traceID string) error {
 	skillID := stringPtrValue(decision.SkillID)
 	if skillID == "" {
 		return nil
@@ -326,7 +326,7 @@ func (a *App) appendM1SkillSelected(ctx context.Context, run *model.Run, decisio
 	})
 }
 
-func (a *App) persistM1RouterDecision(ctx context.Context, run *model.Run, runIntent string, decision pr1.RouterDecision, digest string, catalog []runtimerouter.CatalogSkill) error {
+func (a *App) persistRouterDecision(ctx context.Context, run *model.Run, runIntent string, decision foundation.RouterDecision, digest string, catalog []runtimerouter.CatalogSkill) error {
 	skillID := stringPtrValue(decision.SkillID)
 	skillVersion := ""
 	skillSource := stringPtrValue(decision.SkillSource)
@@ -356,7 +356,7 @@ func (a *App) persistM1RouterDecision(ctx context.Context, run *model.Run, runIn
 	return a.repo.DB().WithContext(ctx).Model(&model.Run{}).Where("id = ?", run.ID).Update("skill_selection", jsonObject(snapshot)).Error
 }
 
-func (a *App) createM1AssistantMessage(ctx context.Context, run *model.Run, content string, summary map[string]any, traceID string) error {
+func (a *App) createRouterAssistantMessage(ctx context.Context, run *model.Run, content string, summary map[string]any, traceID string) error {
 	sequence, err := a.repo.NextMessageSequence(ctx, run.SessionID)
 	if err != nil {
 		return err
@@ -371,7 +371,7 @@ func (a *App) createM1AssistantMessage(ctx context.Context, run *model.Run, cont
 		ContentSummary: jsonObject(summary),
 		Sequence:       sequence,
 		TraceID:        traceID,
-		Metadata:       jsonObject(map[string]any{"source": "m1_router"}),
+		Metadata:       jsonObject(map[string]any{"source": "creative_router"}),
 	}
 	if err := a.repo.CreateMessage(ctx, message); err != nil {
 		return err
@@ -386,7 +386,7 @@ func (a *App) createM1AssistantMessage(ctx context.Context, run *model.Run, cont
 	})
 }
 
-func (a *App) completeM1Run(ctx context.Context, run *model.Run, traceID string, payload map[string]any) error {
+func (a *App) completeRouterRun(ctx context.Context, run *model.Run, traceID string, payload map[string]any) error {
 	if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusCompleted, "", ""); err != nil {
 		return err
 	}
@@ -398,10 +398,10 @@ func (a *App) completeM1Run(ctx context.Context, run *model.Run, traceID string,
 	return a.appendRunEvent(ctx, run, "agent.run.completed", traceID, payload)
 }
 
-func m1RouterCatalog(items []SkillSummaryDTO) []runtimerouter.CatalogSkill {
+func creativeRouterCatalog(items []SkillSummaryDTO) []runtimerouter.CatalogSkill {
 	out := make([]runtimerouter.CatalogSkill, 0, len(items))
 	for _, item := range items {
-		source := m1SkillSource(item.SkillScope, item.RouteHints)
+		source := skillCatalogSource(item.SkillScope, item.RouteHints)
 		out = append(out, runtimerouter.CatalogSkill{
 			SkillID:              item.SkillID,
 			SkillName:            item.SkillName,
@@ -410,7 +410,7 @@ func m1RouterCatalog(items []SkillSummaryDTO) []runtimerouter.CatalogSkill {
 			SkillVersion:         item.Version,
 			Status:               item.Status,
 			SupportedOutputTypes: splitRouteHints(firstNonEmpty(item.RouteHints["output_types"], item.RouteHints["output_type"])),
-			RoutingExamples:      m1RoutingExamples(item.RouteHints),
+			RoutingExamples:      skillRoutingExamples(item.RouteHints),
 			RouteHints:           item.RouteHints,
 			PricingSummary:       jsonMapFromString(item.RouteHints["pricing_summary_json"]),
 			CreatorSummary:       jsonMapFromString(item.RouteHints["creator_summary_json"]),
@@ -420,7 +420,7 @@ func m1RouterCatalog(items []SkillSummaryDTO) []runtimerouter.CatalogSkill {
 	return out
 }
 
-func m1GuideCatalog(items []runtimerouter.CatalogSkill) []runtimeguide.CatalogSkill {
+func creativeGuideCatalog(items []runtimerouter.CatalogSkill) []runtimeguide.CatalogSkill {
 	out := make([]runtimeguide.CatalogSkill, 0, len(items))
 	for _, item := range items {
 		out = append(out, runtimeguide.CatalogSkill{
@@ -435,19 +435,19 @@ func m1GuideCatalog(items []runtimerouter.CatalogSkill) []runtimeguide.CatalogSk
 	return out
 }
 
-func m1SkillSource(scope string, hints map[string]string) string {
+func skillCatalogSource(scope string, hints map[string]string) string {
 	source := firstNonEmpty(hints["skill_source"], scope)
 	switch source {
-	case pr1.SkillSourceSystemDefault, pr1.SkillSourceSystemBuiltin, pr1.SkillSourceInstalled, pr1.SkillSourceMarketplace:
+	case foundation.SkillSourceSystemDefault, foundation.SkillSourceSystemBuiltin, foundation.SkillSourceInstalled, foundation.SkillSourceMarketplace:
 		return source
 	case "public", "default", "":
-		return pr1.SkillSourceSystemDefault
+		return foundation.SkillSourceSystemDefault
 	default:
 		return source
 	}
 }
 
-func m1RoutingExamples(hints map[string]string) []string {
+func skillRoutingExamples(hints map[string]string) []string {
 	values := splitRouteHints(firstNonEmpty(hints["intent_examples"], hints["routing_examples"], hints["example_prompt"], hints["intent"]))
 	if len(values) == 0 {
 		values = splitRouteHints(hints["keywords"])
@@ -455,7 +455,7 @@ func m1RoutingExamples(hints map[string]string) []string {
 	return values
 }
 
-func m1SelectedSkillFromControls(inputs []ControlInputDTO) (string, string) {
+func selectedSkillFromControls(inputs []ControlInputDTO) (string, string) {
 	selectedSkillID := ""
 	selectedListingID := ""
 	for _, input := range inputs {
@@ -470,7 +470,7 @@ func m1SelectedSkillFromControls(inputs []ControlInputDTO) (string, string) {
 	return selectedSkillID, selectedListingID
 }
 
-func m1CapabilityAnswer(catalog []runtimerouter.CatalogSkill) string {
+func capabilityAnswer(catalog []runtimerouter.CatalogSkill) string {
 	names := make([]string, 0, len(catalog))
 	for _, skill := range catalog {
 		if skill.Status != "published" || skill.SkillID == "skill_generic_creation" {
@@ -486,7 +486,7 @@ func m1CapabilityAnswer(catalog []runtimerouter.CatalogSkill) string {
 	return "当前空间可用的创作能力包括：" + strings.Join(names, "、") + "。你可以描述目标、风格、时长和投放平台，我会先完成路由和澄清。"
 }
 
-func m1ClarifyMessage(decision pr1.RouterDecision) string {
+func clarifyMessage(decision foundation.RouterDecision) string {
 	if len(decision.MissingFields) == 0 {
 		return "我需要再确认一些创作信息后才能继续。"
 	}

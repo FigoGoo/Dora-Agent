@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/creation"
 )
 
-func TestGenericCreationGraphRunnerExecutesPR2Graph(t *testing.T) {
+func TestGenericCreationGraphRunnerExecutesBoardGraphGraph(t *testing.T) {
 	runner, err := NewGenericCreationGraphRunner(t.Context(), fixedGenericCreationClock)
 	if err != nil {
 		t.Fatalf("new generic creation graph runner: %v", err)
@@ -32,19 +32,19 @@ func TestGenericCreationGraphRunnerExecutesPR2Graph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute generic creation graph: %v", err)
 	}
-	if err := pr2.ValidateGenericGraphFixture(result.GenericGraph, result.GraphTemplate, result.GraphPlan); err != nil {
+	if err := boardgraph.ValidateGenericGraphFixture(result.GenericGraph, result.GraphTemplate, result.GraphPlan); err != nil {
 		t.Fatalf("generic graph contract: %v", err)
 	}
-	if err := pr2.ValidateBoardCreation(result.Board, result.Elements); err != nil {
+	if err := boardgraph.ValidateBoardCreation(result.Board, result.Elements); err != nil {
 		t.Fatalf("board creation contract: %v", err)
 	}
-	if err := pr2.ValidateBoardSnapshot(result.Snapshot); err != nil {
+	if err := boardgraph.ValidateBoardSnapshot(result.Snapshot); err != nil {
 		t.Fatalf("board snapshot contract: %v", err)
 	}
-	if err := pr1.ValidateAGUISequence(result.Events); err != nil {
+	if err := foundation.ValidateAGUISequence(result.Events); err != nil {
 		t.Fatalf("ag-ui sequence contract: %v", err)
 	}
-	if result.GraphTemplate.GraphTemplateID != "gtemplate_generic_creation" || result.GraphTemplate.GraphType != pr2.GraphTypeGenericCreation {
+	if result.GraphTemplate.GraphTemplateID != "gtemplate_generic_creation" || result.GraphTemplate.GraphType != boardgraph.GraphTypeGenericCreation {
 		t.Fatalf("unexpected graph template: %#v", result.GraphTemplate)
 	}
 	if result.Board.ToolPlanAllowed {

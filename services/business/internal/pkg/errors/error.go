@@ -57,8 +57,8 @@ func New(code Code, message string) *BusinessError {
 func NotImplemented(method string) *BusinessError {
 	return &BusinessError{
 		Code:    CodeNotImplemented,
-		Message: method + " is not implemented in M1 infrastructure baseline",
-		Details: map[string]string{"method": method, "milestone": "M1"},
+		Message: method + " is not implemented in local infrastructure baseline",
+		Details: map[string]string{"method": method, "milestone": "baseline"},
 	}
 }
 

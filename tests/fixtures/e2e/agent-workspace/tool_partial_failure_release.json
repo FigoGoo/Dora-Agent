@@ -2,9 +2,9 @@
   "case_id": "tool_partial_failure_release_e2e_v1",
   "status": "active",
   "owner": "测试与验收责任域 / Agent Runtime / Tool Runtime / Business Credit",
-  "depends_on_pr": [
-    "PR-2",
-    "PR-3"
+  "depends_on_contracts": [
+    "board graph",
+    "tool asset"
   ],
   "contract_references": [
     {

@@ -4,7 +4,7 @@
 owner：测试与验收责任域 / Agent Runtime / Business Service / 前端 / 管理端 / 运维发布责任域 / 文档与契约责任域  
 更新时间：2026-07-01  
 适用范围：PR-5 测试事实源、Fake Provider、E2E suite index、fixture、service-level PostgreSQL E2E、Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke、本地 Agent + Business 双服务 HTTP smoke、本地真实浏览器前端联动 smoke、feature flag、观测和回滚 gate 的基础校验
-相关代码路径：`internal/contracts/pr5/**`、`services/business/internal/e2e/pr5/**`、`services/agent/internal/e2e/pr5/**`、`internal/testredis/**`、`services/agent/internal/events/stream/**`、`services/business/internal/infra/repository/businesscore/pr4_marketplace.go`、`scripts/validate-pr5-full-http-smoke.sh`、`tests/e2e/browser/**`
+相关代码路径：`internal/contracts/releasegate/**`、`services/business/internal/e2e/release/**`、`services/agent/internal/e2e/release/**`、`internal/testredis/**`、`services/agent/internal/events/stream/**`、`services/business/internal/infra/repository/businesscore/marketplace.go`、`scripts/validate-release-full-http-smoke.sh`、`tests/e2e/browser/**`
 相关契约：`docs/active/contracts/pr-5-e2e-fixtures-release-gates.md`、`tests/e2e/**`、`tests/fixtures/e2e/**`、`docs/active/technical/release-governance.md`
 
 ## 背景
@@ -36,16 +36,16 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 
 | 类型 | 文件 | 说明 |
 | --- | --- | --- |
-| Fake Provider | `internal/contracts/pr5/fake_provider.go` | provider 行为、场景覆盖、场景执行和幂等规则校验 |
-| E2E Gate | `internal/contracts/pr5/e2e.go` | suite index、fixture、release governance 校验 |
-| Tests | `internal/contracts/pr5/*_test.go` | 读取 PR-5 active fixture 和 release 文档做漂移防护 |
-| Service E2E | `services/business/internal/e2e/pr5/service_e2e_test.go` | 本地 PostgreSQL 中串联 agent/business migrations 与 PR-3/PR-4 仓储主路径 |
-| Agent HTTP/Redis E2E | `services/agent/internal/e2e/pr5/agent_http_redis_e2e_test.go` | `httptest` 走真实 Agent HTTP router，Redis 使用 testcontainers 真容器 |
-| Agent Process Smoke | `services/agent/internal/e2e/pr5/agent_process_smoke_test.go` | 构建并启动真实 `cmd/agent` 二进制，验证 Postgres + Redis + `/healthz` + `/readyz` |
-| Business Process Smoke | `services/business/internal/e2e/pr5/business_process_smoke_test.go` | 构建并启动真实 `cmd/business` 二进制，验证 Postgres + Kitex + `/healthz` + `/readyz` |
-| Full HTTP Service Smoke | `services/agent/internal/e2e/pr5/full_http_service_smoke_test.go`、`scripts/validate-pr5-full-http-smoke.sh` | 本地真实 `cmd/business` + `cmd/agent` 双进程，验证 Business HTTP login、Business Kitex RPC、Agent HTTP run 和 AG-UI replay |
-| Browser Smoke | `scripts/validate-pr5-browser-smoke.sh`、`tests/e2e/browser/pr5-frontend-browser-smoke.mjs` | 构建用户端 / 管理端，Vite preview + 本地 Chrome 验证 PR-5 前后台联动主路径 |
-| Marketplace Guard | `services/business/internal/infra/repository/businesscore/pr4_marketplace.go` | `MARKETPLACE_LISTING_SUSPENDED` 新安装守卫，已存在 installation 幂等重放不受影响 |
+| Fake Provider | `internal/contracts/releasegate/fake_provider.go` | provider 行为、场景覆盖、场景执行和幂等规则校验 |
+| E2E Gate | `internal/contracts/releasegate/e2e.go` | suite index、fixture、release governance 校验 |
+| Tests | `internal/contracts/releasegate/*_test.go` | 读取 PR-5 active fixture 和 release 文档做漂移防护 |
+| Service E2E | `services/business/internal/e2e/release/service_e2e_test.go` | 本地 PostgreSQL 中串联 agent/business migrations 与 PR-3/PR-4 仓储主路径 |
+| Agent HTTP/Redis E2E | `services/agent/internal/e2e/release/agent_http_redis_e2e_test.go` | `httptest` 走真实 Agent HTTP router，Redis 使用 testcontainers 真容器 |
+| Agent Process Smoke | `services/agent/internal/e2e/release/agent_process_smoke_test.go` | 构建并启动真实 `cmd/agent` 二进制，验证 Postgres + Redis + `/healthz` + `/readyz` |
+| Business Process Smoke | `services/business/internal/e2e/release/business_process_smoke_test.go` | 构建并启动真实 `cmd/business` 二进制，验证 Postgres + Kitex + `/healthz` + `/readyz` |
+| Full HTTP Service Smoke | `services/agent/internal/e2e/release/full_http_service_smoke_test.go`、`scripts/validate-release-full-http-smoke.sh` | 本地真实 `cmd/business` + `cmd/agent` 双进程，验证 Business HTTP login、Business Kitex RPC、Agent HTTP run 和 AG-UI replay |
+| Browser Smoke | `scripts/validate-release-browser-smoke.sh`、`tests/e2e/browser/release-frontend-browser-smoke.mjs` | 构建用户端 / 管理端，Vite preview + 本地 Chrome 验证 PR-5 前后台联动主路径 |
+| Marketplace Guard | `services/business/internal/infra/repository/businesscore/marketplace.go` | `MARKETPLACE_LISTING_SUSPENDED` 新安装守卫，已存在 installation 幂等重放不受影响 |
 
 ## 开发注意事项
 
@@ -57,7 +57,7 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 
 ## Done Gate
 
-- [x] `internal/contracts/pr5` 包存在。
+- [x] `internal/contracts/releasegate` 包存在。
 - [x] fake provider required behaviors 覆盖校验通过。
 - [x] fake provider scenarios 可执行且幂等。
 - [x] E2E suite index 覆盖 required fixtures 校验通过。
@@ -74,19 +74,19 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 ## 验证命令
 
 ```bash
-go test ./internal/contracts/pr5
-go test ./services/agent/internal/e2e/pr5 ./services/agent/internal/events/stream ./internal/testredis
-go test ./services/agent/internal/e2e/pr5 -run TestPR5AgentIndependentProcessHTTPSmoke -count=1 -v
-go test ./services/business/internal/e2e/pr5 -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v
-go test ./services/agent/internal/e2e/pr5 -run TestPR5FullHTTPServiceE2ESmoke -count=1 -v
-go test ./internal/contracts/pr5 ./services/business/internal/infra/repository/businesscore ./services/business/internal/e2e/pr5
-go test ./internal/contracts/pr3 ./internal/contracts/pr4 ./internal/contracts/pr5 ./services/business/internal/e2e/pr5
-scripts/validate-pr5-full-http-smoke.sh
-scripts/validate-pr5-browser-smoke.sh
-make pr5-full-http-smoke
-make pr5-browser-smoke
+go test ./internal/contracts/releasegate
+go test ./services/agent/internal/e2e/release ./services/agent/internal/events/stream ./internal/testredis
+go test ./services/agent/internal/e2e/release -run TestPR5AgentIndependentProcessHTTPSmoke -count=1 -v
+go test ./services/business/internal/e2e/release -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v
+go test ./services/agent/internal/e2e/release -run TestPR5FullHTTPServiceE2ESmoke -count=1 -v
+go test ./internal/contracts/releasegate ./services/business/internal/infra/repository/businesscore ./services/business/internal/e2e/release
+go test ./internal/contracts/toolasset ./internal/contracts/skillmarket ./internal/contracts/releasegate ./services/business/internal/e2e/release
+scripts/validate-release-full-http-smoke.sh
+scripts/validate-release-browser-smoke.sh
+make release-full-http-smoke
+make release-browser-smoke
 make active-contract-gate
-make pr0-ci-gate
+make development-ci-gate
 ```
 
 ## 本地验证记录
@@ -94,32 +94,32 @@ make pr0-ci-gate
 2026-07-01 已执行：
 
 ```bash
-go test ./internal/contracts/pr5
-go test ./services/agent/internal/e2e/pr5 ./services/agent/internal/events/stream ./internal/testredis
-go test ./services/agent/internal/e2e/pr5 -run TestPR5AgentIndependentProcessHTTPSmoke -count=1 -v
-go test ./services/business/internal/e2e/pr5 -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v
-go test ./services/agent/internal/e2e/pr5 -run TestPR5FullHTTPServiceE2ESmoke -count=1 -v
-go test ./internal/contracts/pr5 ./services/business/internal/infra/repository/businesscore ./services/business/internal/e2e/pr5
-go test ./internal/contracts/pr3 ./internal/contracts/pr4 ./internal/contracts/pr5 ./services/business/internal/e2e/pr5
-scripts/validate-pr5-full-http-smoke.sh
-scripts/validate-pr5-browser-smoke.sh
-make pr5-full-http-smoke
-make pr5-browser-smoke
+go test ./internal/contracts/releasegate
+go test ./services/agent/internal/e2e/release ./services/agent/internal/events/stream ./internal/testredis
+go test ./services/agent/internal/e2e/release -run TestPR5AgentIndependentProcessHTTPSmoke -count=1 -v
+go test ./services/business/internal/e2e/release -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v
+go test ./services/agent/internal/e2e/release -run TestPR5FullHTTPServiceE2ESmoke -count=1 -v
+go test ./internal/contracts/releasegate ./services/business/internal/infra/repository/businesscore ./services/business/internal/e2e/release
+go test ./internal/contracts/toolasset ./internal/contracts/skillmarket ./internal/contracts/releasegate ./services/business/internal/e2e/release
+scripts/validate-release-full-http-smoke.sh
+scripts/validate-release-browser-smoke.sh
+make release-full-http-smoke
+make release-browser-smoke
 make active-contract-gate
-make pr0-ci-gate
+make development-ci-gate
 ```
 
 结果：
 
 ```text
-ok github.com/FigoGoo/Dora-Agent/internal/contracts/pr5
-ok github.com/FigoGoo/Dora-Agent/services/agent/internal/e2e/pr5
+ok github.com/FigoGoo/Dora-Agent/internal/contracts/releasegate
+ok github.com/FigoGoo/Dora-Agent/services/agent/internal/e2e/release
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/events/stream
 PASS TestPR5AgentIndependentProcessHTTPSmoke
 PASS TestPR5BusinessIndependentProcessHTTPSmoke
 PASS TestPR5FullHTTPServiceE2ESmoke
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore
-ok github.com/FigoGoo/Dora-Agent/services/business/internal/e2e/pr5
+ok github.com/FigoGoo/Dora-Agent/services/business/internal/e2e/release
 PR-5 full HTTP service smoke passed
 PR-5 frontend browser smoke passed
 active contract gate passed

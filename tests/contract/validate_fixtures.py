@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate M0 business RPC and HTTP contract fixtures."""
+"""Validate toolchain baseline business RPC and HTTP contract fixtures."""
 
 from __future__ import annotations
 

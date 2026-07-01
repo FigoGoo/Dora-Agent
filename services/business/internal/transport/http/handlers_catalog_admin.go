@@ -11,9 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func registerM3Routes(router *gin.Engine, opts RouterOptions) {
-	auth := m2Handler{account: opts.AccountSpace, admin: opts.Admin, project: opts.Project}
-	h := m3Handler{model: opts.Model, tool: opts.Tool, skill: opts.Skill, dictionary: opts.Dictionary}
+func registerCatalogAdminRoutes(router *gin.Engine, opts RouterOptions) {
+	auth := accountProjectAdminHandler{account: opts.AccountSpace, admin: opts.Admin, project: opts.Project}
+	h := catalogAdminHandler{model: opts.Model, tool: opts.Tool, skill: opts.Skill, dictionary: opts.Dictionary}
 
 	router.GET("/api/models/generation", auth.userAuth(), h.listGenerationModels)
 	router.GET("/api/tools/bindable", auth.userAuth(), h.listBindableTools)
@@ -55,14 +55,14 @@ func registerM3Routes(router *gin.Engine, opts RouterOptions) {
 	router.GET("/api/admin/asset-element-types", auth.adminAuth(false), h.adminListAssetElementTypes)
 }
 
-type m3Handler struct {
+type catalogAdminHandler struct {
 	model      *modelconfig.App
 	tool       *toolpolicy.App
 	skill      *skillcatalog.App
 	dictionary *assetdict.App
 }
 
-func (h m3Handler) listGenerationModels(c *gin.Context) {
+func (h catalogAdminHandler) listGenerationModels(c *gin.Context) {
 	if h.model == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -71,7 +71,7 @@ func (h m3Handler) listGenerationModels(c *gin.Context) {
 	respond(c, gin.H{"models": models, "next_cursor": next}, err)
 }
 
-func (h m3Handler) listBindableTools(c *gin.Context) {
+func (h catalogAdminHandler) listBindableTools(c *gin.Context) {
 	if h.tool == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -80,7 +80,7 @@ func (h m3Handler) listBindableTools(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) listSkills(c *gin.Context) {
+func (h catalogAdminHandler) listSkills(c *gin.Context) {
 	if h.skill == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -89,15 +89,15 @@ func (h m3Handler) listSkills(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) createSkill(c *gin.Context) {
+func (h catalogAdminHandler) createSkill(c *gin.Context) {
 	h.saveSkill(c, "")
 }
 
-func (h m3Handler) updateSkill(c *gin.Context) {
+func (h catalogAdminHandler) updateSkill(c *gin.Context) {
 	h.saveSkill(c, c.Param("skill_id"))
 }
 
-func (h m3Handler) saveSkill(c *gin.Context, skillID string) {
+func (h catalogAdminHandler) saveSkill(c *gin.Context, skillID string) {
 	if h.skill == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -127,12 +127,12 @@ func (h m3Handler) saveSkill(c *gin.Context, skillID string) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) getSkill(c *gin.Context) {
+func (h catalogAdminHandler) getSkill(c *gin.Context) {
 	out, err := h.skill.GetSkill(c.Request.Context(), userAuth(c), c.Param("skill_id"))
 	respond(c, out, err)
 }
 
-func (h m3Handler) submitSkillTest(c *gin.Context) {
+func (h catalogAdminHandler) submitSkillTest(c *gin.Context) {
 	var req struct {
 		VersionID          string `json:"version_id"`
 		TestRunID          string `json:"test_run_id"`
@@ -151,35 +151,35 @@ func (h m3Handler) submitSkillTest(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) submitSkillReview(c *gin.Context) {
+func (h catalogAdminHandler) submitSkillReview(c *gin.Context) {
 	out, err := h.skill.SubmitReview(c.Request.Context(), userAuth(c), c.Param("skill_id"))
 	respond(c, out, err)
 }
 
-func (h m3Handler) rollbackSkill(c *gin.Context) {
+func (h catalogAdminHandler) rollbackSkill(c *gin.Context) {
 	out, err := h.skill.Rollback(c.Request.Context(), userAuth(c), c.Param("skill_id"))
 	respond(c, out, err)
 }
 
-func (h m3Handler) listAssetElementTypes(c *gin.Context) {
+func (h catalogAdminHandler) listAssetElementTypes(c *gin.Context) {
 	out, version, err := h.dictionary.ListAssetElementTypes(c.Request.Context(), userAuth(c), intQuery(c, "limit", 50), c.Query("schema_version"))
 	respond(c, gin.H{"element_types": out, "schema_version": version}, err)
 }
 
-func (h m3Handler) adminListProviders(c *gin.Context) {
+func (h catalogAdminHandler) adminListProviders(c *gin.Context) {
 	out, err := h.model.ListProviders(c.Request.Context(), adminAuth(c), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminSaveProvider(c *gin.Context) {
+func (h catalogAdminHandler) adminSaveProvider(c *gin.Context) {
 	h.adminSaveProviderWithID(c, "")
 }
 
-func (h m3Handler) adminPatchProvider(c *gin.Context) {
+func (h catalogAdminHandler) adminPatchProvider(c *gin.Context) {
 	h.adminSaveProviderWithID(c, c.Param("provider_id"))
 }
 
-func (h m3Handler) adminSaveProviderWithID(c *gin.Context, providerID string) {
+func (h catalogAdminHandler) adminSaveProviderWithID(c *gin.Context, providerID string) {
 	var req struct {
 		ProviderCode string         `json:"provider_code"`
 		ProviderName string         `json:"provider_name"`
@@ -209,7 +209,7 @@ func (h m3Handler) adminSaveProviderWithID(c *gin.Context, providerID string) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminConnectivityTest(c *gin.Context) {
+func (h catalogAdminHandler) adminConnectivityTest(c *gin.Context) {
 	var req struct {
 		ModelID string `json:"model_id"`
 	}
@@ -218,20 +218,20 @@ func (h m3Handler) adminConnectivityTest(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminListModels(c *gin.Context) {
+func (h catalogAdminHandler) adminListModels(c *gin.Context) {
 	out, err := h.model.ListModels(c.Request.Context(), adminAuth(c), c.Query("provider_id"), c.Query("resource_type"), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminSaveModel(c *gin.Context) {
+func (h catalogAdminHandler) adminSaveModel(c *gin.Context) {
 	h.adminSaveModelWithID(c, "")
 }
 
-func (h m3Handler) adminPatchModel(c *gin.Context) {
+func (h catalogAdminHandler) adminPatchModel(c *gin.Context) {
 	h.adminSaveModelWithID(c, c.Param("model_id"))
 }
 
-func (h m3Handler) adminSaveModelWithID(c *gin.Context, modelID string) {
+func (h catalogAdminHandler) adminSaveModelWithID(c *gin.Context, modelID string) {
 	var req struct {
 		ProviderID        string         `json:"provider_id"`
 		ModelCode         string         `json:"model_code"`
@@ -261,7 +261,7 @@ func (h m3Handler) adminSaveModelWithID(c *gin.Context, modelID string) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminSetDefaultModel(c *gin.Context) {
+func (h catalogAdminHandler) adminSetDefaultModel(c *gin.Context) {
 	var req struct {
 		ResourceType      string `json:"resource_type"`
 		ModelID           string `json:"model_id"`
@@ -274,7 +274,7 @@ func (h m3Handler) adminSetDefaultModel(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminSetModelStatus(c *gin.Context) {
+func (h catalogAdminHandler) adminSetModelStatus(c *gin.Context) {
 	var req struct {
 		Status string `json:"status"`
 	}
@@ -285,12 +285,12 @@ func (h m3Handler) adminSetModelStatus(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminListTools(c *gin.Context) {
+func (h catalogAdminHandler) adminListTools(c *gin.Context) {
 	out, err := h.tool.ListAdminTools(c.Request.Context(), adminAuth(c), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminRegisterTool(c *gin.Context) {
+func (h catalogAdminHandler) adminRegisterTool(c *gin.Context) {
 	var req struct {
 		ToolName             string            `json:"tool_name"`
 		ToolType             string            `json:"tool_type"`
@@ -332,13 +332,13 @@ func (h m3Handler) adminRegisterTool(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminToolImpactPreview(c *gin.Context) {
+func (h catalogAdminHandler) adminToolImpactPreview(c *gin.Context) {
 	toolName, toolType := parseToolKey(c.Param("tool_key"), c.Query("tool_type"))
 	out, err := h.tool.ImpactPreview(c.Request.Context(), adminAuth(c), toolName, toolType)
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminUpdateToolPolicy(c *gin.Context) {
+func (h catalogAdminHandler) adminUpdateToolPolicy(c *gin.Context) {
 	var req struct {
 		ToolType             string            `json:"tool_type"`
 		Allowed              *bool             `json:"allowed"`
@@ -356,7 +356,7 @@ func (h m3Handler) adminUpdateToolPolicy(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminUpdateToolPricing(c *gin.Context) {
+func (h catalogAdminHandler) adminUpdateToolPricing(c *gin.Context) {
 	var req struct {
 		ToolType        string  `json:"tool_type"`
 		ChargeMode      string  `json:"charge_mode"`
@@ -373,7 +373,7 @@ func (h m3Handler) adminUpdateToolPricing(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminSetToolStatus(c *gin.Context) {
+func (h catalogAdminHandler) adminSetToolStatus(c *gin.Context) {
 	var req struct {
 		ToolType string `json:"tool_type"`
 		Status   string `json:"status"`
@@ -386,7 +386,7 @@ func (h m3Handler) adminSetToolStatus(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminSaveToolWhitelist(c *gin.Context) {
+func (h catalogAdminHandler) adminSaveToolWhitelist(c *gin.Context) {
 	var req struct {
 		ToolType  string `json:"tool_type"`
 		ScopeType string `json:"scope_type"`
@@ -402,12 +402,12 @@ func (h m3Handler) adminSaveToolWhitelist(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminListSystemSkills(c *gin.Context) {
+func (h catalogAdminHandler) adminListSystemSkills(c *gin.Context) {
 	out, err := h.skill.ListSystemSkills(c.Request.Context(), adminAuth(c), c.Query("status"), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminCreateSystemSkill(c *gin.Context) {
+func (h catalogAdminHandler) adminCreateSystemSkill(c *gin.Context) {
 	var req struct {
 		SkillKey               string             `json:"skill_key"`
 		SkillName              string             `json:"skill_name"`
@@ -438,7 +438,7 @@ func (h m3Handler) adminCreateSystemSkill(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminSkillTest(c *gin.Context) {
+func (h catalogAdminHandler) adminSkillTest(c *gin.Context) {
 	var req struct {
 		VersionID          string `json:"version_id"`
 		TestRunID          string `json:"test_run_id"`
@@ -456,7 +456,7 @@ func (h m3Handler) adminSkillTest(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminPublishSkill(c *gin.Context) {
+func (h catalogAdminHandler) adminPublishSkill(c *gin.Context) {
 	var req struct {
 		VersionID string `json:"version_id"`
 	}
@@ -467,17 +467,17 @@ func (h m3Handler) adminPublishSkill(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminDeprecateSkill(c *gin.Context) {
+func (h catalogAdminHandler) adminDeprecateSkill(c *gin.Context) {
 	out, err := h.skill.Deprecate(c.Request.Context(), adminAuth(c), c.Param("skill_id"))
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminListSkillReviews(c *gin.Context) {
+func (h catalogAdminHandler) adminListSkillReviews(c *gin.Context) {
 	out, err := h.skill.ListReviews(c.Request.Context(), adminAuth(c), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminConfirmSkillReview(c *gin.Context) {
+func (h catalogAdminHandler) adminConfirmSkillReview(c *gin.Context) {
 	var req adminSkillReviewRequest
 	if !bindJSON(c, &req) {
 		return
@@ -535,20 +535,20 @@ func (r adminSkillReviewRequest) normalizedComment() string {
 	return strings.TrimSpace(r.Reason)
 }
 
-func (h m3Handler) adminListAssetElementTypes(c *gin.Context) {
+func (h catalogAdminHandler) adminListAssetElementTypes(c *gin.Context) {
 	out, err := h.dictionary.ListAdminElementTypes(c.Request.Context(), adminAuth(c), c.Query("status"), adminPageLimit(c, 20), adminPageOffset(c))
 	respond(c, out, err)
 }
 
-func (h m3Handler) adminSaveAssetElementType(c *gin.Context) {
+func (h catalogAdminHandler) adminSaveAssetElementType(c *gin.Context) {
 	h.adminSaveAssetElementTypeWithKey(c, "")
 }
 
-func (h m3Handler) adminPatchAssetElementType(c *gin.Context) {
+func (h catalogAdminHandler) adminPatchAssetElementType(c *gin.Context) {
 	h.adminSaveAssetElementTypeWithKey(c, c.Param("element_type"))
 }
 
-func (h m3Handler) adminSaveAssetElementTypeWithKey(c *gin.Context, elementType string) {
+func (h catalogAdminHandler) adminSaveAssetElementTypeWithKey(c *gin.Context, elementType string) {
 	var req struct {
 		ElementType   string `json:"element_type"`
 		DisplayName   string `json:"display_name"`

@@ -49,7 +49,7 @@ func TestUploadURLFallsBackWithoutSigner(t *testing.T) {
 		now:    fixedNow,
 	}
 	got := a.uploadURL("k.png", "image/png", fixedNow().Add(10*time.Minute))
-	if got != "https://tos.doraigc.com/k.png?upload_token=local-m4" {
+	if got != "https://tos.doraigc.com/k.png?upload_token=local-upload" {
 		t.Fatalf("fallback url mismatch: %s", got)
 	}
 }

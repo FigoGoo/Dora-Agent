@@ -70,7 +70,7 @@ flowchart TD
 go test ./services/agent/internal/runtime/skillgraph ./services/agent/internal/runtime/eino ./services/agent/internal/application/workbench
 go test ./services/agent/internal/runtime/skillgraph ./services/agent/internal/runtime/eino ./services/agent/internal/runtime/creation ./services/agent/internal/infra/repository ./services/agent/internal/api/http ./services/agent/internal/application/workbench
 make active-contract-gate
-make pr0-ci-gate
+make development-ci-gate
 ```
 
 结果：

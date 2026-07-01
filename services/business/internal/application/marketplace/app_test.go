@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr4"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/skillmarket"
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
@@ -21,10 +21,10 @@ func TestMarketplaceAppUserInstallAndSkillUsageLifecycle(t *testing.T) {
 	app.now = func() time.Time { return time.Date(2026, 7, 1, 6, 0, 0, 0, time.UTC) }
 
 	var publishFixture struct {
-		SkillPackage  pr4.SkillPackage       `json:"skill_package"`
-		SkillVersion  pr4.SkillVersion       `json:"skill_version"`
-		PricingPolicy pr4.SkillPricingPolicy `json:"pricing_policy"`
-		Listing       pr4.MarketplaceListing `json:"listing"`
+		SkillPackage  skillmarket.SkillPackage       `json:"skill_package"`
+		SkillVersion  skillmarket.SkillVersion       `json:"skill_version"`
+		PricingPolicy skillmarket.SkillPricingPolicy `json:"pricing_policy"`
+		Listing       skillmarket.MarketplaceListing `json:"listing"`
 	}
 	readMarketplaceFixture(t, "tests/fixtures/contracts/marketplace/creator_submit_approve_publish.json", &publishFixture)
 	if err := repo.SaveCreatorPublishFlowV1(t.Context(), publishFixture.SkillPackage, publishFixture.SkillVersion, publishFixture.PricingPolicy, publishFixture.Listing); err != nil {
@@ -52,19 +52,19 @@ func TestMarketplaceAppUserInstallAndSkillUsageLifecycle(t *testing.T) {
 		Auth:        auth,
 		Meta:        accountspace.RequestMeta{IdempotencyKey: "acct_personal_001:listing_city_tourism_creator_001:install"},
 		ListingID:   publishFixture.Listing.ListingID,
-		TargetScope: pr4.AccountScopePersonal,
+		TargetScope: skillmarket.AccountScopePersonal,
 	})
 	if err != nil {
 		t.Fatalf("install skill: %v", err)
 	}
-	if installed.Installation.AccountScope != pr4.AccountScopePersonal || installed.Installation.VersionStrategy != pr4.VersionStrategyLatestPublished {
+	if installed.Installation.AccountScope != skillmarket.AccountScopePersonal || installed.Installation.VersionStrategy != skillmarket.VersionStrategyLatestPublished {
 		t.Fatalf("unexpected installation: %#v", installed)
 	}
 	replayedInstall, err := app.InstallSkill(t.Context(), InstallSkillInput{
 		Auth:        auth,
 		Meta:        accountspace.RequestMeta{IdempotencyKey: "acct_personal_001:listing_city_tourism_creator_001:install"},
 		ListingID:   publishFixture.Listing.ListingID,
-		TargetScope: pr4.AccountScopePersonal,
+		TargetScope: skillmarket.AccountScopePersonal,
 	})
 	if err != nil {
 		t.Fatalf("replay install skill: %v", err)
@@ -207,7 +207,7 @@ func TestMarketplaceAppAdminGovernanceLifecycle(t *testing.T) {
 		Auth:        creator,
 		Meta:        accountspace.RequestMeta{IdempotencyKey: "creator-skill-draft-admin-001"},
 		Name:        "审核治理 Skill",
-		Description: "用于验证 PR-4 管理端审核治理闭环。",
+		Description: "用于验证 skill market 管理端审核治理闭环。",
 	})
 	if err != nil {
 		t.Fatalf("create creator draft for admin: %v", err)
@@ -254,10 +254,10 @@ func TestMarketplaceAppAdminGovernanceLifecycle(t *testing.T) {
 	}
 
 	var publishFixture struct {
-		SkillPackage  pr4.SkillPackage       `json:"skill_package"`
-		SkillVersion  pr4.SkillVersion       `json:"skill_version"`
-		PricingPolicy pr4.SkillPricingPolicy `json:"pricing_policy"`
-		Listing       pr4.MarketplaceListing `json:"listing"`
+		SkillPackage  skillmarket.SkillPackage       `json:"skill_package"`
+		SkillVersion  skillmarket.SkillVersion       `json:"skill_version"`
+		PricingPolicy skillmarket.SkillPricingPolicy `json:"pricing_policy"`
+		Listing       skillmarket.MarketplaceListing `json:"listing"`
 	}
 	readMarketplaceFixture(t, "tests/fixtures/contracts/marketplace/creator_submit_approve_publish.json", &publishFixture)
 	if err := repo.SaveCreatorPublishFlowV1(t.Context(), publishFixture.SkillPackage, publishFixture.SkillVersion, publishFixture.PricingPolicy, publishFixture.Listing); err != nil {
@@ -288,8 +288,8 @@ func TestMarketplaceAppAdminGovernanceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("commit refund usage: %v", err)
 	}
-	beforeRefund := pr4.SkillUsageRecord{
-		SchemaVersion:       pr4.SchemaVersionSkillUsageRecord,
+	beforeRefund := skillmarket.SkillUsageRecord{
+		SchemaVersion:       skillmarket.SchemaVersionSkillUsageRecord,
 		UsageID:             committed.Usage.UsageID,
 		RunID:               committed.Usage.RunID,
 		ListingID:           committed.Usage.ListingID,
@@ -311,7 +311,7 @@ func TestMarketplaceAppAdminGovernanceLifecycle(t *testing.T) {
 		t.Fatalf("mark refund pending: %v", err)
 	}
 	settlementID := committed.Settlement.SettlementID
-	if err := repo.DB().Create(&businesscore.PR4SkillRefundCaseRecord{
+	if err := repo.DB().Create(&businesscore.SkillRefundCaseRecord{
 		RefundCaseID: "refund_case_admin_001",
 		UsageID:      committed.Usage.UsageID,
 		SettlementID: &settlementID,
@@ -410,7 +410,7 @@ func TestMarketplaceAppAdminGovernanceLifecycle(t *testing.T) {
 	if confirmed.Settlement.Status != "settled" || confirmed.Payout.Action != "confirm_payout" || confirmed.Payout.PayoutReference == "" {
 		t.Fatalf("unexpected confirmed payout: %#v", confirmed)
 	}
-	var payoutUsageRecord businesscore.PR4SkillUsageRecord
+	var payoutUsageRecord businesscore.SkillUsageRecord
 	if err := repo.DB().Where("usage_id = ?", payoutUsage.Usage.UsageID).First(&payoutUsageRecord).Error; err != nil {
 		t.Fatalf("load payout usage record: %v", err)
 	}

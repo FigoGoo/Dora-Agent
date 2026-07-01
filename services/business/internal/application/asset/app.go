@@ -670,7 +670,7 @@ func (a *App) uploadURL(objectKey, contentType string, expiresAt time.Time) stri
 			return url
 		}
 	}
-	return strings.TrimRight(a.tos.BaseURL, "/") + "/" + strings.TrimLeft(objectKey, "/") + "?upload_token=local-m4"
+	return strings.TrimRight(a.tos.BaseURL, "/") + "/" + strings.TrimLeft(objectKey, "/") + "?upload_token=local-upload"
 }
 
 // clampUploadTTL 把上传凭证有效期约束到规范要求的 5-15 分钟。

@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr4"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/skillmarket"
 	marketplaceapi "github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessskillmarketplace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/marketplace"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
@@ -189,7 +189,7 @@ func (h *Handler) CommitSkillUsageAndSettle(ctx context.Context, req *marketplac
 	if err := validateMarketplaceRPCContext(req.GetAuthContext(), req.GetRequestMeta()); err != nil {
 		return nil, err
 	}
-	if err := pr1.ValidateDigest(req.GetValueDeliveredDigest()); err != nil {
+	if err := foundation.ValidateDigest(req.GetValueDeliveredDigest()); err != nil {
 		return nil, bizerrors.New(bizerrors.CodeInvalidArgument, "value_delivered_digest is invalid")
 	}
 	out, err := h.Marketplace.CommitSkillUsageAndSettle(ctx, marketplace.CommitSkillUsageAndSettleInput{
@@ -299,14 +299,14 @@ func marketplaceListingStatusToRPC(status string) marketplaceapi.MarketplaceList
 func installationScopeFromRPC(scope marketplaceapi.InstallationScope) string {
 	switch scope {
 	case marketplaceapi.InstallationScope_ENTERPRISE:
-		return pr4.AccountScopeEnterprise
+		return skillmarket.AccountScopeEnterprise
 	default:
-		return pr4.AccountScopePersonal
+		return skillmarket.AccountScopePersonal
 	}
 }
 
 func installationScopeToRPC(scope string) marketplaceapi.InstallationScope {
-	if strings.TrimSpace(scope) == pr4.AccountScopeEnterprise {
+	if strings.TrimSpace(scope) == skillmarket.AccountScopeEnterprise {
 		return marketplaceapi.InstallationScope_ENTERPRISE
 	}
 	return marketplaceapi.InstallationScope_PERSONAL

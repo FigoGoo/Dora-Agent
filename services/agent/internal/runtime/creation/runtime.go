@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
 )
 
 const genericTemplateID = "gtemplate_generic_creation"
@@ -33,25 +33,25 @@ type GenericCreationInput struct {
 }
 
 type GenericCreationResult struct {
-	GenericGraph  pr2.GenericCreationGraph
-	GraphTemplate pr2.GraphTemplate
-	GraphPlan     pr2.GraphPlan
-	Board         pr2.CreativeBoard
-	Elements      []pr2.CreativeElement
-	Snapshot      pr2.BoardSnapshot
-	Events        []pr1.AGUIEnvelope
+	GenericGraph  boardgraph.GenericCreationGraph
+	GraphTemplate boardgraph.GraphTemplate
+	GraphPlan     boardgraph.GraphPlan
+	Board         boardgraph.CreativeBoard
+	Elements      []boardgraph.CreativeElement
+	Snapshot      boardgraph.BoardSnapshot
+	Events        []foundation.AGUIEnvelope
 }
 
 type ApproveBoardInput struct {
-	Board          pr2.CreativeBoard
+	Board          boardgraph.CreativeBoard
 	ActorUserID    string
 	IdempotencyKey string
 	ApprovedAt     time.Time
 }
 
 type ApproveBoardResult struct {
-	Patch pr2.BoardPatch
-	Board pr2.CreativeBoard
+	Patch boardgraph.BoardPatch
+	Board boardgraph.CreativeBoard
 }
 
 func New(clock Clock) Runtime {
@@ -76,22 +76,22 @@ func (r Runtime) ExecuteGenericCreation(ctx context.Context, input GenericCreati
 	template := buildGenericTemplate(now)
 	generic := buildGenericGraph(template.TemplateDigest)
 
-	briefDigest, err := pr1.CanonicalDigest(map[string]any{
+	briefDigest, err := foundation.CanonicalDigest(map[string]any{
 		"prompt":                 prompt,
 		"router_decision_digest": input.RouterDecisionDigest,
 	})
 	if err != nil {
 		return GenericCreationResult{}, err
 	}
-	briefOutputDigest, err := pr1.CanonicalDigest(map[string]any{
+	briefOutputDigest, err := foundation.CanonicalDigest(map[string]any{
 		"brief_summary": summarizePrompt(prompt),
-		"graph":         pr2.GenericCreationGraphID,
+		"graph":         boardgraph.GenericCreationGraphID,
 	})
 	if err != nil {
 		return GenericCreationResult{}, err
 	}
 	plan := buildGraphPlan(input, graphPlanID, boardID, briefDigest, briefOutputDigest, now)
-	if plan.GraphPlanDigest, err = pr1.CanonicalDigest(map[string]any{
+	if plan.GraphPlanDigest, err = foundation.CanonicalDigest(map[string]any{
 		"graph_plan_id":          plan.GraphPlanID,
 		"graph_template_id":      plan.GraphTemplateID,
 		"graph_template_version": plan.GraphTemplateVersion,
@@ -109,8 +109,8 @@ func (r Runtime) ExecuteGenericCreation(ctx context.Context, input GenericCreati
 		return GenericCreationResult{}, err
 	}
 	graphPlanIDPtr := plan.GraphPlanID
-	board := pr2.CreativeBoard{
-		SchemaVersion:   pr2.SchemaVersionCreativeBoard,
+	board := boardgraph.CreativeBoard{
+		SchemaVersion:   boardgraph.SchemaVersionCreativeBoard,
 		BoardID:         boardID,
 		ProjectID:       input.ProjectID,
 		SessionID:       input.SessionID,
@@ -124,7 +124,7 @@ func (r Runtime) ExecuteGenericCreation(ctx context.Context, input GenericCreati
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	if board.BoardDigest, err = pr1.CanonicalDigest(map[string]any{
+	if board.BoardDigest, err = foundation.CanonicalDigest(map[string]any{
 		"board_id": board.BoardID,
 		"version":  board.Version,
 		"status":   board.Status,
@@ -132,8 +132,8 @@ func (r Runtime) ExecuteGenericCreation(ctx context.Context, input GenericCreati
 	}); err != nil {
 		return GenericCreationResult{}, err
 	}
-	snapshot := pr2.BoardSnapshot{
-		SchemaVersion: pr2.SchemaVersionBoardSnapshot,
+	snapshot := boardgraph.BoardSnapshot{
+		SchemaVersion: boardgraph.SchemaVersionBoardSnapshot,
 		BoardID:       board.BoardID,
 		Version:       board.Version,
 		Status:        board.Status,
@@ -165,7 +165,7 @@ func (r Runtime) ApproveBoard(ctx context.Context, input ApproveBoardInput) (App
 	if err := ctx.Err(); err != nil {
 		return ApproveBoardResult{}, err
 	}
-	if err := pr2.ValidateCreativeBoard(input.Board); err != nil {
+	if err := boardgraph.ValidateCreativeBoard(input.Board); err != nil {
 		return ApproveBoardResult{}, fmt.Errorf("board: %w", err)
 	}
 	if strings.TrimSpace(input.ActorUserID) == "" {
@@ -182,26 +182,26 @@ func (r Runtime) ApproveBoard(ctx context.Context, input ApproveBoardInput) (App
 		"approved_by": input.ActorUserID,
 		"approved_at": approvedAt.Format(time.RFC3339),
 	}
-	patchDigest, err := pr1.CanonicalDigest(map[string]any{
+	patchDigest, err := foundation.CanonicalDigest(map[string]any{
 		"board_id":        input.Board.BoardID,
 		"base_version":    input.Board.Version,
 		"target_version":  input.Board.Version + 1,
-		"operation":       pr2.BoardPatchOperationApproveBoard,
-		"actor":           pr2.BoardPatchActorUser,
+		"operation":       boardgraph.BoardPatchOperationApproveBoard,
+		"actor":           boardgraph.BoardPatchActorUser,
 		"idempotency_key": input.IdempotencyKey,
 		"payload":         payload,
 	})
 	if err != nil {
 		return ApproveBoardResult{}, err
 	}
-	patch := pr2.BoardPatch{
-		SchemaVersion:  pr2.SchemaVersionBoardPatch,
+	patch := boardgraph.BoardPatch{
+		SchemaVersion:  boardgraph.SchemaVersionBoardPatch,
 		PatchID:        "patch_" + shortDigest(input.Board.BoardID+":approve:"+fmt.Sprint(input.Board.Version)),
 		BoardID:        input.Board.BoardID,
 		BaseVersion:    input.Board.Version,
 		TargetVersion:  input.Board.Version + 1,
-		Operation:      pr2.BoardPatchOperationApproveBoard,
-		Actor:          pr2.BoardPatchActorUser,
+		Operation:      boardgraph.BoardPatchOperationApproveBoard,
+		Actor:          boardgraph.BoardPatchActorUser,
 		IdempotencyKey: input.IdempotencyKey,
 		Payload:        payload,
 		PatchDigest:    patchDigest,
@@ -215,7 +215,7 @@ func (r Runtime) ApproveBoard(ctx context.Context, input ApproveBoardInput) (App
 	after.ApprovedBy = &approvedBy
 	after.ToolPlanAllowed = true
 	after.UpdatedAt = approvedAt
-	after.BoardDigest, err = pr1.CanonicalDigest(map[string]any{
+	after.BoardDigest, err = foundation.CanonicalDigest(map[string]any{
 		"board_id":        after.BoardID,
 		"version":         after.Version,
 		"status":          after.Status,
@@ -225,7 +225,7 @@ func (r Runtime) ApproveBoard(ctx context.Context, input ApproveBoardInput) (App
 	if err != nil {
 		return ApproveBoardResult{}, err
 	}
-	if err := pr2.ValidateBoardApproval(input.Board, patch, after); err != nil {
+	if err := boardgraph.ValidateBoardApproval(input.Board, patch, after); err != nil {
 		return ApproveBoardResult{}, err
 	}
 	return ApproveBoardResult{Patch: patch, Board: after}, nil
@@ -239,7 +239,7 @@ func validateGenericCreationInput(input GenericCreationInput) error {
 		return errors.New("prompt is required")
 	}
 	if strings.TrimSpace(input.RouterDecisionDigest) != "" {
-		if err := pr1.ValidateDigest(input.RouterDecisionDigest); err != nil {
+		if err := foundation.ValidateDigest(input.RouterDecisionDigest); err != nil {
 			return fmt.Errorf("router_decision_digest: %w", err)
 		}
 	}
@@ -247,26 +247,26 @@ func validateGenericCreationInput(input GenericCreationInput) error {
 }
 
 func validateGenericCreationResult(result GenericCreationResult) error {
-	if err := pr2.ValidateGenericGraphFixture(result.GenericGraph, result.GraphTemplate, result.GraphPlan); err != nil {
+	if err := boardgraph.ValidateGenericGraphFixture(result.GenericGraph, result.GraphTemplate, result.GraphPlan); err != nil {
 		return err
 	}
-	if err := pr2.ValidateBoardCreation(result.Board, result.Elements); err != nil {
+	if err := boardgraph.ValidateBoardCreation(result.Board, result.Elements); err != nil {
 		return err
 	}
-	if err := pr2.ValidateBoardSnapshot(result.Snapshot); err != nil {
+	if err := boardgraph.ValidateBoardSnapshot(result.Snapshot); err != nil {
 		return err
 	}
-	if err := pr1.ValidateAGUISequence(result.Events); err != nil {
+	if err := foundation.ValidateAGUISequence(result.Events); err != nil {
 		return err
 	}
 	return nil
 }
 
-func buildGenericGraph(templateDigest string) pr2.GenericCreationGraph {
-	return pr2.GenericCreationGraph{
-		SchemaVersion:        pr2.SchemaVersionGenericCreationGraph,
-		GenericGraphID:       pr2.GenericCreationGraphID,
-		SkillLevel:           pr2.SkillLevelL0,
+func buildGenericGraph(templateDigest string) boardgraph.GenericCreationGraph {
+	return boardgraph.GenericCreationGraph{
+		SchemaVersion:        boardgraph.SchemaVersionGenericCreationGraph,
+		GenericGraphID:       boardgraph.GenericCreationGraphID,
+		SkillLevel:           boardgraph.SkillLevelL0,
 		PricingPolicy:        "free",
 		UsageFee:             0,
 		VersionStrategy:      "platform_builtin",
@@ -277,37 +277,37 @@ func buildGenericGraph(templateDigest string) pr2.GenericCreationGraph {
 	}
 }
 
-func buildGenericTemplate(now time.Time) pr2.GraphTemplate {
-	nodes := []pr2.GraphNode{
-		{NodeID: "brief_parser", NodeType: pr2.GraphNodeTypeBriefParser, DisplayName: "解析创作意图"},
-		{NodeID: "clarifier", NodeType: pr2.GraphNodeTypeClarifier, DisplayName: "补齐关键信息"},
-		{NodeID: "creative_direction", NodeType: pr2.GraphNodeTypeLLM, DisplayName: "生成创意方向"},
-		{NodeID: "board_writer", NodeType: pr2.GraphNodeTypeBoardWriter, DisplayName: "生成 Board 草稿"},
-		{NodeID: "skill_recommendation", NodeType: pr2.GraphNodeTypeRecommendation, DisplayName: "推荐可安装 Skill"},
+func buildGenericTemplate(now time.Time) boardgraph.GraphTemplate {
+	nodes := []boardgraph.GraphNode{
+		{NodeID: "brief_parser", NodeType: boardgraph.GraphNodeTypeBriefParser, DisplayName: "解析创作意图"},
+		{NodeID: "clarifier", NodeType: boardgraph.GraphNodeTypeClarifier, DisplayName: "补齐关键信息"},
+		{NodeID: "creative_direction", NodeType: boardgraph.GraphNodeTypeLLM, DisplayName: "生成创意方向"},
+		{NodeID: "board_writer", NodeType: boardgraph.GraphNodeTypeBoardWriter, DisplayName: "生成 Board 草稿"},
+		{NodeID: "skill_recommendation", NodeType: boardgraph.GraphNodeTypeRecommendation, DisplayName: "推荐可安装 Skill"},
 	}
-	edges := []pr2.GraphEdge{
+	edges := []boardgraph.GraphEdge{
 		{From: "brief_parser", To: "clarifier"},
 		{From: "clarifier", To: "creative_direction"},
 		{From: "creative_direction", To: "board_writer"},
 		{From: "board_writer", To: "skill_recommendation"},
 	}
-	digest, _ := pr1.CanonicalDigest(map[string]any{
+	digest, _ := foundation.CanonicalDigest(map[string]any{
 		"graph_template_id": genericTemplateID,
 		"version":           "v1",
-		"graph_type":        pr2.GraphTypeGenericCreation,
-		"skill_level":       pr2.SkillLevelL0,
+		"graph_type":        boardgraph.GraphTypeGenericCreation,
+		"skill_level":       boardgraph.SkillLevelL0,
 		"entry_node":        "brief_parser",
 		"terminal_nodes":    []string{"board_writer", "skill_recommendation"},
 		"nodes":             nodes,
 		"edges":             edges,
 	})
-	return pr2.GraphTemplate{
-		SchemaVersion:   pr2.SchemaVersionGraphTemplate,
+	return boardgraph.GraphTemplate{
+		SchemaVersion:   boardgraph.SchemaVersionGraphTemplate,
 		GraphTemplateID: genericTemplateID,
 		Name:            "Generic Creation Graph",
 		Version:         "v1",
-		GraphType:       pr2.GraphTypeGenericCreation,
-		SkillLevel:      pr2.SkillLevelL0,
+		GraphType:       boardgraph.GraphTypeGenericCreation,
+		SkillLevel:      boardgraph.SkillLevelL0,
 		EntryNode:       "brief_parser",
 		TerminalNodes:   []string{"board_writer", "skill_recommendation"},
 		Nodes:           nodes,
@@ -317,10 +317,10 @@ func buildGenericTemplate(now time.Time) pr2.GraphTemplate {
 	}
 }
 
-func buildGraphPlan(input GenericCreationInput, graphPlanID, boardID, inputDigest, outputDigest string, now time.Time) pr2.GraphPlan {
+func buildGraphPlan(input GenericCreationInput, graphPlanID, boardID, inputDigest, outputDigest string, now time.Time) boardgraph.GraphPlan {
 	currentNode := "board_writer"
-	return pr2.GraphPlan{
-		SchemaVersion:        pr2.SchemaVersionGraphPlan,
+	return boardgraph.GraphPlan{
+		SchemaVersion:        boardgraph.SchemaVersionGraphPlan,
 		GraphPlanID:          graphPlanID,
 		GraphTemplateID:      genericTemplateID,
 		GraphTemplateVersion: "v1",
@@ -328,15 +328,15 @@ func buildGraphPlan(input GenericCreationInput, graphPlanID, boardID, inputDiges
 		BoardID:              boardID,
 		Status:               "compiled",
 		CurrentNode:          &currentNode,
-		ValueDeliveredStage:  pr2.ValueDeliveredStageStoryboardReady,
-		Nodes: []pr2.GraphPlanNode{
-			{NodeID: "brief_parser", NodeType: pr2.GraphNodeTypeBriefParser, Status: pr2.GraphPlanNodeStatusCompleted, InputDigest: &inputDigest, OutputDigest: &outputDigest},
-			{NodeID: "clarifier", NodeType: pr2.GraphNodeTypeClarifier, Status: pr2.GraphPlanNodeStatusSkipped},
-			{NodeID: "creative_direction", NodeType: pr2.GraphNodeTypeLLM, Status: pr2.GraphPlanNodeStatusCompleted, InputDigest: &outputDigest, OutputDigest: &outputDigest},
-			{NodeID: "board_writer", NodeType: pr2.GraphNodeTypeBoardWriter, Status: pr2.GraphPlanNodeStatusCompleted, InputDigest: &outputDigest},
-			{NodeID: "skill_recommendation", NodeType: pr2.GraphNodeTypeRecommendation, Status: pr2.GraphPlanNodeStatusPending},
+		ValueDeliveredStage:  boardgraph.ValueDeliveredStageStoryboardReady,
+		Nodes: []boardgraph.GraphPlanNode{
+			{NodeID: "brief_parser", NodeType: boardgraph.GraphNodeTypeBriefParser, Status: boardgraph.GraphPlanNodeStatusCompleted, InputDigest: &inputDigest, OutputDigest: &outputDigest},
+			{NodeID: "clarifier", NodeType: boardgraph.GraphNodeTypeClarifier, Status: boardgraph.GraphPlanNodeStatusSkipped},
+			{NodeID: "creative_direction", NodeType: boardgraph.GraphNodeTypeLLM, Status: boardgraph.GraphPlanNodeStatusCompleted, InputDigest: &outputDigest, OutputDigest: &outputDigest},
+			{NodeID: "board_writer", NodeType: boardgraph.GraphNodeTypeBoardWriter, Status: boardgraph.GraphPlanNodeStatusCompleted, InputDigest: &outputDigest},
+			{NodeID: "skill_recommendation", NodeType: boardgraph.GraphNodeTypeRecommendation, Status: boardgraph.GraphPlanNodeStatusPending},
 		},
-		Edges: []pr2.GraphPlanEdge{
+		Edges: []boardgraph.GraphPlanEdge{
 			{From: "brief_parser", To: "clarifier"},
 			{From: "clarifier", To: "creative_direction"},
 			{From: "creative_direction", To: "board_writer"},
@@ -347,7 +347,7 @@ func buildGraphPlan(input GenericCreationInput, graphPlanID, boardID, inputDiges
 	}
 }
 
-func buildBoardElements(boardID, prompt string, now time.Time) ([]pr2.CreativeElement, error) {
+func buildBoardElements(boardID, prompt string, now time.Time) ([]boardgraph.CreativeElement, error) {
 	sceneContent := map[string]any{
 		"scene_title": "核心开场镜头",
 		"shot_prompt": "围绕用户 brief 建立真实、有节奏的开场镜头：" + summarizePrompt(prompt),
@@ -355,23 +355,23 @@ func buildBoardElements(boardID, prompt string, now time.Time) ([]pr2.CreativeEl
 	promptContent := map[string]any{
 		"prompt": "基于 brief 生成 Storyboard 草稿：" + prompt,
 	}
-	sceneDigest, err := pr1.CanonicalDigest(sceneContent)
+	sceneDigest, err := foundation.CanonicalDigest(sceneContent)
 	if err != nil {
 		return nil, err
 	}
-	promptDigest, err := pr1.CanonicalDigest(promptContent)
+	promptDigest, err := foundation.CanonicalDigest(promptContent)
 	if err != nil {
 		return nil, err
 	}
-	return []pr2.CreativeElement{
+	return []boardgraph.CreativeElement{
 		{
-			SchemaVersion:  pr2.SchemaVersionCreativeElement,
+			SchemaVersion:  boardgraph.SchemaVersionCreativeElement,
 			ElementID:      "elem_" + shortDigest(boardID+":scene:1"),
 			BoardID:        boardID,
-			ElementType:    pr2.BoardElementTypeStoryScene,
-			Source:         pr2.BoardElementSourceGraph,
-			Status:         pr2.BoardElementStatusReady,
-			Position:       pr2.ElementPosition{X: 0, Y: 0, Width: 640, Height: 360, Order: 1},
+			ElementType:    boardgraph.BoardElementTypeStoryScene,
+			Source:         boardgraph.BoardElementSourceGraph,
+			Status:         boardgraph.BoardElementStatusReady,
+			Position:       boardgraph.ElementPosition{X: 0, Y: 0, Width: 640, Height: 360, Order: 1},
 			Content:        sceneContent,
 			LinkedAssetIDs: []string{},
 			ContentDigest:  sceneDigest,
@@ -379,13 +379,13 @@ func buildBoardElements(boardID, prompt string, now time.Time) ([]pr2.CreativeEl
 			UpdatedAt:      now,
 		},
 		{
-			SchemaVersion:  pr2.SchemaVersionCreativeElement,
+			SchemaVersion:  boardgraph.SchemaVersionCreativeElement,
 			ElementID:      "elem_" + shortDigest(boardID+":prompt:1"),
 			BoardID:        boardID,
-			ElementType:    pr2.BoardElementTypePromptBlock,
-			Source:         pr2.BoardElementSourceGraph,
-			Status:         pr2.BoardElementStatusReady,
-			Position:       pr2.ElementPosition{X: 660, Y: 0, Width: 480, Height: 260, Order: 2},
+			ElementType:    boardgraph.BoardElementTypePromptBlock,
+			Source:         boardgraph.BoardElementSourceGraph,
+			Status:         boardgraph.BoardElementStatusReady,
+			Position:       boardgraph.ElementPosition{X: 660, Y: 0, Width: 480, Height: 260, Order: 2},
 			Content:        promptContent,
 			LinkedAssetIDs: []string{},
 			ContentDigest:  promptDigest,
@@ -395,8 +395,8 @@ func buildBoardElements(boardID, prompt string, now time.Time) ([]pr2.CreativeEl
 	}, nil
 }
 
-func buildEvents(input GenericCreationInput, plan pr2.GraphPlan, board pr2.CreativeBoard, elements []pr2.CreativeElement, now time.Time) ([]pr1.AGUIEnvelope, error) {
-	graphPayload := pr2.GraphPlanCreatedPayload{
+func buildEvents(input GenericCreationInput, plan boardgraph.GraphPlan, board boardgraph.CreativeBoard, elements []boardgraph.CreativeElement, now time.Time) ([]foundation.AGUIEnvelope, error) {
+	graphPayload := boardgraph.GraphPlanCreatedPayload{
 		GraphPlanID:         plan.GraphPlanID,
 		GraphTemplateID:     plan.GraphTemplateID,
 		GraphPlanStatus:     plan.Status,
@@ -404,7 +404,7 @@ func buildEvents(input GenericCreationInput, plan pr2.GraphPlan, board pr2.Creat
 		BoardID:             plan.BoardID,
 		ValueDeliveredStage: plan.ValueDeliveredStage,
 	}
-	if err := pr2.ValidateGraphPlanCreatedPayload(graphPayload); err != nil {
+	if err := boardgraph.ValidateGraphPlanCreatedPayload(graphPayload); err != nil {
 		return nil, err
 	}
 	graphPayloadMap := map[string]any{
@@ -415,11 +415,11 @@ func buildEvents(input GenericCreationInput, plan pr2.GraphPlan, board pr2.Creat
 		"board_id":              graphPayload.BoardID,
 		"value_delivered_stage": graphPayload.ValueDeliveredStage,
 	}
-	graphPayloadDigest, err := pr1.CanonicalDigest(graphPayloadMap)
+	graphPayloadDigest, err := foundation.CanonicalDigest(graphPayloadMap)
 	if err != nil {
 		return nil, err
 	}
-	boardPayload := pr2.BoardSnapshotUpdatedPayload{
+	boardPayload := boardgraph.BoardSnapshotUpdatedPayload{
 		BoardID:           board.BoardID,
 		BoardVersion:      board.Version,
 		BoardStatus:       board.Status,
@@ -427,7 +427,7 @@ func buildEvents(input GenericCreationInput, plan pr2.GraphPlan, board pr2.Creat
 		ChangedElementIDs: elementIDs(elements),
 		SnapshotRequired:  true,
 	}
-	if err := pr2.ValidateBoardSnapshotUpdatedPayload(boardPayload); err != nil {
+	if err := boardgraph.ValidateBoardSnapshotUpdatedPayload(boardPayload); err != nil {
 		return nil, err
 	}
 	boardPayloadMap := map[string]any{
@@ -438,13 +438,13 @@ func buildEvents(input GenericCreationInput, plan pr2.GraphPlan, board pr2.Creat
 		"changed_element_ids": boardPayload.ChangedElementIDs,
 		"snapshot_required":   boardPayload.SnapshotRequired,
 	}
-	boardPayloadDigest, err := pr1.CanonicalDigest(boardPayloadMap)
+	boardPayloadDigest, err := foundation.CanonicalDigest(boardPayloadMap)
 	if err != nil {
 		return nil, err
 	}
-	first, err := pr1.BuildAGUIEnvelope(pr1.AGUIInput{
+	first, err := foundation.BuildAGUIEnvelope(foundation.AGUIInput{
 		EventID:       "evt_" + shortDigest(input.RunID+":graph.plan.created"),
-		EventType:     pr2.EventTypeGraphPlanCreated,
+		EventType:     boardgraph.EventTypeGraphPlanCreated,
 		ProjectID:     input.ProjectID,
 		SpaceID:       input.SpaceID,
 		ActorUserID:   input.ActorUserID,
@@ -459,9 +459,9 @@ func buildEvents(input GenericCreationInput, plan pr2.GraphPlan, board pr2.Creat
 	if err != nil {
 		return nil, err
 	}
-	second, err := pr1.BuildAGUIEnvelope(pr1.AGUIInput{
+	second, err := foundation.BuildAGUIEnvelope(foundation.AGUIInput{
 		EventID:       "evt_" + shortDigest(input.RunID+":board.snapshot.updated"),
-		EventType:     pr2.EventTypeBoardSnapshotUpdated,
+		EventType:     boardgraph.EventTypeBoardSnapshotUpdated,
 		ProjectID:     input.ProjectID,
 		SpaceID:       input.SpaceID,
 		ActorUserID:   input.ActorUserID,
@@ -476,7 +476,7 @@ func buildEvents(input GenericCreationInput, plan pr2.GraphPlan, board pr2.Creat
 	if err != nil {
 		return nil, err
 	}
-	return []pr1.AGUIEnvelope{first, second}, nil
+	return []foundation.AGUIEnvelope{first, second}, nil
 }
 
 func boardTitle(prompt string) string {
@@ -495,7 +495,7 @@ func summarizePrompt(prompt string) string {
 	return string(runes[:80])
 }
 
-func elementIDs(elements []pr2.CreativeElement) []string {
+func elementIDs(elements []boardgraph.CreativeElement) []string {
 	ids := make([]string, 0, len(elements))
 	for _, element := range elements {
 		ids = append(ids, element.ElementID)

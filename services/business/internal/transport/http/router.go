@@ -87,10 +87,10 @@ func NewRouter(opts RouterOptions) *gin.Engine {
 		}
 	})
 
-	registerM2Routes(router, opts)
-	registerM3Routes(router, opts)
-	registerM4Routes(router, opts)
-	registerM5Routes(router, opts)
+	registerAccountProjectAdminRoutes(router, opts)
+	registerCatalogAdminRoutes(router, opts)
+	registerCreditAssetRoutes(router, opts)
+	registerWorkNotificationMarketplaceRoutes(router, opts)
 
 	return router
 }

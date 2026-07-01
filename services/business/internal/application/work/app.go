@@ -1445,7 +1445,7 @@ func decodeToken(token string, out any) error {
 
 func signature(value any) string {
 	data, _ := json.Marshal(value)
-	sum := sha256.Sum256(append(data, []byte(":dora-m5-preview")...))
+	sum := sha256.Sum256(append(data, []byte(":dora-work-preview")...))
 	return hex.EncodeToString(sum[:])
 }
 

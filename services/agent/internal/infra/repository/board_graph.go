@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -19,22 +19,22 @@ var ErrBoardVersionConflict = errors.New("board version conflict")
 
 func (r *Repository) SaveGenericCreationState(
 	ctx context.Context,
-	template pr2.GraphTemplate,
-	plan pr2.GraphPlan,
-	board pr2.CreativeBoard,
-	elements []pr2.CreativeElement,
-	events []pr1.AGUIEnvelope,
+	template boardgraph.GraphTemplate,
+	plan boardgraph.GraphPlan,
+	board boardgraph.CreativeBoard,
+	elements []boardgraph.CreativeElement,
+	events []foundation.AGUIEnvelope,
 ) error {
-	if err := pr2.ValidateGraphTemplate(template); err != nil {
+	if err := boardgraph.ValidateGraphTemplate(template); err != nil {
 		return fmt.Errorf("graph_template: %w", err)
 	}
-	if err := pr2.ValidateGraphPlan(plan); err != nil {
+	if err := boardgraph.ValidateGraphPlan(plan); err != nil {
 		return fmt.Errorf("graph_plan: %w", err)
 	}
-	if err := pr2.ValidateBoardCreation(board, elements); err != nil {
+	if err := boardgraph.ValidateBoardCreation(board, elements); err != nil {
 		return fmt.Errorf("board: %w", err)
 	}
-	if err := pr1.ValidateAGUISequence(events); err != nil {
+	if err := foundation.ValidateAGUISequence(events); err != nil {
 		return fmt.Errorf("events: %w", err)
 	}
 	if plan.RunID != board.RunID || plan.BoardID != board.BoardID || events[0].RunID != plan.RunID {
@@ -79,11 +79,11 @@ func (r *Repository) SaveGenericCreationState(
 func (r *Repository) SaveBoardGraphForWorkbenchRun(
 	ctx context.Context,
 	run *model.Run,
-	template pr2.GraphTemplate,
-	plan pr2.GraphPlan,
-	board pr2.CreativeBoard,
-	elements []pr2.CreativeElement,
-	events []pr1.AGUIEnvelope,
+	template boardgraph.GraphTemplate,
+	plan boardgraph.GraphPlan,
+	board boardgraph.CreativeBoard,
+	elements []boardgraph.CreativeElement,
+	events []foundation.AGUIEnvelope,
 	routerDecisionDigest string,
 	extraSelection map[string]any,
 ) error {
@@ -127,7 +127,7 @@ func (r *Repository) SaveBoardGraphForWorkbenchRun(
 		if err := tx.Model(&model.Run{}).
 			Where("id = ? AND deleted_at IS NULL", run.ID).
 			Updates(map[string]any{
-				"status":     pr1.RunStatusWaitingConfirmation,
+				"status":     foundation.RunStatusWaitingConfirmation,
 				"updated_at": now,
 			}).Error; err != nil {
 			return err
@@ -166,23 +166,23 @@ func (r *Repository) SaveBoardGraphForWorkbenchRun(
 }
 
 func validateGenericCreationPersistence(
-	template pr2.GraphTemplate,
-	plan pr2.GraphPlan,
-	board pr2.CreativeBoard,
-	elements []pr2.CreativeElement,
-	events []pr1.AGUIEnvelope,
+	template boardgraph.GraphTemplate,
+	plan boardgraph.GraphPlan,
+	board boardgraph.CreativeBoard,
+	elements []boardgraph.CreativeElement,
+	events []foundation.AGUIEnvelope,
 ) error {
-	if err := pr2.ValidateGraphTemplate(template); err != nil {
+	if err := boardgraph.ValidateGraphTemplate(template); err != nil {
 		return fmt.Errorf("graph_template: %w", err)
 	}
-	if err := pr2.ValidateGraphPlan(plan); err != nil {
+	if err := boardgraph.ValidateGraphPlan(plan); err != nil {
 		return fmt.Errorf("graph_plan: %w", err)
 	}
-	if err := pr2.ValidateBoardCreation(board, elements); err != nil {
+	if err := boardgraph.ValidateBoardCreation(board, elements); err != nil {
 		return fmt.Errorf("board: %w", err)
 	}
 	for index, event := range events {
-		if err := pr1.ValidateAGUIEnvelope(event); err != nil {
+		if err := foundation.ValidateAGUIEnvelope(event); err != nil {
 			return fmt.Errorf("event %d: %w", index+1, err)
 		}
 	}
@@ -207,39 +207,39 @@ func (r *Repository) GetAgentRunV1(ctx context.Context, runID string) (model.Age
 	return agentRunRecordFromWorkbenchRun(run), nil
 }
 
-func (r *Repository) GetGraphPlanV1(ctx context.Context, graphPlanID string) (pr2.GraphPlan, error) {
+func (r *Repository) GetGraphPlanV1(ctx context.Context, graphPlanID string) (boardgraph.GraphPlan, error) {
 	var record model.GraphPlanRecord
 	if err := r.db.WithContext(ctx).Where("graph_plan_id = ?", graphPlanID).First(&record).Error; err != nil {
-		return pr2.GraphPlan{}, err
+		return boardgraph.GraphPlan{}, err
 	}
 	return graphPlanContract(record)
 }
 
-func (r *Repository) GetCreativeBoardV1(ctx context.Context, boardID string) (pr2.CreativeBoard, error) {
+func (r *Repository) GetCreativeBoardV1(ctx context.Context, boardID string) (boardgraph.CreativeBoard, error) {
 	var record model.CreativeBoardRecord
 	if err := r.db.WithContext(ctx).Where("board_id = ?", boardID).First(&record).Error; err != nil {
-		return pr2.CreativeBoard{}, err
+		return boardgraph.CreativeBoard{}, err
 	}
 	return creativeBoardContract(record)
 }
 
-func (r *Repository) GetBoardSnapshotV1(ctx context.Context, boardID string) (pr2.BoardSnapshot, error) {
+func (r *Repository) GetBoardSnapshotV1(ctx context.Context, boardID string) (boardgraph.BoardSnapshot, error) {
 	var board model.CreativeBoardRecord
 	if err := r.db.WithContext(ctx).Where("board_id = ?", boardID).First(&board).Error; err != nil {
-		return pr2.BoardSnapshot{}, err
+		return boardgraph.BoardSnapshot{}, err
 	}
 	var elementRecords []model.CreativeElementRecord
 	if err := r.db.WithContext(ctx).
 		Where("board_id = ?", boardID).
 		Order("created_at ASC, element_id ASC").
 		Find(&elementRecords).Error; err != nil {
-		return pr2.BoardSnapshot{}, err
+		return boardgraph.BoardSnapshot{}, err
 	}
-	elements := make([]pr2.CreativeElement, 0, len(elementRecords))
+	elements := make([]boardgraph.CreativeElement, 0, len(elementRecords))
 	for _, record := range elementRecords {
 		element, err := creativeElementContract(record)
 		if err != nil {
-			return pr2.BoardSnapshot{}, err
+			return boardgraph.BoardSnapshot{}, err
 		}
 		elements = append(elements, element)
 	}
@@ -253,10 +253,10 @@ func (r *Repository) GetBoardSnapshotV1(ctx context.Context, boardID string) (pr
 		value := lastPatch.PatchID
 		lastPatchID = &value
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return pr2.BoardSnapshot{}, err
+		return boardgraph.BoardSnapshot{}, err
 	}
-	snapshot := pr2.BoardSnapshot{
-		SchemaVersion: pr2.SchemaVersionBoardSnapshot,
+	snapshot := boardgraph.BoardSnapshot{
+		SchemaVersion: boardgraph.SchemaVersionBoardSnapshot,
 		BoardID:       board.BoardID,
 		Version:       board.Version,
 		Status:        board.Status,
@@ -265,8 +265,8 @@ func (r *Repository) GetBoardSnapshotV1(ctx context.Context, boardID string) (pr
 		BoardDigest:   board.BoardDigest,
 		CreatedAt:     board.UpdatedAt,
 	}
-	if err := pr2.ValidateBoardSnapshot(snapshot); err != nil {
-		return pr2.BoardSnapshot{}, err
+	if err := boardgraph.ValidateBoardSnapshot(snapshot); err != nil {
+		return boardgraph.BoardSnapshot{}, err
 	}
 	return snapshot, nil
 }
@@ -294,13 +294,13 @@ func (r *Repository) NextRunEventSeqV1(ctx context.Context, runID string) (int64
 	return maxSeq + 1, nil
 }
 
-func (r *Repository) AppendRunEventsV1(ctx context.Context, events []pr1.AGUIEnvelope) error {
+func (r *Repository) AppendRunEventsV1(ctx context.Context, events []foundation.AGUIEnvelope) error {
 	if len(events) == 0 {
 		return errors.New("events are required")
 	}
 	runID := events[0].RunID
 	for index, event := range events {
-		if err := pr1.ValidateAGUIEnvelope(event); err != nil {
+		if err := foundation.ValidateAGUIEnvelope(event); err != nil {
 			return fmt.Errorf("event %d: %w", index+1, err)
 		}
 		if event.RunID != runID {
@@ -329,14 +329,14 @@ func (r *Repository) AppendRunEventsV1(ctx context.Context, events []pr1.AGUIEnv
 	})
 }
 
-func (r *Repository) ApplyBoardApprovalV1(ctx context.Context, patch pr2.BoardPatch, after pr2.CreativeBoard) error {
-	if err := pr2.ValidateBoardPatch(patch); err != nil {
+func (r *Repository) ApplyBoardApprovalV1(ctx context.Context, patch boardgraph.BoardPatch, after boardgraph.CreativeBoard) error {
+	if err := boardgraph.ValidateBoardPatch(patch); err != nil {
 		return fmt.Errorf("patch: %w", err)
 	}
-	if err := pr2.ValidateCreativeBoard(after); err != nil {
+	if err := boardgraph.ValidateCreativeBoard(after); err != nil {
 		return fmt.Errorf("after: %w", err)
 	}
-	if patch.Operation != pr2.BoardPatchOperationApproveBoard || patch.Actor != pr2.BoardPatchActorUser {
+	if patch.Operation != boardgraph.BoardPatchOperationApproveBoard || patch.Actor != boardgraph.BoardPatchActorUser {
 		return errors.New("only user approve_board patch is supported")
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -372,14 +372,14 @@ func (r *Repository) ApplyBoardApprovalV1(ctx context.Context, patch pr2.BoardPa
 	})
 }
 
-func (r *Repository) ApplyBoardPatchAfterStateV1(ctx context.Context, patch pr2.BoardPatch, after pr2.CreativeBoard, elements []pr2.CreativeElement) error {
-	if err := pr2.ValidateBoardPatch(patch); err != nil {
+func (r *Repository) ApplyBoardPatchAfterStateV1(ctx context.Context, patch boardgraph.BoardPatch, after boardgraph.CreativeBoard, elements []boardgraph.CreativeElement) error {
+	if err := boardgraph.ValidateBoardPatch(patch); err != nil {
 		return fmt.Errorf("patch: %w", err)
 	}
-	if patch.Operation == pr2.BoardPatchOperationApproveBoard {
+	if patch.Operation == boardgraph.BoardPatchOperationApproveBoard {
 		return errors.New("approve_board patch must use board approval flow")
 	}
-	if err := pr2.ValidateBoardCreation(after, elements); err != nil {
+	if err := boardgraph.ValidateBoardCreation(after, elements); err != nil {
 		return fmt.Errorf("after_state: %w", err)
 	}
 	if patch.BoardID != after.BoardID || patch.TargetVersion != after.Version {
@@ -417,12 +417,12 @@ func (r *Repository) ApplyBoardPatchAfterStateV1(ctx context.Context, patch pr2.
 	})
 }
 
-func updateRunAfterBoardApproval(tx *gorm.DB, board pr2.CreativeBoard) error {
+func updateRunAfterBoardApproval(tx *gorm.DB, board boardgraph.CreativeBoard) error {
 	if tx.Migrator().HasColumn(&model.AgentRunRecord{}, "run_id") && tx.Migrator().HasColumn(&model.AgentRunRecord{}, "current_board_id") {
 		if err := tx.Model(&model.AgentRunRecord{}).
 			Where("run_id = ? AND current_board_id = ?", board.RunID, board.BoardID).
 			Updates(map[string]any{
-				"status":     pr1.RunStatusPlanning,
+				"status":     foundation.RunStatusPlanning,
 				"updated_at": board.UpdatedAt,
 			}).Error; err != nil {
 			return err
@@ -432,12 +432,12 @@ func updateRunAfterBoardApproval(tx *gorm.DB, board pr2.CreativeBoard) error {
 	return tx.Model(&model.Run{}).
 		Where("id = ? AND deleted_at IS NULL", board.RunID).
 		Updates(map[string]any{
-			"status":     pr1.RunStatusPlanning,
+			"status":     foundation.RunStatusPlanning,
 			"updated_at": board.UpdatedAt,
 		}).Error
 }
 
-func updateRunTouch(tx *gorm.DB, board pr2.CreativeBoard) error {
+func updateRunTouch(tx *gorm.DB, board boardgraph.CreativeBoard) error {
 	if tx.Migrator().HasColumn(&model.AgentRunRecord{}, "run_id") && tx.Migrator().HasColumn(&model.AgentRunRecord{}, "current_board_id") {
 		if err := tx.Model(&model.AgentRunRecord{}).
 			Where("run_id = ? AND current_board_id = ?", board.RunID, board.BoardID).
@@ -451,7 +451,7 @@ func updateRunTouch(tx *gorm.DB, board pr2.CreativeBoard) error {
 		Update("updated_at", board.UpdatedAt).Error
 }
 
-func creativeBoardUpdates(board pr2.CreativeBoard) map[string]any {
+func creativeBoardUpdates(board boardgraph.CreativeBoard) map[string]any {
 	return map[string]any{
 		"project_id":        board.ProjectID,
 		"session_id":        board.SessionID,
@@ -470,7 +470,7 @@ func creativeBoardUpdates(board pr2.CreativeBoard) map[string]any {
 	}
 }
 
-func replaceBoardElements(tx *gorm.DB, boardID string, elements []pr2.CreativeElement) error {
+func replaceBoardElements(tx *gorm.DB, boardID string, elements []boardgraph.CreativeElement) error {
 	if err := tx.Where("board_id = ?", boardID).Delete(&model.CreativeElementRecord{}).Error; err != nil {
 		return err
 	}
@@ -482,7 +482,7 @@ func replaceBoardElements(tx *gorm.DB, boardID string, elements []pr2.CreativeEl
 	return nil
 }
 
-func agentRunRecord(plan pr2.GraphPlan, board pr2.CreativeBoard, events []pr1.AGUIEnvelope) *model.AgentRunRecord {
+func agentRunRecord(plan boardgraph.GraphPlan, board boardgraph.CreativeBoard, events []foundation.AGUIEnvelope) *model.AgentRunRecord {
 	traceID := ""
 	if len(events) > 0 {
 		traceID = stringValue(events[0].TraceID)
@@ -495,7 +495,7 @@ func agentRunRecord(plan pr2.GraphPlan, board pr2.CreativeBoard, events []pr1.AG
 		RunID:              plan.RunID,
 		SessionID:          board.SessionID,
 		ProjectID:          board.ProjectID,
-		Status:             pr1.RunStatusWaitingConfirmation,
+		Status:             foundation.RunStatusWaitingConfirmation,
 		CurrentBoardID:     board.BoardID,
 		CurrentGraphPlanID: plan.GraphPlanID,
 		TraceID:            traceID,
@@ -516,7 +516,7 @@ func agentRunRecordFromWorkbenchRun(run model.Run) model.AgentRunRecord {
 	}
 }
 
-func graphTemplateRecord(template pr2.GraphTemplate) *model.GraphTemplateRecord {
+func graphTemplateRecord(template boardgraph.GraphTemplate) *model.GraphTemplateRecord {
 	return &model.GraphTemplateRecord{
 		GraphTemplateID: template.GraphTemplateID,
 		Name:            template.Name,
@@ -532,7 +532,7 @@ func graphTemplateRecord(template pr2.GraphTemplate) *model.GraphTemplateRecord 
 	}
 }
 
-func graphPlanRecord(plan pr2.GraphPlan) *model.GraphPlanRecord {
+func graphPlanRecord(plan boardgraph.GraphPlan) *model.GraphPlanRecord {
 	return &model.GraphPlanRecord{
 		GraphPlanID:          plan.GraphPlanID,
 		GraphTemplateID:      plan.GraphTemplateID,
@@ -550,7 +550,7 @@ func graphPlanRecord(plan pr2.GraphPlan) *model.GraphPlanRecord {
 	}
 }
 
-func creativeBoardRecord(board pr2.CreativeBoard) *model.CreativeBoardRecord {
+func creativeBoardRecord(board boardgraph.CreativeBoard) *model.CreativeBoardRecord {
 	return &model.CreativeBoardRecord{
 		BoardID:         board.BoardID,
 		ProjectID:       board.ProjectID,
@@ -570,7 +570,7 @@ func creativeBoardRecord(board pr2.CreativeBoard) *model.CreativeBoardRecord {
 	}
 }
 
-func creativeElementRecord(element pr2.CreativeElement) *model.CreativeElementRecord {
+func creativeElementRecord(element boardgraph.CreativeElement) *model.CreativeElementRecord {
 	return &model.CreativeElementRecord{
 		ElementID:      element.ElementID,
 		BoardID:        element.BoardID,
@@ -586,7 +586,7 @@ func creativeElementRecord(element pr2.CreativeElement) *model.CreativeElementRe
 	}
 }
 
-func boardPatchRecord(patch pr2.BoardPatch) *model.BoardPatchRecord {
+func boardPatchRecord(patch boardgraph.BoardPatch) *model.BoardPatchRecord {
 	return &model.BoardPatchRecord{
 		PatchID:        patch.PatchID,
 		BoardID:        patch.BoardID,
@@ -601,7 +601,7 @@ func boardPatchRecord(patch pr2.BoardPatch) *model.BoardPatchRecord {
 	}
 }
 
-func runEventRecord(event pr1.AGUIEnvelope) *model.RunEventRecord {
+func runEventRecord(event foundation.AGUIEnvelope) *model.RunEventRecord {
 	return &model.RunEventRecord{
 		EventID:              event.EventID,
 		RunID:                event.RunID,
@@ -616,9 +616,9 @@ func runEventRecord(event pr1.AGUIEnvelope) *model.RunEventRecord {
 	}
 }
 
-func creativeBoardContract(record model.CreativeBoardRecord) (pr2.CreativeBoard, error) {
-	board := pr2.CreativeBoard{
-		SchemaVersion:   pr2.SchemaVersionCreativeBoard,
+func creativeBoardContract(record model.CreativeBoardRecord) (boardgraph.CreativeBoard, error) {
+	board := boardgraph.CreativeBoard{
+		SchemaVersion:   boardgraph.SchemaVersionCreativeBoard,
 		BoardID:         record.BoardID,
 		ProjectID:       record.ProjectID,
 		SessionID:       record.SessionID,
@@ -635,24 +635,24 @@ func creativeBoardContract(record model.CreativeBoardRecord) (pr2.CreativeBoard,
 		CreatedAt:       record.CreatedAt,
 		UpdatedAt:       record.UpdatedAt,
 	}
-	if err := pr2.ValidateCreativeBoard(board); err != nil {
-		return pr2.CreativeBoard{}, err
+	if err := boardgraph.ValidateCreativeBoard(board); err != nil {
+		return boardgraph.CreativeBoard{}, err
 	}
 	return board, nil
 }
 
-func graphPlanContract(record model.GraphPlanRecord) (pr2.GraphPlan, error) {
-	var nodes []pr2.GraphPlanNode
+func graphPlanContract(record model.GraphPlanRecord) (boardgraph.GraphPlan, error) {
+	var nodes []boardgraph.GraphPlanNode
 	if err := json.Unmarshal(record.Nodes, &nodes); err != nil {
-		return pr2.GraphPlan{}, err
+		return boardgraph.GraphPlan{}, err
 	}
-	var edges []pr2.GraphPlanEdge
+	var edges []boardgraph.GraphPlanEdge
 	if err := json.Unmarshal(record.Edges, &edges); err != nil {
-		return pr2.GraphPlan{}, err
+		return boardgraph.GraphPlan{}, err
 	}
 	currentNode := stringPointer(record.CurrentNode)
-	plan := pr2.GraphPlan{
-		SchemaVersion:        pr2.SchemaVersionGraphPlan,
+	plan := boardgraph.GraphPlan{
+		SchemaVersion:        boardgraph.SchemaVersionGraphPlan,
 		GraphPlanID:          record.GraphPlanID,
 		GraphTemplateID:      record.GraphTemplateID,
 		GraphTemplateVersion: record.GraphTemplateVersion,
@@ -667,27 +667,27 @@ func graphPlanContract(record model.GraphPlanRecord) (pr2.GraphPlan, error) {
 		CreatedAt:            record.CreatedAt,
 		UpdatedAt:            record.UpdatedAt,
 	}
-	if err := pr2.ValidateGraphPlan(plan); err != nil {
-		return pr2.GraphPlan{}, err
+	if err := boardgraph.ValidateGraphPlan(plan); err != nil {
+		return boardgraph.GraphPlan{}, err
 	}
 	return plan, nil
 }
 
-func creativeElementContract(record model.CreativeElementRecord) (pr2.CreativeElement, error) {
-	var position pr2.ElementPosition
+func creativeElementContract(record model.CreativeElementRecord) (boardgraph.CreativeElement, error) {
+	var position boardgraph.ElementPosition
 	if err := json.Unmarshal(record.Position, &position); err != nil {
-		return pr2.CreativeElement{}, err
+		return boardgraph.CreativeElement{}, err
 	}
 	var content map[string]any
 	if err := json.Unmarshal(record.Content, &content); err != nil {
-		return pr2.CreativeElement{}, err
+		return boardgraph.CreativeElement{}, err
 	}
 	var linkedAssetIDs []string
 	if err := json.Unmarshal(record.LinkedAssetIDs, &linkedAssetIDs); err != nil {
-		return pr2.CreativeElement{}, err
+		return boardgraph.CreativeElement{}, err
 	}
-	element := pr2.CreativeElement{
-		SchemaVersion:  pr2.SchemaVersionCreativeElement,
+	element := boardgraph.CreativeElement{
+		SchemaVersion:  boardgraph.SchemaVersionCreativeElement,
 		ElementID:      record.ElementID,
 		BoardID:        record.BoardID,
 		ElementType:    record.ElementType,
@@ -700,8 +700,8 @@ func creativeElementContract(record model.CreativeElementRecord) (pr2.CreativeEl
 		CreatedAt:      record.CreatedAt,
 		UpdatedAt:      record.UpdatedAt,
 	}
-	if err := pr2.ValidateCreativeElement(element); err != nil {
-		return pr2.CreativeElement{}, err
+	if err := boardgraph.ValidateCreativeElement(element); err != nil {
+		return boardgraph.CreativeElement{}, err
 	}
 	return element, nil
 }

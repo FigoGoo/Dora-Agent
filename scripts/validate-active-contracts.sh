@@ -4,12 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-echo "== PR-1 ~ PR-5 active contract validators =="
-python3 tests/contract/validate_pr1_contracts.py
-python3 tests/contract/validate_pr2_contracts.py
-python3 tests/contract/validate_pr3_contracts.py
-python3 tests/contract/validate_pr4_contracts.py
-python3 tests/contract/validate_pr5_e2e_gates.py
+echo "== foundation ~ release active contract validators =="
+python3 tests/contract/validate_foundation_contracts.py
+python3 tests/contract/validate_board_graph_contracts.py
+python3 tests/contract/validate_tool_asset_contracts.py
+python3 tests/contract/validate_skill_market_contracts.py
+python3 tests/contract/validate_release_e2e_gates.py
 python3 tests/contract/validate_json_schema_contracts.py
 
 echo "== OpenAPI YAML parse =="
@@ -35,7 +35,7 @@ for path in paths:
     print(f"{path} yaml parse ok")
 PY
 
-echo "== PR-2 ~ PR-4 migration static gate =="
+echo "== board graph ~ skill market migration static gate =="
 python3 - <<'PY'
 from __future__ import annotations
 
@@ -88,8 +88,8 @@ roots = [
 blocked_tokens = [
     "split / not frozen",
     "PR 状态：split / not frozen",
-    "下一步按 PR-5",
-    "PR-5 未完成前",
+    "下一步按 release",
+    "release 未完成前",
     "测试事实源待冻结",
     "继续拆分",
     "待冻结",

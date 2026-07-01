@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate M0 AG-UI fixture shape and schema coverage."""
+"""Validate toolchain baseline AG-UI fixture shape and schema coverage."""
 
 from __future__ import annotations
 

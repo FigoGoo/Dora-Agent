@@ -5,26 +5,26 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr3"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/toolasset"
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
 )
 
-func TestM4BoardApproveCreatesToolPlanAndConfirmationThenCommitsAsset(t *testing.T) {
-	app, gateway := newM4ToolPlanApp(t)
+func TestToolGenerationBoardApproveCreatesToolPlanAndConfirmationThenCommitsAsset(t *testing.T) {
+	app, gateway := newToolGenerationPlanApp(t)
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
 	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{
-		ProjectID: "prj_active_1001", InitialTitle: "m4 toolplan", IdempotencyKey: "idem-m4-session",
-	}, "trace-m4")
+		ProjectID: "prj_active_1001", InitialTitle: "tool generation toolplan", IdempotencyKey: "idem-tool-generation-session",
+	}, "trace-tool-generation")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	run, err := app.CreateRun(t.Context(), auth, CreateRunRequest{
-		SessionID: session.SessionID, ProjectID: session.ProjectID, RunIntent: "normal", IdempotencyKey: "idem-m4-run",
-		UserInput: UserInputDTO{ClientMessageID: "cm_m4", ContentType: "text", Text: "帮我做一个杭州夏季文旅宣传视频，现代国风，30 秒"},
-	}, "trace-m4")
+		SessionID: session.SessionID, ProjectID: session.ProjectID, RunIntent: "normal", IdempotencyKey: "idem-tool-generation-run",
+		UserInput: UserInputDTO{ClientMessageID: "cm_tool_generation", ContentType: "text", Text: "帮我做一个杭州夏季文旅宣传视频，现代国风，30 秒"},
+	}, "trace-tool-generation")
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -32,17 +32,17 @@ func TestM4BoardApproveCreatesToolPlanAndConfirmationThenCommitsAsset(t *testing
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	selection := m1JSONMap(t, persisted.SkillSelection)
+	selection := jsonMapFromRaw(t, persisted.SkillSelection)
 	boardID := selection["current_board_id"].(string)
 
 	approved, err := app.ApproveCreativeBoard(t.Context(), auth, boardID, ApproveCreativeBoardRequest{
-		ApprovedBy: auth.ActorUserID, BoardVersion: 1, IdempotencyKey: "idem-m4-board-approve",
-	}, "trace-m4")
+		ApprovedBy: auth.ActorUserID, BoardVersion: 1, IdempotencyKey: "idem-tool-generation-board-approve",
+	}, "trace-tool-generation")
 	if err != nil {
 		t.Fatalf("approve board: %v", err)
 	}
 	if approved.ToolPlan == nil {
-		t.Fatalf("approve should create M4 ToolPlan: %#v", approved)
+		t.Fatalf("approve should create tool generation ToolPlan: %#v", approved)
 	}
 	if approved.ToolPlan.Status != "confirmation_required" || !approved.ToolPlan.ConfirmationRequired {
 		t.Fatalf("ToolPlan should wait for generation confirmation: %#v", approved.ToolPlan)
@@ -51,7 +51,7 @@ func TestM4BoardApproveCreatesToolPlanAndConfirmationThenCommitsAsset(t *testing
 		t.Fatalf("ToolPlan should bind approved board version, got %#v", approved.ToolPlan)
 	}
 	if !containsCall(gateway.calls, "EstimateToolCredits") {
-		t.Fatalf("M4 preflight must estimate Tool credits, calls=%v", gateway.calls)
+		t.Fatalf("tool generation preflight must estimate Tool credits, calls=%v", gateway.calls)
 	}
 	stored, err := app.repo.GetToolPlanV1(t.Context(), approved.ToolPlan.ToolPlanID)
 	if err != nil {
@@ -60,12 +60,12 @@ func TestM4BoardApproveCreatesToolPlanAndConfirmationThenCommitsAsset(t *testing
 	if stored.ToolPlanDigest != approved.ToolPlan.ToolPlanDigest {
 		t.Fatalf("stored tool plan digest mismatch, stored=%s response=%s", stored.ToolPlanDigest, approved.ToolPlan.ToolPlanDigest)
 	}
-	pr3Events, err := app.repo.ListRunEventsV1AfterSeq(t.Context(), run.RunID, 0, 20)
+	toolAssetEvents, err := app.repo.ListRunEventsV1AfterSeq(t.Context(), run.RunID, 0, 20)
 	if err != nil {
-		t.Fatalf("list PR-3 events: %v", err)
+		t.Fatalf("list tool asset events: %v", err)
 	}
-	if !hasRunEventV1(pr3Events, pr3.EventTypeCostDisclosureGenerationPresented) {
-		t.Fatalf("missing cost_disclosure.generation.presented event: %#v", pr3Events)
+	if !hasRunEventV1(toolAssetEvents, toolasset.EventTypeCostDisclosureGenerationPresented) {
+		t.Fatalf("missing cost_disclosure.generation.presented event: %#v", toolAssetEvents)
 	}
 	interrupt, err := app.repo.GetRequiredInterrupt(t.Context(), run.RunID)
 	if err != nil {
@@ -83,35 +83,35 @@ func TestM4BoardApproveCreatesToolPlanAndConfirmationThenCommitsAsset(t *testing
 	accepted, err := app.AcceptInterrupt(t.Context(), auth, run.RunID, ConfirmInterruptRequest{
 		RunID: run.RunID, InterruptID: interrupt.ID, Action: "confirm",
 		ConfirmedPayloadDigest: confirmationPayloadDigest(interrupt.ConfirmationPayload),
-		IdempotencyKey:         "idem-m4-toolplan-confirm",
-	}, "trace-m4")
+		IdempotencyKey:         "idem-tool-generation-toolplan-confirm",
+	}, "trace-tool-generation")
 	if err != nil {
 		t.Fatalf("accept ToolPlan confirmation: %v", err)
 	}
 	if accepted.Status != state.RunStatusCompleted {
-		t.Fatalf("M4 confirmation should complete generation asset commit, got %#v", accepted)
+		t.Fatalf("tool generation confirmation should complete generation asset commit, got %#v", accepted)
 	}
 	if !containsSubsequence(gateway.calls, []string{"FreezeCredits", "PrepareGeneratedAssetObjects", "CommitGeneratedAssetAndCharge"}) {
-		t.Fatalf("M4 confirmation should freeze, prepare and commit assets, calls=%v", gateway.calls)
+		t.Fatalf("tool generation confirmation should freeze, prepare and commit assets, calls=%v", gateway.calls)
 	}
 	if gateway.lastCommit.RunID != run.RunID || gateway.lastCommit.FreezeID == "" || len(gateway.lastCommit.Artifacts) == 0 {
 		t.Fatalf("unexpected asset commit request: %#v", gateway.lastCommit)
 	}
 	finalEvents, err := app.repo.ListRunEventsV1AfterSeq(t.Context(), run.RunID, 0, 100)
 	if err != nil {
-		t.Fatalf("list final PR-3 events: %v", err)
+		t.Fatalf("list final tool asset events: %v", err)
 	}
-	if !hasRunEventV1(finalEvents, pr3.EventTypeToolTaskUpdated) {
+	if !hasRunEventV1(finalEvents, toolasset.EventTypeToolTaskUpdated) {
 		t.Fatalf("missing tool.task.updated event: %#v", finalEvents)
 	}
-	if !hasRunEventV1(finalEvents, pr3.EventTypeAssetCommitUpdated) {
+	if !hasRunEventV1(finalEvents, toolasset.EventTypeAssetCommitUpdated) {
 		t.Fatalf("missing asset.commit.updated event: %#v", finalEvents)
 	}
 }
 
-func newM4ToolPlanApp(t *testing.T) (*App, *recordingGateway) {
+func newToolGenerationPlanApp(t *testing.T) (*App, *recordingGateway) {
 	t.Helper()
-	db := testdb.StartPostgres(t, "dora_agent_m4_toolplan")
+	db := testdb.StartPostgres(t, "dora_agent_tool_generation")
 	baseMigrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/20260627_agent_runtime/agent")
 	t.Cleanup(func() { testdb.DownMigrations(t, baseMigrator) })
 	testdb.ExecSQL(t, db.DB, testdb.MustReadSQL(t, "db/migrations/iterations/2026-07-01-tool-credit-asset-contracts/agent/0001_agent_tool_plan_task.up.sql"))
@@ -170,17 +170,17 @@ func newM4ToolPlanApp(t *testing.T) (*App, *recordingGateway) {
 			PricingSnapshotID: "price_static_image", ProviderRuntimeRef: "static:local", TimeoutMS: 30000,
 		},
 		ToolEstimate: CreditEstimateDTO{
-			EstimateID: "est_m4_toolplan", EstimatePoints: 10, AvailablePoints: 100,
+			EstimateID: "est_tool_generation", EstimatePoints: 10, AvailablePoints: 100,
 			CreditAccountScope: "personal", CreditAccountID: "ca_personal_1001", PricingSnapshotID: "price_static_image",
 			LineItems: []CreditEstimateLineItemDTO{{
-				EstimateItemID: "est_item_m4_toolplan", ItemType: "model_generation", ToolName: "model_generation",
+				EstimateItemID: "est_item_tool_generation", ItemType: "model_generation", ToolName: "model_generation",
 				ToolType: "image", ModelID: "mdl_static_image", ResourceType: "image", BillingUnit: "image", EstimatePoints: 10,
 			}},
 			ExpiresAt: "2026-07-01T11:00:00Z",
 		},
-		Freeze: FreezeCreditsDTO{FreezeID: "frz_m4_toolplan", FrozenPoints: 10, ExpiresAt: "2026-07-01T11:15:00Z"},
+		Freeze: FreezeCreditsDTO{FreezeID: "frz_tool_generation", FrozenPoints: 10, ExpiresAt: "2026-07-01T11:15:00Z"},
 	}}
-	return New(repository.New(db.DB), gateway, "m4-toolplan-service"), gateway
+	return New(repository.New(db.DB), gateway, "tool-generation-service"), gateway
 }
 
 func (g *recordingGateway) ResolveDefaultModel(ctx context.Context, auth AuthContextDTO, resourceType string, traceID string) (ModelSummaryDTO, error) {

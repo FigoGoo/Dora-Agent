@@ -90,7 +90,7 @@ func (TurnLoop) StartTurn(ctx context.Context, in StartInput) (Result, error) {
 		snapshot.Phase = "model_unavailable"
 		return Result{RunID: in.RunID, Status: "failed", Phase: snapshot.Phase, Snapshot: snapshot}, nil
 	}
-	phase := "m3_runtime_ready"
+	phase := "skill_runtime_ready"
 	if strings.TrimSpace(in.SkillID) == "" {
 		phase = "text_fallback_ready"
 	}
@@ -131,7 +131,7 @@ func (TurnLoop) CancelRun(ctx context.Context, in CancelInput) (Result, error) {
 	}
 	return Result{RunID: in.RunID, Status: "cancelled", Phase: phase, Snapshot: Snapshot{
 		RunID: in.RunID, Phase: phase, IdempotencyKey: in.IdempotencyKey, CancelReason: phase,
-		Steps: []Step{{Name: "cancel_task", Status: "requested"}, {Name: "release_m4_freeze", Status: "not_applicable_in_m3"}},
+		Steps: []Step{{Name: "cancel_task", Status: "requested"}, {Name: "release_tool_generation_freeze", Status: "not_applicable_in_skill_runtime"}},
 	}}, nil
 }
 

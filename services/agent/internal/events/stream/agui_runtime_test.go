@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
 )
 
-func TestPR2RedisKeys(t *testing.T) {
+func TestRedisKeys(t *testing.T) {
 	if got := RunEventsKey("run_1"); got != "agent:run:run_1:events" {
 		t.Fatalf("run events key = %s", got)
 	}
@@ -28,7 +28,7 @@ func TestMemoryAGUIEventBusReplaysBySeqAndDedupes(t *testing.T) {
 	third := testAGUIEvent(t, "run_1", "board.snapshot.updated", 3)
 	first := testAGUIEvent(t, "run_1", "graph.plan.created", 1)
 	second := testAGUIEvent(t, "run_1", "board.patch.applied", 2)
-	for _, event := range []pr1.AGUIEnvelope{third, first, second, second} {
+	for _, event := range []foundation.AGUIEnvelope{third, first, second, second} {
 		if err := bus.PublishAGUI(t.Context(), event); err != nil {
 			t.Fatalf("publish event: %v", err)
 		}
@@ -91,14 +91,14 @@ func TestMemoryTurnLockOwnerAndExpiry(t *testing.T) {
 	}
 }
 
-func testAGUIEvent(t *testing.T, runID string, eventType string, seq int64) pr1.AGUIEnvelope {
+func testAGUIEvent(t *testing.T, runID string, eventType string, seq int64) foundation.AGUIEnvelope {
 	t.Helper()
 	payload := map[string]any{"seq": seq}
-	digest, err := pr1.CanonicalDigest(payload)
+	digest, err := foundation.CanonicalDigest(payload)
 	if err != nil {
 		t.Fatalf("digest: %v", err)
 	}
-	event, err := pr1.BuildAGUIEnvelope(pr1.AGUIInput{
+	event, err := foundation.BuildAGUIEnvelope(foundation.AGUIInput{
 		EventID:       "evt_test_" + eventType + "_" + time.Unix(seq, 0).UTC().Format("150405"),
 		EventType:     eventType,
 		ProjectID:     "proj_1",

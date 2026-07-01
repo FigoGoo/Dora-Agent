@@ -6,19 +6,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/creation"
 )
 
-func TestPR2BoardGraphRepositoryWithActiveMigration(t *testing.T) {
-	db := testdb.StartPostgres(t, "dora_agent_pr2")
+func TestBoardGraphRepositoryWithActiveMigration(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_agent_board_graph")
 	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/2026-07-01-agent-runtime-contracts/agent")
 	testdb.RequireNoForeignKeys(t, db.DB)
 	if !testdb.TableExists(t, db.DB, "agent_runs") || !testdb.TableExists(t, db.DB, "graph_plans") || !testdb.TableExists(t, db.DB, "creative_boards") {
-		t.Fatal("PR-2 active migration tables missing")
+		t.Fatal("board graph active migration tables missing")
 	}
 	if testdb.TableExists(t, db.DB, "credit_holds") {
 		t.Fatal("agent database must not contain business credit tables")
@@ -32,7 +32,7 @@ func TestPR2BoardGraphRepositoryWithActiveMigration(t *testing.T) {
 		SessionID:            "sess_city_001",
 		SpaceID:              "space_001",
 		ActorUserID:          "user_001",
-		TraceID:              "trace_pr2_board_graph",
+		TraceID:              "trace_board_graph",
 		Prompt:               "生成一支 30 秒城市文旅宣传短片，风格明亮、真实、有文化质感",
 		RouterDecisionDigest: "sha256:" + strings.Repeat("1", 64),
 	})
@@ -52,7 +52,7 @@ func TestPR2BoardGraphRepositoryWithActiveMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get agent run: %v", err)
 	}
-	if run.Status != pr1.RunStatusWaitingConfirmation || run.CurrentBoardID != result.Board.BoardID || run.CurrentGraphPlanID != result.GraphPlan.GraphPlanID {
+	if run.Status != foundation.RunStatusWaitingConfirmation || run.CurrentBoardID != result.Board.BoardID || run.CurrentGraphPlanID != result.GraphPlan.GraphPlanID {
 		t.Fatalf("unexpected run record: %#v", run)
 	}
 
@@ -60,7 +60,7 @@ func TestPR2BoardGraphRepositoryWithActiveMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get graph plan: %v", err)
 	}
-	if err := pr2.ValidateGraphPlan(plan); err != nil {
+	if err := boardgraph.ValidateGraphPlan(plan); err != nil {
 		t.Fatalf("graph plan contract invalid: %v", err)
 	}
 
@@ -68,7 +68,7 @@ func TestPR2BoardGraphRepositoryWithActiveMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get board snapshot: %v", err)
 	}
-	if err := pr2.ValidateBoardSnapshot(snapshot); err != nil {
+	if err := boardgraph.ValidateBoardSnapshot(snapshot); err != nil {
 		t.Fatalf("board snapshot contract invalid: %v", err)
 	}
 	if snapshot.Status != "ready" || snapshot.Version != 1 || len(snapshot.Elements) != len(result.Elements) {
@@ -79,7 +79,7 @@ func TestPR2BoardGraphRepositoryWithActiveMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list run events: %v", err)
 	}
-	if len(events) != 2 || events[0].Seq != 1 || events[0].EventType != pr2.EventTypeGraphPlanCreated || events[1].EventType != pr2.EventTypeBoardSnapshotUpdated {
+	if len(events) != 2 || events[0].Seq != 1 || events[0].EventType != boardgraph.EventTypeGraphPlanCreated || events[1].EventType != boardgraph.EventTypeBoardSnapshotUpdated {
 		t.Fatalf("unexpected run events: %#v", events)
 	}
 
@@ -110,7 +110,7 @@ func TestPR2BoardGraphRepositoryWithActiveMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get run after approval: %v", err)
 	}
-	if runAfterApproval.Status != pr1.RunStatusPlanning {
+	if runAfterApproval.Status != foundation.RunStatusPlanning {
 		t.Fatalf("expected run planning after board approval, got %#v", runAfterApproval)
 	}
 

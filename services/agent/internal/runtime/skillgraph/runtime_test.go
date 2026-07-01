@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph"
 )
 
 func TestExecutePublishedSkillBuildsStableGraphBoardAndEvents(t *testing.T) {
@@ -23,13 +23,13 @@ func TestExecutePublishedSkillBuildsStableGraphBoardAndEvents(t *testing.T) {
 	if first.SkillSpecDigest == "" || first.SkillSpecDigest != second.SkillSpecDigest {
 		t.Fatalf("skill spec digest should be stable, first=%q second=%q", first.SkillSpecDigest, second.SkillSpecDigest)
 	}
-	if first.GraphPlan.GraphTemplateID == "gtemplate_generic_creation" || first.GraphTemplate.GraphType != pr2.GraphTypeSystemSkill {
+	if first.GraphPlan.GraphTemplateID == "gtemplate_generic_creation" || first.GraphTemplate.GraphType != boardgraph.GraphTypeSystemSkill {
 		t.Fatalf("expected system Skill graph, template=%#v", first.GraphTemplate)
 	}
 	if first.GraphPlan.GraphPlanDigest != second.GraphPlan.GraphPlanDigest || first.Board.BoardDigest != second.Board.BoardDigest {
 		t.Fatalf("graph or board digest should be stable, first=%#v second=%#v", first.GraphPlan, second.GraphPlan)
 	}
-	if len(first.Events) != 2 || first.Events[0].EventType != pr2.EventTypeGraphPlanCreated || first.Events[1].EventType != pr2.EventTypeBoardSnapshotUpdated {
+	if len(first.Events) != 2 || first.Events[0].EventType != boardgraph.EventTypeGraphPlanCreated || first.Events[1].EventType != boardgraph.EventTypeBoardSnapshotUpdated {
 		t.Fatalf("unexpected events: %#v", first.Events)
 	}
 }
@@ -108,7 +108,7 @@ func skillGraphTestInput() Input {
 			}
 		}`,
 		OutputElements: []OutputElement{{
-			ElementType:  pr2.BoardElementTypeStoryboardFrame,
+			ElementType:  boardgraph.BoardElementTypeStoryboardFrame,
 			ElementName:  "分镜",
 			Required:     true,
 			UseDraft:     true,

@@ -33,7 +33,7 @@ PR-2 把 Agent Runtime 的可执行契约拆清楚，让用户从创作意图进
 | AG-UI Payloads | `api/agui/events/board.*.schema.json`、`api/agui/events/graph.*.schema.json` | Board / Graph 流式事件 |
 | Agent Migration | `db/migrations/iterations/2026-07-01-agent-runtime-contracts/agent/**` | Agent Runtime 表 |
 | Fixtures | `tests/fixtures/contracts/board/**`、`tests/fixtures/contracts/graph/**` | replay、digest、checkpoint |
-| Validator | `tests/contract/validate_pr2_contracts.py` | PR-2 contract gate |
+| Validator | `tests/contract/validate_board_graph_contracts.py` | PR-2 contract gate |
 
 ## API 契约范围
 
@@ -113,5 +113,5 @@ version_strategy = platform_builtin
 - [x] Agent migration 文件存在且静态 guard 通过，不含数据库级外键。
 - [x] Board replay fixture 证明 snapshot 可恢复。
 - [x] GraphPlan digest fixture 证明同输入同 digest。
-- [x] `python3 tests/contract/validate_pr2_contracts.py` 通过。
+- [x] `python3 tests/contract/validate_board_graph_contracts.py` 通过。
 - [x] 真实 PostgreSQL migration dry-run 和 down-test 已由 `services/agent/internal/infra/repository` 集成测试覆盖。

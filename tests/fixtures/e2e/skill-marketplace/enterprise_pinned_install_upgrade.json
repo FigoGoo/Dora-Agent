@@ -2,8 +2,8 @@
   "case_id": "enterprise_pinned_install_upgrade_e2e_v1",
   "status": "active",
   "owner": "测试与验收责任域 / Business Marketplace / 企业空间",
-  "depends_on_pr": [
-    "PR-4"
+  "depends_on_contracts": [
+    "skill market"
   ],
   "contract_references": [
     {

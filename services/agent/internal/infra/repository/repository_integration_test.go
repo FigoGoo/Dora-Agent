@@ -31,7 +31,7 @@ func TestAgentMigrationRepositoryAndBoundaries(t *testing.T) {
 		SpaceID:        "space_1",
 		ProjectID:      "project_1",
 		UserID:         "user_1",
-		Title:          "M1",
+		Title:          "router",
 		IdempotencyKey: "session-key",
 		TraceID:        "trace-agent-db",
 	}
@@ -206,7 +206,7 @@ func TestAgentMigrationRepositoryAndBoundaries(t *testing.T) {
 		ConfigKey:      "agent.default",
 		Version:        "local-dev",
 		Status:         "active",
-		Owner:          "m1",
+		Owner:          "router",
 		Content:        datatypes.JSON([]byte(`{"model":"test"}`)),
 		SafeConfigRefs: datatypes.JSON([]byte(`[]`)),
 		ActivatedAt:    &now,

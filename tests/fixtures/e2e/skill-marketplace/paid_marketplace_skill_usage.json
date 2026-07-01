@@ -2,11 +2,11 @@
   "case_id": "paid_marketplace_skill_usage_e2e_v1",
   "status": "active",
   "owner": "测试与验收责任域 / Agent Runtime / Business Marketplace / Business Credit / 前端",
-  "depends_on_pr": [
-    "PR-1",
-    "PR-2",
-    "PR-3",
-    "PR-4"
+  "depends_on_contracts": [
+    "foundation",
+    "board graph",
+    "tool asset",
+    "skill market"
   ],
   "contract_references": [
     {

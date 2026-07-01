@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skillgraph"
 )
 
@@ -50,7 +50,7 @@ func TestSkillGraphRunnerExecutesPublishedSkillSpec(t *testing.T) {
 			}
 		}`,
 		OutputElements: []skillgraph.OutputElement{{
-			ElementType:  pr2.BoardElementTypeStoryboardFrame,
+			ElementType:  boardgraph.BoardElementTypeStoryboardFrame,
 			ElementName:  "分镜",
 			Required:     true,
 			UseDraft:     true,
@@ -64,10 +64,10 @@ func TestSkillGraphRunnerExecutesPublishedSkillSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute skill graph runner: %v", err)
 	}
-	if result.GraphTemplate.GraphType != pr2.GraphTypeSystemSkill || result.GraphPlan.GraphTemplateID == "gtemplate_generic_creation" {
+	if result.GraphTemplate.GraphType != boardgraph.GraphTypeSystemSkill || result.GraphPlan.GraphTemplateID == "gtemplate_generic_creation" {
 		t.Fatalf("expected published skill graph, got %#v", result.GraphTemplate)
 	}
-	if len(result.Events) != 2 || result.Events[0].EventType != pr2.EventTypeGraphPlanCreated || result.Events[1].EventType != pr2.EventTypeBoardSnapshotUpdated {
+	if len(result.Events) != 2 || result.Events[0].EventType != boardgraph.EventTypeGraphPlanCreated || result.Events[1].EventType != boardgraph.EventTypeBoardSnapshotUpdated {
 		t.Fatalf("unexpected events: %#v", result.Events)
 	}
 }

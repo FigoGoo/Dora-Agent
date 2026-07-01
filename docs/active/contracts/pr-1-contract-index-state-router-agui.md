@@ -87,7 +87,7 @@ RouterDecision / SkillCatalogSummary 的 `skill_source` 当前支持 `system_def
 - [x] RouterDecision schema 和 fixtures 存在。
 - [x] AG-UI Envelope 和 payload schema 存在。
 - [x] 付费市场 Skill 使用费确认 fixture 存在。
-- [x] `python3 tests/contract/validate_pr1_contracts.py` 通过。
+- [x] `python3 tests/contract/validate_foundation_contracts.py` 通过。
 
 ## 后续影响
 

@@ -7,16 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr3"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/toolasset"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/apperror"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/modeltool"
 	"gorm.io/gorm"
 )
 
-func (a *App) ensureM4ToolPlanPreflight(ctx context.Context, auth AuthContextDTO, agentRun model.AgentRunRecord, board pr2.CreativeBoard, traceID string) (*pr3.ToolPlan, error) {
+func (a *App) ensureToolGenerationPlanPreflight(ctx context.Context, auth AuthContextDTO, agentRun model.AgentRunRecord, board boardgraph.CreativeBoard, traceID string) (*toolasset.ToolPlan, error) {
 	if !board.ToolPlanAllowed || board.Status != "approved" {
 		return nil, nil
 	}
@@ -36,7 +36,7 @@ func (a *App) ensureM4ToolPlanPreflight(ctx context.Context, auth AuthContextDTO
 	if err != nil {
 		return nil, err
 	}
-	resourceType := m4ResourceTypeForBoard(board)
+	resourceType := resourceTypeForBoard(board)
 	defaultModel, err := a.gateway.ResolveDefaultModel(ctx, auth, resourceType, traceID)
 	if err != nil {
 		return nil, mapBusinessError(err)
@@ -45,7 +45,7 @@ func (a *App) ensureM4ToolPlanPreflight(ctx context.Context, auth AuthContextDTO
 	if err != nil {
 		return nil, mapBusinessError(err)
 	}
-	safety, err := a.recordPromptSafetyEvaluation(ctx, run, "m4_tool_generation_preflight", "prompt", run.ID, prompt, traceID)
+	safety, err := a.recordPromptSafetyEvaluation(ctx, run, "tool_generation_preflight", "prompt", run.ID, prompt, traceID)
 	if err != nil {
 		return nil, err
 	}
@@ -72,37 +72,37 @@ func (a *App) ensureM4ToolPlanPreflight(ctx context.Context, auth AuthContextDTO
 		})
 		return nil, apperror.New(apperror.CodeStateConflict, "credit account has insufficient points")
 	}
-	plan, expiresAt, err := buildM4ToolPlan(run.ID, board, snapshot, estimate, prompt)
+	plan, expiresAt, err := buildToolGenerationPlan(run.ID, board, snapshot, estimate, prompt)
 	if err != nil {
 		return nil, err
 	}
-	precondition := pr3.ToolPlanPrecondition{
+	precondition := toolasset.ToolPlanPrecondition{
 		BoardID: board.BoardID, BoardVersion: board.Version, BoardStatus: board.Status, GraphPlanID: stringPtrValue(board.GraphPlanID),
 	}
-	if err := pr3.ValidateToolPlanForApprovedBoard(precondition, plan); err != nil {
+	if err := toolasset.ValidateToolPlanForApprovedBoard(precondition, plan); err != nil {
 		return nil, err
 	}
 	if err := a.repo.SaveToolPlanV1(ctx, plan); err != nil {
 		return nil, err
 	}
-	if err := a.appendM4GenerationCostDisclosure(ctx, run, plan, expiresAt, traceID); err != nil {
+	if err := a.appendToolGenerationCostDisclosure(ctx, run, plan, expiresAt, traceID); err != nil {
 		return nil, err
 	}
-	if err := a.createM4ToolPlanConfirmation(ctx, run, plan, snapshot, estimate, safety, prompt, expiresAt, traceID); err != nil {
+	if err := a.createToolGenerationPlanConfirmation(ctx, run, plan, snapshot, estimate, safety, prompt, expiresAt, traceID); err != nil {
 		return nil, err
 	}
 	return &plan, nil
 }
 
-func buildM4ToolPlan(runID string, board pr2.CreativeBoard, snapshot ModelRuntimeSnapshotDTO, estimate CreditEstimateDTO, prompt string) (pr3.ToolPlan, time.Time, error) {
+func buildToolGenerationPlan(runID string, board boardgraph.CreativeBoard, snapshot ModelRuntimeSnapshotDTO, estimate CreditEstimateDTO, prompt string) (toolasset.ToolPlan, time.Time, error) {
 	now := time.Now().UTC()
-	expiresAt := parseM4ExpiresAt(estimate.ExpiresAt, now.Add(15*time.Minute))
-	items, total, err := buildM4ToolPlanItems(board, snapshot, estimate, prompt)
+	expiresAt := parseToolPlanExpiresAt(estimate.ExpiresAt, now.Add(15*time.Minute))
+	items, total, err := buildToolGenerationPlanItems(board, snapshot, estimate, prompt)
 	if err != nil {
-		return pr3.ToolPlan{}, time.Time{}, err
+		return toolasset.ToolPlan{}, time.Time{}, err
 	}
-	plan := pr3.ToolPlan{
-		SchemaVersion:        pr3.SchemaVersionToolPlan,
+	plan := toolasset.ToolPlan{
+		SchemaVersion:        toolasset.SchemaVersionToolPlan,
 		ToolPlanID:           "tpl_" + shortStableID(runID+":"+board.BoardID+":"+fmt.Sprint(board.Version)),
 		RunID:                runID,
 		BoardID:              board.BoardID,
@@ -111,13 +111,13 @@ func buildM4ToolPlan(runID string, board pr2.CreativeBoard, snapshot ModelRuntim
 		Status:               "confirmation_required",
 		Items:                items,
 		EstimatedCredits:     total,
-		Currency:             pr3.CurrencyCredits,
+		Currency:             toolasset.CurrencyCredits,
 		ConfirmationRequired: true,
 		ExpiresAt:            &expiresAt,
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	}
-	digest, err := pr1.CanonicalDigest(map[string]any{
+	digest, err := foundation.CanonicalDigest(map[string]any{
 		"tool_plan_id":        plan.ToolPlanID,
 		"run_id":              plan.RunID,
 		"board_id":            plan.BoardID,
@@ -132,13 +132,13 @@ func buildM4ToolPlan(runID string, board pr2.CreativeBoard, snapshot ModelRuntim
 		"pricing_snapshot_id": snapshot.PricingSnapshotID,
 	})
 	if err != nil {
-		return pr3.ToolPlan{}, time.Time{}, err
+		return toolasset.ToolPlan{}, time.Time{}, err
 	}
 	plan.ToolPlanDigest = digest
 	return plan, expiresAt, nil
 }
 
-func buildM4ToolPlanItems(board pr2.CreativeBoard, snapshot ModelRuntimeSnapshotDTO, estimate CreditEstimateDTO, prompt string) ([]pr3.ToolPlanItem, int, error) {
+func buildToolGenerationPlanItems(board boardgraph.CreativeBoard, snapshot ModelRuntimeSnapshotDTO, estimate CreditEstimateDTO, prompt string) ([]toolasset.ToolPlanItem, int, error) {
 	lines := estimate.LineItems
 	if len(lines) == 0 {
 		lines = []CreditEstimateLineItemDTO{{
@@ -148,14 +148,14 @@ func buildM4ToolPlanItems(board pr2.CreativeBoard, snapshot ModelRuntimeSnapshot
 			EstimatePoints: estimate.EstimatePoints,
 		}}
 	}
-	items := make([]pr3.ToolPlanItem, 0, len(lines))
+	items := make([]toolasset.ToolPlanItem, 0, len(lines))
 	total := 0
 	for index, line := range lines {
 		credits := line.EstimatePoints
 		if credits <= 0 && len(lines) == 1 {
 			credits = estimate.EstimatePoints
 		}
-		inputDigest, err := pr1.CanonicalDigest(map[string]any{
+		inputDigest, err := foundation.CanonicalDigest(map[string]any{
 			"board_id": board.BoardID, "board_version": board.Version, "graph_plan_id": stringPtrValue(board.GraphPlanID),
 			"prompt_digest": digestText(prompt), "estimate_item_id": line.EstimateItemID, "model_id": firstNonEmpty(line.ModelID, snapshot.ModelID),
 		})
@@ -163,11 +163,11 @@ func buildM4ToolPlanItems(board pr2.CreativeBoard, snapshot ModelRuntimeSnapshot
 			return nil, 0, err
 		}
 		itemIDSeed := firstNonEmpty(line.EstimateItemID, fmt.Sprintf("%s:%d", estimate.EstimateID, index+1))
-		item := pr3.ToolPlanItem{
+		item := toolasset.ToolPlanItem{
 			ToolPlanItemID:   "tpi_" + shortStableID(board.BoardID+":"+fmt.Sprint(board.Version)+":"+itemIDSeed),
 			ToolID:           firstNonEmpty(line.ToolName, "model_generation"),
 			ToolVersion:      firstNonEmpty(estimate.PricingSnapshotID, snapshot.PricingSnapshotID, "v1"),
-			ResourceType:     firstNonEmpty(line.ResourceType, snapshot.ResourceType, pr3.ResourceTypeImage),
+			ResourceType:     firstNonEmpty(line.ResourceType, snapshot.ResourceType, toolasset.ResourceTypeImage),
 			Quantity:         1,
 			EstimatedCredits: int(credits),
 			InputDigest:      inputDigest,
@@ -178,15 +178,15 @@ func buildM4ToolPlanItems(board pr2.CreativeBoard, snapshot ModelRuntimeSnapshot
 	return items, total, nil
 }
 
-func (a *App) appendM4GenerationCostDisclosure(ctx context.Context, run *model.Run, plan pr3.ToolPlan, expiresAt time.Time, traceID string) error {
-	payload := pr3.GenerationCostDisclosurePayload{
+func (a *App) appendToolGenerationCostDisclosure(ctx context.Context, run *model.Run, plan toolasset.ToolPlan, expiresAt time.Time, traceID string) error {
+	payload := toolasset.GenerationCostDisclosurePayload{
 		ToolPlanID: plan.ToolPlanID, ToolPlanDigest: plan.ToolPlanDigest, BoardID: plan.BoardID, BoardVersion: plan.BoardVersion,
 		EstimatedCredits: plan.EstimatedCredits, Currency: plan.Currency, ExpiresAt: expiresAt,
 	}
-	if err := pr3.ValidateGenerationCostDisclosurePayload(payload); err != nil {
+	if err := toolasset.ValidateGenerationCostDisclosurePayload(payload); err != nil {
 		return err
 	}
-	seq, err := a.nextPR2AGUISequence(ctx, run)
+	seq, err := a.nextBoardGraphAGUISequence(ctx, run)
 	if err != nil {
 		return err
 	}
@@ -200,13 +200,13 @@ func (a *App) appendM4GenerationCostDisclosure(ctx context.Context, run *model.R
 		"expires_at":         payload.ExpiresAt,
 		"skill_usage_status": payload.SkillUsageStatus,
 	}
-	payloadDigest, err := pr1.CanonicalDigest(body)
+	payloadDigest, err := foundation.CanonicalDigest(body)
 	if err != nil {
 		return err
 	}
-	event, err := pr1.BuildAGUIEnvelope(pr1.AGUIInput{
+	event, err := foundation.BuildAGUIEnvelope(foundation.AGUIInput{
 		EventID:       "evt_" + shortStableID(run.ID+":cost_disclosure_generation:"+plan.ToolPlanID),
-		EventType:     pr3.EventTypeCostDisclosureGenerationPresented,
+		EventType:     toolasset.EventTypeCostDisclosureGenerationPresented,
 		ProjectID:     run.ProjectID,
 		SpaceID:       run.SpaceID,
 		ActorUserID:   run.UserID,
@@ -221,41 +221,41 @@ func (a *App) appendM4GenerationCostDisclosure(ctx context.Context, run *model.R
 	if err != nil {
 		return err
 	}
-	if err := a.repo.AppendRunEventsV1(ctx, []pr1.AGUIEnvelope{event}); err != nil {
+	if err := a.repo.AppendRunEventsV1(ctx, []foundation.AGUIEnvelope{event}); err != nil {
 		return err
 	}
-	a.publishPR2AGUIEvents(ctx, []pr1.AGUIEnvelope{event})
+	a.publishBoardGraphAGUIEvents(ctx, []foundation.AGUIEnvelope{event})
 	return nil
 }
 
-func (a *App) createM4ToolPlanConfirmation(ctx context.Context, run *model.Run, plan pr3.ToolPlan, snapshot ModelRuntimeSnapshotDTO, estimate CreditEstimateDTO, safety *model.SafetyEvaluation, prompt string, expiresAt time.Time, traceID string) error {
-	outputElements := a.m4OutputElementsForBoard(ctx, plan.BoardID)
+func (a *App) createToolGenerationPlanConfirmation(ctx context.Context, run *model.Run, plan toolasset.ToolPlan, snapshot ModelRuntimeSnapshotDTO, estimate CreditEstimateDTO, safety *model.SafetyEvaluation, prompt string, expiresAt time.Time, traceID string) error {
+	outputElements := a.outputElementsForBoard(ctx, plan.BoardID)
 	ttl := time.Until(expiresAt)
 	if ttl <= 0 {
 		ttl = 15 * time.Minute
 	}
 	return a.createConfirmationInterrupt(ctx, run, "tool_generation_confirmation", "tool generation credit charge requires confirmation", map[string]any{
-		"m4_flow":             "generation_asset_commit",
-		"tool_plan_id":        plan.ToolPlanID,
-		"tool_plan_digest":    plan.ToolPlanDigest,
-		"board_id":            plan.BoardID,
-		"board_version":       plan.BoardVersion,
-		"graph_plan_id":       plan.GraphPlanID,
-		"estimate_id":         estimate.EstimateID,
-		"estimate_points":     int64(plan.EstimatedCredits),
-		"points":              int64(plan.EstimatedCredits),
-		"available_points":    estimate.AvailablePoints,
-		"credit_account_id":   estimate.CreditAccountID,
-		"pricing_snapshot_id": firstNonEmpty(estimate.PricingSnapshotID, snapshot.PricingSnapshotID),
-		"model_snapshot":      snapshot,
-		"estimate":            estimate,
-		"safety_evidence":     safetyEvidenceToRPC(safety),
-		"prompt_digest":       digestText(prompt),
-		"output_elements":     outputElements,
+		"tool_generation_flow": "generation_asset_commit",
+		"tool_plan_id":         plan.ToolPlanID,
+		"tool_plan_digest":     plan.ToolPlanDigest,
+		"board_id":             plan.BoardID,
+		"board_version":        plan.BoardVersion,
+		"graph_plan_id":        plan.GraphPlanID,
+		"estimate_id":          estimate.EstimateID,
+		"estimate_points":      int64(plan.EstimatedCredits),
+		"points":               int64(plan.EstimatedCredits),
+		"available_points":     estimate.AvailablePoints,
+		"credit_account_id":    estimate.CreditAccountID,
+		"pricing_snapshot_id":  firstNonEmpty(estimate.PricingSnapshotID, snapshot.PricingSnapshotID),
+		"model_snapshot":       snapshot,
+		"estimate":             estimate,
+		"safety_evidence":      safetyEvidenceToRPC(safety),
+		"prompt_digest":        digestText(prompt),
+		"output_elements":      outputElements,
 	}, "Tool 生成费确认", "确认后将冻结 Tool 生成费，生成完成并保存资产后扣费", []string{"tool_generation", "credit_freeze", "asset_commit", "tool_plan:" + plan.ToolPlanID}, ttl, traceID)
 }
 
-func (a *App) startM4ToolTaskForConfirmation(ctx context.Context, run *model.Run, payload m4ConfirmationPayload, generationTask *model.Task, idempotencyKey string, traceID string) (*pr3.ToolTask, error) {
+func (a *App) startToolGenerationTaskForConfirmation(ctx context.Context, run *model.Run, payload toolGenerationConfirmationPayload, generationTask *model.Task, idempotencyKey string, traceID string) (*toolasset.ToolTask, error) {
 	if strings.TrimSpace(payload.ToolPlanID) == "" {
 		return nil, nil
 	}
@@ -275,16 +275,16 @@ func (a *App) startM4ToolTaskForConfirmation(ctx context.Context, run *model.Run
 		timeoutMS = 30000
 	}
 	now := time.Now().UTC()
-	task := pr3.ToolTask{
-		SchemaVersion:  pr3.SchemaVersionToolTask,
+	task := toolasset.ToolTask{
+		SchemaVersion:  toolasset.SchemaVersionToolTask,
 		ToolTaskID:     "ttask_" + shortStableID(run.ID+":"+plan.ToolPlanID+":primary"),
 		ToolPlanID:     plan.ToolPlanID,
 		ToolPlanItemID: item.ToolPlanItemID,
 		RunID:          run.ID,
 		Status:         "running",
 		Progress:       10,
-		ProviderPolicy: pr3.ProviderPolicy{Mode: pr3.ProviderModeSync, TimeoutMS: timeoutMS, Retryable: true},
-		IdempotencyKey: m4ToolTaskIdempotencyKey(run.ID, payload, idempotencyKey),
+		ProviderPolicy: toolasset.ProviderPolicy{Mode: toolasset.ProviderModeSync, TimeoutMS: timeoutMS, Retryable: true},
+		IdempotencyKey: toolGenerationTaskIdempotencyKey(run.ID, payload, idempotencyKey),
 		InputDigest:    item.InputDigest,
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -298,22 +298,22 @@ func (a *App) startM4ToolTaskForConfirmation(ctx context.Context, run *model.Run
 			"tool_plan_item_id": task.ToolPlanItemID,
 		})
 	}
-	if err := a.appendM4ToolTaskUpdated(ctx, run, task, traceID); err != nil {
+	if err := a.appendToolGenerationTaskUpdated(ctx, run, task, traceID); err != nil {
 		return nil, err
 	}
 	return &task, nil
 }
 
-func (a *App) completeM4ToolTaskFromResult(ctx context.Context, run *model.Run, task *pr3.ToolTask, artifacts []modeltool.Artifact, traceID string) error {
+func (a *App) completeToolGenerationTaskFromResult(ctx context.Context, run *model.Run, task *toolasset.ToolTask, artifacts []modeltool.Artifact, traceID string) error {
 	if task == nil {
 		return nil
 	}
-	outputDigest, err := m4ArtifactOutputDigest(artifacts)
+	outputDigest, err := artifactOutputDigest(artifacts)
 	if err != nil {
 		return err
 	}
-	updated, err := a.repo.ApplyToolTaskCompletedEventV1(ctx, pr3.ToolTaskCompletedStreamEvent{
-		Stream:         pr3.ToolTaskCompletedStream,
+	updated, err := a.repo.ApplyToolTaskCompletedEventV1(ctx, toolasset.ToolTaskCompletedStreamEvent{
+		Stream:         toolasset.ToolTaskCompletedStream,
 		DedupeKey:      "provider:" + task.ToolTaskID + ":" + outputDigest,
 		ToolTaskID:     task.ToolTaskID,
 		ProviderStatus: "succeeded",
@@ -322,11 +322,11 @@ func (a *App) completeM4ToolTaskFromResult(ctx context.Context, run *model.Run, 
 	if err != nil {
 		return err
 	}
-	return a.appendM4ToolTaskUpdated(ctx, run, updated, traceID)
+	return a.appendToolGenerationTaskUpdated(ctx, run, updated, traceID)
 }
 
-func (a *App) appendM4ToolTaskUpdated(ctx context.Context, run *model.Run, task pr3.ToolTask, traceID string) error {
-	payload := pr3.ToolTaskUpdatedPayload{
+func (a *App) appendToolGenerationTaskUpdated(ctx context.Context, run *model.Run, task toolasset.ToolTask, traceID string) error {
+	payload := toolasset.ToolTaskUpdatedPayload{
 		ToolTaskID:   task.ToolTaskID,
 		ToolPlanID:   task.ToolPlanID,
 		Status:       task.Status,
@@ -334,7 +334,7 @@ func (a *App) appendM4ToolTaskUpdated(ctx context.Context, run *model.Run, task 
 		OutputDigest: task.OutputDigest,
 		ErrorCode:    task.ErrorCode,
 	}
-	if err := pr3.ValidateToolTaskUpdatedPayload(payload); err != nil {
+	if err := toolasset.ValidateToolTaskUpdatedPayload(payload); err != nil {
 		return err
 	}
 	body := map[string]any{
@@ -347,10 +347,10 @@ func (a *App) appendM4ToolTaskUpdated(ctx context.Context, run *model.Run, task 
 	if payload.OutputDigest != nil {
 		body["output_digest"] = *payload.OutputDigest
 	}
-	return a.appendM4PR3AGUIEvent(ctx, run, pr3.EventTypeToolTaskUpdated, body, payload.ToolTaskID+":"+payload.Status+":"+fmt.Sprint(payload.Progress), traceID)
+	return a.appendToolGenerationAGUIEvent(ctx, run, toolasset.EventTypeToolTaskUpdated, body, payload.ToolTaskID+":"+payload.Status+":"+fmt.Sprint(payload.Progress), traceID)
 }
 
-func (a *App) appendM4AssetCommitUpdatedFromTask(ctx context.Context, run *model.Run, task *model.Task, commit AssetCommitDTO, traceID string) error {
+func (a *App) appendToolGenerationAssetCommitUpdatedFromTask(ctx context.Context, run *model.Run, task *model.Task, commit AssetCommitDTO, traceID string) error {
 	if task == nil {
 		return nil
 	}
@@ -359,10 +359,10 @@ func (a *App) appendM4AssetCommitUpdatedFromTask(ctx context.Context, run *model
 	if strings.TrimSpace(toolTaskID) == "" {
 		return nil
 	}
-	payload := pr3.AssetCommitUpdatedPayload{
+	payload := toolasset.AssetCommitUpdatedPayload{
 		ToolTaskID:        toolTaskID,
-		CommitStatus:      m4CommitStatusForAGUI(commit.CommitStatus, len(commit.AssetRefs)),
-		CommittedAssetIDs: m4CommittedAssetIDs(commit.AssetRefs),
+		CommitStatus:      commitStatusForAGUI(commit.CommitStatus, len(commit.AssetRefs)),
+		CommittedAssetIDs: committedAssetIDs(commit.AssetRefs),
 		FailedAssetCount:  0,
 	}
 	body := map[string]any{
@@ -371,19 +371,19 @@ func (a *App) appendM4AssetCommitUpdatedFromTask(ctx context.Context, run *model
 		"committed_asset_ids": payload.CommittedAssetIDs,
 		"failed_asset_count":  payload.FailedAssetCount,
 	}
-	return a.appendM4PR3AGUIEvent(ctx, run, pr3.EventTypeAssetCommitUpdated, body, toolTaskID+":"+payload.CommitStatus, traceID)
+	return a.appendToolGenerationAGUIEvent(ctx, run, toolasset.EventTypeAssetCommitUpdated, body, toolTaskID+":"+payload.CommitStatus, traceID)
 }
 
-func (a *App) appendM4PR3AGUIEvent(ctx context.Context, run *model.Run, eventType string, payload map[string]any, seed string, traceID string) error {
-	seq, err := a.nextPR2AGUISequence(ctx, run)
+func (a *App) appendToolGenerationAGUIEvent(ctx context.Context, run *model.Run, eventType string, payload map[string]any, seed string, traceID string) error {
+	seq, err := a.nextBoardGraphAGUISequence(ctx, run)
 	if err != nil {
 		return err
 	}
-	payloadDigest, err := pr1.CanonicalDigest(payload)
+	payloadDigest, err := foundation.CanonicalDigest(payload)
 	if err != nil {
 		return err
 	}
-	event, err := pr1.BuildAGUIEnvelope(pr1.AGUIInput{
+	event, err := foundation.BuildAGUIEnvelope(foundation.AGUIInput{
 		EventID:       "evt_" + shortStableID(run.ID+":"+eventType+":"+seed),
 		EventType:     eventType,
 		ProjectID:     run.ProjectID,
@@ -400,14 +400,14 @@ func (a *App) appendM4PR3AGUIEvent(ctx context.Context, run *model.Run, eventTyp
 	if err != nil {
 		return err
 	}
-	if err := a.repo.AppendRunEventsV1(ctx, []pr1.AGUIEnvelope{event}); err != nil {
+	if err := a.repo.AppendRunEventsV1(ctx, []foundation.AGUIEnvelope{event}); err != nil {
 		return err
 	}
-	a.publishPR2AGUIEvents(ctx, []pr1.AGUIEnvelope{event})
+	a.publishBoardGraphAGUIEvents(ctx, []foundation.AGUIEnvelope{event})
 	return nil
 }
 
-func (a *App) m4OutputElementsForBoard(ctx context.Context, boardID string) []SkillOutputElementDTO {
+func (a *App) outputElementsForBoard(ctx context.Context, boardID string) []SkillOutputElementDTO {
 	snapshot, err := a.repo.GetBoardSnapshotV1(ctx, boardID)
 	if err != nil || len(snapshot.Elements) == 0 {
 		return []SkillOutputElementDTO{{ElementType: "image_ref", ElementName: "生成资产", Required: true, UseDraft: true, UseFinal: true, Editable: true, Referable: true, DisplayOrder: 1, DisplaySlot: "board"}}
@@ -422,25 +422,25 @@ func (a *App) m4OutputElementsForBoard(ctx context.Context, boardID string) []Sk
 	return out
 }
 
-func m4ResourceTypeForBoard(board pr2.CreativeBoard) string {
-	return pr3.ResourceTypeImage
+func resourceTypeForBoard(board boardgraph.CreativeBoard) string {
+	return toolasset.ResourceTypeImage
 }
 
-func m4FreezeIdempotencyKey(runID string, payload m4ConfirmationPayload, fallback string) string {
+func toolGenerationFreezeIdempotencyKey(runID string, payload toolGenerationConfirmationPayload, fallback string) string {
 	if strings.TrimSpace(payload.ToolPlanDigest) == "" || strings.TrimSpace(payload.CreditAccountID) == "" {
 		return fallback + ":freeze"
 	}
 	return "toolplan:" + runID + ":" + payload.ToolPlanDigest + ":" + payload.CreditAccountID + ":freeze"
 }
 
-func m4ToolTaskIdempotencyKey(runID string, payload m4ConfirmationPayload, fallback string) string {
+func toolGenerationTaskIdempotencyKey(runID string, payload toolGenerationConfirmationPayload, fallback string) string {
 	if strings.TrimSpace(payload.ToolPlanDigest) == "" {
 		return fallback + ":tool_task"
 	}
 	return "tooltask:" + runID + ":" + payload.ToolPlanDigest
 }
 
-func m4ArtifactOutputDigest(artifacts []modeltool.Artifact) (string, error) {
+func artifactOutputDigest(artifacts []modeltool.Artifact) (string, error) {
 	items := make([]map[string]any, 0, len(artifacts))
 	for _, artifact := range artifacts {
 		items = append(items, map[string]any{
@@ -451,10 +451,10 @@ func m4ArtifactOutputDigest(artifacts []modeltool.Artifact) (string, error) {
 			"size_bytes":    artifact.SizeBytes,
 		})
 	}
-	return pr1.CanonicalDigest(items)
+	return foundation.CanonicalDigest(items)
 }
 
-func m4CommittedAssetIDs(refs []CommittedAssetRefDTO) []string {
+func committedAssetIDs(refs []CommittedAssetRefDTO) []string {
 	out := make([]string, 0, len(refs))
 	for _, ref := range refs {
 		if strings.TrimSpace(ref.AssetID) != "" {
@@ -464,7 +464,7 @@ func m4CommittedAssetIDs(refs []CommittedAssetRefDTO) []string {
 	return out
 }
 
-func m4CommitStatusForAGUI(status string, committedCount int) string {
+func commitStatusForAGUI(status string, committedCount int) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "failed":
 		return "failed"
@@ -480,7 +480,7 @@ func m4CommitStatusForAGUI(status string, committedCount int) string {
 	}
 }
 
-func parseM4ExpiresAt(raw string, fallback time.Time) time.Time {
+func parseToolPlanExpiresAt(raw string, fallback time.Time) time.Time {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return fallback.UTC()

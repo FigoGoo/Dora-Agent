@@ -33,7 +33,7 @@
         "cover_asset_id": "ast_seed_1001",
         "category": "image",
         "tags": [
-          "m6",
+          "service_acceptance",
           "contract"
         ]
       },
@@ -51,7 +51,7 @@
           "cover_asset_id": "ast_seed_1001",
           "category": "image",
           "tags": [
-            "m6",
+            "service_acceptance",
             "contract"
           ],
           "updated_at": "2026-06-28T12:00:00Z"
@@ -78,7 +78,7 @@
         "public_title": "Public Candidate Work",
         "public_description": "Share safe summary",
         "tags": [
-          "m6"
+          "service_acceptance"
         ],
         "safety_evidence": {
           "safety_evidence_id": "safe_work_share_1001",
@@ -236,7 +236,7 @@
           "source": "public_http"
         },
         "category": "image",
-        "tag": "m6",
+        "tag": "service_acceptance",
         "resource_type": "image",
         "limit": 10,
         "offset": 0

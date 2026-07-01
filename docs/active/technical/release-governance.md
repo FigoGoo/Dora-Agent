@@ -48,11 +48,11 @@ Agent 核心重构横跨 Agent Runtime、业务微服务、前端、管理端、
 
 | 阶段 | 触发条件 | 命令 | 产物 | 阻断条件 |
 | --- | --- | --- | --- | --- |
-| Contract Gate | PR 或合并前 | `python3 tests/contract/validate_pr1_contracts.py && python3 tests/contract/validate_pr2_contracts.py && python3 tests/contract/validate_pr3_contracts.py && python3 tests/contract/validate_pr4_contracts.py` | 契约校验日志 | schema、OpenAPI、Thrift、migration static guard 或 fixture 任一失败 |
+| Contract Gate | PR 或合并前 | `python3 tests/contract/validate_foundation_contracts.py && python3 tests/contract/validate_board_graph_contracts.py && python3 tests/contract/validate_tool_asset_contracts.py && python3 tests/contract/validate_skill_market_contracts.py` | 契约校验日志 | schema、OpenAPI、Thrift、migration static guard 或 fixture 任一失败 |
 | Migration Gate | test 环境发布前 | PostgreSQL dry-run、down-test、数据兼容检查 | migration 报告 | PR-2 / PR-3 / PR-4 migration 无法重放 |
-| Fixture Gate | E2E 前 | `python3 tests/contract/validate_pr5_e2e_gates.py` | PR-5 fixture 报告 | fake provider、E2E fixture 或 release gate 缺失 |
-| Service E2E Gate | 发布前 | `go test ./services/business/internal/e2e/pr5` | 本地 PostgreSQL 服务级 E2E 报告 | PR-2 / PR-3 / PR-4 主路径串联失败 |
-| Agent / Business HTTP Gate | 发布前 | `go test ./services/agent/internal/e2e/pr5 ./services/business/internal/e2e/pr5` | Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke 报告 | 健康检查、AG-UI replay、stream dedupe、cache、lock、Agent main 或 Business main 进程启动失败 |
+| Fixture Gate | E2E 前 | `python3 tests/contract/validate_release_e2e_gates.py` | PR-5 fixture 报告 | fake provider、E2E fixture 或 release gate 缺失 |
+| Service E2E Gate | 发布前 | `go test ./services/business/internal/e2e/release` | 本地 PostgreSQL 服务级 E2E 报告 | PR-2 / PR-3 / PR-4 主路径串联失败 |
+| Agent / Business HTTP Gate | 发布前 | `go test ./services/agent/internal/e2e/release ./services/business/internal/e2e/release` | Agent HTTP router + Redis container E2E、Agent / Business 独立进程 HTTP smoke 报告 | 健康检查、AG-UI replay、stream dedupe、cache、lock、Agent main 或 Business main 进程启动失败 |
 | Fake Provider Gate | E2E | fake provider 场景套件 | 成功、失败、partial、超时报告 | 任一 required behavior 未覆盖或幂等失败 |
 | Build Gate | 发布前 | 前端、Agent、业务服务构建命令 | 构建产物 | 任一服务构建失败 |
 | Release Gate | 灰度前 | 健康检查、关键 API/RPC/AG-UI smoke | 发布记录 | 指标、trace、日志、告警缺失 |

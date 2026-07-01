@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
 	runtimeskill "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skill"
 )
 
@@ -41,9 +41,9 @@ func NewChatModelRouter() ChatModelRouter {
 	return ChatModelRouter{routeHints: runtimeskill.NewRouter()}
 }
 
-func (r ChatModelRouter) Decide(ctx context.Context, input Input) (pr1.RouterDecision, error) {
+func (r ChatModelRouter) Decide(ctx context.Context, input Input) (foundation.RouterDecision, error) {
 	if err := ctx.Err(); err != nil {
-		return pr1.RouterDecision{}, err
+		return foundation.RouterDecision{}, err
 	}
 	text := strings.TrimSpace(input.UserInput)
 	if input.RunIntent == "capability_question" || isCapabilityQuestion(text) {
@@ -64,17 +64,17 @@ func (r ChatModelRouter) Decide(ctx context.Context, input Input) (pr1.RouterDec
 	return clarifyDecision(map[string]any{"user_input_preview": trimForRouter(text, 80)}, []string{"creative_goal"}, "creative_intent_unclear", "请补充要创作的目标、媒介或限制", 0.42), nil
 }
 
-func (r ChatModelRouter) capabilityAnswer(input Input) pr1.RouterDecision {
-	marketplaceCandidates := make([]pr1.MarketplaceCandidate, 0)
+func (r ChatModelRouter) capabilityAnswer(input Input) foundation.RouterDecision {
+	marketplaceCandidates := make([]foundation.MarketplaceCandidate, 0)
 	for _, skill := range input.Catalog {
-		if skill.Status != "published" || skillSource(skill) != pr1.SkillSourceMarketplace || skill.ListingID == "" {
+		if skill.Status != "published" || skillSource(skill) != foundation.SkillSourceMarketplace || skill.ListingID == "" {
 			continue
 		}
 		entitlement := entitlementStatus(skill)
-		if entitlement == pr1.EntitlementAvailable && !skillRequiresUsageConfirmation(skill) {
+		if entitlement == foundation.EntitlementAvailable && !skillRequiresUsageConfirmation(skill) {
 			continue
 		}
-		marketplaceCandidates = append(marketplaceCandidates, pr1.MarketplaceCandidate{
+		marketplaceCandidates = append(marketplaceCandidates, foundation.MarketplaceCandidate{
 			SkillID:           skill.SkillID,
 			ListingID:         skill.ListingID,
 			Score:             0.82,
@@ -87,16 +87,16 @@ func (r ChatModelRouter) capabilityAnswer(input Input) pr1.RouterDecision {
 	if len(marketplaceCandidates) > 0 {
 		fallback = "展示市场候选，等待用户显式安装或选择"
 	}
-	return pr1.RouterDecision{
-		SchemaVersion:                  pr1.SchemaVersionRouterDecision,
-		Decision:                       pr1.RouterDecisionCapabilityAnswer,
+	return foundation.RouterDecision{
+		SchemaVersion:                  foundation.SchemaVersionRouterDecision,
+		Decision:                       foundation.RouterDecisionCapabilityAnswer,
 		Confidence:                     0.81,
 		ReasonCode:                     "capability_question",
 		SafeToExecute:                  false,
 		RequiresSkillUsageConfirmation: false,
 		ExtractedParams:                map[string]any{},
 		MissingFields:                  []string{},
-		CandidateSkills:                []pr1.CandidateSkill{},
+		CandidateSkills:                []foundation.CandidateSkill{},
 		MarketplaceCandidates:          marketplaceCandidates,
 		PricingSummary:                 nil,
 		CreatorSummary:                 nil,
@@ -104,7 +104,7 @@ func (r ChatModelRouter) capabilityAnswer(input Input) pr1.RouterDecision {
 	}
 }
 
-func (r ChatModelRouter) explicitSelect(input Input) pr1.RouterDecision {
+func (r ChatModelRouter) explicitSelect(input Input) foundation.RouterDecision {
 	for _, skill := range input.Catalog {
 		if input.SelectedSkillID != "" && skill.SkillID != input.SelectedSkillID {
 			continue
@@ -120,7 +120,7 @@ func (r ChatModelRouter) explicitSelect(input Input) pr1.RouterDecision {
 	return clarifyDecision(map[string]any{"requested_skill_id": input.SelectedSkillID, "requested_listing_id": input.SelectedListingID}, []string{"available_skill_choice"}, "selected_skill_unavailable", "listing removed", 0.73)
 }
 
-func (r ChatModelRouter) matchPublishedSkill(text string, catalog []CatalogSkill) (pr1.RouterDecision, bool) {
+func (r ChatModelRouter) matchPublishedSkill(text string, catalog []CatalogSkill) (foundation.RouterDecision, bool) {
 	summaries := make([]runtimeskill.Summary, 0, len(catalog))
 	byID := map[string]CatalogSkill{}
 	for _, skill := range catalog {
@@ -132,26 +132,26 @@ func (r ChatModelRouter) matchPublishedSkill(text string, catalog []CatalogSkill
 	}
 	route := r.routeHints.Route(text, summaries)
 	if !route.Matched {
-		return pr1.RouterDecision{}, false
+		return foundation.RouterDecision{}, false
 	}
 	skill := byID[route.Skill.SkillID]
 	if skill.Status != "published" {
 		return unavailableDecision(skill), true
 	}
-	if skillSource(skill) == pr1.SkillSourceMarketplace && entitlementStatus(skill) != pr1.EntitlementAvailable {
+	if skillSource(skill) == foundation.SkillSourceMarketplace && entitlementStatus(skill) != foundation.EntitlementAvailable {
 		return marketplaceCapabilityDecision(skill, text), true
 	}
 	return selectSkillDecision(skill, 0.92, reasonCodeForSkill(skill, route.Reason), extractedParams(text), "命中"+displaySkillName(skill)+"场景"), true
 }
 
-func selectSkillDecision(skill CatalogSkill, confidence float64, reasonCode string, params map[string]any, why string) pr1.RouterDecision {
+func selectSkillDecision(skill CatalogSkill, confidence float64, reasonCode string, params map[string]any, why string) foundation.RouterDecision {
 	source := skillSource(skill)
 	skillID := strings.TrimSpace(skill.SkillID)
 	listingID := strings.TrimSpace(skill.ListingID)
 	entitlement := entitlementStatus(skill)
-	return pr1.RouterDecision{
-		SchemaVersion:                  pr1.SchemaVersionRouterDecision,
-		Decision:                       pr1.RouterDecisionSelectSkill,
+	return foundation.RouterDecision{
+		SchemaVersion:                  foundation.SchemaVersionRouterDecision,
+		Decision:                       foundation.RouterDecisionSelectSkill,
 		SkillSource:                    stringPtr(source),
 		SkillID:                        stringPtr(skillID),
 		ListingID:                      nullableStringPtr(listingID),
@@ -161,8 +161,8 @@ func selectSkillDecision(skill CatalogSkill, confidence float64, reasonCode stri
 		RequiresSkillUsageConfirmation: skillRequiresUsageConfirmation(skill),
 		ExtractedParams:                params,
 		MissingFields:                  []string{},
-		CandidateSkills:                []pr1.CandidateSkill{{SkillID: skillID, Score: confidence, Why: why}},
-		MarketplaceCandidates:          []pr1.MarketplaceCandidate{},
+		CandidateSkills:                []foundation.CandidateSkill{{SkillID: skillID, Score: confidence, Why: why}},
+		MarketplaceCandidates:          []foundation.MarketplaceCandidate{},
 		PricingSummary:                 nullableMap(skill.PricingSummary),
 		CreatorSummary:                 nullableMap(skill.CreatorSummary),
 		EntitlementStatus:              stringPtr(entitlement),
@@ -170,18 +170,18 @@ func selectSkillDecision(skill CatalogSkill, confidence float64, reasonCode stri
 	}
 }
 
-func marketplaceCapabilityDecision(skill CatalogSkill, text string) pr1.RouterDecision {
-	return pr1.RouterDecision{
-		SchemaVersion:                  pr1.SchemaVersionRouterDecision,
-		Decision:                       pr1.RouterDecisionCapabilityAnswer,
+func marketplaceCapabilityDecision(skill CatalogSkill, text string) foundation.RouterDecision {
+	return foundation.RouterDecision{
+		SchemaVersion:                  foundation.SchemaVersionRouterDecision,
+		Decision:                       foundation.RouterDecisionCapabilityAnswer,
 		Confidence:                     0.81,
 		ReasonCode:                     "marketplace_candidates_not_installed",
 		SafeToExecute:                  false,
 		RequiresSkillUsageConfirmation: false,
 		ExtractedParams:                extractedParams(text),
 		MissingFields:                  []string{},
-		CandidateSkills:                []pr1.CandidateSkill{},
-		MarketplaceCandidates: []pr1.MarketplaceCandidate{{
+		CandidateSkills:                []foundation.CandidateSkill{},
+		MarketplaceCandidates: []foundation.MarketplaceCandidate{{
 			SkillID:           skill.SkillID,
 			ListingID:         skill.ListingID,
 			Score:             0.87,
@@ -196,12 +196,12 @@ func marketplaceCapabilityDecision(skill CatalogSkill, text string) pr1.RouterDe
 	}
 }
 
-func genericCreationDecision(text string) pr1.RouterDecision {
-	source := pr1.SkillSourceSystemBuiltin
+func genericCreationDecision(text string) foundation.RouterDecision {
+	source := foundation.SkillSourceSystemBuiltin
 	skillID := "skill_generic_creation"
-	return pr1.RouterDecision{
-		SchemaVersion:                  pr1.SchemaVersionRouterDecision,
-		Decision:                       pr1.RouterDecisionGenericCreation,
+	return foundation.RouterDecision{
+		SchemaVersion:                  foundation.SchemaVersionRouterDecision,
+		Decision:                       foundation.RouterDecisionGenericCreation,
 		SkillSource:                    &source,
 		SkillID:                        &skillID,
 		ListingID:                      nil,
@@ -211,27 +211,27 @@ func genericCreationDecision(text string) pr1.RouterDecision {
 		RequiresSkillUsageConfirmation: false,
 		ExtractedParams:                extractedParams(text),
 		MissingFields:                  []string{},
-		CandidateSkills:                []pr1.CandidateSkill{{SkillID: skillID, Score: 0.72, Why: "未命中具体 Skill，进入内置自由创作"}},
-		MarketplaceCandidates:          []pr1.MarketplaceCandidate{},
+		CandidateSkills:                []foundation.CandidateSkill{{SkillID: skillID, Score: 0.72, Why: "未命中具体 Skill，进入内置自由创作"}},
+		MarketplaceCandidates:          []foundation.MarketplaceCandidate{},
 		PricingSummary:                 map[string]any{"skill_usage_points": 0, "tool_generation_points": "preflight_estimate"},
 		CreatorSummary:                 nil,
-		EntitlementStatus:              stringPtr(pr1.EntitlementAvailable),
+		EntitlementStatus:              stringPtr(foundation.EntitlementAvailable),
 		FallbackReason:                 nil,
 	}
 }
 
-func clarifyDecision(params map[string]any, missing []string, reasonCode, fallback string, confidence float64) pr1.RouterDecision {
-	return pr1.RouterDecision{
-		SchemaVersion:                  pr1.SchemaVersionRouterDecision,
-		Decision:                       pr1.RouterDecisionClarify,
+func clarifyDecision(params map[string]any, missing []string, reasonCode, fallback string, confidence float64) foundation.RouterDecision {
+	return foundation.RouterDecision{
+		SchemaVersion:                  foundation.SchemaVersionRouterDecision,
+		Decision:                       foundation.RouterDecisionClarify,
 		Confidence:                     confidence,
 		ReasonCode:                     reasonCode,
 		SafeToExecute:                  false,
 		RequiresSkillUsageConfirmation: false,
 		ExtractedParams:                params,
 		MissingFields:                  missing,
-		CandidateSkills:                []pr1.CandidateSkill{},
-		MarketplaceCandidates:          []pr1.MarketplaceCandidate{},
+		CandidateSkills:                []foundation.CandidateSkill{},
+		MarketplaceCandidates:          []foundation.MarketplaceCandidate{},
 		PricingSummary:                 nil,
 		CreatorSummary:                 nil,
 		EntitlementStatus:              nil,
@@ -239,7 +239,7 @@ func clarifyDecision(params map[string]any, missing []string, reasonCode, fallba
 	}
 }
 
-func unavailableDecision(skill CatalogSkill) pr1.RouterDecision {
+func unavailableDecision(skill CatalogSkill) foundation.RouterDecision {
 	return clarifyDecision(map[string]any{"requested_skill_id": skill.SkillID, "requested_listing_id": skill.ListingID}, []string{"available_skill_choice"}, "selected_skill_unavailable", "listing removed", 0.73)
 }
 
@@ -280,10 +280,10 @@ func skillSource(skill CatalogSkill) string {
 		source = strings.TrimSpace(skill.RouteHints["skill_source"])
 	}
 	switch source {
-	case pr1.SkillSourceSystemDefault, pr1.SkillSourceSystemBuiltin, pr1.SkillSourceInstalled, pr1.SkillSourceMarketplace:
+	case foundation.SkillSourceSystemDefault, foundation.SkillSourceSystemBuiltin, foundation.SkillSourceInstalled, foundation.SkillSourceMarketplace:
 		return source
 	case "public", "default", "":
-		return pr1.SkillSourceSystemDefault
+		return foundation.SkillSourceSystemDefault
 	default:
 		return source
 	}
@@ -296,14 +296,14 @@ func entitlementStatus(skill CatalogSkill) string {
 	if value := strings.TrimSpace(skill.RouteHints["entitlement"]); value != "" {
 		return value
 	}
-	if skillSource(skill) == pr1.SkillSourceMarketplace && skill.ListingID != "" {
-		return pr1.EntitlementInstallRequired
+	if skillSource(skill) == foundation.SkillSourceMarketplace && skill.ListingID != "" {
+		return foundation.EntitlementInstallRequired
 	}
-	return pr1.EntitlementAvailable
+	return foundation.EntitlementAvailable
 }
 
 func skillRequiresUsageConfirmation(skill CatalogSkill) bool {
-	if skillSource(skill) != pr1.SkillSourceMarketplace {
+	if skillSource(skill) != foundation.SkillSourceMarketplace {
 		return false
 	}
 	if value, ok := skill.PricingSummary["skill_usage_points"]; ok && value != nil {

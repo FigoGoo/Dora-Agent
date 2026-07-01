@@ -15,17 +15,17 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
 )
 
-func TestM6IndependentToolChargeClosesRPCChain(t *testing.T) {
-	app, gateway := newM6ServiceApp(t)
+func TestIndependentToolChargeClosesRPCChain(t *testing.T) {
+	app, gateway := newServiceRuntimeApp(t)
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
-	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "m6", IdempotencyKey: "idem-m6-session"}, "trace-m6-tool")
+	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "service runtime", IdempotencyKey: "idem-service-runtime-session"}, "trace-service-runtime-tool")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	run, err := app.CreateRun(t.Context(), auth, CreateRunRequest{
-		SessionID: session.SessionID, ProjectID: "prj_active_1001", IdempotencyKey: "idem-m6-run-tool-charge",
-		UserInput: UserInputDTO{ClientMessageID: "cm_m6_tool", ContentType: "text", Text: "lookup with web fetch"},
-	}, "trace-m6-tool")
+		SessionID: session.SessionID, ProjectID: "prj_active_1001", IdempotencyKey: "idem-service-runtime-run-tool-charge",
+		UserInput: UserInputDTO{ClientMessageID: "cm_service_runtime_tool", ContentType: "text", Text: "lookup with web fetch"},
+	}, "trace-service-runtime-tool")
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -45,18 +45,18 @@ func TestM6IndependentToolChargeClosesRPCChain(t *testing.T) {
 	}
 }
 
-func TestM6IndependentToolChargeFailureReleasesFreeze(t *testing.T) {
-	app, gateway := newM6ServiceApp(t)
+func TestIndependentToolChargeFailureReleasesFreeze(t *testing.T) {
+	app, gateway := newServiceRuntimeApp(t)
 	gateway.chargeErr = errors.New("STATE_CONFLICT: duplicate estimate item")
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
-	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "m6 fail", IdempotencyKey: "idem-m6-session-fail"}, "trace-m6-tool-fail")
+	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "service runtime fail", IdempotencyKey: "idem-service-runtime-session-fail"}, "trace-service-runtime-tool-fail")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	_, err = app.CreateRun(t.Context(), auth, CreateRunRequest{
-		SessionID: session.SessionID, ProjectID: "prj_active_1001", IdempotencyKey: "idem-m6-run-tool-charge-fail",
-		UserInput: UserInputDTO{ClientMessageID: "cm_m6_tool_fail", ContentType: "text", Text: "lookup with web fetch"},
-	}, "trace-m6-tool-fail")
+		SessionID: session.SessionID, ProjectID: "prj_active_1001", IdempotencyKey: "idem-service-runtime-run-tool-charge-fail",
+		UserInput: UserInputDTO{ClientMessageID: "cm_service_runtime_tool_fail", ContentType: "text", Text: "lookup with web fetch"},
+	}, "trace-service-runtime-tool-fail")
 	if err == nil {
 		t.Fatal("expected charge failure")
 	}
@@ -64,7 +64,7 @@ func TestM6IndependentToolChargeFailureReleasesFreeze(t *testing.T) {
 	if !containsSubsequence(gateway.calls, want) {
 		t.Fatalf("missing failure release RPC chain\ncalls=%v\nwant subsequence=%v", gateway.calls, want)
 	}
-	run, err := app.repo.GetRunByIdempotencyKey(t.Context(), "idem-m6-run-tool-charge-fail")
+	run, err := app.repo.GetRunByIdempotencyKey(t.Context(), "idem-service-runtime-run-tool-charge-fail")
 	if err != nil {
 		t.Fatalf("get failed run: %v", err)
 	}
@@ -77,13 +77,13 @@ func TestM6IndependentToolChargeFailureReleasesFreeze(t *testing.T) {
 	}
 }
 
-func TestM6SkillTestConsumesReviewCandidateRPC(t *testing.T) {
-	app, gateway := newM6ServiceApp(t)
+func TestSkillTestConsumesReviewCandidateRPC(t *testing.T) {
+	app, gateway := newServiceRuntimeApp(t)
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
 	result, err := app.RunSkillTestCase(t.Context(), auth, SkillTestCaseRequest{
-		SkillID: "sk_review", VersionID: "skv_review", TestRunID: "skrun_m6", TestCaseID: "skcase_m6",
-		IdempotencyKey: "skill_test:skrun_m6",
-	}, "trace-m6-skilltest")
+		SkillID: "sk_review", VersionID: "skv_review", TestRunID: "skrun_service_runtime", TestCaseID: "skcase_service_runtime",
+		IdempotencyKey: "skill_test:skrun_service_runtime",
+	}, "trace-service-runtime-skilltest")
 	if err != nil {
 		t.Fatalf("run skill test case: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestM6SkillTestConsumesReviewCandidateRPC(t *testing.T) {
 }
 
 func TestSkillOutputElementsDriveDraftAndFinalArtifacts(t *testing.T) {
-	app, gateway := newM6ServiceApp(t)
+	app, gateway := newServiceRuntimeApp(t)
 	gateway.StaticGateway.SkillSpec.OutputElements = []SkillOutputElementDTO{
 		{
 			ElementType: "image_ref", ElementName: "草稿图", Required: true, UseDraft: true,
@@ -124,7 +124,7 @@ func TestSkillOutputElementsDriveDraftAndFinalArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get confirmation interrupt: %v", err)
 	}
-	var payload m4ConfirmationPayload
+	var payload toolGenerationConfirmationPayload
 	if err := json.Unmarshal(interrupt.ConfirmationPayload, &payload); err != nil {
 		t.Fatalf("decode confirmation payload: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestSkillOutputElementsDriveDraftAndFinalArtifacts(t *testing.T) {
 }
 
 func TestExpiredSafetyEvidenceIsReevaluatedBeforeGenerationFreeze(t *testing.T) {
-	app, gateway := newM6ServiceApp(t)
+	app, gateway := newServiceRuntimeApp(t)
 	gateway.refreshEstimate = gateway.StaticGateway.Estimate
 	gateway.refreshEstimate.EstimateID = "est_generation_refresh"
 	gateway.refreshEstimate.LineItems = []CreditEstimateLineItemDTO{{
@@ -202,7 +202,7 @@ func TestExpiredSafetyEvidenceIsReevaluatedBeforeGenerationFreeze(t *testing.T) 
 	if err != nil {
 		t.Fatalf("get confirmation interrupt: %v", err)
 	}
-	var payload m4ConfirmationPayload
+	var payload toolGenerationConfirmationPayload
 	if err := json.Unmarshal(interrupt.ConfirmationPayload, &payload); err != nil {
 		t.Fatalf("decode confirmation payload: %v", err)
 	}
@@ -250,8 +250,8 @@ func TestExpiredSafetyEvidenceIsReevaluatedBeforeGenerationFreeze(t *testing.T) 
 	}
 }
 
-func TestQueuedGenerationAcceptReturnsBeforeM4AndWorkerCompletes(t *testing.T) {
-	app, gateway := newM6ServiceApp(t)
+func TestQueuedGenerationAcceptReturnsBeforeToolGenerationAndWorkerCompletes(t *testing.T) {
+	app, gateway := newServiceRuntimeApp(t)
 	queue := NewMemoryGenerationJobQueue(1)
 	app.SetGenerationQueue(queue)
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
@@ -283,7 +283,7 @@ func TestQueuedGenerationAcceptReturnsBeforeM4AndWorkerCompletes(t *testing.T) {
 		t.Fatalf("queued accept should return before generation completes, got status=%s", accepted.Status)
 	}
 	if containsCall(gateway.calls, "FreezeCredits") || containsCall(gateway.calls, "CommitGeneratedAssetAndCharge") {
-		t.Fatalf("accept should not execute M4 chain when queue is enabled, calls=%v", gateway.calls)
+		t.Fatalf("accept should not execute tool generation chain when queue is enabled, calls=%v", gateway.calls)
 	}
 	if queue.Len() != 1 {
 		t.Fatalf("expected one queued generation job, got %d", queue.Len())
@@ -301,7 +301,7 @@ func TestQueuedGenerationAcceptReturnsBeforeM4AndWorkerCompletes(t *testing.T) {
 		t.Fatalf("unexpected worker result: %#v", result)
 	}
 	if !containsSubsequence(gateway.calls, []string{"FreezeCredits", "PrepareGeneratedAssetObjects", "CommitGeneratedAssetAndCharge"}) {
-		t.Fatalf("worker should execute M4 chain, calls=%v", gateway.calls)
+		t.Fatalf("worker should execute tool generation chain, calls=%v", gateway.calls)
 	}
 	updated, err := app.repo.GetRun(t.Context(), run.RunID)
 	if err != nil {
@@ -319,8 +319,8 @@ func TestQueuedGenerationAcceptReturnsBeforeM4AndWorkerCompletes(t *testing.T) {
 	}
 }
 
-func TestQueuedGenerationRedeliveryRecoversRunningTaskWithoutDuplicateM4(t *testing.T) {
-	app, gateway := newM6ServiceApp(t)
+func TestQueuedGenerationRedeliveryRecoversRunningTaskWithoutDuplicateToolGeneration(t *testing.T) {
+	app, gateway := newServiceRuntimeApp(t)
 	queue := NewMemoryGenerationJobQueue(1)
 	app.SetGenerationQueue(queue)
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
@@ -353,7 +353,7 @@ func TestQueuedGenerationRedeliveryRecoversRunningTaskWithoutDuplicateM4(t *test
 		Status: state.TaskStatusRunning, ProgressPercent: 25,
 		ProgressDetail: jsonObject(map[string]any{
 			"stage": "credits_frozen", "freeze_id": "frz_redelivery", "frozen_points": int64(10),
-			"estimate_id": "est_generation_m6", "idempotency_key": "idem-redelivery-confirm",
+			"estimate_id": "est_generation_service_runtime", "idempotency_key": "idem-redelivery-confirm",
 			"auth": map[string]any{"actor_user_id": auth.ActorUserID, "login_identity_type": auth.LoginIdentityType, "space_id": auth.SpaceID},
 		}),
 		StartedAt: &stale, UpdatedAt: stale, TraceID: "trace-redelivery",
@@ -382,7 +382,7 @@ func TestQueuedGenerationRedeliveryRecoversRunningTaskWithoutDuplicateM4(t *test
 }
 
 func TestRecoverGenerationTasksReleasesFrozenTaskAfterRestart(t *testing.T) {
-	app, gateway := newM6ServiceApp(t)
+	app, gateway := newServiceRuntimeApp(t)
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
 	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "recover", IdempotencyKey: "idem-recover-session"}, "trace-recover")
 	if err != nil {
@@ -401,7 +401,7 @@ func TestRecoverGenerationTasksReleasesFrozenTaskAfterRestart(t *testing.T) {
 		Status: state.TaskStatusRunning, ProgressPercent: 25,
 		ProgressDetail: jsonObject(map[string]any{
 			"stage": "credits_frozen", "freeze_id": "frz_recover", "frozen_points": int64(10),
-			"estimate_id": "est_generation_m6", "idempotency_key": "idem-recover-confirm",
+			"estimate_id": "est_generation_service_runtime", "idempotency_key": "idem-recover-confirm",
 			"auth": map[string]any{"actor_user_id": auth.ActorUserID, "login_identity_type": auth.LoginIdentityType, "space_id": auth.SpaceID},
 		}),
 		StartedAt: &stale, UpdatedAt: stale, TraceID: "trace-recover",
@@ -447,7 +447,7 @@ func TestRecoverGenerationTasksReleasesFrozenTaskAfterRestart(t *testing.T) {
 }
 
 func TestRecoverGenerationTasksReplaysAssetCommitAndCompletesIdempotently(t *testing.T) {
-	app, gateway := newM6ServiceApp(t)
+	app, gateway := newServiceRuntimeApp(t)
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
 	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{ProjectID: "prj_active_1001", InitialTitle: "recover commit", IdempotencyKey: "idem-recover-commit-session"}, "trace-recover-commit")
 	if err != nil {
@@ -473,7 +473,7 @@ func TestRecoverGenerationTasksReplaysAssetCommitAndCompletesIdempotently(t *tes
 	stale := time.Now().UTC().Add(-10 * time.Minute)
 	commitReq := CommitGeneratedAssetAndChargeRequest{
 		ProjectID: session.ProjectID, SessionID: session.SessionID, RunID: run.RunID, FreezeID: "frz_recover_commit",
-		EstimateID: "est_generation_m6", IdempotencyKey: "idem-recover-commit-confirm:commit",
+		EstimateID: "est_generation_service_runtime", IdempotencyKey: "idem-recover-commit-confirm:commit",
 		SafetyEvidence: &businessagent.SafetyEvidenceDTO{
 			SafetyEvidenceId: "se_recover_commit", Scene: "generation", Result_: state.SafetyResultPassed,
 			TargetType: "prompt", EvaluatedObjectDigest: "digest_recover_commit", PolicyVersion: "policy_test",
@@ -481,7 +481,7 @@ func TestRecoverGenerationTasksReplaysAssetCommitAndCompletesIdempotently(t *tes
 		},
 		Artifacts: []CommitArtifactDTO{{
 			ArtifactID: "artifact_recover_commit", ResourceType: "image", ElementType: "image_ref",
-			EstimateItemID: "est_item_generation_m6", ToolName: "model_generation", ToolType: "image", ChargeQuantity: 1,
+			EstimateItemID: "est_item_generation_service_runtime", ToolName: "model_generation", ToolType: "image", ChargeQuantity: 1,
 			StorageObjectRef: CommitStorageObjectRefDTO{
 				ObjectKey: "local/recover/artifact_recover_commit", Bucket: "dora-public", ContentType: "image/png",
 				SizeBytes: 123, Checksum: "sha256:recover", Etag: "etag-recover",
@@ -571,7 +571,7 @@ func TestRecoverGenerationTasksReplaysAssetCommitAndCompletesIdempotently(t *tes
 }
 
 func TestPermissionLossCancelsActiveRunBeforeConfirm(t *testing.T) {
-	app, gateway := newM6ServiceApp(t)
+	app, gateway := newServiceRuntimeApp(t)
 	gateway.StaticGateway.Space = SpaceContextDTO{
 		SpaceID: "sp_enterprise_1001", SpaceType: "enterprise", EnterpriseID: "ent_1001", EnterpriseRole: "member",
 		CreditAccountScope: "enterprise", CreditAccountID: "ca_ent_1001",
@@ -621,9 +621,9 @@ func TestPermissionLossCancelsActiveRunBeforeConfirm(t *testing.T) {
 	}
 }
 
-func newM6ServiceApp(t *testing.T) (*App, *recordingGateway) {
+func newServiceRuntimeApp(t *testing.T) (*App, *recordingGateway) {
 	t.Helper()
-	db := testdb.StartPostgres(t, "dora_agent_m6_service")
+	db := testdb.StartPostgres(t, "dora_agent_service_runtime")
 	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/20260627_agent_runtime/agent")
 	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
 	gateway := &recordingGateway{StaticGateway: StaticGateway{
@@ -642,20 +642,20 @@ func newM6ServiceApp(t *testing.T) (*App, *recordingGateway) {
 			ProviderRuntimeRef: "static:local", TimeoutMS: 30000,
 		},
 		ToolEstimate: CreditEstimateDTO{
-			EstimateID: "est_tool_m6", EstimatePoints: 4, AvailablePoints: 100, CreditAccountScope: "personal", CreditAccountID: "ca_personal_1001",
-			LineItems: []CreditEstimateLineItemDTO{{EstimateItemID: "est_item_tool_m6", ItemType: "tool_usage", ToolName: "web_fetch", ToolType: "browser", BillingUnit: "call", EstimatePoints: 4}},
+			EstimateID: "est_tool_service_runtime", EstimatePoints: 4, AvailablePoints: 100, CreditAccountScope: "personal", CreditAccountID: "ca_personal_1001",
+			LineItems: []CreditEstimateLineItemDTO{{EstimateItemID: "est_item_tool_service_runtime", ItemType: "tool_usage", ToolName: "web_fetch", ToolType: "browser", BillingUnit: "call", EstimatePoints: 4}},
 			ExpiresAt: "2026-06-28T00:00:00Z",
 		},
-		Freeze: FreezeCreditsDTO{FreezeID: "frz_tool_m6", FrozenPoints: 4, ExpiresAt: "2026-06-28T00:15:00Z"},
+		Freeze: FreezeCreditsDTO{FreezeID: "frz_tool_service_runtime", FrozenPoints: 4, ExpiresAt: "2026-06-28T00:15:00Z"},
 		ToolCharge: ToolChargeDTO{
-			ToolChargeID: "toolchg_m6", ChargedPoints: 4, ReleasedPoints: 0, FreezeStatus: "charged",
-			LedgerEntryIDs:   []string{"cled_tool_m6"},
-			ChargedLineItems: []ChargedLineItemDTO{{EstimateItemID: "est_item_tool_m6", ChargedPoints: 4, Status: "charged", ToolCallID: "tool_m6"}},
+			ToolChargeID: "toolchg_service_runtime", ChargedPoints: 4, ReleasedPoints: 0, FreezeStatus: "charged",
+			LedgerEntryIDs:   []string{"cled_tool_service_runtime"},
+			ChargedLineItems: []ChargedLineItemDTO{{EstimateItemID: "est_item_tool_service_runtime", ChargedPoints: 4, Status: "charged", ToolCallID: "tool_service_runtime"}},
 		},
 		Estimate: CreditEstimateDTO{
-			EstimateID: "est_generation_m6", EstimatePoints: 10, AvailablePoints: 100, CreditAccountScope: "personal", CreditAccountID: "ca_personal_1001",
+			EstimateID: "est_generation_service_runtime", EstimatePoints: 10, AvailablePoints: 100, CreditAccountScope: "personal", CreditAccountID: "ca_personal_1001",
 			PricingSnapshotID: "price_static_image",
-			LineItems:         []CreditEstimateLineItemDTO{{EstimateItemID: "est_item_generation_m6", ItemType: "model_generation", ModelID: "mdl_static_image", ResourceType: "image", BillingUnit: "image", EstimatePoints: 10}},
+			LineItems:         []CreditEstimateLineItemDTO{{EstimateItemID: "est_item_generation_service_runtime", ItemType: "model_generation", ModelID: "mdl_static_image", ResourceType: "image", BillingUnit: "image", EstimatePoints: 10}},
 			ExpiresAt:         "2026-06-28T00:00:00Z",
 		},
 		ReviewSpec: ReviewCandidateSkillSpecDTO{
@@ -671,7 +671,7 @@ func newM6ServiceApp(t *testing.T) (*App, *recordingGateway) {
 			Status: "active", UsageStage: "draft_final", DraftEnabled: true, FinalEnabled: true, Editable: true, Referable: true,
 		}},
 	}}
-	return New(repository.New(db.DB), gateway, "m6-service"), gateway
+	return New(repository.New(db.DB), gateway, "service-runtime-service"), gateway
 }
 
 type recordingGateway struct {

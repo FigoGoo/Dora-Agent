@@ -16,8 +16,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func registerM2Routes(router *gin.Engine, opts RouterOptions) {
-	h := m2Handler{account: opts.AccountSpace, admin: opts.Admin, project: opts.Project}
+func registerAccountProjectAdminRoutes(router *gin.Engine, opts RouterOptions) {
+	h := accountProjectAdminHandler{account: opts.AccountSpace, admin: opts.Admin, project: opts.Project}
 	router.POST("/api/auth/register", h.register)
 	router.POST("/api/auth/login", h.login)
 	router.POST("/api/auth/logout", h.userAuth(), h.logout)
@@ -56,13 +56,13 @@ func registerM2Routes(router *gin.Engine, opts RouterOptions) {
 	router.GET("/api/admin/audit-logs", h.adminAuth(false), h.auditLogs)
 }
 
-type m2Handler struct {
+type accountProjectAdminHandler struct {
 	account *accountspace.App
 	admin   *admin.App
 	project *project.App
 }
 
-func (h m2Handler) register(c *gin.Context) {
+func (h accountProjectAdminHandler) register(c *gin.Context) {
 	var req struct {
 		Email       string `json:"email"`
 		Phone       string `json:"phone"`
@@ -78,7 +78,7 @@ func (h m2Handler) register(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) login(c *gin.Context) {
+func (h accountProjectAdminHandler) login(c *gin.Context) {
 	var req struct {
 		LoginType    string `json:"login_type"`
 		Account      string `json:"account"`
@@ -94,17 +94,17 @@ func (h m2Handler) login(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) logout(c *gin.Context) {
+func (h accountProjectAdminHandler) logout(c *gin.Context) {
 	err := h.account.Logout(c.Request.Context(), userAuth(c), h.meta(c, true))
 	respond(c, gin.H{"logged_out": err == nil}, err)
 }
 
-func (h m2Handler) currentSpace(c *gin.Context) {
+func (h accountProjectAdminHandler) currentSpace(c *gin.Context) {
 	out, err := h.account.CurrentSpaceFromSession(c.Request.Context(), userAuth(c))
 	respond(c, out, err)
 }
 
-func (h m2Handler) switchIdentity(c *gin.Context) {
+func (h accountProjectAdminHandler) switchIdentity(c *gin.Context) {
 	var req struct {
 		TargetIdentityType string `json:"target_identity_type"`
 		TargetEnterpriseID string `json:"target_enterprise_id"`
@@ -122,7 +122,7 @@ func (h m2Handler) switchIdentity(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) createEnterprise(c *gin.Context) {
+func (h accountProjectAdminHandler) createEnterprise(c *gin.Context) {
 	var req struct {
 		EnterpriseName   string `json:"enterprise_name"`
 		Name             string `json:"name"`
@@ -141,17 +141,17 @@ func (h m2Handler) createEnterprise(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) enterpriseSummary(c *gin.Context) {
+func (h accountProjectAdminHandler) enterpriseSummary(c *gin.Context) {
 	out, err := h.account.GetEnterpriseSummary(c.Request.Context(), userAuth(c))
 	respond(c, out, err)
 }
 
-func (h m2Handler) enterpriseMembers(c *gin.Context) {
+func (h accountProjectAdminHandler) enterpriseMembers(c *gin.Context) {
 	out, err := h.account.ListEnterpriseMembers(c.Request.Context(), userAuth(c), page(c))
 	respond(c, out, err)
 }
 
-func (h m2Handler) enterpriseInvite(c *gin.Context) {
+func (h accountProjectAdminHandler) enterpriseInvite(c *gin.Context) {
 	var req struct {
 		Email         string `json:"email"`
 		Phone         string `json:"phone"`
@@ -167,7 +167,7 @@ func (h m2Handler) enterpriseInvite(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) previewRemoveMember(c *gin.Context) {
+func (h accountProjectAdminHandler) previewRemoveMember(c *gin.Context) {
 	var req struct {
 		Reason string `json:"reason"`
 	}
@@ -176,7 +176,7 @@ func (h m2Handler) previewRemoveMember(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) confirmRemoveMember(c *gin.Context) {
+func (h accountProjectAdminHandler) confirmRemoveMember(c *gin.Context) {
 	var req struct {
 		Reason       string `json:"reason"`
 		PreviewToken string `json:"preview_token"`
@@ -190,7 +190,7 @@ func (h m2Handler) confirmRemoveMember(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) previewTransferOwner(c *gin.Context) {
+func (h accountProjectAdminHandler) previewTransferOwner(c *gin.Context) {
 	var req struct {
 		TargetMemberID string `json:"target_member_id"`
 	}
@@ -201,7 +201,7 @@ func (h m2Handler) previewTransferOwner(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) confirmTransferOwner(c *gin.Context) {
+func (h accountProjectAdminHandler) confirmTransferOwner(c *gin.Context) {
 	var req struct {
 		TargetMemberID string `json:"target_member_id"`
 		PreviewToken   string `json:"preview_token"`
@@ -216,12 +216,12 @@ func (h m2Handler) confirmTransferOwner(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) listProjects(c *gin.Context) {
+func (h accountProjectAdminHandler) listProjects(c *gin.Context) {
 	out, err := h.project.ListProjects(c.Request.Context(), userAuth(c), project.PageRequest{Status: c.Query("status"), Limit: intQuery(c, "limit", 10), Offset: intQuery(c, "offset", 0)})
 	respond(c, out, err)
 }
 
-func (h m2Handler) createProject(c *gin.Context) {
+func (h accountProjectAdminHandler) createProject(c *gin.Context) {
 	var req struct {
 		Title               string `json:"title"`
 		InitialPromptDigest string `json:"initial_prompt_digest"`
@@ -235,12 +235,12 @@ func (h m2Handler) createProject(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) getProject(c *gin.Context) {
+func (h accountProjectAdminHandler) getProject(c *gin.Context) {
 	out, err := h.project.GetProject(c.Request.Context(), userAuth(c), c.Param("project_id"))
 	respond(c, out, err)
 }
 
-func (h m2Handler) updateProject(c *gin.Context) {
+func (h accountProjectAdminHandler) updateProject(c *gin.Context) {
 	var req struct {
 		Title         *string `json:"title"`
 		Description   *string `json:"description"`
@@ -254,7 +254,7 @@ func (h m2Handler) updateProject(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) archiveProject(c *gin.Context) {
+func (h accountProjectAdminHandler) archiveProject(c *gin.Context) {
 	var req struct {
 		Reason string `json:"reason"`
 	}
@@ -263,7 +263,7 @@ func (h m2Handler) archiveProject(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) restoreProject(c *gin.Context) {
+func (h accountProjectAdminHandler) restoreProject(c *gin.Context) {
 	var req struct {
 		Reason string `json:"reason"`
 	}
@@ -272,17 +272,17 @@ func (h m2Handler) restoreProject(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) projectAssets(c *gin.Context) {
+func (h accountProjectAdminHandler) projectAssets(c *gin.Context) {
 	out, err := h.project.ListProjectAssets(c.Request.Context(), userAuth(c), c.Param("project_id"), project.PageRequest{Limit: intQuery(c, "limit", 10), Offset: intQuery(c, "offset", 0)})
 	respond(c, out, err)
 }
 
-func (h m2Handler) projectWorks(c *gin.Context) {
+func (h accountProjectAdminHandler) projectWorks(c *gin.Context) {
 	out, err := h.project.ListProjectWorks(c.Request.Context(), userAuth(c), c.Param("project_id"), project.PageRequest{Limit: intQuery(c, "limit", 10), Offset: intQuery(c, "offset", 0)})
 	respond(c, out, err)
 }
 
-func (h m2Handler) adminLogin(c *gin.Context) {
+func (h accountProjectAdminHandler) adminLogin(c *gin.Context) {
 	var req struct {
 		Account  string `json:"account"`
 		Password string `json:"password"`
@@ -294,12 +294,12 @@ func (h m2Handler) adminLogin(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) adminLogout(c *gin.Context) {
+func (h accountProjectAdminHandler) adminLogout(c *gin.Context) {
 	err := h.admin.Logout(c.Request.Context(), adminAuth(c), h.meta(c, true))
 	respond(c, gin.H{"logged_out": err == nil}, err)
 }
 
-func (h m2Handler) rotateAdminPassword(c *gin.Context) {
+func (h accountProjectAdminHandler) rotateAdminPassword(c *gin.Context) {
 	var req struct {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
@@ -312,17 +312,17 @@ func (h m2Handler) rotateAdminPassword(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) adminDashboard(c *gin.Context) {
+func (h accountProjectAdminHandler) adminDashboard(c *gin.Context) {
 	out, err := h.admin.Dashboard(c.Request.Context(), adminAuth(c))
 	respond(c, out, err)
 }
 
-func (h m2Handler) listAdmins(c *gin.Context) {
+func (h accountProjectAdminHandler) listAdmins(c *gin.Context) {
 	out, err := h.admin.ListAdmins(c.Request.Context(), adminAuth(c), adminPageLimit(c, 10), adminPageOffset(c))
 	respond(c, out, err)
 }
 
-func (h m2Handler) createAdmin(c *gin.Context) {
+func (h accountProjectAdminHandler) createAdmin(c *gin.Context) {
 	var req struct {
 		Account         string `json:"account"`
 		InitialPassword string `json:"initial_password"`
@@ -335,7 +335,7 @@ func (h m2Handler) createAdmin(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) disableAdmin(c *gin.Context) {
+func (h accountProjectAdminHandler) disableAdmin(c *gin.Context) {
 	var req struct {
 		Reason string `json:"reason"`
 	}
@@ -346,17 +346,17 @@ func (h m2Handler) disableAdmin(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) adminUsers(c *gin.Context) {
+func (h accountProjectAdminHandler) adminUsers(c *gin.Context) {
 	out, err := h.admin.ListUsers(c.Request.Context(), admin.ListUsersInput{Auth: adminAuth(c), Status: c.Query("status"), Keyword: c.Query("keyword"), Limit: adminPageLimit(c, 10), Offset: adminPageOffset(c)})
 	respond(c, out, err)
 }
 
-func (h m2Handler) adminUserDetail(c *gin.Context) {
+func (h accountProjectAdminHandler) adminUserDetail(c *gin.Context) {
 	out, err := h.admin.GetUserSummary(c.Request.Context(), adminAuth(c), c.Param("user_id"))
 	respond(c, out, err)
 }
 
-func (h m2Handler) previewUserStatus(c *gin.Context) {
+func (h accountProjectAdminHandler) previewUserStatus(c *gin.Context) {
 	var req struct {
 		TargetStatus string `json:"target_status"`
 		Reason       string `json:"reason"`
@@ -368,7 +368,7 @@ func (h m2Handler) previewUserStatus(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) confirmUserStatus(c *gin.Context) {
+func (h accountProjectAdminHandler) confirmUserStatus(c *gin.Context) {
 	var req struct {
 		TargetStatus string `json:"target_status"`
 		PreviewToken string `json:"preview_token"`
@@ -381,12 +381,12 @@ func (h m2Handler) confirmUserStatus(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m2Handler) auditLogs(c *gin.Context) {
+func (h accountProjectAdminHandler) auditLogs(c *gin.Context) {
 	out, err := h.admin.ListAuditLogs(c.Request.Context(), admin.AuditQueryInput{Auth: adminAuth(c), BusinessAction: c.Query("business_action"), TraceID: c.Query("trace_id"), Limit: adminPageLimit(c, 10), Offset: adminPageOffset(c)})
 	respond(c, out, err)
 }
 
-func (h m2Handler) userAuth() gin.HandlerFunc {
+func (h accountProjectAdminHandler) userAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if h.account == nil {
 			_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
@@ -404,7 +404,7 @@ func (h m2Handler) userAuth() gin.HandlerFunc {
 	}
 }
 
-func (h m2Handler) adminAuth(allowRotate bool) gin.HandlerFunc {
+func (h accountProjectAdminHandler) adminAuth(allowRotate bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if h.admin == nil {
 			_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
@@ -426,7 +426,7 @@ func (h m2Handler) adminAuth(allowRotate bool) gin.HandlerFunc {
 	}
 }
 
-func (h m2Handler) bind(c *gin.Context, out any) bool {
+func (h accountProjectAdminHandler) bind(c *gin.Context, out any) bool {
 	body := readBody(c)
 	c.Set("raw_body", body)
 	if err := c.ShouldBindJSON(out); err != nil {
@@ -436,7 +436,7 @@ func (h m2Handler) bind(c *gin.Context, out any) bool {
 	return true
 }
 
-func (h m2Handler) meta(c *gin.Context, requireIdempotency bool) accountspace.RequestMeta {
+func (h accountProjectAdminHandler) meta(c *gin.Context, requireIdempotency bool) accountspace.RequestMeta {
 	body, _ := c.Get("raw_body")
 	rawBody, _ := body.([]byte)
 	key := c.GetHeader("Idempotency-Key")

@@ -4,7 +4,7 @@
 owner：文档与契约责任域 / 测试与验收责任域 / 工程基础设施责任域  
 更新时间：2026-07-01  
 适用范围：M7 active 拆分完成后的开发准备、CI gate、本地验证入口和后续 PR-1 到 PR-5 开发准入  
-相关代码路径：`scripts/validate-active-contracts.sh`、`scripts/validate-pr0-ci-gate.sh`、`scripts/validate-pr5-full-http-smoke.sh`、`scripts/validate-pr5-browser-smoke.sh`、`tests/contract/validate_json_schema_contracts.py`、`requirements/contract-gates.txt`、`Makefile`、`.github/workflows/active-contract-gates.yml`
+相关代码路径：`scripts/validate-active-contracts.sh`、`scripts/validate-development-ci-gate.sh`、`scripts/validate-release-full-http-smoke.sh`、`scripts/validate-release-browser-smoke.sh`、`tests/contract/validate_json_schema_contracts.py`、`requirements/contract-gates.txt`、`Makefile`、`.github/workflows/active-contract-gates.yml`
 相关契约：`docs/active/contracts/pr-roadmap.md`、`docs/active/contracts/index.md`、`docs/active/technical/release-governance.md`
 
 ## 背景
@@ -30,10 +30,10 @@ PR-1 到 PR-5 active 契约、fixture、fake provider 和 release gate 已冻结
 | Gate | 命令 | 覆盖范围 | 阻断条件 |
 | --- | --- | --- | --- |
 | Active Contract Gate | `scripts/validate-active-contracts.sh` | PR-1 到 PR-5 validator、正式 JSON Schema fixture validator、OpenAPI 解析、migration static guard、active 文档状态扫描 | 任一契约、fixture、OpenAPI、migration 或状态残留失败 |
-| PR-0 CI Gate | `scripts/validate-pr0-ci-gate.sh` | Active Contract Gate、Go 测试、用户端测试/build、管理端测试/build | 任一基础测试或构建失败 |
-| PR-5 Full HTTP Smoke | `scripts/validate-pr5-full-http-smoke.sh` | 本地真实 `cmd/business` + `cmd/agent` 双进程、PostgreSQL、Redis、Business HTTP login、Business Kitex RPC、Agent HTTP run 和 AG-UI replay | 进程启动、健康检查、认证、RPC、RouterDecision 或事件回放失败 |
-| PR-5 Browser Smoke | `scripts/validate-pr5-browser-smoke.sh` | 本地 Chrome + Vite preview 覆盖用户端 Skill 市场、创作者提交和管理端结算治理 | 前后台构建、真实 DOM、fetch 请求或幂等 key 断言失败 |
-| Makefile 快捷入口 | `make active-contract-gate`、`make pr0-ci-gate`、`make pr5-full-http-smoke`、`make pr5-browser-smoke` | 本地开发快速验证 | 同对应脚本 |
+| PR-0 CI Gate | `scripts/validate-development-ci-gate.sh` | Active Contract Gate、Go 测试、用户端测试/build、管理端测试/build | 任一基础测试或构建失败 |
+| PR-5 Full HTTP Smoke | `scripts/validate-release-full-http-smoke.sh` | 本地真实 `cmd/business` + `cmd/agent` 双进程、PostgreSQL、Redis、Business HTTP login、Business Kitex RPC、Agent HTTP run 和 AG-UI replay | 进程启动、健康检查、认证、RPC、RouterDecision 或事件回放失败 |
+| PR-5 Browser Smoke | `scripts/validate-release-browser-smoke.sh` | 本地 Chrome + Vite preview 覆盖用户端 Skill 市场、创作者提交和管理端结算治理 | 前后台构建、真实 DOM、fetch 请求或幂等 key 断言失败 |
+| Makefile 快捷入口 | `make active-contract-gate`、`make development-ci-gate`、`make release-full-http-smoke`、`make release-browser-smoke` | 本地开发快速验证 | 同对应脚本 |
 | GitHub Actions | `.github/workflows/active-contract-gates.yml` | PR 和 main/master push | 任一 job 失败 |
 
 ## 后续开发顺序
@@ -76,14 +76,14 @@ PR-0 开发准备与 CI Gate
 - [x] Makefile 快捷入口存在。
 - [x] GitHub Actions workflow 存在。
 - [x] `scripts/validate-active-contracts.sh` 本地通过。
-- [x] `scripts/validate-pr0-ci-gate.sh` 本地通过。
+- [x] `scripts/validate-development-ci-gate.sh` 本地通过。
 - [ ] GitHub Actions 在远端 PR 中通过。
 - [x] PR-2 / PR-3 / PR-4 真实 PostgreSQL dry-run / down-test 证据已由 repository integration tests 归档。
-- [x] PR-5 本地 service-level PostgreSQL E2E 证据已由 `services/business/internal/e2e/pr5` 归档。
-- [x] PR-5 本地 Agent HTTP router + Redis container E2E 证据已由 `services/agent/internal/e2e/pr5` 归档。
-- [x] PR-5 本地 Agent 独立进程 HTTP smoke 证据已由 `services/agent/internal/e2e/pr5` 归档。
-- [x] PR-5 本地 Business 独立进程 HTTP smoke 证据已由 `services/business/internal/e2e/pr5` 归档。
-- [x] PR-5 本地 Agent + Business 双服务 HTTP smoke 证据已由 `services/agent/internal/e2e/pr5` 归档。
+- [x] PR-5 本地 service-level PostgreSQL E2E 证据已由 `services/business/internal/e2e/release` 归档。
+- [x] PR-5 本地 Agent HTTP router + Redis container E2E 证据已由 `services/agent/internal/e2e/release` 归档。
+- [x] PR-5 本地 Agent 独立进程 HTTP smoke 证据已由 `services/agent/internal/e2e/release` 归档。
+- [x] PR-5 本地 Business 独立进程 HTTP smoke 证据已由 `services/business/internal/e2e/release` 归档。
+- [x] PR-5 本地 Agent + Business 双服务 HTTP smoke 证据已由 `services/agent/internal/e2e/release` 归档。
 - [x] PR-5 本地真实浏览器前端联动 smoke 证据归档。
 - [ ] PR-5 完整测试环境 HTTP 服务 E2E 证据归档。
 
@@ -93,21 +93,21 @@ PR-0 开发准备与 CI Gate
 
 ```bash
 scripts/validate-active-contracts.sh
-scripts/validate-pr0-ci-gate.sh
-scripts/validate-pr5-full-http-smoke.sh
-scripts/validate-pr5-browser-smoke.sh
+scripts/validate-development-ci-gate.sh
+scripts/validate-release-full-http-smoke.sh
+scripts/validate-release-browser-smoke.sh
 python3 tests/contract/validate_json_schema_contracts.py
 make active-contract-gate
-make pr0-ci-gate
-make pr5-full-http-smoke
-make pr5-browser-smoke
+make development-ci-gate
+make release-full-http-smoke
+make release-browser-smoke
 go test ./services/agent/internal/infra/repository
 go test ./services/business/internal/infra/repository/businesscore
-go test ./services/business/internal/e2e/pr5
-go test ./services/agent/internal/e2e/pr5
-go test ./services/agent/internal/e2e/pr5 -run TestPR5FullHTTPServiceE2ESmoke -count=1 -v
-go test ./services/agent/internal/e2e/pr5 -run TestPR5AgentIndependentProcessHTTPSmoke -count=1 -v
-go test ./services/business/internal/e2e/pr5 -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v
+go test ./services/business/internal/e2e/release
+go test ./services/agent/internal/e2e/release
+go test ./services/agent/internal/e2e/release -run TestPR5FullHTTPServiceE2ESmoke -count=1 -v
+go test ./services/agent/internal/e2e/release -run TestPR5AgentIndependentProcessHTTPSmoke -count=1 -v
+go test ./services/business/internal/e2e/release -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v
 ```
 
 结果：
@@ -120,8 +120,8 @@ PR-5 full HTTP service smoke passed
 json schema contract validation ok
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore
-ok github.com/FigoGoo/Dora-Agent/services/business/internal/e2e/pr5
-ok github.com/FigoGoo/Dora-Agent/services/agent/internal/e2e/pr5
+ok github.com/FigoGoo/Dora-Agent/services/business/internal/e2e/release
+ok github.com/FigoGoo/Dora-Agent/services/agent/internal/e2e/release
 PASS TestPR5FullHTTPServiceE2ESmoke
 PASS TestPR5AgentIndependentProcessHTTPSmoke
 PASS TestPR5BusinessIndependentProcessHTTPSmoke

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr4"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/skillmarket"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
@@ -578,7 +578,7 @@ func (a *App) CreateCreatorSkillDraft(ctx context.Context, in CreateCreatorSkill
 	skillID := prefixedStableID("skill_", in.Auth.UserID, in.Meta.IdempotencyKey)
 	skillVersionID := prefixedStableID("skv_", skillID, version)
 	pricingPolicyID := prefixedStableID("spp_", skillID, version)
-	runtimeDigest, err := pr1.CanonicalDigest(map[string]any{
+	runtimeDigest, err := foundation.CanonicalDigest(map[string]any{
 		"schema_version": "creator_skill_runtime_spec.v1",
 		"skill_id":       skillID,
 		"version":        version,
@@ -588,11 +588,11 @@ func (a *App) CreateCreatorSkillDraft(ctx context.Context, in CreateCreatorSkill
 	if err != nil {
 		return CreateCreatorSkillDraftOutput{}, err
 	}
-	pricingDigest, err := pr1.CanonicalDigest(map[string]any{
+	pricingDigest, err := foundation.CanonicalDigest(map[string]any{
 		"schema_version":         "skill_pricing_policy.v1",
 		"skill_id":               skillID,
 		"skill_version":          version,
-		"pricing_model":          pr4.PricingModelFree,
+		"pricing_model":          skillmarket.PricingModelFree,
 		"usage_credits":          0,
 		"value_delivered_stage":  "storyboard_ready",
 		"two_stage_confirmation": true,
@@ -602,19 +602,19 @@ func (a *App) CreateCreatorSkillDraft(ctx context.Context, in CreateCreatorSkill
 	}
 
 	currentVersion := version
-	pkg := pr4.SkillPackage{
-		SchemaVersion:  pr4.SchemaVersionSkillPackage,
+	pkg := skillmarket.SkillPackage{
+		SchemaVersion:  skillmarket.SchemaVersionSkillPackage,
 		SkillID:        skillID,
 		CreatorUserID:  in.Auth.UserID,
 		Name:           name,
 		Description:    description,
-		Visibility:     pr4.SkillVisibilityReviewOnly,
+		Visibility:     skillmarket.SkillVisibilityReviewOnly,
 		CurrentVersion: &currentVersion,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	skillVersion := pr4.SkillVersion{
-		SchemaVersion:       pr4.SchemaVersionSkillVersion,
+	skillVersion := skillmarket.SkillVersion{
+		SchemaVersion:       skillmarket.SchemaVersionSkillVersion,
 		SkillVersionID:      skillVersionID,
 		SkillID:             skillID,
 		Version:             version,
@@ -624,24 +624,24 @@ func (a *App) CreateCreatorSkillDraft(ctx context.Context, in CreateCreatorSkill
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
-	policy := pr4.SkillPricingPolicy{
-		SchemaVersion:       pr4.SchemaVersionSkillPricingPolicy,
+	policy := skillmarket.SkillPricingPolicy{
+		SchemaVersion:       skillmarket.SchemaVersionSkillPricingPolicy,
 		PricingPolicyID:     pricingPolicyID,
 		SkillID:             skillID,
 		SkillVersion:        version,
-		PricingModel:        pr4.PricingModelFree,
+		PricingModel:        skillmarket.PricingModelFree,
 		UsageCredits:        0,
 		ValueDeliveredStage: "storyboard_ready",
 		PricingPolicyDigest: pricingDigest,
 		CreatedAt:           now,
 	}
-	if err := pr4.ValidateSkillPackage(pkg); err != nil {
+	if err := skillmarket.ValidateSkillPackage(pkg); err != nil {
 		return CreateCreatorSkillDraftOutput{}, err
 	}
-	if err := pr4.ValidateSkillVersion(skillVersion); err != nil {
+	if err := skillmarket.ValidateSkillVersion(skillVersion); err != nil {
 		return CreateCreatorSkillDraftOutput{}, err
 	}
-	if err := pr4.ValidateSkillPricingPolicy(policy); err != nil {
+	if err := skillmarket.ValidateSkillPricingPolicy(policy); err != nil {
 		return CreateCreatorSkillDraftOutput{}, err
 	}
 
@@ -677,13 +677,13 @@ func (a *App) SubmitCreatorSkillVersion(ctx context.Context, in SubmitCreatorSki
 	}
 	now := a.now().UTC()
 	if err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var pkg businesscore.PR4SkillPackageRecord
+		var pkg businesscore.MarketplaceSkillPackageRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("skill_id = ? AND creator_user_id = ?", skillID, in.Auth.UserID).
 			First(&pkg).Error; err != nil {
 			return err
 		}
-		var skillVersion businesscore.PR4SkillVersionRecord
+		var skillVersion businesscore.MarketplaceSkillVersionRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("skill_id = ? AND version = ?", skillID, version).
 			First(&skillVersion).Error; err != nil {
@@ -694,13 +694,13 @@ func (a *App) SubmitCreatorSkillVersion(ctx context.Context, in SubmitCreatorSki
 			return bizerrors.New(bizerrors.CodeStateConflict, "skill version cannot be submitted from current status")
 		case "submitted", "reviewing":
 		default:
-			if err := tx.Model(&businesscore.PR4SkillVersionRecord{}).
+			if err := tx.Model(&businesscore.MarketplaceSkillVersionRecord{}).
 				Where("skill_version_id = ?", skillVersion.SkillVersionID).
 				Updates(map[string]any{"status": "submitted", "submitted_at": now, "updated_at": now}).Error; err != nil {
 				return err
 			}
 		}
-		review := businesscore.PR4SkillReviewRecord{
+		review := businesscore.MarketplaceSkillReviewRecord{
 			ReviewID:       prefixedStableID("review_", skillID, skillVersion.SkillVersionID),
 			SkillID:        skillID,
 			SkillVersionID: skillVersion.SkillVersionID,
@@ -711,9 +711,9 @@ func (a *App) SubmitCreatorSkillVersion(ctx context.Context, in SubmitCreatorSki
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&review).Error; err != nil {
 			return err
 		}
-		return tx.Model(&businesscore.PR4SkillPackageRecord{}).
+		return tx.Model(&businesscore.MarketplaceSkillPackageRecord{}).
 			Where("skill_id = ?", skillID).
-			Updates(map[string]any{"visibility": pr4.SkillVisibilityReviewOnly, "updated_at": now}).Error
+			Updates(map[string]any{"visibility": skillmarket.SkillVisibilityReviewOnly, "updated_at": now}).Error
 	}); err != nil {
 		return SubmitCreatorSkillVersionOutput{}, mapStoreError(err)
 	}
@@ -833,7 +833,7 @@ func (a *App) ApproveSkillReview(ctx context.Context, in ApproveSkillReviewInput
 	now := a.now().UTC()
 	var listingID string
 	if err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var review businesscore.PR4SkillReviewRecord
+		var review businesscore.MarketplaceSkillReviewRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("review_id = ?", reviewID).
 			First(&review).Error; err != nil {
@@ -842,7 +842,7 @@ func (a *App) ApproveSkillReview(ctx context.Context, in ApproveSkillReviewInput
 		if !isAllowed(review.Status, []string{"submitted", "reviewing", "approved"}) {
 			return bizerrors.New(bizerrors.CodeStateConflict, "skill review cannot be approved from current status")
 		}
-		var skillVersion businesscore.PR4SkillVersionRecord
+		var skillVersion businesscore.MarketplaceSkillVersionRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("skill_version_id = ?", review.SkillVersionID).
 			First(&skillVersion).Error; err != nil {
@@ -851,13 +851,13 @@ func (a *App) ApproveSkillReview(ctx context.Context, in ApproveSkillReviewInput
 		if !isAllowed(skillVersion.Status, []string{"submitted", "reviewing", "published"}) {
 			return bizerrors.New(bizerrors.CodeStateConflict, "skill version cannot be published from current status")
 		}
-		var pkg businesscore.PR4SkillPackageRecord
+		var pkg businesscore.MarketplaceSkillPackageRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("skill_id = ?", review.SkillID).
 			First(&pkg).Error; err != nil {
 			return err
 		}
-		var policy businesscore.PR4SkillPricingPolicyRecord
+		var policy businesscore.SkillPricingPolicyRecord
 		if err := tx.Where("skill_id = ? AND skill_version = ? AND pricing_policy_digest = ?", review.SkillID, skillVersion.Version, skillVersion.PricingPolicyDigest).
 			First(&policy).Error; err != nil {
 			return err
@@ -871,8 +871,8 @@ func (a *App) ApproveSkillReview(ctx context.Context, in ApproveSkillReviewInput
 		}
 		listedAt := now
 		listingID = prefixedStableID("listing_", review.SkillID, review.SkillVersionID)
-		listing := pr4.MarketplaceListing{
-			SchemaVersion:       pr4.SchemaVersionMarketplaceListing,
+		listing := skillmarket.MarketplaceListing{
+			SchemaVersion:       skillmarket.SchemaVersionMarketplaceListing,
 			ListingID:           listingID,
 			SkillID:             review.SkillID,
 			SkillVersionID:      review.SkillVersionID,
@@ -883,20 +883,20 @@ func (a *App) ApproveSkillReview(ctx context.Context, in ApproveSkillReviewInput
 			CreatedAt:           now,
 			UpdatedAt:           now,
 		}
-		if err := pr4.ValidateCreatorPublishFlow(
-			pr4.SkillPackage{
-				SchemaVersion:  pr4.SchemaVersionSkillPackage,
+		if err := skillmarket.ValidateCreatorPublishFlow(
+			skillmarket.SkillPackage{
+				SchemaVersion:  skillmarket.SchemaVersionSkillPackage,
 				SkillID:        pkg.SkillID,
 				CreatorUserID:  pkg.CreatorUserID,
 				Name:           pkg.Name,
 				Description:    pkg.Description,
-				Visibility:     pr4.SkillVisibilityPublic,
+				Visibility:     skillmarket.SkillVisibilityPublic,
 				CurrentVersion: &currentVersion,
 				CreatedAt:      pkg.CreatedAt.UTC(),
 				UpdatedAt:      now,
 			},
-			pr4.SkillVersion{
-				SchemaVersion:       pr4.SchemaVersionSkillVersion,
+			skillmarket.SkillVersion{
+				SchemaVersion:       skillmarket.SchemaVersionSkillVersion,
 				SkillVersionID:      skillVersion.SkillVersionID,
 				SkillID:             skillVersion.SkillID,
 				Version:             skillVersion.Version,
@@ -908,8 +908,8 @@ func (a *App) ApproveSkillReview(ctx context.Context, in ApproveSkillReviewInput
 				CreatedAt:           skillVersion.CreatedAt.UTC(),
 				UpdatedAt:           now,
 			},
-			pr4.SkillPricingPolicy{
-				SchemaVersion:       pr4.SchemaVersionSkillPricingPolicy,
+			skillmarket.SkillPricingPolicy{
+				SchemaVersion:       skillmarket.SchemaVersionSkillPricingPolicy,
 				PricingPolicyID:     policy.PricingPolicyID,
 				SkillID:             policy.SkillID,
 				SkillVersion:        policy.SkillVersion,
@@ -924,7 +924,7 @@ func (a *App) ApproveSkillReview(ctx context.Context, in ApproveSkillReviewInput
 			return err
 		}
 
-		if err := tx.Model(&businesscore.PR4SkillReviewRecord{}).
+		if err := tx.Model(&businesscore.MarketplaceSkillReviewRecord{}).
 			Where("review_id = ?", reviewID).
 			Updates(map[string]any{
 				"status":          "approved",
@@ -934,14 +934,14 @@ func (a *App) ApproveSkillReview(ctx context.Context, in ApproveSkillReviewInput
 			}).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&businesscore.PR4SkillVersionRecord{}).
+		if err := tx.Model(&businesscore.MarketplaceSkillVersionRecord{}).
 			Where("skill_version_id = ?", review.SkillVersionID).
 			Updates(map[string]any{"status": "published", "published_at": publishedAt, "updated_at": now}).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&businesscore.PR4SkillPackageRecord{}).
+		if err := tx.Model(&businesscore.MarketplaceSkillPackageRecord{}).
 			Where("skill_id = ?", review.SkillID).
-			Updates(map[string]any{"visibility": pr4.SkillVisibilityPublic, "current_version": currentVersion, "updated_at": now}).Error; err != nil {
+			Updates(map[string]any{"visibility": skillmarket.SkillVisibilityPublic, "current_version": currentVersion, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		record := marketplaceListingRecordFromContract(listing)
@@ -1042,10 +1042,10 @@ func (a *App) ApproveSkillUsageRefund(ctx context.Context, in ApproveSkillUsageR
 		return ApproveSkillUsageRefundOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "refund_case_id is required")
 	}
 	now := a.now().UTC()
-	var usage pr4.SkillUsageRecord
-	var settlement pr4.SkillSettlement
+	var usage skillmarket.SkillUsageRecord
+	var settlement skillmarket.SkillSettlement
 	if err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var refundCase businesscore.PR4SkillRefundCaseRecord
+		var refundCase businesscore.SkillRefundCaseRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("refund_case_id = ?", refundCaseID).
 			First(&refundCase).Error; err != nil {
@@ -1066,7 +1066,7 @@ func (a *App) ApproveSkillUsageRefund(ctx context.Context, in ApproveSkillUsageR
 			usage = currentUsage
 			settlement = currentSettlement
 			settlementID := currentSettlement.SettlementID
-			return tx.Model(&businesscore.PR4SkillRefundCaseRecord{}).
+			return tx.Model(&businesscore.SkillRefundCaseRecord{}).
 				Where("refund_case_id = ?", refundCaseID).
 				Updates(map[string]any{"status": "refund_reversed", "settlement_id": settlementID, "updated_at": now}).Error
 		}
@@ -1079,10 +1079,10 @@ func (a *App) ApproveSkillUsageRefund(ctx context.Context, in ApproveSkillUsageR
 		afterSettlement := currentSettlement
 		afterSettlement.Status = "reversed"
 		afterSettlement.UpdatedAt = now
-		if err := pr4.ValidateSkillUsageRefundReversal(currentUsage, afterRefund, afterSettlement); err != nil {
+		if err := skillmarket.ValidateSkillUsageRefundReversal(currentUsage, afterRefund, afterSettlement); err != nil {
 			return err
 		}
-		if err := tx.Model(&businesscore.PR4SkillUsageRecord{}).
+		if err := tx.Model(&businesscore.SkillUsageRecord{}).
 			Where("usage_id = ?", afterRefund.UsageID).
 			Updates(map[string]any{
 				"usage_status":      afterRefund.UsageStatus,
@@ -1093,7 +1093,7 @@ func (a *App) ApproveSkillUsageRefund(ctx context.Context, in ApproveSkillUsageR
 			}).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&businesscore.PR4SkillSettlementRecord{}).
+		if err := tx.Model(&businesscore.SkillSettlementRecord{}).
 			Where("settlement_id = ?", afterSettlement.SettlementID).
 			Updates(map[string]any{"status": afterSettlement.Status, "updated_at": afterSettlement.UpdatedAt}).Error; err != nil {
 			return err
@@ -1101,7 +1101,7 @@ func (a *App) ApproveSkillUsageRefund(ctx context.Context, in ApproveSkillUsageR
 		usage = afterRefund
 		settlement = afterSettlement
 		settlementID := afterSettlement.SettlementID
-		return tx.Model(&businesscore.PR4SkillRefundCaseRecord{}).
+		return tx.Model(&businesscore.SkillRefundCaseRecord{}).
 			Where("refund_case_id = ?", refundCaseID).
 			Updates(map[string]any{"status": "refund_reversed", "settlement_id": settlementID, "updated_at": now}).Error
 	}); err != nil {
@@ -1149,8 +1149,8 @@ func (a *App) ReleaseSkillSettlementHold(ctx context.Context, in ReleaseSkillSet
 	}
 
 	now := a.now().UTC()
-	var settlement pr4.SkillSettlement
-	var payout businesscore.PR4SkillSettlementPayoutRecord
+	var settlement skillmarket.SkillSettlement
+	var payout businesscore.SkillSettlementPayoutRecord
 	err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		existing, found, err := findSettlementPayoutByIdempotencyTx(tx, idempotencyKey)
 		if err != nil {
@@ -1186,13 +1186,13 @@ func (a *App) ReleaseSkillSettlementHold(ctx context.Context, in ReleaseSkillSet
 		after := current
 		after.Status = "eligible"
 		after.UpdatedAt = now
-		if err := pr4.ValidateSkillSettlement(after); err != nil {
+		if err := skillmarket.ValidateSkillSettlement(after); err != nil {
 			return err
 		}
 		afterUsage := usage
 		afterUsage.SettlementStatus = after.Status
 		afterUsage.UpdatedAt = now
-		if err := pr4.ValidateSkillUsageRecord(afterUsage); err != nil {
+		if err := skillmarket.ValidateSkillUsageRecord(afterUsage); err != nil {
 			return err
 		}
 		if err := updateSettlementAndUsageStatusTx(tx, after, afterUsage); err != nil {
@@ -1233,8 +1233,8 @@ func (a *App) ConfirmSkillSettlementPayout(ctx context.Context, in ConfirmSkillS
 	}
 
 	now := a.now().UTC()
-	var settlement pr4.SkillSettlement
-	var payout businesscore.PR4SkillSettlementPayoutRecord
+	var settlement skillmarket.SkillSettlement
+	var payout businesscore.SkillSettlementPayoutRecord
 	err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		existing, found, err := findSettlementPayoutByIdempotencyTx(tx, idempotencyKey)
 		if err != nil {
@@ -1267,13 +1267,13 @@ func (a *App) ConfirmSkillSettlementPayout(ctx context.Context, in ConfirmSkillS
 		after := current
 		after.Status = "settled"
 		after.UpdatedAt = now
-		if err := pr4.ValidateSkillSettlement(after); err != nil {
+		if err := skillmarket.ValidateSkillSettlement(after); err != nil {
 			return err
 		}
 		afterUsage := usage
 		afterUsage.SettlementStatus = after.Status
 		afterUsage.UpdatedAt = now
-		if err := pr4.ValidateSkillUsageRecord(afterUsage); err != nil {
+		if err := skillmarket.ValidateSkillUsageRecord(afterUsage); err != nil {
 			return err
 		}
 		if err := updateSettlementAndUsageStatusTx(tx, after, afterUsage); err != nil {
@@ -1336,7 +1336,7 @@ func (a *App) InstallSkill(ctx context.Context, in InstallSkillInput) (InstallSk
 	}
 	scope := strings.TrimSpace(in.TargetScope)
 	if scope == "" {
-		scope = pr4.AccountScopePersonal
+		scope = skillmarket.AccountScopePersonal
 	}
 	accountID, err := accountIDForScope(in.Auth, scope, in.EnterpriseID)
 	if err != nil {
@@ -1358,12 +1358,12 @@ func (a *App) InstallSkill(ctx context.Context, in InstallSkillInput) (InstallSk
 	}
 
 	now := a.now().UTC()
-	versionStrategy := pr4.VersionStrategyLatestPublished
-	if scope == pr4.AccountScopeEnterprise {
-		versionStrategy = pr4.VersionStrategyPinned
+	versionStrategy := skillmarket.VersionStrategyLatestPublished
+	if scope == skillmarket.AccountScopeEnterprise {
+		versionStrategy = skillmarket.VersionStrategyPinned
 	}
-	installation := pr4.SkillInstallation{
-		SchemaVersion:    pr4.SchemaVersionSkillInstallation,
+	installation := skillmarket.SkillInstallation{
+		SchemaVersion:    skillmarket.SchemaVersionSkillInstallation,
 		InstallationID:   prefixedStableID("sinst_", accountID, scope, row.ListingID, row.SkillID),
 		AccountID:        accountID,
 		AccountScope:     scope,
@@ -1376,9 +1376,9 @@ func (a *App) InstallSkill(ctx context.Context, in InstallSkillInput) (InstallSk
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	request := pr4.InstallSkillRequest{AccountID: accountID, AccountScope: scope, ListingID: row.ListingID, IdempotencyKey: in.Meta.IdempotencyKey}
-	var saved pr4.SkillInstallation
-	if scope == pr4.AccountScopePersonal {
+	request := skillmarket.InstallSkillRequest{AccountID: accountID, AccountScope: scope, ListingID: row.ListingID, IdempotencyKey: in.Meta.IdempotencyKey}
+	var saved skillmarket.SkillInstallation
+	if scope == skillmarket.AccountScopePersonal {
 		saved, err = a.repo.InstallPersonalLatestSkillV1(ctx, request, installation)
 	} else {
 		if err = a.repo.EnsureMarketplaceListingInstallableV1(ctx, row.ListingID); err == nil {
@@ -1451,13 +1451,13 @@ func (a *App) UpgradeSkillInstallation(ctx context.Context, in UpgradeSkillInsta
 	after.InstalledVersion = strings.TrimSpace(in.TargetVersion)
 	after.UpgradeStatus = "confirmed"
 	after.UpdatedAt = now
-	request := pr4.UpgradeSkillInstallationRequest{
+	request := skillmarket.UpgradeSkillInstallationRequest{
 		InstallationID: initial.InstallationID,
 		TargetVersion:  after.InstalledVersion,
 		Confirmed:      in.Confirmed,
 		IdempotencyKey: in.Meta.IdempotencyKey,
 	}
-	rule := pr4.HistoricalRunRule{
+	rule := skillmarket.HistoricalRunRule{
 		RunID:                      prefixedStableID("run_upgrade_", initial.InstallationID, initial.InstalledVersion),
 		MustResumeWithSkillVersion: initial.InstalledVersion,
 	}
@@ -1523,8 +1523,8 @@ func (a *App) CreateSkillUsageRecord(ctx context.Context, in CreateSkillUsageRec
 		credits = row.UsageCredits
 	}
 	now := a.now().UTC()
-	usage := pr4.SkillUsageRecord{
-		SchemaVersion:       pr4.SchemaVersionSkillUsageRecord,
+	usage := skillmarket.SkillUsageRecord{
+		SchemaVersion:       skillmarket.SchemaVersionSkillUsageRecord,
 		UsageID:             prefixedStableID("susage_", in.RunID, row.ListingID, row.SkillVersion, row.PricingPolicyDigest),
 		RunID:               in.RunID,
 		ListingID:           row.ListingID,
@@ -1606,8 +1606,8 @@ func (a *App) CommitSkillUsageAndSettle(ctx context.Context, in CommitSkillUsage
 	afterCharge.ValueDeliveredAt = &now
 	afterCharge.UpdatedAt = now
 	platformFee := current.EstimatedCredits / 5
-	settlement := pr4.SkillSettlement{
-		SchemaVersion:      pr4.SchemaVersionSkillSettlement,
+	settlement := skillmarket.SkillSettlement{
+		SchemaVersion:      skillmarket.SchemaVersionSkillSettlement,
 		SettlementID:       prefixedStableID("settle_", current.UsageID),
 		UsageID:            current.UsageID,
 		CreatorUserID:      creatorUserID,
@@ -1832,16 +1832,16 @@ func (a *App) findInstallation(ctx context.Context, accountID string, scope stri
 	return row, true, nil
 }
 
-func (a *App) getInstallationContract(ctx context.Context, installationID string) (pr4.SkillInstallation, error) {
+func (a *App) getInstallationContract(ctx context.Context, installationID string) (skillmarket.SkillInstallation, error) {
 	if strings.TrimSpace(installationID) == "" {
-		return pr4.SkillInstallation{}, bizerrors.New(bizerrors.CodeInvalidArgument, "installation_id is required")
+		return skillmarket.SkillInstallation{}, bizerrors.New(bizerrors.CodeInvalidArgument, "installation_id is required")
 	}
-	var record businesscore.PR4SkillInstallationRecord
+	var record businesscore.SkillInstallationRecord
 	if err := a.repo.DB().WithContext(ctx).Where("installation_id = ?", installationID).First(&record).Error; err != nil {
-		return pr4.SkillInstallation{}, mapStoreError(err)
+		return skillmarket.SkillInstallation{}, mapStoreError(err)
 	}
-	installation := pr4.SkillInstallation{
-		SchemaVersion:    pr4.SchemaVersionSkillInstallation,
+	installation := skillmarket.SkillInstallation{
+		SchemaVersion:    skillmarket.SchemaVersionSkillInstallation,
 		InstallationID:   record.InstallationID,
 		AccountID:        record.AccountID,
 		AccountScope:     record.AccountScope,
@@ -1854,22 +1854,22 @@ func (a *App) getInstallationContract(ctx context.Context, installationID string
 		CreatedAt:        record.CreatedAt.UTC(),
 		UpdatedAt:        record.UpdatedAt.UTC(),
 	}
-	if err := pr4.ValidateSkillInstallation(installation); err != nil {
-		return pr4.SkillInstallation{}, err
+	if err := skillmarket.ValidateSkillInstallation(installation); err != nil {
+		return skillmarket.SkillInstallation{}, err
 	}
 	return installation, nil
 }
 
-func (a *App) getUsageContract(ctx context.Context, usageID string) (pr4.SkillUsageRecord, error) {
+func (a *App) getUsageContract(ctx context.Context, usageID string) (skillmarket.SkillUsageRecord, error) {
 	if strings.TrimSpace(usageID) == "" {
-		return pr4.SkillUsageRecord{}, bizerrors.New(bizerrors.CodeInvalidArgument, "usage_id is required")
+		return skillmarket.SkillUsageRecord{}, bizerrors.New(bizerrors.CodeInvalidArgument, "usage_id is required")
 	}
-	var record businesscore.PR4SkillUsageRecord
+	var record businesscore.SkillUsageRecord
 	if err := a.repo.DB().WithContext(ctx).Where("usage_id = ?", usageID).First(&record).Error; err != nil {
-		return pr4.SkillUsageRecord{}, mapStoreError(err)
+		return skillmarket.SkillUsageRecord{}, mapStoreError(err)
 	}
-	usage := pr4.SkillUsageRecord{
-		SchemaVersion:       pr4.SchemaVersionSkillUsageRecord,
+	usage := skillmarket.SkillUsageRecord{
+		SchemaVersion:       skillmarket.SchemaVersionSkillUsageRecord,
 		UsageID:             record.UsageID,
 		RunID:               record.RunID,
 		ListingID:           record.ListingID,
@@ -1887,22 +1887,22 @@ func (a *App) getUsageContract(ctx context.Context, usageID string) (pr4.SkillUs
 		CreatedAt:           record.CreatedAt.UTC(),
 		UpdatedAt:           record.UpdatedAt.UTC(),
 	}
-	if err := pr4.ValidateSkillUsageRecord(usage); err != nil {
-		return pr4.SkillUsageRecord{}, err
+	if err := skillmarket.ValidateSkillUsageRecord(usage); err != nil {
+		return skillmarket.SkillUsageRecord{}, err
 	}
 	return usage, nil
 }
 
-func (a *App) getUsageContractTx(tx *gorm.DB, usageID string) (pr4.SkillUsageRecord, error) {
+func (a *App) getUsageContractTx(tx *gorm.DB, usageID string) (skillmarket.SkillUsageRecord, error) {
 	if strings.TrimSpace(usageID) == "" {
-		return pr4.SkillUsageRecord{}, bizerrors.New(bizerrors.CodeInvalidArgument, "usage_id is required")
+		return skillmarket.SkillUsageRecord{}, bizerrors.New(bizerrors.CodeInvalidArgument, "usage_id is required")
 	}
-	var record businesscore.PR4SkillUsageRecord
+	var record businesscore.SkillUsageRecord
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("usage_id = ?", usageID).First(&record).Error; err != nil {
-		return pr4.SkillUsageRecord{}, err
+		return skillmarket.SkillUsageRecord{}, err
 	}
-	usage := pr4.SkillUsageRecord{
-		SchemaVersion:       pr4.SchemaVersionSkillUsageRecord,
+	usage := skillmarket.SkillUsageRecord{
+		SchemaVersion:       skillmarket.SchemaVersionSkillUsageRecord,
 		UsageID:             record.UsageID,
 		RunID:               record.RunID,
 		ListingID:           record.ListingID,
@@ -1920,14 +1920,14 @@ func (a *App) getUsageContractTx(tx *gorm.DB, usageID string) (pr4.SkillUsageRec
 		CreatedAt:           record.CreatedAt.UTC(),
 		UpdatedAt:           record.UpdatedAt.UTC(),
 	}
-	if err := pr4.ValidateSkillUsageRecord(usage); err != nil {
-		return pr4.SkillUsageRecord{}, err
+	if err := skillmarket.ValidateSkillUsageRecord(usage); err != nil {
+		return skillmarket.SkillUsageRecord{}, err
 	}
 	return usage, nil
 }
 
-func (a *App) getSettlementContractTx(tx *gorm.DB, settlementID *string, usageID string) (pr4.SkillSettlement, error) {
-	var record businesscore.PR4SkillSettlementRecord
+func (a *App) getSettlementContractTx(tx *gorm.DB, settlementID *string, usageID string) (skillmarket.SkillSettlement, error) {
+	var record businesscore.SkillSettlementRecord
 	query := tx.Clauses(clause.Locking{Strength: "UPDATE"})
 	if settlementID != nil && strings.TrimSpace(*settlementID) != "" {
 		query = query.Where("settlement_id = ?", strings.TrimSpace(*settlementID))
@@ -1935,10 +1935,10 @@ func (a *App) getSettlementContractTx(tx *gorm.DB, settlementID *string, usageID
 		query = query.Where("usage_id = ?", usageID)
 	}
 	if err := query.First(&record).Error; err != nil {
-		return pr4.SkillSettlement{}, err
+		return skillmarket.SkillSettlement{}, err
 	}
-	settlement := pr4.SkillSettlement{
-		SchemaVersion:      pr4.SchemaVersionSkillSettlement,
+	settlement := skillmarket.SkillSettlement{
+		SchemaVersion:      skillmarket.SchemaVersionSkillSettlement,
 		SettlementID:       record.SettlementID,
 		UsageID:            record.UsageID,
 		CreatorUserID:      record.CreatorUserID,
@@ -1950,39 +1950,39 @@ func (a *App) getSettlementContractTx(tx *gorm.DB, settlementID *string, usageID
 		CreatedAt:          record.CreatedAt.UTC(),
 		UpdatedAt:          record.UpdatedAt.UTC(),
 	}
-	if err := pr4.ValidateSkillSettlement(settlement); err != nil {
-		return pr4.SkillSettlement{}, err
+	if err := skillmarket.ValidateSkillSettlement(settlement); err != nil {
+		return skillmarket.SkillSettlement{}, err
 	}
 	return settlement, nil
 }
 
-func findSettlementPayoutByIdempotencyTx(tx *gorm.DB, idempotencyKey string) (businesscore.PR4SkillSettlementPayoutRecord, bool, error) {
-	var record businesscore.PR4SkillSettlementPayoutRecord
+func findSettlementPayoutByIdempotencyTx(tx *gorm.DB, idempotencyKey string) (businesscore.SkillSettlementPayoutRecord, bool, error) {
+	var record businesscore.SkillSettlementPayoutRecord
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("idempotency_key = ?", idempotencyKey).
 		First(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return businesscore.PR4SkillSettlementPayoutRecord{}, false, nil
+		return businesscore.SkillSettlementPayoutRecord{}, false, nil
 	}
 	if err != nil {
-		return businesscore.PR4SkillSettlementPayoutRecord{}, false, err
+		return businesscore.SkillSettlementPayoutRecord{}, false, err
 	}
 	return record, true, nil
 }
 
-func updateSettlementAndUsageStatusTx(tx *gorm.DB, settlement pr4.SkillSettlement, usage pr4.SkillUsageRecord) error {
-	if err := tx.Model(&businesscore.PR4SkillSettlementRecord{}).
+func updateSettlementAndUsageStatusTx(tx *gorm.DB, settlement skillmarket.SkillSettlement, usage skillmarket.SkillUsageRecord) error {
+	if err := tx.Model(&businesscore.SkillSettlementRecord{}).
 		Where("settlement_id = ?", settlement.SettlementID).
 		Updates(map[string]any{"status": settlement.Status, "updated_at": settlement.UpdatedAt}).Error; err != nil {
 		return err
 	}
-	return tx.Model(&businesscore.PR4SkillUsageRecord{}).
+	return tx.Model(&businesscore.SkillUsageRecord{}).
 		Where("usage_id = ?", usage.UsageID).
 		Updates(map[string]any{"settlement_status": usage.SettlementStatus, "updated_at": usage.UpdatedAt}).Error
 }
 
-func buildSettlementPayoutRecord(settlement pr4.SkillSettlement, action string, before string, after string, payoutReference string, reasonCode string, adminID string, idempotencyKey string, now time.Time) businesscore.PR4SkillSettlementPayoutRecord {
-	return businesscore.PR4SkillSettlementPayoutRecord{
+func buildSettlementPayoutRecord(settlement skillmarket.SkillSettlement, action string, before string, after string, payoutReference string, reasonCode string, adminID string, idempotencyKey string, now time.Time) businesscore.SkillSettlementPayoutRecord {
+	return businesscore.SkillSettlementPayoutRecord{
 		PayoutID:        prefixedStableID("spayout_", settlement.SettlementID, action, idempotencyKey),
 		SettlementID:    settlement.SettlementID,
 		CreatorUserID:   settlement.CreatorUserID,
@@ -1999,7 +1999,7 @@ func buildSettlementPayoutRecord(settlement pr4.SkillSettlement, action string, 
 }
 
 func (a *App) getSkillCreatorUserID(ctx context.Context, skillID string) (string, error) {
-	var record businesscore.PR4SkillPackageRecord
+	var record businesscore.MarketplaceSkillPackageRecord
 	if err := a.repo.DB().WithContext(ctx).Where("skill_id = ?", skillID).First(&record).Error; err != nil {
 		return "", mapStoreError(err)
 	}
@@ -2038,14 +2038,14 @@ func requireAdminID(adminID string) error {
 
 func accountIDForScope(auth AuthContext, scope string, enterpriseID string) (string, error) {
 	switch scope {
-	case pr4.AccountScopePersonal:
+	case skillmarket.AccountScopePersonal:
 		if auth.SpaceID != "" {
 			return auth.SpaceID, nil
 		}
 		if auth.UserID != "" {
 			return auth.UserID, nil
 		}
-	case pr4.AccountScopeEnterprise:
+	case skillmarket.AccountScopeEnterprise:
 		id := strings.TrimSpace(enterpriseID)
 		if id == "" {
 			id = auth.EnterpriseID
@@ -2060,9 +2060,9 @@ func accountIDForScope(auth AuthContext, scope string, enterpriseID string) (str
 
 func currentAccountScope(auth AuthContext) string {
 	if auth.LoginIdentityType == accountspace.IdentityEnterprise || auth.EnterpriseID != "" {
-		return pr4.AccountScopeEnterprise
+		return skillmarket.AccountScopeEnterprise
 	}
-	return pr4.AccountScopePersonal
+	return skillmarket.AccountScopePersonal
 }
 
 func mapStoreError(err error) error {
@@ -2082,7 +2082,7 @@ func mapStoreError(err error) error {
 }
 
 func skillUsageDigest(runID string, row listingRow) (string, error) {
-	return pr1.CanonicalDigest(map[string]any{
+	return foundation.CanonicalDigest(map[string]any{
 		"schema_version":         "skill_usage_preflight.v1",
 		"run_id":                 runID,
 		"listing_id":             row.ListingID,
@@ -2096,8 +2096,8 @@ func skillUsageDigest(runID string, row listingRow) (string, error) {
 	})
 }
 
-func skillPackageRecordFromContract(pkg pr4.SkillPackage) *businesscore.PR4SkillPackageRecord {
-	return &businesscore.PR4SkillPackageRecord{
+func skillPackageRecordFromContract(pkg skillmarket.SkillPackage) *businesscore.MarketplaceSkillPackageRecord {
+	return &businesscore.MarketplaceSkillPackageRecord{
 		SkillID:        pkg.SkillID,
 		CreatorUserID:  pkg.CreatorUserID,
 		Name:           pkg.Name,
@@ -2109,8 +2109,8 @@ func skillPackageRecordFromContract(pkg pr4.SkillPackage) *businesscore.PR4Skill
 	}
 }
 
-func skillVersionRecordFromContract(version pr4.SkillVersion) *businesscore.PR4SkillVersionRecord {
-	return &businesscore.PR4SkillVersionRecord{
+func skillVersionRecordFromContract(version skillmarket.SkillVersion) *businesscore.MarketplaceSkillVersionRecord {
+	return &businesscore.MarketplaceSkillVersionRecord{
 		SkillVersionID:      version.SkillVersionID,
 		SkillID:             version.SkillID,
 		Version:             version.Version,
@@ -2124,8 +2124,8 @@ func skillVersionRecordFromContract(version pr4.SkillVersion) *businesscore.PR4S
 	}
 }
 
-func skillPricingPolicyRecordFromContract(policy pr4.SkillPricingPolicy) *businesscore.PR4SkillPricingPolicyRecord {
-	return &businesscore.PR4SkillPricingPolicyRecord{
+func skillPricingPolicyRecordFromContract(policy skillmarket.SkillPricingPolicy) *businesscore.SkillPricingPolicyRecord {
+	return &businesscore.SkillPricingPolicyRecord{
 		PricingPolicyID:     policy.PricingPolicyID,
 		SkillID:             policy.SkillID,
 		SkillVersion:        policy.SkillVersion,
@@ -2137,8 +2137,8 @@ func skillPricingPolicyRecordFromContract(policy pr4.SkillPricingPolicy) *busine
 	}
 }
 
-func marketplaceListingRecordFromContract(listing pr4.MarketplaceListing) *businesscore.PR4MarketplaceListingRecord {
-	return &businesscore.PR4MarketplaceListingRecord{
+func marketplaceListingRecordFromContract(listing skillmarket.MarketplaceListing) *businesscore.MarketplaceListingRecord {
+	return &businesscore.MarketplaceListingRecord{
 		ListingID:           listing.ListingID,
 		SkillID:             listing.SkillID,
 		SkillVersionID:      listing.SkillVersionID,
@@ -2336,7 +2336,7 @@ func installationDTO(row installationRow) SkillInstallationDTO {
 	}
 }
 
-func installationDTOFromContract(installation pr4.SkillInstallation) SkillInstallationDTO {
+func installationDTOFromContract(installation skillmarket.SkillInstallation) SkillInstallationDTO {
 	return SkillInstallationDTO{
 		InstallationID:   installation.InstallationID,
 		AccountID:        installation.AccountID,
@@ -2352,7 +2352,7 @@ func installationDTOFromContract(installation pr4.SkillInstallation) SkillInstal
 	}
 }
 
-func usageDTO(usage pr4.SkillUsageRecord) SkillUsageRecordDTO {
+func usageDTO(usage skillmarket.SkillUsageRecord) SkillUsageRecordDTO {
 	return SkillUsageRecordDTO{
 		UsageID:             usage.UsageID,
 		RunID:               usage.RunID,
@@ -2373,7 +2373,7 @@ func usageDTO(usage pr4.SkillUsageRecord) SkillUsageRecordDTO {
 	}
 }
 
-func settlementDTO(settlement pr4.SkillSettlement) SkillSettlementDTO {
+func settlementDTO(settlement skillmarket.SkillSettlement) SkillSettlementDTO {
 	return SkillSettlementDTO{
 		SettlementID:       settlement.SettlementID,
 		UsageID:            settlement.UsageID,
@@ -2388,7 +2388,7 @@ func settlementDTO(settlement pr4.SkillSettlement) SkillSettlementDTO {
 	}
 }
 
-func settlementPayoutDTO(record businesscore.PR4SkillSettlementPayoutRecord) SkillSettlementPayoutDTO {
+func settlementPayoutDTO(record businesscore.SkillSettlementPayoutRecord) SkillSettlementPayoutDTO {
 	return SkillSettlementPayoutDTO{
 		PayoutID:        record.PayoutID,
 		SettlementID:    record.SettlementID,

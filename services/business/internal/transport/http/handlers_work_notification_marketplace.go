@@ -9,9 +9,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func registerM5Routes(router *gin.Engine, opts RouterOptions) {
-	auth := m2Handler{account: opts.AccountSpace, admin: opts.Admin, project: opts.Project}
-	h := m5Handler{work: opts.Work, notification: opts.Notification, marketplace: opts.Marketplace, auth: auth}
+func registerWorkNotificationMarketplaceRoutes(router *gin.Engine, opts RouterOptions) {
+	auth := accountProjectAdminHandler{account: opts.AccountSpace, admin: opts.Admin, project: opts.Project}
+	h := workNotificationMarketplaceHandler{work: opts.Work, notification: opts.Notification, marketplace: opts.Marketplace, auth: auth}
 
 	router.GET("/api/marketplace/skills", auth.userAuth(), h.listMarketplaceSkills)
 	router.GET("/api/marketplace/skills/:listing_id", auth.userAuth(), h.getMarketplaceSkill)
@@ -59,14 +59,14 @@ func registerM5Routes(router *gin.Engine, opts RouterOptions) {
 	router.GET("/api/notifications/:notification_id/navigation", auth.userAuth(), h.notificationNavigation)
 }
 
-type m5Handler struct {
+type workNotificationMarketplaceHandler struct {
 	work         *work.App
 	notification *notification.App
 	marketplace  *marketplace.App
-	auth         m2Handler
+	auth         accountProjectAdminHandler
 }
 
-func (h m5Handler) listMarketplaceSkills(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) listMarketplaceSkills(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -77,7 +77,7 @@ func (h m5Handler) listMarketplaceSkills(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) getMarketplaceSkill(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) getMarketplaceSkill(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -86,7 +86,7 @@ func (h m5Handler) getMarketplaceSkill(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) installMarketplaceSkill(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) installMarketplaceSkill(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -110,7 +110,7 @@ func (h m5Handler) installMarketplaceSkill(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) upgradeSkillInstallation(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) upgradeSkillInstallation(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -133,7 +133,7 @@ func (h m5Handler) upgradeSkillInstallation(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) listInstalledSkills(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) listInstalledSkills(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -144,7 +144,7 @@ func (h m5Handler) listInstalledSkills(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) createCreatorSkillDraft(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) createCreatorSkillDraft(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -167,7 +167,7 @@ func (h m5Handler) createCreatorSkillDraft(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) submitCreatorSkillVersion(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) submitCreatorSkillVersion(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -188,7 +188,7 @@ func (h m5Handler) submitCreatorSkillVersion(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) listCreatorListings(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) listCreatorListings(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -199,7 +199,7 @@ func (h m5Handler) listCreatorListings(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) creatorSkillUsageAnalytics(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) creatorSkillUsageAnalytics(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -208,7 +208,7 @@ func (h m5Handler) creatorSkillUsageAnalytics(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminListSkillReviews(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminListSkillReviews(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -223,7 +223,7 @@ func (h m5Handler) adminListSkillReviews(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminApproveSkillReview(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminApproveSkillReview(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -243,7 +243,7 @@ func (h m5Handler) adminApproveSkillReview(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminListMarketplaceListings(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminListMarketplaceListings(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -258,7 +258,7 @@ func (h m5Handler) adminListMarketplaceListings(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminSuspendMarketplaceListing(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminSuspendMarketplaceListing(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -278,7 +278,7 @@ func (h m5Handler) adminSuspendMarketplaceListing(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminListRefundCases(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminListRefundCases(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -292,7 +292,7 @@ func (h m5Handler) adminListRefundCases(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminApproveSkillUsageRefund(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminApproveSkillUsageRefund(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -310,7 +310,7 @@ func (h m5Handler) adminApproveSkillUsageRefund(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminListSettlements(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminListSettlements(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -324,7 +324,7 @@ func (h m5Handler) adminListSettlements(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminReleaseSkillSettlementHold(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminReleaseSkillSettlementHold(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -349,7 +349,7 @@ func (h m5Handler) adminReleaseSkillSettlementHold(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminConfirmSkillSettlementPayout(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminConfirmSkillSettlementPayout(c *gin.Context) {
 	if h.marketplace == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -376,7 +376,7 @@ func (h m5Handler) adminConfirmSkillSettlementPayout(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) publicHome(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) publicHome(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -385,7 +385,7 @@ func (h m5Handler) publicHome(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) listPublicWorks(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) listPublicWorks(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -397,7 +397,7 @@ func (h m5Handler) listPublicWorks(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) getPublicWork(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) getPublicWork(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -406,7 +406,7 @@ func (h m5Handler) getPublicWork(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) likePublicWork(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) likePublicWork(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -425,7 +425,7 @@ func (h m5Handler) likePublicWork(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) unlikePublicWork(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) unlikePublicWork(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -444,7 +444,7 @@ func (h m5Handler) unlikePublicWork(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) listWorks(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) listWorks(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -456,7 +456,7 @@ func (h m5Handler) listWorks(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) createWork(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) createWork(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -485,7 +485,7 @@ func (h m5Handler) createWork(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) getWork(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) getWork(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -494,7 +494,7 @@ func (h m5Handler) getWork(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) updateWork(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) updateWork(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -523,7 +523,7 @@ func (h m5Handler) updateWork(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) previewShareWork(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) previewShareWork(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -544,7 +544,7 @@ func (h m5Handler) previewShareWork(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) confirmShareWork(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) confirmShareWork(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -560,7 +560,7 @@ func (h m5Handler) confirmShareWork(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) unshareWork(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) unshareWork(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -580,7 +580,7 @@ func (h m5Handler) unshareWork(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminListPublicWorks(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminListPublicWorks(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -592,7 +592,7 @@ func (h m5Handler) adminListPublicWorks(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminPreviewTakeDownWork(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminPreviewTakeDownWork(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -610,7 +610,7 @@ func (h m5Handler) adminPreviewTakeDownWork(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) adminConfirmTakeDownWork(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) adminConfirmTakeDownWork(c *gin.Context) {
 	if h.work == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -631,7 +631,7 @@ func (h m5Handler) adminConfirmTakeDownWork(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) listNotifications(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) listNotifications(c *gin.Context) {
 	if h.notification == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -642,7 +642,7 @@ func (h m5Handler) listNotifications(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) unreadCount(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) unreadCount(c *gin.Context) {
 	if h.notification == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -651,7 +651,7 @@ func (h m5Handler) unreadCount(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) markNotificationRead(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) markNotificationRead(c *gin.Context) {
 	if h.notification == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -670,7 +670,7 @@ func (h m5Handler) markNotificationRead(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) markAllNotificationsRead(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) markAllNotificationsRead(c *gin.Context) {
 	if h.notification == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -690,7 +690,7 @@ func (h m5Handler) markAllNotificationsRead(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m5Handler) notificationNavigation(c *gin.Context) {
+func (h workNotificationMarketplaceHandler) notificationNavigation(c *gin.Context) {
 	if h.notification == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return

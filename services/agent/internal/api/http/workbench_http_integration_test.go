@@ -19,8 +19,8 @@ import (
 	"gorm.io/datatypes"
 )
 
-func TestM2AgentSessionRunProjectGate(t *testing.T) {
-	db := testdb.StartPostgres(t, "dora_agent_m2")
+func TestAgentSessionRunProjectGate(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_agent_http")
 	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/20260627_agent_runtime/agent")
 	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
 
@@ -30,8 +30,8 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 		ConfigKey:      "agent.default",
 		Version:        "cfg-active-v2",
 		Status:         "active",
-		Owner:          "m2-test",
-		Content:        datatypes.JSON([]byte(`{"turn_loop":"m2"}`)),
+		Owner:          "board-graph-test",
+		Content:        datatypes.JSON([]byte(`{"turn_loop":"board_graph"}`)),
 		SafeConfigRefs: datatypes.JSON([]byte(`[]`)),
 		ActivatedAt:    &now,
 	}); err != nil {
@@ -43,7 +43,7 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 	}, "local-dev")
 	router := NewRouter(RouterOptions{App: app})
 
-	sessionResp := agentJSON(t, router, http.MethodPost, "/api/agent/sessions", "idem-agent-session", map[string]any{"project_id": "prj_active_1001", "initial_title": "M2"})
+	sessionResp := agentJSON(t, router, http.MethodPost, "/api/agent/sessions", "idem-agent-session", map[string]any{"project_id": "prj_active_1001", "initial_title": "Board graph"})
 	sessionID := sessionResp["session_id"].(string)
 	if sessionID == "" {
 		t.Fatalf("session response missing session_id: %#v", sessionResp)
@@ -62,7 +62,7 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 	})
 	runID := runResp["run_id"].(string)
 	if runResp["status"] != "waiting_confirmation" {
-		t.Fatalf("expected waiting confirmation run after M4 credit estimate, got %#v", runResp)
+		t.Fatalf("expected waiting confirmation run after tool generation credit estimate, got %#v", runResp)
 	}
 	createdRun, err := repo.GetRun(t.Context(), runID)
 	if err != nil {
@@ -151,8 +151,8 @@ func TestM2AgentSessionRunProjectGate(t *testing.T) {
 	}
 }
 
-func TestM2AgentInterruptRoutes(t *testing.T) {
-	db := testdb.StartPostgres(t, "dora_agent_m2_interrupt")
+func TestAgentInterruptRoutes(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_agent_http_interrupt")
 	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/20260627_agent_runtime/agent")
 	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
 
@@ -205,8 +205,8 @@ func TestM2AgentInterruptRoutes(t *testing.T) {
 	}
 }
 
-func TestM2AgentDeniedAccessBodyBlocksResumeActions(t *testing.T) {
-	db := testdb.StartPostgres(t, "dora_agent_m2_denied")
+func TestAgentDeniedAccessBodyBlocksResumeActions(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_agent_http_denied")
 	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/20260627_agent_runtime/agent")
 	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
 
@@ -267,7 +267,7 @@ func TestM2AgentDeniedAccessBodyBlocksResumeActions(t *testing.T) {
 	}
 }
 
-func TestM2AgentAuthRequired(t *testing.T) {
+func TestAgentAuthRequired(t *testing.T) {
 	router := NewRouter(RouterOptions{App: workbench.New(repository.New(nil), workbench.StaticGateway{}, "local-dev")})
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/agent/sessions", bytes.NewBufferString(`{"project_id":"p"}`))
@@ -278,8 +278,8 @@ func TestM2AgentAuthRequired(t *testing.T) {
 	}
 }
 
-func TestM3AgentAuthUsesAuthorizationToken(t *testing.T) {
-	db := testdb.StartPostgres(t, "dora_agent_m3_auth")
+func TestAgentAuthUsesAuthorizationToken(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_agent_auth")
 	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/20260627_agent_runtime/agent")
 	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
 
@@ -288,7 +288,7 @@ func TestM3AgentAuthUsesAuthorizationToken(t *testing.T) {
 		Space:  workbench.SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
 		Access: workbench.ProjectAccessDTO{Allowed: true, ProjectStatus: "active", CreativeAllowed: true, AllowedActions: []string{"view", "continue_creation"}},
 	}, "local-dev")})
-	req := agentRequest(http.MethodPost, "/api/agent/sessions", "idem-m3-auth-token", map[string]any{"project_id": "prj_active_1001", "initial_title": "auth"})
+	req := agentRequest(http.MethodPost, "/api/agent/sessions", "idem-auth-token", map[string]any{"project_id": "prj_active_1001", "initial_title": "auth"})
 	req.Header.Set("X-Actor-User-Id", "malicious_user")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -471,7 +471,7 @@ func agentRequest(method, path, idem string, body any) *http.Request {
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer test-agent-token")
-	req.Header.Set("X-Trace-Id", "trace-agent-m2")
+	req.Header.Set("X-Trace-Id", "trace-agent-board-graph")
 	req.Header.Set("X-Actor-User-Id", "usr_1001")
 	req.Header.Set("X-Space-Id", "sp_personal_1001")
 	req.Header.Set("X-Login-Identity-Type", "personal")

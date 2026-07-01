@@ -2,8 +2,8 @@
   "case_id": "refund_settlement_reverse_e2e_v1",
   "status": "active",
   "owner": "测试与验收责任域 / Admin Governance / Business Settlement",
-  "depends_on_pr": [
-    "PR-4"
+  "depends_on_contracts": [
+    "skill market"
   ],
   "contract_references": [
     {

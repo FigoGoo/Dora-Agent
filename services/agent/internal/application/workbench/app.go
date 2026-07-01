@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr3"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/toolasset"
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/apperror"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
@@ -777,8 +777,8 @@ type CreateRunResponse struct {
 }
 
 type CreativeBoardResponse struct {
-	Board    pr2.CreativeBoard `json:"board"`
-	Snapshot pr2.BoardSnapshot `json:"snapshot"`
+	Board    boardgraph.CreativeBoard `json:"board"`
+	Snapshot boardgraph.BoardSnapshot `json:"snapshot"`
 }
 
 type ApproveCreativeBoardRequest struct {
@@ -788,29 +788,29 @@ type ApproveCreativeBoardRequest struct {
 }
 
 type ApproveCreativeBoardResponse struct {
-	Board    pr2.CreativeBoard `json:"board"`
-	Patch    *pr2.BoardPatch   `json:"patch,omitempty"`
-	ToolPlan *pr3.ToolPlan     `json:"tool_plan,omitempty"`
+	Board    boardgraph.CreativeBoard `json:"board"`
+	Patch    *boardgraph.BoardPatch   `json:"patch,omitempty"`
+	ToolPlan *toolasset.ToolPlan      `json:"tool_plan,omitempty"`
 }
 
 type ApplyBoardPatchRequest struct {
-	Patch          pr2.BoardPatch `json:"patch"`
-	IdempotencyKey string         `json:"idempotency_key"`
+	Patch          boardgraph.BoardPatch `json:"patch"`
+	IdempotencyKey string                `json:"idempotency_key"`
 }
 
 type ApplyBoardPatchResponse struct {
-	Board pr2.CreativeBoard `json:"board"`
-	Patch pr2.BoardPatch    `json:"patch"`
+	Board boardgraph.CreativeBoard `json:"board"`
+	Patch boardgraph.BoardPatch    `json:"patch"`
 }
 
 type boardPatchAfterState struct {
-	BoardAfter        pr2.CreativeBoard     `json:"board_after"`
-	ElementsAfter     []pr2.CreativeElement `json:"elements_after"`
-	ChangedElementIDs []string              `json:"changed_element_ids"`
+	BoardAfter        boardgraph.CreativeBoard     `json:"board_after"`
+	ElementsAfter     []boardgraph.CreativeElement `json:"elements_after"`
+	ChangedElementIDs []string                     `json:"changed_element_ids"`
 }
 
 type GraphPlanResponse struct {
-	GraphPlan pr2.GraphPlan `json:"graph_plan"`
+	GraphPlan boardgraph.GraphPlan `json:"graph_plan"`
 }
 
 func (a *App) CreateSession(ctx context.Context, auth AuthContextDTO, req CreateSessionRequest, traceID string) (CreateSessionResponse, error) {
@@ -935,7 +935,7 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	}
 	runID := securityID("run_")
 	runStatus := state.RunStatusPending
-	if isM1RunIntent(req.RunIntent) {
+	if isRouterRunIntent(req.RunIntent) {
 		runStatus = state.RunStatusRouting
 	}
 	run := &model.Run{
@@ -973,8 +973,8 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 	if err := a.repo.AppendEvent(ctx, event); err != nil {
 		return CreateRunResponse{}, err
 	}
-	if isM1RunIntent(req.RunIntent) {
-		if err := a.recordM1RunEvents(ctx, auth, run, req, traceID); err != nil {
+	if isRouterRunIntent(req.RunIntent) {
+		if err := a.recordRouterRunEvents(ctx, auth, run, req, traceID); err != nil {
 			return CreateRunResponse{}, err
 		}
 		if updated, err := a.repo.GetRun(ctx, run.ID); err == nil {
@@ -982,7 +982,7 @@ func (a *App) CreateRun(ctx context.Context, auth AuthContextDTO, req CreateRunR
 		}
 		return runResponse(*run), nil
 	}
-	if err := a.recordM3StartEvents(ctx, auth, run, req.UserInput.Text, traceID); err != nil {
+	if err := a.recordSkillRuntimeStartEvents(ctx, auth, run, req.UserInput.Text, traceID); err != nil {
 		return CreateRunResponse{}, err
 	}
 	if updated, err := a.repo.GetRun(ctx, run.ID); err == nil {
@@ -1164,11 +1164,11 @@ func (a *App) AcceptInterrupt(ctx context.Context, auth AuthContextDTO, runID st
 }
 
 func (a *App) dispatchConfirmedGeneration(ctx context.Context, auth AuthContextDTO, run *model.Run, interrupt *model.Interrupt, idempotencyKey string, traceID string) error {
-	if _, ok := parseM4ConfirmationPayload(interrupt); !ok {
+	if _, ok := parseToolGenerationConfirmationPayload(interrupt); !ok {
 		return nil
 	}
 	if a.generationQueue == nil {
-		return a.runM4ConfirmedGeneration(ctx, auth, run.ID, interrupt, idempotencyKey, traceID)
+		return a.runConfirmedToolGeneration(ctx, auth, run.ID, interrupt, idempotencyKey, traceID)
 	}
 	job := GenerationJob{
 		RunID:          run.ID,
@@ -1300,12 +1300,12 @@ func (a *App) CancelRun(ctx context.Context, auth AuthContextDTO, runID string, 
 func (a *App) ReplayEvents(ctx context.Context, auth AuthContextDTO, runID string, afterSequence int64, limit int, traceID string) (EventReplayResponse, error) {
 	run, err := a.repo.GetRun(ctx, runID)
 	if err != nil {
-		pr2Replay, pr2Err := a.replayPR2Events(ctx, auth, runID, afterSequence, limit, traceID)
-		if pr2Err == nil {
-			return pr2Replay, nil
+		boardGraphReplay, boardGraphErr := a.replayBoardGraphEvents(ctx, auth, runID, afterSequence, limit, traceID)
+		if boardGraphErr == nil {
+			return boardGraphReplay, nil
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return EventReplayResponse{}, pr2Err
+			return EventReplayResponse{}, boardGraphErr
 		}
 		return EventReplayResponse{}, err
 	}
@@ -1324,8 +1324,8 @@ func (a *App) ReplayEvents(ctx context.Context, auth AuthContextDTO, runID strin
 	for _, row := range rows {
 		items = append(items, eventDTO(row))
 	}
-	if pr2Rows, pr2Err := a.repo.ListRunEventsV1AfterSeq(ctx, runID, afterSequence, limit+1); pr2Err == nil && len(pr2Rows) > 0 {
-		pr2Run := model.AgentRunRecord{
+	if boardGraphRows, boardGraphErr := a.repo.ListRunEventsV1AfterSeq(ctx, runID, afterSequence, limit+1); boardGraphErr == nil && len(boardGraphRows) > 0 {
+		boardGraphRun := model.AgentRunRecord{
 			RunID:     run.ID,
 			SessionID: run.SessionID,
 			ProjectID: run.ProjectID,
@@ -1334,8 +1334,8 @@ func (a *App) ReplayEvents(ctx context.Context, auth AuthContextDTO, runID strin
 			CreatedAt: run.CreatedAt,
 			UpdatedAt: run.UpdatedAt,
 		}
-		for _, row := range pr2Rows {
-			items = append(items, pr2EventDTO(pr2Run, row))
+		for _, row := range boardGraphRows {
+			items = append(items, boardGraphEventDTO(boardGraphRun, row))
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -1355,13 +1355,13 @@ func (a *App) ReplayEvents(ctx context.Context, auth AuthContextDTO, runID strin
 	return EventReplayResponse{Events: items, NextSequence: next, HasMore: hasMore}, nil
 }
 
-func (a *App) replayPR2Events(ctx context.Context, auth AuthContextDTO, runID string, afterSequence int64, limit int, traceID string) (EventReplayResponse, error) {
-	run, err := a.requirePR2RunAccess(ctx, auth, runID, businessagent.ProjectAccessPurpose_VIEW, traceID)
+func (a *App) replayBoardGraphEvents(ctx context.Context, auth AuthContextDTO, runID string, afterSequence int64, limit int, traceID string) (EventReplayResponse, error) {
+	run, err := a.requireBoardGraphRunAccess(ctx, auth, runID, businessagent.ProjectAccessPurpose_VIEW, traceID)
 	if err != nil {
 		return EventReplayResponse{}, err
 	}
 	limit, _ = normalizePage(limit, 0, 200)
-	if replay, ok := a.replayPR2EventsFromBus(ctx, run, afterSequence, limit); ok {
+	if replay, ok := a.replayBoardGraphEventsFromBus(ctx, run, afterSequence, limit); ok {
 		return replay, nil
 	}
 	rows, err := a.repo.ListRunEventsV1AfterSeq(ctx, runID, afterSequence, limit+1)
@@ -1375,13 +1375,13 @@ func (a *App) replayPR2Events(ctx context.Context, auth AuthContextDTO, runID st
 	items := make([]EventDTO, 0, len(rows))
 	next := afterSequence
 	for _, row := range rows {
-		items = append(items, pr2EventDTO(run, row))
+		items = append(items, boardGraphEventDTO(run, row))
 		next = row.Seq
 	}
 	return EventReplayResponse{Events: items, NextSequence: next, HasMore: hasMore}, nil
 }
 
-func (a *App) replayPR2EventsFromBus(ctx context.Context, run model.AgentRunRecord, afterSequence int64, limit int) (EventReplayResponse, bool) {
+func (a *App) replayBoardGraphEventsFromBus(ctx context.Context, run model.AgentRunRecord, afterSequence int64, limit int) (EventReplayResponse, bool) {
 	if a.aguiEventBus == nil {
 		return EventReplayResponse{}, false
 	}
@@ -1420,7 +1420,7 @@ func (a *App) GetCreativeBoard(ctx context.Context, auth AuthContextDTO, boardID
 	if err != nil {
 		return CreativeBoardResponse{}, apperror.New(apperror.CodeResourceNotFound, "board not found")
 	}
-	run, err := a.requirePR2RunAccess(ctx, auth, board.RunID, businessagent.ProjectAccessPurpose_VIEW, traceID)
+	run, err := a.requireBoardGraphRunAccess(ctx, auth, board.RunID, businessagent.ProjectAccessPurpose_VIEW, traceID)
 	if err != nil {
 		return CreativeBoardResponse{}, err
 	}
@@ -1447,14 +1447,14 @@ func (a *App) ApplyBoardPatch(ctx context.Context, auth AuthContextDTO, boardID 
 	if patch.BoardID != boardID {
 		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeInvalidArgument, "patch board_id does not match path")
 	}
-	if patch.Operation == pr2.BoardPatchOperationApproveBoard {
+	if patch.Operation == boardgraph.BoardPatchOperationApproveBoard {
 		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeInvalidArgument, "approve_board patch must use board approval endpoint")
 	}
 	current, err := a.repo.GetCreativeBoardV1(ctx, boardID)
 	if err != nil {
 		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeResourceNotFound, "board not found")
 	}
-	run, err := a.requirePR2RunAccess(ctx, auth, current.RunID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
+	run, err := a.requireBoardGraphRunAccess(ctx, auth, current.RunID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
 	if err != nil {
 		return ApplyBoardPatchResponse{}, err
 	}
@@ -1462,7 +1462,7 @@ func (a *App) ApplyBoardPatch(ctx context.Context, auth AuthContextDTO, boardID 
 		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeStateConflict, "board project does not match run project")
 	}
 	if current.Status == "approved" || current.ToolPlanAllowed {
-		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeStateConflict, "approved board cannot be patched before PR-3 ToolPlan flow")
+		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeStateConflict, "approved board cannot be patched before tool asset ToolPlan flow")
 	}
 	payload, err := boardPatchAfterStatePayload(patch.Payload)
 	if err != nil {
@@ -1504,7 +1504,7 @@ func (a *App) ApproveCreativeBoard(ctx context.Context, auth AuthContextDTO, boa
 	if err != nil {
 		return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodeResourceNotFound, "board not found")
 	}
-	run, err := a.requirePR2RunAccess(ctx, auth, board.RunID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
+	run, err := a.requireBoardGraphRunAccess(ctx, auth, board.RunID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
 	if err != nil {
 		return ApproveCreativeBoardResponse{}, err
 	}
@@ -1512,7 +1512,7 @@ func (a *App) ApproveCreativeBoard(ctx context.Context, auth AuthContextDTO, boa
 		return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodeStateConflict, "board project does not match run project")
 	}
 	if board.Status == "approved" && board.Version == req.BoardVersion+1 {
-		toolPlan, err := a.ensureM4ToolPlanPreflight(ctx, auth, run, board, traceID)
+		toolPlan, err := a.ensureToolGenerationPlanPreflight(ctx, auth, run, board, traceID)
 		if err != nil {
 			return ApproveCreativeBoardResponse{}, err
 		}
@@ -1544,7 +1544,7 @@ func (a *App) ApproveCreativeBoard(ctx context.Context, auth AuthContextDTO, boa
 	if err := a.appendBoardApprovalEvents(ctx, run, approval.Patch, approval.Board, actor, traceID); err != nil {
 		return ApproveCreativeBoardResponse{}, err
 	}
-	toolPlan, err := a.ensureM4ToolPlanPreflight(ctx, auth, run, approval.Board, traceID)
+	toolPlan, err := a.ensureToolGenerationPlanPreflight(ctx, auth, run, approval.Board, traceID)
 	if err != nil {
 		return ApproveCreativeBoardResponse{}, err
 	}
@@ -1556,7 +1556,7 @@ func (a *App) GetGraphPlan(ctx context.Context, auth AuthContextDTO, graphPlanID
 	if err != nil {
 		return GraphPlanResponse{}, apperror.New(apperror.CodeResourceNotFound, "graph plan not found")
 	}
-	if _, err := a.requirePR2RunAccess(ctx, auth, plan.RunID, businessagent.ProjectAccessPurpose_VIEW, traceID); err != nil {
+	if _, err := a.requireBoardGraphRunAccess(ctx, auth, plan.RunID, businessagent.ProjectAccessPurpose_VIEW, traceID); err != nil {
 		return GraphPlanResponse{}, err
 	}
 	return GraphPlanResponse{GraphPlan: plan}, nil
@@ -1646,7 +1646,7 @@ func (a *App) requireViewProjectAccess(ctx context.Context, auth AuthContextDTO,
 	return access, nil
 }
 
-func (a *App) requirePR2RunAccess(ctx context.Context, auth AuthContextDTO, runID string, purpose businessagent.ProjectAccessPurpose, traceID string) (model.AgentRunRecord, error) {
+func (a *App) requireBoardGraphRunAccess(ctx context.Context, auth AuthContextDTO, runID string, purpose businessagent.ProjectAccessPurpose, traceID string) (model.AgentRunRecord, error) {
 	if auth.ActorUserID == "" {
 		return model.AgentRunRecord{}, apperror.New(apperror.CodeUnauthenticated, "auth context is required")
 	}
@@ -1767,7 +1767,7 @@ func isRevokedMembershipError(err error) bool {
 		strings.Contains(message, "permission revoked")
 }
 
-func (a *App) recordM3StartEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, traceID string) error {
+func (a *App) recordSkillRuntimeStartEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, prompt string, traceID string) error {
 	if a.gateway == nil {
 		return nil
 	}
@@ -1999,19 +1999,19 @@ func (a *App) createToolConfirmationInterrupt(ctx context.Context, auth AuthCont
 			return apperror.New(apperror.CodeStateConflict, "credit account has insufficient points")
 		}
 		return a.createConfirmationInterrupt(ctx, run, "risk_confirmation", "high risk tool requires confirmation", map[string]any{
-			"m4_flow":           "independent_tool_charge",
-			"tool_call_id":      toolCallID,
-			"tool_name":         toolName,
-			"tool_type":         toolType,
-			"billing_unit":      defaultToolBillingUnit(toolType),
-			"quantity":          float64(1),
-			"risk_level":        policy.RiskLevel,
-			"estimate_id":       estimate.EstimateID,
-			"estimate_points":   estimate.EstimatePoints,
-			"points":            estimate.EstimatePoints,
-			"credit_account_id": estimate.CreditAccountID,
-			"estimate":          estimate,
-			"safety_evidence":   safetyEvidenceToRPC(safety),
+			"tool_generation_flow": "independent_tool_charge",
+			"tool_call_id":         toolCallID,
+			"tool_name":            toolName,
+			"tool_type":            toolType,
+			"billing_unit":         defaultToolBillingUnit(toolType),
+			"quantity":             float64(1),
+			"risk_level":           policy.RiskLevel,
+			"estimate_id":          estimate.EstimateID,
+			"estimate_points":      estimate.EstimatePoints,
+			"points":               estimate.EstimatePoints,
+			"credit_account_id":    estimate.CreditAccountID,
+			"estimate":             estimate,
+			"safety_evidence":      safetyEvidenceToRPC(safety),
 		}, "工具调用确认", "高风险工具需要人工确认后继续", []string{policy.RiskLevel, toolName + ":" + toolType}, 15*time.Minute, traceID)
 	}
 	return a.createConfirmationInterrupt(ctx, run, "risk_confirmation", "high risk tool requires confirmation", map[string]any{
@@ -2039,18 +2039,18 @@ func (a *App) createSkillConfirmationInterrupt(ctx context.Context, run *model.R
 
 func (a *App) createCreditConfirmationInterrupt(ctx context.Context, run *model.Run, snapshot ModelRuntimeSnapshotDTO, estimate CreditEstimateDTO, safety *model.SafetyEvaluation, prompt string, outputElements []SkillOutputElementDTO, traceID string) error {
 	return a.createConfirmationInterrupt(ctx, run, "credit_generation_confirmation", "generation credit charge requires confirmation", map[string]any{
-		"m4_flow":             "generation_asset_commit",
-		"estimate_id":         estimate.EstimateID,
-		"estimate_points":     estimate.EstimatePoints,
-		"points":              estimate.EstimatePoints,
-		"available_points":    estimate.AvailablePoints,
-		"credit_account_id":   estimate.CreditAccountID,
-		"pricing_snapshot_id": snapshot.PricingSnapshotID,
-		"model_snapshot":      snapshot,
-		"estimate":            estimate,
-		"safety_evidence":     safetyEvidenceToRPC(safety),
-		"prompt_digest":       digestText(prompt),
-		"output_elements":     outputElements,
+		"tool_generation_flow": "generation_asset_commit",
+		"estimate_id":          estimate.EstimateID,
+		"estimate_points":      estimate.EstimatePoints,
+		"points":               estimate.EstimatePoints,
+		"available_points":     estimate.AvailablePoints,
+		"credit_account_id":    estimate.CreditAccountID,
+		"pricing_snapshot_id":  snapshot.PricingSnapshotID,
+		"model_snapshot":       snapshot,
+		"estimate":             estimate,
+		"safety_evidence":      safetyEvidenceToRPC(safety),
+		"prompt_digest":        digestText(prompt),
+		"output_elements":      outputElements,
 	}, "生成与扣费确认", "确认后将冻结积分，生成完成并保存资产后扣费", []string{"credit_freeze", "asset_commit", "project:" + run.ProjectID}, 15*time.Minute, traceID)
 }
 
@@ -2067,17 +2067,17 @@ type independentToolChargeInput struct {
 }
 
 type toolChargeConfirmationPayload struct {
-	M4Flow          string                          `json:"m4_flow"`
-	ToolCallID      string                          `json:"tool_call_id"`
-	ToolName        string                          `json:"tool_name"`
-	ToolType        string                          `json:"tool_type"`
-	BillingUnit     string                          `json:"billing_unit"`
-	Quantity        float64                         `json:"quantity"`
-	EstimateID      string                          `json:"estimate_id"`
-	EstimatePoints  int64                           `json:"estimate_points"`
-	CreditAccountID string                          `json:"credit_account_id"`
-	Estimate        CreditEstimateDTO               `json:"estimate"`
-	SafetyEvidence  businessagent.SafetyEvidenceDTO `json:"safety_evidence"`
+	ToolGenerationFlow string                          `json:"tool_generation_flow"`
+	ToolCallID         string                          `json:"tool_call_id"`
+	ToolName           string                          `json:"tool_name"`
+	ToolType           string                          `json:"tool_type"`
+	BillingUnit        string                          `json:"billing_unit"`
+	Quantity           float64                         `json:"quantity"`
+	EstimateID         string                          `json:"estimate_id"`
+	EstimatePoints     int64                           `json:"estimate_points"`
+	CreditAccountID    string                          `json:"credit_account_id"`
+	Estimate           CreditEstimateDTO               `json:"estimate"`
+	SafetyEvidence     businessagent.SafetyEvidenceDTO `json:"safety_evidence"`
 }
 
 func (a *App) estimateIndependentToolCredits(ctx context.Context, auth AuthContextDTO, run *model.Run, toolName, toolType, billingUnit string, quantity float64, safety *businessagent.SafetyEvidenceDTO, idempotencyKey string, traceID string) (CreditEstimateDTO, error) {
@@ -2227,7 +2227,7 @@ func parseToolChargeConfirmationPayload(interrupt *model.Interrupt) (toolChargeC
 	if err := json.Unmarshal(interrupt.ConfirmationPayload, &payload); err != nil {
 		return toolChargeConfirmationPayload{}, false
 	}
-	return payload, payload.M4Flow == "independent_tool_charge"
+	return payload, payload.ToolGenerationFlow == "independent_tool_charge"
 }
 
 func (a *App) failIndependentToolAfterFreeze(ctx context.Context, auth AuthContextDTO, run *model.Run, freeze FreezeCreditsDTO, toolCallID, reason, idempotencyBase, traceID string, cause error) error {
@@ -2248,26 +2248,26 @@ func (a *App) failIndependentToolAfterFreeze(ctx context.Context, auth AuthConte
 	return mapBusinessError(cause)
 }
 
-type m4ConfirmationPayload struct {
-	M4Flow            string                          `json:"m4_flow"`
-	ToolPlanID        string                          `json:"tool_plan_id"`
-	ToolPlanDigest    string                          `json:"tool_plan_digest"`
-	BoardID           string                          `json:"board_id"`
-	BoardVersion      int                             `json:"board_version"`
-	GraphPlanID       string                          `json:"graph_plan_id"`
-	EstimateID        string                          `json:"estimate_id"`
-	EstimatePoints    int64                           `json:"estimate_points"`
-	CreditAccountID   string                          `json:"credit_account_id"`
-	PricingSnapshotID string                          `json:"pricing_snapshot_id"`
-	ModelSnapshot     ModelRuntimeSnapshotDTO         `json:"model_snapshot"`
-	Estimate          CreditEstimateDTO               `json:"estimate"`
-	SafetyEvidence    businessagent.SafetyEvidenceDTO `json:"safety_evidence"`
-	PromptDigest      string                          `json:"prompt_digest"`
-	OutputElements    []SkillOutputElementDTO         `json:"output_elements"`
+type toolGenerationConfirmationPayload struct {
+	ToolGenerationFlow string                          `json:"tool_generation_flow"`
+	ToolPlanID         string                          `json:"tool_plan_id"`
+	ToolPlanDigest     string                          `json:"tool_plan_digest"`
+	BoardID            string                          `json:"board_id"`
+	BoardVersion       int                             `json:"board_version"`
+	GraphPlanID        string                          `json:"graph_plan_id"`
+	EstimateID         string                          `json:"estimate_id"`
+	EstimatePoints     int64                           `json:"estimate_points"`
+	CreditAccountID    string                          `json:"credit_account_id"`
+	PricingSnapshotID  string                          `json:"pricing_snapshot_id"`
+	ModelSnapshot      ModelRuntimeSnapshotDTO         `json:"model_snapshot"`
+	Estimate           CreditEstimateDTO               `json:"estimate"`
+	SafetyEvidence     businessagent.SafetyEvidenceDTO `json:"safety_evidence"`
+	PromptDigest       string                          `json:"prompt_digest"`
+	OutputElements     []SkillOutputElementDTO         `json:"output_elements"`
 }
 
-func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO, runID string, interrupt *model.Interrupt, idempotencyKey string, traceID string) error {
-	payload, ok := parseM4ConfirmationPayload(interrupt)
+func (a *App) runConfirmedToolGeneration(ctx context.Context, auth AuthContextDTO, runID string, interrupt *model.Interrupt, idempotencyKey string, traceID string) error {
+	payload, ok := parseToolGenerationConfirmationPayload(interrupt)
 	if !ok {
 		return nil
 	}
@@ -2301,7 +2301,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	if err != nil {
 		return err
 	}
-	toolTask, err := a.startM4ToolTaskForConfirmation(ctx, run, payload, task, idempotencyKey, traceID)
+	toolTask, err := a.startToolGenerationTaskForConfirmation(ctx, run, payload, task, idempotencyKey, traceID)
 	if err != nil {
 		return a.failGenerationTaskBeforeFreeze(ctx, run, task, "tool_task_start_failed", traceID, err)
 	}
@@ -2332,7 +2332,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 			"estimate_points": payload.EstimatePoints,
 		})
 	}
-	freezeIdempotencyKey := m4FreezeIdempotencyKey(run.ID, payload, idempotencyKey)
+	freezeIdempotencyKey := toolGenerationFreezeIdempotencyKey(run.ID, payload, idempotencyKey)
 	_ = a.updateGenerationTaskStage(ctx, task, 20, "freeze_requested", map[string]any{
 		"estimate_id": payload.EstimateID, "estimate_points": payload.EstimatePoints,
 		"credit_account_id": payload.CreditAccountID, "confirmation_id": interrupt.ID,
@@ -2379,7 +2379,7 @@ func (a *App) runM4ConfirmedGeneration(ctx context.Context, auth AuthContextDTO,
 	if len(result.Artifacts) == 0 {
 		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "generation_empty", idempotencyKey, traceID, apperror.New(apperror.CodeInternal, "generation produced no artifact"))
 	}
-	if err := a.completeM4ToolTaskFromResult(ctx, run, toolTask, result.Artifacts, traceID); err != nil {
+	if err := a.completeToolGenerationTaskFromResult(ctx, run, toolTask, result.Artifacts, traceID); err != nil {
 		return a.failGenerationTaskAfterFreeze(ctx, auth, run, task, freeze, "tool_task_complete_failed", idempotencyKey, traceID, err)
 	}
 	_ = a.updateGenerationTaskStage(ctx, task, 55, "artifacts_generated", map[string]any{"artifact_count": len(result.Artifacts)})
@@ -2512,7 +2512,7 @@ func (a *App) completeGenerationAfterCommit(ctx context.Context, run *model.Run,
 		"charged_line_items": commit.ChargedLineItems,
 	})
 	_ = a.updateGenerationTaskStage(ctx, task, 95, "asset_commit_completed", map[string]any{"charged_points": commit.ChargedPoints, "released_points": commit.ReleasedPoints})
-	if err := a.appendM4AssetCommitUpdatedFromTask(ctx, run, task, commit, traceID); err != nil {
+	if err := a.appendToolGenerationAssetCommitUpdatedFromTask(ctx, run, task, commit, traceID); err != nil {
 		return err
 	}
 	if commit.ReleasedPoints > 0 {
@@ -2535,7 +2535,7 @@ func (a *App) completeGenerationAfterCommit(ctx context.Context, run *model.Run,
 	}
 	_ = a.appendRunEvent(ctx, run, "process.snapshot.saved", traceID, map[string]any{
 		"snapshot_id": "snap_" + run.ID, "snapshot_version": time.Now().UTC().Format(time.RFC3339Nano),
-		"last_event_sequence": nextSequence, "messages_count": 1, "assets_count": len(assets), "blackboard_version": "m4",
+		"last_event_sequence": nextSequence, "messages_count": 1, "assets_count": len(assets), "blackboard_version": "tool_generation",
 		"freeze_id": freezeID, "estimate_id": estimateID,
 	})
 	sequence, err := a.repo.NextMessageSequence(ctx, run.SessionID)
@@ -2616,7 +2616,7 @@ type refreshedGenerationSafetyEvidence struct {
 	estimate CreditEstimateDTO
 }
 
-func (a *App) refreshExpiredGenerationSafetyEvidence(ctx context.Context, auth AuthContextDTO, run *model.Run, payload m4ConfirmationPayload, prompt string, idempotencyKey string, traceID string) (bool, refreshedGenerationSafetyEvidence, error) {
+func (a *App) refreshExpiredGenerationSafetyEvidence(ctx context.Context, auth AuthContextDTO, run *model.Run, payload toolGenerationConfirmationPayload, prompt string, idempotencyKey string, traceID string) (bool, refreshedGenerationSafetyEvidence, error) {
 	if !safetyEvidenceExpired(payload.SafetyEvidence, time.Now().UTC()) {
 		return false, refreshedGenerationSafetyEvidence{}, nil
 	}
@@ -2682,18 +2682,18 @@ func refreshedSafetyTargetRefID(runID, idempotencyKey string) string {
 	return "refresh_" + hex.EncodeToString(sum[:])[:16]
 }
 
-func parseM4ConfirmationPayload(interrupt *model.Interrupt) (m4ConfirmationPayload, bool) {
+func parseToolGenerationConfirmationPayload(interrupt *model.Interrupt) (toolGenerationConfirmationPayload, bool) {
 	if interrupt == nil || len(interrupt.ConfirmationPayload) == 0 {
-		return m4ConfirmationPayload{}, false
+		return toolGenerationConfirmationPayload{}, false
 	}
-	var payload m4ConfirmationPayload
+	var payload toolGenerationConfirmationPayload
 	if err := json.Unmarshal(interrupt.ConfirmationPayload, &payload); err != nil {
-		return m4ConfirmationPayload{}, false
+		return toolGenerationConfirmationPayload{}, false
 	}
-	return payload, payload.M4Flow == "generation_asset_commit"
+	return payload, payload.ToolGenerationFlow == "generation_asset_commit"
 }
 
-func (a *App) startGenerationTask(ctx context.Context, run *model.Run, payload m4ConfirmationPayload, idempotencyKey string, traceID string) (*model.Task, error) {
+func (a *App) startGenerationTask(ctx context.Context, run *model.Run, payload toolGenerationConfirmationPayload, idempotencyKey string, traceID string) (*model.Task, error) {
 	task := &model.Task{
 		ID:              securityID("task_"),
 		RunID:           run.ID,
@@ -2845,7 +2845,7 @@ func (a *App) processGenerationJob(ctx context.Context, job GenerationJob) error
 	_ = a.appendRunEvent(ctx, run, "generation.task.dequeued", job.TraceID, map[string]any{
 		"run_id": job.RunID, "interrupt_id": job.InterruptID, "enqueued_at": job.EnqueuedAt.Format(time.RFC3339Nano),
 	})
-	return a.runM4ConfirmedGeneration(ctx, job.Auth, job.RunID, interrupt, job.IdempotencyKey, job.TraceID)
+	return a.runConfirmedToolGeneration(ctx, job.Auth, job.RunID, interrupt, job.IdempotencyKey, job.TraceID)
 }
 
 func (a *App) generationJobReachedTerminalRun(ctx context.Context, job GenerationJob) bool {
@@ -2978,7 +2978,7 @@ func (a *App) failGenerationTaskAfterFreeze(ctx context.Context, auth AuthContex
 	if task != nil {
 		_ = a.repo.UpdateTaskStatus(ctx, task.ID, state.TaskStatusFailed, strings.ToUpper(reason))
 	}
-	return a.failM4AfterFreeze(ctx, auth, run, freeze, reason, idempotencyKey, traceID, cause)
+	return a.failToolGenerationAfterFreeze(ctx, auth, run, freeze, reason, idempotencyKey, traceID, cause)
 }
 
 func (a *App) failGenerationTaskBeforeFreeze(ctx context.Context, run *model.Run, task *model.Task, reason string, traceID string, cause error) error {
@@ -2993,13 +2993,13 @@ func (a *App) failGenerationTaskBeforeFreeze(ctx context.Context, run *model.Run
 		}
 	}
 	_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
-		"error_type": "m4_close_loop", "error_code": strings.ToUpper(reason), "user_message": "生成保存流程失败",
+		"error_type": "tool_generation_close_loop", "error_code": strings.ToUpper(reason), "user_message": "生成保存流程失败",
 		"retryable": true, "support_trace_id": traceID,
 	})
 	return mapBusinessError(cause)
 }
 
-func (a *App) failM4AfterFreeze(ctx context.Context, auth AuthContextDTO, run *model.Run, freeze FreezeCreditsDTO, reason string, idempotencyKey string, traceID string, cause error) error {
+func (a *App) failToolGenerationAfterFreeze(ctx context.Context, auth AuthContextDTO, run *model.Run, freeze FreezeCreditsDTO, reason string, idempotencyKey string, traceID string, cause error) error {
 	released, releaseErr := a.gateway.ReleaseFrozenCredits(ctx, auth, ReleaseFrozenCreditsRequest{
 		FreezeID: freeze.FreezeID, ReleasePoints: freeze.FrozenPoints, Reason: reason, RunID: run.ID, IdempotencyKey: idempotencyKey + ":release:" + reason,
 	}, traceID)
@@ -3009,7 +3009,7 @@ func (a *App) failM4AfterFreeze(ctx context.Context, auth AuthContextDTO, run *m
 		})
 	}
 	_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
-		"error_type": "m4_close_loop", "error_code": strings.ToUpper(reason), "user_message": "生成保存流程失败，已尝试释放冻结积分",
+		"error_type": "tool_generation_close_loop", "error_code": strings.ToUpper(reason), "user_message": "生成保存流程失败，已尝试释放冻结积分",
 		"retryable": true, "support_trace_id": traceID,
 	})
 	_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, strings.ToUpper(reason), cause.Error())
@@ -3090,7 +3090,7 @@ func (a *App) recordPromptSafetyEvaluation(ctx context.Context, run *model.Run, 
 	expiresAt := evidence.EvaluatedAt.Add(24 * time.Hour)
 	safety := &model.SafetyEvaluation{
 		SafetyEvidenceID: evidence.EvidenceID, Scene: evidence.Scene, TargetType: evidence.TargetType, TargetRefID: evidence.TargetRefID,
-		EvaluatedObjectDigest: checked["digest"].(string), PolicyVersion: "local-m3", EvidenceVersion: "2026-06-27",
+		EvaluatedObjectDigest: checked["digest"].(string), PolicyVersion: "local-skill-runtime", EvidenceVersion: "2026-06-27",
 		Result: evidence.Result, UserVisibleReason: evidence.Reason, SourceSessionID: run.SessionID, SourceRunID: run.ID,
 		TraceID: traceID, EvaluatedAt: evidence.EvaluatedAt, ExpiresAt: expiresAt,
 	}
@@ -3359,14 +3359,14 @@ func skillMissingPayload(reason string, message string) map[string]any {
 
 func toolPolicyRiskContext(toolRef string) map[string]string {
 	return map[string]string{
-		"source":                  "m3_start_turn",
+		"source":                  "skill_runtime_start_turn",
 		"tool_ref":                strings.TrimSpace(toolRef),
 		"runtime_whitelist_check": "required_per_tool",
 	}
 }
 
 func validateRunInputs(req CreateRunRequest) error {
-	if req.RunIntent != "" && !isM1RunIntent(req.RunIntent) {
+	if req.RunIntent != "" && !isRouterRunIntent(req.RunIntent) {
 		return apperror.New(apperror.CodeInvalidArgument, "run_intent is invalid")
 	}
 	for i, asset := range req.ReferencedAssets {
@@ -3388,7 +3388,7 @@ func validateRunInputs(req CreateRunRequest) error {
 	return nil
 }
 
-func isM1RunIntent(intent string) bool {
+func isRouterRunIntent(intent string) bool {
 	switch strings.TrimSpace(intent) {
 	case RunIntentEntryGuide, RunIntentCapabilityQuestion, RunIntentNormal, RunIntentSelectSkill:
 		return true
@@ -3518,7 +3518,7 @@ func skillTestSafetyEvidenceJSON(evidence runtimesafety.Evidence, testRunID, tra
 		"target_type":             evidence.TargetType,
 		"target_ref_id":           evidence.TargetRefID,
 		"evaluated_object_digest": digestText(evidence.TargetRefID + ":" + evidence.Result),
-		"policy_version":          "local-m3",
+		"policy_version":          "local-skill-runtime",
 		"evidence_version":        "2026-06-27",
 		"evaluated_at":            evidence.EvaluatedAt.Format(time.RFC3339Nano),
 		"expires_at":              expiresAt,
@@ -3675,7 +3675,7 @@ func boardPatchAfterStatePayload(payload map[string]any) (boardPatchAfterState, 
 	return decoded, nil
 }
 
-func pr2EventDTO(run model.AgentRunRecord, event model.RunEventRecord) EventDTO {
+func boardGraphEventDTO(run model.AgentRunRecord, event model.RunEventRecord) EventDTO {
 	payload := map[string]any{}
 	_ = json.Unmarshal(event.Payload, &payload)
 	return EventDTO{
@@ -3693,7 +3693,7 @@ func pr2EventDTO(run model.AgentRunRecord, event model.RunEventRecord) EventDTO 
 	}
 }
 
-func aguiEnvelopeDTO(run model.AgentRunRecord, event pr1.AGUIEnvelope) EventDTO {
+func aguiEnvelopeDTO(run model.AgentRunRecord, event foundation.AGUIEnvelope) EventDTO {
 	spaceID := ""
 	if event.SpaceID != nil {
 		spaceID = *event.SpaceID
@@ -3723,11 +3723,11 @@ func aguiEnvelopeDTO(run model.AgentRunRecord, event pr1.AGUIEnvelope) EventDTO 
 	}
 }
 
-func (a *App) appendBoardApprovalEvents(ctx context.Context, run model.AgentRunRecord, patch pr2.BoardPatch, board pr2.CreativeBoard, actor string, traceID string) error {
+func (a *App) appendBoardApprovalEvents(ctx context.Context, run model.AgentRunRecord, patch boardgraph.BoardPatch, board boardgraph.CreativeBoard, actor string, traceID string) error {
 	return a.appendBoardPatchEvents(ctx, run, patch, board, actor, traceID, []string{})
 }
 
-func (a *App) appendBoardPatchEvents(ctx context.Context, run model.AgentRunRecord, patch pr2.BoardPatch, board pr2.CreativeBoard, actor string, traceID string, changedElementIDs []string) error {
+func (a *App) appendBoardPatchEvents(ctx context.Context, run model.AgentRunRecord, patch boardgraph.BoardPatch, board boardgraph.CreativeBoard, actor string, traceID string, changedElementIDs []string) error {
 	seq, err := a.repo.NextRunEventSeqV1(ctx, run.RunID)
 	if err != nil {
 		return err
@@ -3736,7 +3736,7 @@ func (a *App) appendBoardPatchEvents(ctx context.Context, run model.AgentRunReco
 	if eventTime.IsZero() {
 		eventTime = time.Now().UTC()
 	}
-	patchPayload := pr2.BoardPatchAppliedPayload{
+	patchPayload := boardgraph.BoardPatchAppliedPayload{
 		BoardID:       patch.BoardID,
 		PatchID:       patch.PatchID,
 		BaseVersion:   patch.BaseVersion,
@@ -3744,10 +3744,10 @@ func (a *App) appendBoardPatchEvents(ctx context.Context, run model.AgentRunReco
 		Operation:     patch.Operation,
 		PatchDigest:   patch.PatchDigest,
 	}
-	if err := pr2.ValidateBoardPatchAppliedPayload(patchPayload); err != nil {
+	if err := boardgraph.ValidateBoardPatchAppliedPayload(patchPayload); err != nil {
 		return err
 	}
-	patchEnvelope, err := pr2AGUIEnvelope(run, pr2.EventTypeBoardPatchApplied, seq, eventTime, actor, traceID, map[string]any{
+	patchEnvelope, err := boardGraphAGUIEnvelope(run, boardgraph.EventTypeBoardPatchApplied, seq, eventTime, actor, traceID, map[string]any{
 		"board_id":       patchPayload.BoardID,
 		"patch_id":       patchPayload.PatchID,
 		"base_version":   patchPayload.BaseVersion,
@@ -3758,7 +3758,7 @@ func (a *App) appendBoardPatchEvents(ctx context.Context, run model.AgentRunReco
 	if err != nil {
 		return err
 	}
-	snapshotPayload := pr2.BoardSnapshotUpdatedPayload{
+	snapshotPayload := boardgraph.BoardSnapshotUpdatedPayload{
 		BoardID:           board.BoardID,
 		BoardVersion:      board.Version,
 		BoardStatus:       board.Status,
@@ -3766,10 +3766,10 @@ func (a *App) appendBoardPatchEvents(ctx context.Context, run model.AgentRunReco
 		ChangedElementIDs: changedElementIDs,
 		SnapshotRequired:  true,
 	}
-	if err := pr2.ValidateBoardSnapshotUpdatedPayload(snapshotPayload); err != nil {
+	if err := boardgraph.ValidateBoardSnapshotUpdatedPayload(snapshotPayload); err != nil {
 		return err
 	}
-	snapshotEnvelope, err := pr2AGUIEnvelope(run, pr2.EventTypeBoardSnapshotUpdated, seq+1, eventTime, actor, traceID, map[string]any{
+	snapshotEnvelope, err := boardGraphAGUIEnvelope(run, boardgraph.EventTypeBoardSnapshotUpdated, seq+1, eventTime, actor, traceID, map[string]any{
 		"board_id":            snapshotPayload.BoardID,
 		"board_version":       snapshotPayload.BoardVersion,
 		"board_status":        snapshotPayload.BoardStatus,
@@ -3780,15 +3780,15 @@ func (a *App) appendBoardPatchEvents(ctx context.Context, run model.AgentRunReco
 	if err != nil {
 		return err
 	}
-	events := []pr1.AGUIEnvelope{patchEnvelope, snapshotEnvelope}
+	events := []foundation.AGUIEnvelope{patchEnvelope, snapshotEnvelope}
 	if err := a.repo.AppendRunEventsV1(ctx, events); err != nil {
 		return err
 	}
-	a.publishPR2AGUIEvents(ctx, events)
+	a.publishBoardGraphAGUIEvents(ctx, events)
 	return nil
 }
 
-func (a *App) publishPR2AGUIEvents(ctx context.Context, events []pr1.AGUIEnvelope) {
+func (a *App) publishBoardGraphAGUIEvents(ctx context.Context, events []foundation.AGUIEnvelope) {
 	if a.aguiEventBus == nil {
 		return
 	}
@@ -3797,15 +3797,15 @@ func (a *App) publishPR2AGUIEvents(ctx context.Context, events []pr1.AGUIEnvelop
 	}
 }
 
-func pr2AGUIEnvelope(run model.AgentRunRecord, eventType string, seq int64, eventTime time.Time, actor string, traceID string, payload map[string]any) (pr1.AGUIEnvelope, error) {
-	payloadDigest, err := pr1.CanonicalDigest(payload)
+func boardGraphAGUIEnvelope(run model.AgentRunRecord, eventType string, seq int64, eventTime time.Time, actor string, traceID string, payload map[string]any) (foundation.AGUIEnvelope, error) {
+	payloadDigest, err := foundation.CanonicalDigest(payload)
 	if err != nil {
-		return pr1.AGUIEnvelope{}, err
+		return foundation.AGUIEnvelope{}, err
 	}
 	if strings.TrimSpace(traceID) == "" {
 		traceID = run.TraceID
 	}
-	return pr1.BuildAGUIEnvelope(pr1.AGUIInput{
+	return foundation.BuildAGUIEnvelope(foundation.AGUIInput{
 		EventID:       securityID("evt_"),
 		EventType:     eventType,
 		ProjectID:     run.ProjectID,

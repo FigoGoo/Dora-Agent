@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr4"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/skillmarket"
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
@@ -19,8 +19,8 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/auditlog"
 )
 
-func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
-	db := testdb.StartPostgres(t, "dora_business_m5_http")
+func TestWorkWorkPublicAndNotificationHTTP(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_business_work_http")
 	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/2026-06-27-business-core/business")
 	t.Cleanup(func() { testdb.DownMigrations(t, migrator) })
 	testdb.ExecSQL(t, db.DB, testdb.MustReadSQL(t, "tests/business/seed/business_core_seed.sql"))
@@ -80,7 +80,7 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 		"safety_evidence": map[string]any{
 			"safety_evidence_id": "safe_http_work_share", "scene": "work_share", "result": "passed", "target_type": "work_share_text",
 			"evaluated_object_digest": work.ShareTextDigest(title, description, []string{"http"}),
-			"policy_version":          "local-m5", "evidence_version": "2026-06-28", "evaluated_at": time.Now().UTC().Format(time.RFC3339Nano),
+			"policy_version":          "local-work", "evidence_version": "2026-06-28", "evaluated_at": time.Now().UTC().Format(time.RFC3339Nano),
 			"expires_at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano), "trace_id": "trace-http-work-share",
 		},
 	})
@@ -134,8 +134,8 @@ func TestM5WorkPublicAndNotificationHTTP(t *testing.T) {
 	requestJSON(t, router, http.MethodPost, "/api/notifications/"+notificationID+"/read", userToken, "idem-http-ntf-read", map[string]any{"request_hash": "hash-http-ntf-read"})
 }
 
-func TestM5CreatorSkillPortalHTTP(t *testing.T) {
-	db := testdb.StartPostgres(t, "dora_business_m5_creator_http")
+func TestWorkCreatorSkillPortalHTTP(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_business_creator_http")
 	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/2026-06-27-business-core/business")
 	t.Cleanup(func() {
 		srcErr, dbErr := migrator.Close()
@@ -222,8 +222,8 @@ DROP TABLE IF EXISTS skill_versions;
 	if err != nil {
 		t.Fatalf("commit http refund usage: %v", err)
 	}
-	beforeRefund := pr4.SkillUsageRecord{
-		SchemaVersion:       pr4.SchemaVersionSkillUsageRecord,
+	beforeRefund := skillmarket.SkillUsageRecord{
+		SchemaVersion:       skillmarket.SchemaVersionSkillUsageRecord,
 		UsageID:             committed.Usage.UsageID,
 		RunID:               committed.Usage.RunID,
 		ListingID:           committed.Usage.ListingID,
@@ -245,7 +245,7 @@ DROP TABLE IF EXISTS skill_versions;
 		t.Fatalf("mark http refund pending: %v", err)
 	}
 	settlementID := committed.Settlement.SettlementID
-	if err := repo.DB().Create(&businesscore.PR4SkillRefundCaseRecord{
+	if err := repo.DB().Create(&businesscore.SkillRefundCaseRecord{
 		RefundCaseID: "refund_case_http_001",
 		UsageID:      committed.Usage.UsageID,
 		SettlementID: &settlementID,
@@ -297,7 +297,7 @@ DROP TABLE IF EXISTS skill_versions;
 	if err != nil {
 		t.Fatalf("commit http payout usage: %v", err)
 	}
-	if err := repo.DB().Model(&businesscore.PR4SkillSettlementRecord{}).
+	if err := repo.DB().Model(&businesscore.SkillSettlementRecord{}).
 		Where("settlement_id = ?", payoutCommitted.Settlement.SettlementID).
 		Update("hold_until", time.Now().UTC().Add(-time.Minute)).Error; err != nil {
 		t.Fatalf("expire settlement hold: %v", err)

@@ -7,61 +7,61 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr3"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/toolasset"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-func (r *Repository) SaveToolPlanV1(ctx context.Context, plan pr3.ToolPlan) error {
-	if err := pr3.ValidateToolPlan(plan); err != nil {
+func (r *Repository) SaveToolPlanV1(ctx context.Context, plan toolasset.ToolPlan) error {
+	if err := toolasset.ValidateToolPlan(plan); err != nil {
 		return fmt.Errorf("tool_plan: %w", err)
 	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(toolPlanRecord(plan)).Error
 }
 
-func (r *Repository) GetToolPlanV1(ctx context.Context, toolPlanID string) (pr3.ToolPlan, error) {
+func (r *Repository) GetToolPlanV1(ctx context.Context, toolPlanID string) (toolasset.ToolPlan, error) {
 	var record model.ToolPlanRecord
 	if err := r.db.WithContext(ctx).Where("tool_plan_id = ?", toolPlanID).First(&record).Error; err != nil {
-		return pr3.ToolPlan{}, err
+		return toolasset.ToolPlan{}, err
 	}
 	return toolPlanContract(record)
 }
 
-func (r *Repository) GetToolPlanByBoardVersionV1(ctx context.Context, boardID string, boardVersion int) (pr3.ToolPlan, error) {
+func (r *Repository) GetToolPlanByBoardVersionV1(ctx context.Context, boardID string, boardVersion int) (toolasset.ToolPlan, error) {
 	var record model.ToolPlanRecord
 	if err := r.db.WithContext(ctx).
 		Where("board_id = ? AND board_version = ?", boardID, boardVersion).
 		Order("created_at DESC, tool_plan_id DESC").
 		First(&record).Error; err != nil {
-		return pr3.ToolPlan{}, err
+		return toolasset.ToolPlan{}, err
 	}
 	return toolPlanContract(record)
 }
 
-func (r *Repository) SaveToolTaskV1(ctx context.Context, task pr3.ToolTask) error {
-	if err := pr3.ValidateToolTask(task); err != nil {
+func (r *Repository) SaveToolTaskV1(ctx context.Context, task toolasset.ToolTask) error {
+	if err := toolasset.ValidateToolTask(task); err != nil {
 		return fmt.Errorf("tool_task: %w", err)
 	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(toolTaskRecord(task)).Error
 }
 
-func (r *Repository) GetToolTaskV1(ctx context.Context, toolTaskID string) (pr3.ToolTask, error) {
+func (r *Repository) GetToolTaskV1(ctx context.Context, toolTaskID string) (toolasset.ToolTask, error) {
 	var record model.ToolTaskRecord
 	if err := r.db.WithContext(ctx).Where("tool_task_id = ?", toolTaskID).First(&record).Error; err != nil {
-		return pr3.ToolTask{}, err
+		return toolasset.ToolTask{}, err
 	}
 	return toolTaskContract(record)
 }
 
-func (r *Repository) ApplyToolTaskCompletedEventV1(ctx context.Context, event pr3.ToolTaskCompletedStreamEvent, completedAt time.Time) (pr3.ToolTask, error) {
-	if err := pr3.ValidateToolTaskCompletedStreamEvent(event); err != nil {
-		return pr3.ToolTask{}, fmt.Errorf("provider_event: %w", err)
+func (r *Repository) ApplyToolTaskCompletedEventV1(ctx context.Context, event toolasset.ToolTaskCompletedStreamEvent, completedAt time.Time) (toolasset.ToolTask, error) {
+	if err := toolasset.ValidateToolTaskCompletedStreamEvent(event); err != nil {
+		return toolasset.ToolTask{}, fmt.Errorf("provider_event: %w", err)
 	}
 	if completedAt.IsZero() {
 		completedAt = time.Now().UTC()
 	}
-	var updated pr3.ToolTask
+	var updated toolasset.ToolTask
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var record model.ToolTaskRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tool_task_id = ?", event.ToolTaskID).First(&record).Error; err != nil {
@@ -84,20 +84,20 @@ func (r *Repository) ApplyToolTaskCompletedEventV1(ctx context.Context, event pr
 		case "succeeded":
 			after.Status = "succeeded"
 			after.ErrorCode = nil
-			if err := pr3.ValidateProviderAsyncResume(before, event, after); err != nil {
+			if err := toolasset.ValidateProviderAsyncResume(before, event, after); err != nil {
 				return err
 			}
 		case "failed":
 			after.Status = "failed"
 			errorCode := "PROVIDER_TERMINAL_FAILURE"
 			after.ErrorCode = &errorCode
-			if err := pr3.ValidateToolTask(after); err != nil {
+			if err := toolasset.ValidateToolTask(after); err != nil {
 				return err
 			}
 		case "cancelled":
 			after.Status = "cancelled"
 			after.ErrorCode = nil
-			if err := pr3.ValidateToolTask(after); err != nil {
+			if err := toolasset.ValidateToolTask(after); err != nil {
 				return err
 			}
 		default:
@@ -117,12 +117,12 @@ func (r *Repository) ApplyToolTaskCompletedEventV1(ctx context.Context, event pr
 		return nil
 	})
 	if err != nil {
-		return pr3.ToolTask{}, err
+		return toolasset.ToolTask{}, err
 	}
 	return updated, nil
 }
 
-func toolPlanRecord(plan pr3.ToolPlan) *model.ToolPlanRecord {
+func toolPlanRecord(plan toolasset.ToolPlan) *model.ToolPlanRecord {
 	return &model.ToolPlanRecord{
 		ToolPlanID:           plan.ToolPlanID,
 		RunID:                plan.RunID,
@@ -141,7 +141,7 @@ func toolPlanRecord(plan pr3.ToolPlan) *model.ToolPlanRecord {
 	}
 }
 
-func toolTaskRecord(task pr3.ToolTask) *model.ToolTaskRecord {
+func toolTaskRecord(task toolasset.ToolTask) *model.ToolTaskRecord {
 	return &model.ToolTaskRecord{
 		ToolTaskID:     task.ToolTaskID,
 		ToolPlanID:     task.ToolPlanID,
@@ -159,13 +159,13 @@ func toolTaskRecord(task pr3.ToolTask) *model.ToolTaskRecord {
 	}
 }
 
-func toolPlanContract(record model.ToolPlanRecord) (pr3.ToolPlan, error) {
-	var items []pr3.ToolPlanItem
+func toolPlanContract(record model.ToolPlanRecord) (toolasset.ToolPlan, error) {
+	var items []toolasset.ToolPlanItem
 	if err := json.Unmarshal(record.Items, &items); err != nil {
-		return pr3.ToolPlan{}, err
+		return toolasset.ToolPlan{}, err
 	}
-	plan := pr3.ToolPlan{
-		SchemaVersion:        pr3.SchemaVersionToolPlan,
+	plan := toolasset.ToolPlan{
+		SchemaVersion:        toolasset.SchemaVersionToolPlan,
 		ToolPlanID:           record.ToolPlanID,
 		RunID:                record.RunID,
 		BoardID:              record.BoardID,
@@ -181,19 +181,19 @@ func toolPlanContract(record model.ToolPlanRecord) (pr3.ToolPlan, error) {
 		CreatedAt:            record.CreatedAt,
 		UpdatedAt:            record.UpdatedAt,
 	}
-	if err := pr3.ValidateToolPlan(plan); err != nil {
-		return pr3.ToolPlan{}, err
+	if err := toolasset.ValidateToolPlan(plan); err != nil {
+		return toolasset.ToolPlan{}, err
 	}
 	return plan, nil
 }
 
-func toolTaskContract(record model.ToolTaskRecord) (pr3.ToolTask, error) {
-	var policy pr3.ProviderPolicy
+func toolTaskContract(record model.ToolTaskRecord) (toolasset.ToolTask, error) {
+	var policy toolasset.ProviderPolicy
 	if err := json.Unmarshal(record.ProviderPolicy, &policy); err != nil {
-		return pr3.ToolTask{}, err
+		return toolasset.ToolTask{}, err
 	}
-	task := pr3.ToolTask{
-		SchemaVersion:  pr3.SchemaVersionToolTask,
+	task := toolasset.ToolTask{
+		SchemaVersion:  toolasset.SchemaVersionToolTask,
 		ToolTaskID:     record.ToolTaskID,
 		ToolPlanID:     record.ToolPlanID,
 		ToolPlanItemID: record.ToolPlanItemID,
@@ -208,8 +208,8 @@ func toolTaskContract(record model.ToolTaskRecord) (pr3.ToolTask, error) {
 		CreatedAt:      record.CreatedAt,
 		UpdatedAt:      record.UpdatedAt,
 	}
-	if err := pr3.ValidateToolTask(task); err != nil {
-		return pr3.ToolTask{}, err
+	if err := toolasset.ValidateToolTask(task); err != nil {
+		return toolasset.ToolTask{}, err
 	}
 	return task, nil
 }

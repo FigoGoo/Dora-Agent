@@ -1,18 +1,18 @@
 SHELL := /usr/bin/env bash
 
-.PHONY: active-contract-gate pr0-ci-gate pr5-full-http-smoke pr5-browser-smoke go-test frontend-test admin-frontend-test
+.PHONY: active-contract-gate development-ci-gate release-full-http-smoke release-browser-smoke go-test frontend-test admin-frontend-test
 
 active-contract-gate:
 	scripts/validate-active-contracts.sh
 
-pr0-ci-gate:
-	scripts/validate-pr0-ci-gate.sh
+development-ci-gate:
+	scripts/validate-development-ci-gate.sh
 
-pr5-browser-smoke:
-	scripts/validate-pr5-browser-smoke.sh
+release-browser-smoke:
+	scripts/validate-release-browser-smoke.sh
 
-pr5-full-http-smoke:
-	scripts/validate-pr5-full-http-smoke.sh
+release-full-http-smoke:
+	scripts/validate-release-full-http-smoke.sh
 
 go-test:
 	go test ./services/... ./internal/...

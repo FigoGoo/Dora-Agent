@@ -77,7 +77,7 @@ FreezeSkillUsageCredits -> FreezeCredits
 当前 M0 / PR-1 使用 active contract gate 校验，包含 PR-1 到 PR-5 轻量 contract validator 和正式 JSON Schema fixture validator：
 
 ```bash
-python3 tests/contract/validate_pr1_contracts.py
+python3 tests/contract/validate_foundation_contracts.py
 python3 tests/contract/validate_json_schema_contracts.py
 make active-contract-gate
 ```

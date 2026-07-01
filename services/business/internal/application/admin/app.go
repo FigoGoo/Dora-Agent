@@ -33,7 +33,7 @@ func New(repo *businesscore.Repository, guard *idempotency.IdempotencyGuard, aud
 		guard:  guard,
 		audit:  audit,
 		now:    func() time.Time { return time.Now().UTC() },
-		secret: "local-m2-admin-preview-secret",
+		secret: "local-admin-preview-secret",
 	}
 }
 

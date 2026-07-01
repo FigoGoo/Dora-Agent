@@ -6,28 +6,28 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr3"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/toolasset"
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
 )
 
-func TestPR3AgentToolRepositoryWithActiveMigration(t *testing.T) {
-	db := testdb.StartPostgres(t, "dora_agent_pr3")
+func TestAgentToolRepositoryWithActiveMigration(t *testing.T) {
+	db := testdb.StartPostgres(t, "dora_agent_tool_asset")
 	migrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/2026-07-01-tool-credit-asset-contracts/agent")
 	testdb.RequireNoForeignKeys(t, db.DB)
 	if !testdb.TableExists(t, db.DB, "tool_plans") || !testdb.TableExists(t, db.DB, "tool_tasks") {
-		t.Fatal("PR-3 active agent migration tables missing")
+		t.Fatal("tool asset active agent migration tables missing")
 	}
 	if testdb.TableExists(t, db.DB, "credit_holds") || testdb.TableExists(t, db.DB, "generated_assets") {
 		t.Fatal("agent database must not contain business credit or asset tables")
 	}
 
 	var toolPlanFixture struct {
-		Precondition pr3.ToolPlanPrecondition `json:"precondition"`
-		ToolPlan     pr3.ToolPlan             `json:"tool_plan"`
+		Precondition toolasset.ToolPlanPrecondition `json:"precondition"`
+		ToolPlan     toolasset.ToolPlan             `json:"tool_plan"`
 	}
-	readPR3Fixture(t, "tests/fixtures/contracts/toolplan/city_video_toolplan.json", &toolPlanFixture)
-	if err := pr3.ValidateToolPlanForApprovedBoard(toolPlanFixture.Precondition, toolPlanFixture.ToolPlan); err != nil {
+	readToolAssetFixture(t, "tests/fixtures/contracts/toolplan/city_video_toolplan.json", &toolPlanFixture)
+	if err := toolasset.ValidateToolPlanForApprovedBoard(toolPlanFixture.Precondition, toolPlanFixture.ToolPlan); err != nil {
 		t.Fatalf("tool plan fixture contract: %v", err)
 	}
 
@@ -47,11 +47,11 @@ func TestPR3AgentToolRepositoryWithActiveMigration(t *testing.T) {
 	}
 
 	var resumeFixture struct {
-		ToolTaskBeforeRestart pr3.ToolTask                     `json:"tool_task_before_restart"`
-		RedisStreamEvent      pr3.ToolTaskCompletedStreamEvent `json:"redis_stream_event"`
-		ToolTaskAfterResume   pr3.ToolTask                     `json:"tool_task_after_resume"`
+		ToolTaskBeforeRestart toolasset.ToolTask                     `json:"tool_task_before_restart"`
+		RedisStreamEvent      toolasset.ToolTaskCompletedStreamEvent `json:"redis_stream_event"`
+		ToolTaskAfterResume   toolasset.ToolTask                     `json:"tool_task_after_resume"`
 	}
-	readPR3Fixture(t, "tests/fixtures/contracts/tool/provider_async_resume.json", &resumeFixture)
+	readToolAssetFixture(t, "tests/fixtures/contracts/tool/provider_async_resume.json", &resumeFixture)
 	if err := repo.SaveToolTaskV1(t.Context(), resumeFixture.ToolTaskBeforeRestart); err != nil {
 		t.Fatalf("save tool task: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestPR3AgentToolRepositoryWithActiveMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply provider completed event: %v", err)
 	}
-	if err := pr3.ValidateProviderAsyncResume(before, resumeFixture.RedisStreamEvent, after); err != nil {
+	if err := toolasset.ValidateProviderAsyncResume(before, resumeFixture.RedisStreamEvent, after); err != nil {
 		t.Fatalf("provider async resume contract: %v", err)
 	}
 	if after.OutputDigest == nil || *after.OutputDigest != resumeFixture.RedisStreamEvent.OutputDigest || after.Status != "succeeded" {
@@ -83,7 +83,7 @@ func TestPR3AgentToolRepositoryWithActiveMigration(t *testing.T) {
 	}
 }
 
-func readPR3Fixture(t *testing.T, relativePath string, target any) {
+func readToolAssetFixture(t *testing.T, relativePath string, target any) {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join(testdb.RepoRoot(t), relativePath))
 	if err != nil {

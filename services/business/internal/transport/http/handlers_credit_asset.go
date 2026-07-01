@@ -11,9 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func registerM4Routes(router *gin.Engine, opts RouterOptions) {
-	auth := m2Handler{account: opts.AccountSpace, admin: opts.Admin, project: opts.Project}
-	h := m4Handler{credit: opts.Credit, asset: opts.Asset, auth: auth}
+func registerCreditAssetRoutes(router *gin.Engine, opts RouterOptions) {
+	auth := accountProjectAdminHandler{account: opts.AccountSpace, admin: opts.Admin, project: opts.Project}
+	h := creditAssetHandler{credit: opts.Credit, asset: opts.Asset, auth: auth}
 
 	router.GET("/api/credits/summary", auth.userAuth(), h.creditSummary)
 	router.GET("/api/credits/ledger", auth.userAuth(), h.creditLedger)
@@ -36,13 +36,13 @@ func registerM4Routes(router *gin.Engine, opts RouterOptions) {
 	router.POST("/api/admin/credits/codes/:batch_id/export", auth.adminAuth(false), requireIdempotency(), h.exportRedeemCodes)
 }
 
-type m4Handler struct {
+type creditAssetHandler struct {
 	credit *credit.App
 	asset  *asset.App
-	auth   m2Handler
+	auth   accountProjectAdminHandler
 }
 
-func (h m4Handler) creditSummary(c *gin.Context) {
+func (h creditAssetHandler) creditSummary(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -51,7 +51,7 @@ func (h m4Handler) creditSummary(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) creditLedger(c *gin.Context) {
+func (h creditAssetHandler) creditLedger(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -60,7 +60,7 @@ func (h m4Handler) creditLedger(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) redeemCode(c *gin.Context) {
+func (h creditAssetHandler) redeemCode(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -85,7 +85,7 @@ func (h m4Handler) redeemCode(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) enterpriseCredits(c *gin.Context) {
+func (h creditAssetHandler) enterpriseCredits(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -94,7 +94,7 @@ func (h m4Handler) enterpriseCredits(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) enterpriseUsage(c *gin.Context) {
+func (h creditAssetHandler) enterpriseUsage(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -103,7 +103,7 @@ func (h m4Handler) enterpriseUsage(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) listAssets(c *gin.Context) {
+func (h creditAssetHandler) listAssets(c *gin.Context) {
 	if h.asset == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -112,7 +112,7 @@ func (h m4Handler) listAssets(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) getAsset(c *gin.Context) {
+func (h creditAssetHandler) getAsset(c *gin.Context) {
 	if h.asset == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -121,7 +121,7 @@ func (h m4Handler) getAsset(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) createUploadIntent(c *gin.Context) {
+func (h creditAssetHandler) createUploadIntent(c *gin.Context) {
 	if h.asset == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -152,7 +152,7 @@ func (h m4Handler) createUploadIntent(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) confirmUploadIntent(c *gin.Context) {
+func (h creditAssetHandler) confirmUploadIntent(c *gin.Context) {
 	if h.asset == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -179,7 +179,7 @@ func (h m4Handler) confirmUploadIntent(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) abortUploadIntent(c *gin.Context) {
+func (h creditAssetHandler) abortUploadIntent(c *gin.Context) {
 	if h.asset == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -199,7 +199,7 @@ func (h m4Handler) abortUploadIntent(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) getAssetAccess(c *gin.Context) {
+func (h creditAssetHandler) getAssetAccess(c *gin.Context) {
 	if h.asset == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -208,7 +208,7 @@ func (h m4Handler) getAssetAccess(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) searchCreditTargets(c *gin.Context) {
+func (h creditAssetHandler) searchCreditTargets(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -217,7 +217,7 @@ func (h m4Handler) searchCreditTargets(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) adminGrantCredits(c *gin.Context) {
+func (h creditAssetHandler) adminGrantCredits(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -249,7 +249,7 @@ func (h m4Handler) adminGrantCredits(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) listRedeemCodes(c *gin.Context) {
+func (h creditAssetHandler) listRedeemCodes(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -258,7 +258,7 @@ func (h m4Handler) listRedeemCodes(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) createRedeemCodes(c *gin.Context) {
+func (h creditAssetHandler) createRedeemCodes(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -321,7 +321,7 @@ func (h m4Handler) createRedeemCodes(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) disableRedeemCodeBatch(c *gin.Context) {
+func (h creditAssetHandler) disableRedeemCodeBatch(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
@@ -337,7 +337,7 @@ func (h m4Handler) disableRedeemCodeBatch(c *gin.Context) {
 	respond(c, out, err)
 }
 
-func (h m4Handler) exportRedeemCodes(c *gin.Context) {
+func (h creditAssetHandler) exportRedeemCodes(c *gin.Context) {
 	if h.credit == nil {
 		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
 		return
