@@ -42,6 +42,7 @@
 
 - Active Contract Gate：通过 / 未执行 / 不适用
 - PR-0 CI Gate：通过 / 未执行 / 不适用
+- PR-5 Browser Smoke：通过 / 未执行 / 不适用
 - 真实 PostgreSQL dry-run / down-test：通过 / 未执行 / 不适用
 - 真实 E2E：通过 / 未执行 / 不适用
 

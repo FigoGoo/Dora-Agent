@@ -42,7 +42,7 @@ PR-5 不新增业务字段，而是把 PR-1 到 PR-4 的契约串成可回放、
 | Agent HTTP/Redis E2E | `services/agent/internal/e2e/pr5/agent_http_redis_e2e_test.go` | `httptest` 走真实 Agent HTTP router，Redis 使用 testcontainers 真容器 |
 | Agent Process Smoke | `services/agent/internal/e2e/pr5/agent_process_smoke_test.go` | 构建并启动真实 `cmd/agent` 二进制，验证 Postgres + Redis + `/healthz` + `/readyz` |
 | Business Process Smoke | `services/business/internal/e2e/pr5/business_process_smoke_test.go` | 构建并启动真实 `cmd/business` 二进制，验证 Postgres + Kitex + `/healthz` + `/readyz` |
-| Browser Smoke | `tests/e2e/browser/pr5-frontend-browser-smoke.mjs` | 构建用户端 / 管理端，Vite preview + 本地 Chrome 验证 PR-5 前后台联动主路径 |
+| Browser Smoke | `scripts/validate-pr5-browser-smoke.sh`、`tests/e2e/browser/pr5-frontend-browser-smoke.mjs` | 构建用户端 / 管理端，Vite preview + 本地 Chrome 验证 PR-5 前后台联动主路径 |
 | Marketplace Guard | `services/business/internal/infra/repository/businesscore/pr4_marketplace.go` | `MARKETPLACE_LISTING_SUSPENDED` 新安装守卫，已存在 installation 幂等重放不受影响 |
 
 ## 开发注意事项
@@ -77,7 +77,8 @@ go test ./services/agent/internal/e2e/pr5 -run TestPR5AgentIndependentProcessHTT
 go test ./services/business/internal/e2e/pr5 -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v
 go test ./internal/contracts/pr5 ./services/business/internal/infra/repository/businesscore ./services/business/internal/e2e/pr5
 go test ./internal/contracts/pr3 ./internal/contracts/pr4 ./internal/contracts/pr5 ./services/business/internal/e2e/pr5
-npm --prefix tests/e2e/browser run smoke
+scripts/validate-pr5-browser-smoke.sh
+make pr5-browser-smoke
 make active-contract-gate
 make pr0-ci-gate
 ```
@@ -93,7 +94,8 @@ go test ./services/agent/internal/e2e/pr5 -run TestPR5AgentIndependentProcessHTT
 go test ./services/business/internal/e2e/pr5 -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v
 go test ./internal/contracts/pr5 ./services/business/internal/infra/repository/businesscore ./services/business/internal/e2e/pr5
 go test ./internal/contracts/pr3 ./internal/contracts/pr4 ./internal/contracts/pr5 ./services/business/internal/e2e/pr5
-npm --prefix tests/e2e/browser run smoke
+scripts/validate-pr5-browser-smoke.sh
+make pr5-browser-smoke
 make active-contract-gate
 make pr0-ci-gate
 ```

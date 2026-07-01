@@ -53,6 +53,7 @@ PR-1 / PR-2 / PR-3 / PR-4 / PR-5 当前范围：
 - `tests/e2e/agent-workspace/**`
 - `tests/e2e/skill-marketplace/**`
 - `tests/e2e/admin-governance/**`
+- `scripts/validate-pr5-browser-smoke.sh`
 - `tests/e2e/browser/**`
 - `tests/fixtures/e2e/**`
 - `docs/active/technical/release-governance.md`

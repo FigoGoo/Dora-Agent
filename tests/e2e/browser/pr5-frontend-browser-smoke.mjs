@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
@@ -9,9 +10,40 @@ import { chromium } from 'playwright-core';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../..');
 const defaultChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const chromePathCandidates = [
+  defaultChrome,
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser'
+];
+const chromeBinaryCandidates = [
+  'google-chrome',
+  'google-chrome-stable',
+  'chromium',
+  'chromium-browser'
+];
 
 function log(message) {
   console.log(`[pr5-browser] ${message}`);
+}
+
+function resolveChromeExecutable() {
+  if (process.env.CHROME_EXECUTABLE) {
+    return process.env.CHROME_EXECUTABLE;
+  }
+  for (const candidate of chromePathCandidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  for (const binary of chromeBinaryCandidates) {
+    const result = spawnSync('which', [binary], { encoding: 'utf8' });
+    if (result.status === 0 && result.stdout.trim()) {
+      return result.stdout.trim().split('\n')[0];
+    }
+  }
+  throw new Error('Chrome executable not found; set CHROME_EXECUTABLE to a local Chrome or Chromium binary.');
 }
 
 function run(command, args, options = {}) {
@@ -385,7 +417,8 @@ async function runAdminFrontendSmoke(browser, baseURL) {
 }
 
 async function main() {
-  const chromeExecutable = process.env.CHROME_EXECUTABLE || defaultChrome;
+  const chromeExecutable = resolveChromeExecutable();
+  log(`using Chrome executable: ${chromeExecutable}`);
   const skipBuild = process.argv.includes('--skip-build');
   if (!skipBuild) {
     log('building frontend bundles');

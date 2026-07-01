@@ -4,7 +4,7 @@
 owner：文档与契约责任域 / 测试与验收责任域 / 工程基础设施责任域  
 更新时间：2026-07-01  
 适用范围：M7 active 拆分完成后的开发准备、CI gate、本地验证入口和后续 PR-1 到 PR-5 开发准入  
-相关代码路径：`scripts/validate-active-contracts.sh`、`scripts/validate-pr0-ci-gate.sh`、`Makefile`、`.github/workflows/active-contract-gates.yml`  
+相关代码路径：`scripts/validate-active-contracts.sh`、`scripts/validate-pr0-ci-gate.sh`、`scripts/validate-pr5-browser-smoke.sh`、`Makefile`、`.github/workflows/active-contract-gates.yml`
 相关契约：`docs/active/contracts/pr-roadmap.md`、`docs/active/contracts/index.md`、`docs/active/technical/release-governance.md`
 
 ## 背景
@@ -31,7 +31,8 @@ PR-1 到 PR-5 active 契约、fixture、fake provider 和 release gate 已冻结
 | --- | --- | --- | --- |
 | Active Contract Gate | `scripts/validate-active-contracts.sh` | PR-1 到 PR-5 validator、OpenAPI 解析、migration static guard、active 文档状态扫描 | 任一契约、fixture、OpenAPI、migration 或状态残留失败 |
 | PR-0 CI Gate | `scripts/validate-pr0-ci-gate.sh` | Active Contract Gate、Go 测试、用户端测试/build、管理端测试/build | 任一基础测试或构建失败 |
-| Makefile 快捷入口 | `make active-contract-gate`、`make pr0-ci-gate` | 本地开发快速验证 | 同对应脚本 |
+| PR-5 Browser Smoke | `scripts/validate-pr5-browser-smoke.sh` | 本地 Chrome + Vite preview 覆盖用户端 Skill 市场、创作者提交和管理端结算治理 | 前后台构建、真实 DOM、fetch 请求或幂等 key 断言失败 |
+| Makefile 快捷入口 | `make active-contract-gate`、`make pr0-ci-gate`、`make pr5-browser-smoke` | 本地开发快速验证 | 同对应脚本 |
 | GitHub Actions | `.github/workflows/active-contract-gates.yml` | PR 和 main/master push | 任一 job 失败 |
 
 ## 后续开发顺序
@@ -68,6 +69,7 @@ PR-0 开发准备与 CI Gate
 
 - [x] Active Contract Gate 脚本存在。
 - [x] PR-0 CI Gate 脚本存在。
+- [x] PR-5 Browser Smoke 脚本存在。
 - [x] Makefile 快捷入口存在。
 - [x] GitHub Actions workflow 存在。
 - [x] `scripts/validate-active-contracts.sh` 本地通过。
@@ -88,8 +90,10 @@ PR-0 开发准备与 CI Gate
 ```bash
 scripts/validate-active-contracts.sh
 scripts/validate-pr0-ci-gate.sh
+scripts/validate-pr5-browser-smoke.sh
 make active-contract-gate
 make pr0-ci-gate
+make pr5-browser-smoke
 go test ./services/agent/internal/infra/repository
 go test ./services/business/internal/infra/repository/businesscore
 go test ./services/business/internal/e2e/pr5
@@ -103,6 +107,7 @@ go test ./services/business/internal/e2e/pr5 -run TestPR5BusinessIndependentProc
 ```text
 active contract gate passed
 PR-0 CI gate passed
+PR-5 frontend browser smoke passed
 ok github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/infra/repository/businesscore
 ok github.com/FigoGoo/Dora-Agent/services/business/internal/e2e/pr5

@@ -29,6 +29,7 @@ PR-0 后，本地和 CI 的默认验证入口：
 ```text
 make active-contract-gate
 make pr0-ci-gate
+make pr5-browser-smoke
 ```
 
 后续进入真实 DB / E2E 前仍必须补充：
@@ -38,5 +39,5 @@ make pr0-ci-gate
 - PR-5 已完成本地 Agent HTTP router + Redis container E2E：`go test ./services/agent/internal/e2e/pr5`。
 - PR-5 已完成本地 Agent 独立进程 HTTP smoke：`go test ./services/agent/internal/e2e/pr5 -run TestPR5AgentIndependentProcessHTTPSmoke -count=1 -v`。
 - PR-5 已完成本地 Business 独立进程 HTTP smoke：`go test ./services/business/internal/e2e/pr5 -run TestPR5BusinessIndependentProcessHTTPSmoke -count=1 -v`。
-- PR-5 已完成本地真实浏览器前端联动 smoke：`npm --prefix tests/e2e/browser run smoke`。
+- PR-5 已完成本地真实浏览器前端联动 smoke：`scripts/validate-pr5-browser-smoke.sh` 或 `make pr5-browser-smoke`。
 - PR-5 完整测试环境 HTTP 服务 E2E 执行和测试报告仍是发布前 gate。

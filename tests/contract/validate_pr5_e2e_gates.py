@@ -16,6 +16,9 @@ BROWSER_SMOKE_DIR = E2E_ROOT / "browser"
 FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "e2e"
 CONTRACT_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "contracts"
 RELEASE_GOVERNANCE_DOC = REPO_ROOT / "docs" / "active" / "technical" / "release-governance.md"
+BROWSER_SMOKE_SCRIPT = REPO_ROOT / "scripts" / "validate-pr5-browser-smoke.sh"
+MAKEFILE = REPO_ROOT / "Makefile"
+ACTIVE_CONTRACT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "active-contract-gates.yml"
 
 REQUIRED_BEHAVIORS = {
     "deterministic_success",
@@ -232,7 +235,7 @@ def validate_browser_smoke() -> None:
     package_json = BROWSER_SMOKE_DIR / "package.json"
     package_lock = BROWSER_SMOKE_DIR / "package-lock.json"
     smoke_script = BROWSER_SMOKE_DIR / "pr5-frontend-browser-smoke.mjs"
-    for path in (package_json, package_lock, smoke_script):
+    for path in (package_json, package_lock, smoke_script, BROWSER_SMOKE_SCRIPT, MAKEFILE, ACTIVE_CONTRACT_WORKFLOW):
         if not path.exists():
             fail(f"missing {path}")
 
@@ -246,6 +249,20 @@ def validate_browser_smoke() -> None:
     for token in REQUIRED_BROWSER_SMOKE_TOKENS:
         if token not in script_text:
             fail(f"{smoke_script}: missing browser smoke token {token}")
+
+    shell_text = BROWSER_SMOKE_SCRIPT.read_text(encoding="utf-8")
+    for token in ("CHROME_EXECUTABLE", "npm --prefix tests/e2e/browser run smoke"):
+        if token not in shell_text:
+            fail(f"{BROWSER_SMOKE_SCRIPT}: missing browser smoke token {token}")
+
+    makefile_text = MAKEFILE.read_text(encoding="utf-8")
+    if "pr5-browser-smoke" not in makefile_text:
+        fail(f"{MAKEFILE}: missing pr5-browser-smoke target")
+
+    workflow_text = ACTIVE_CONTRACT_WORKFLOW.read_text(encoding="utf-8")
+    for token in ("pr5-browser-smoke", "tests/e2e/browser/package-lock.json", "scripts/validate-pr5-browser-smoke.sh"):
+        if token not in workflow_text:
+            fail(f"{ACTIVE_CONTRACT_WORKFLOW}: missing browser smoke token {token}")
     print("pr5 browser smoke artifacts ok")
 
 
