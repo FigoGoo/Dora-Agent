@@ -39,6 +39,7 @@ Thrift / OpenAPI / JSON Schema / SQL / fixture = 字段级事实源
 | creative.router.decided | v1 | Agent Runtime + Frontend | `api/agui/events/creative.router.decided.schema.json` | Agent Runtime | Frontend / Test | `tests/fixtures/contracts/agui/` | `02-M1` | active |
 | cost_disclosure.skill_usage.presented | v1 | Agent Runtime + Business Credit | `api/agui/events/cost_disclosure.skill_usage.presented.schema.json` | Agent Runtime | Frontend / Test | `tests/fixtures/contracts/agui/` | `05-M4` / `06-M5` | active |
 | confirmation.required | v1 | Agent Runtime + Frontend | `api/agui/events/confirmation.required.schema.json` | Agent Runtime | Frontend / Test | `tests/fixtures/contracts/agui/` | `01-M0` / `05-M4` | active |
+| JSONSchemaContractValidator | v1 | 文档与契约责任域 / 测试与验收 | `tests/contract/validate_json_schema_contracts.py`、`requirements/contract-gates.txt` | Test | CI / Agent / Business / Frontend | `api/schemas/**`、`api/agui/**`、`tests/fixtures/contracts/**` | `01-M0` / `08-M7` | active |
 
 ## PR-2 契约索引
 

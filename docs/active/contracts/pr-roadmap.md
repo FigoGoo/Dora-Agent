@@ -61,7 +61,7 @@ PR-1 Contract Index + StateEnum + RouterDecision + AG-UI Envelope
 
 | PR | 最小验证命令 | 结果要求 |
 | --- | --- | --- |
-| PR-1 | `python3 tests/contract/validate_pr1_contracts.py` | JSON、Router fixture、AG-UI fixture 通过 |
+| PR-1 | `python3 tests/contract/validate_pr1_contracts.py`、`python3 tests/contract/validate_json_schema_contracts.py` | JSON、Router fixture、AG-UI fixture、JSON Schema examples 和 mapped contract fixtures 通过 |
 | PR-2 | `python3 tests/contract/validate_pr2_contracts.py` | Board replay、GraphPlan digest、agent migration static guard 通过 |
 | PR-3 | `python3 tests/contract/validate_pr3_contracts.py`、`go test ./services/agent/internal/infra/repository ./services/business/internal/infra/repository/businesscore` | ToolPlan digest、freeze/commit/release、asset partial success、agent/business migration up/down 通过 |
 | PR-4 | `python3 tests/contract/validate_pr4_contracts.py`、`go test ./services/business/internal/infra/repository/businesscore` | Marketplace API/RPC、usage record、installation、settlement fixture、business migration up/down 通过 |

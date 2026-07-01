@@ -74,18 +74,12 @@ FreezeSkillUsageCredits -> FreezeCredits
 
 ## 验收命令
 
-当前 M0 / PR-1 使用无外部依赖的轻量 contract 校验：
+当前 M0 / PR-1 使用 active contract gate 校验，包含 PR-1 到 PR-5 轻量 contract validator 和正式 JSON Schema fixture validator：
 
 ```bash
 python3 tests/contract/validate_pr1_contracts.py
-```
-
-后续 CI 必须补充正式 JSON Schema / OpenAPI / Thrift / SQL 校验：
-
-```text
-make schema-validate
-make agui-fixture-test
-make fixture-test
+python3 tests/contract/validate_json_schema_contracts.py
+make active-contract-gate
 ```
 
 ## Done Gate
@@ -103,6 +97,6 @@ make fixture-test
 - [x] PR-5 本地 Agent HTTP router + Redis container E2E 已完成。
 - [x] PR-5 本地 Agent 独立进程 HTTP smoke 已完成。
 - [x] PR-5 本地 Business 独立进程 HTTP smoke 已完成。
-- [ ] 正式 JSON Schema validator 接入 CI。
+- [x] 正式 JSON Schema validator 接入 CI。
 - [x] PR-5 本地真实浏览器前端联动 smoke 执行完成。
 - [ ] PR-5 完整测试环境 HTTP 服务 E2E 环境执行完成前，不进入对应 M1-M6 后续真实流量发布。

@@ -57,11 +57,13 @@ PR-1 / PR-2 / PR-3 / PR-4 / PR-5 当前范围：
 - `tests/e2e/browser/**`
 - `tests/fixtures/e2e/**`
 - `docs/active/technical/release-governance.md`
+- `requirements/contract-gates.txt`
 - `tests/contract/validate_pr1_contracts.py`
 - `tests/contract/validate_pr2_contracts.py`
 - `tests/contract/validate_pr3_contracts.py`
 - `tests/contract/validate_pr4_contracts.py`
 - `tests/contract/validate_pr5_e2e_gates.py`
+- `tests/contract/validate_json_schema_contracts.py`
 
 ## 需要重建的契约
 

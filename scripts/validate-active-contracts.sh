@@ -10,6 +10,7 @@ python3 tests/contract/validate_pr2_contracts.py
 python3 tests/contract/validate_pr3_contracts.py
 python3 tests/contract/validate_pr4_contracts.py
 python3 tests/contract/validate_pr5_e2e_gates.py
+python3 tests/contract/validate_json_schema_contracts.py
 
 echo "== OpenAPI YAML parse =="
 python3 - <<'PY'

@@ -21,6 +21,7 @@ owner：测试与验收责任域
 | Fake provider E2E | `tests/e2e/fake-provider/**` | PR-5 |
 | E2E fixtures | `tests/fixtures/e2e/**` | PR-5 |
 | Browser smoke | `tests/e2e/browser/**` | PR-5 |
+| JSON Schema validator | `tests/contract/validate_json_schema_contracts.py` | PR-1 ~ PR-5 |
 
 ## Gate
 
