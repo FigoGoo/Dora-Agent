@@ -11,11 +11,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr1"
+	"github.com/FigoGoo/Dora-Agent/internal/contracts/pr2"
 	"github.com/FigoGoo/Dora-Agent/kitex_gen/dora/api/businessagent"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/apperror"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state"
+	runtimestream "github.com/FigoGoo/Dora-Agent/services/agent/internal/events/stream"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
+	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/creation"
 	runtimeeino "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/eino"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/modeltool"
 	runtimesafety "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/safety"
@@ -461,6 +465,9 @@ type App struct {
 	artifactUploader ArtifactUploader
 	turnLoop         turnloop.TurnLoop
 	generationQueue  GenerationJobQueue
+	aguiEventBus     runtimestream.AGUIEventBus
+	snapshotCache    runtimestream.SnapshotCache
+	turnLock         runtimestream.TurnLock
 }
 
 var errToolConfirmationRequired = errors.New("tool confirmation required")
@@ -496,6 +503,18 @@ func (a *App) SetModelAdapter(adapter modeltool.Adapter) {
 
 func (a *App) SetGenerationQueue(queue GenerationJobQueue) {
 	a.generationQueue = queue
+}
+
+func (a *App) SetRuntimePrimitives(bus runtimestream.AGUIEventBus, cache runtimestream.SnapshotCache, lock runtimestream.TurnLock) {
+	if bus != nil {
+		a.aguiEventBus = bus
+	}
+	if cache != nil {
+		a.snapshotCache = cache
+	}
+	if lock != nil {
+		a.turnLock = lock
+	}
 }
 
 func (a *App) ResolveAuthContextFromToken(ctx context.Context, authorization string, expectedSpaceID string, traceID string) (AuthContextDTO, error) {
@@ -742,6 +761,42 @@ type CreateRunResponse struct {
 	Status          string `json:"status"`
 	StreamURL       string `json:"stream_url"`
 	SnapshotVersion string `json:"snapshot_version"`
+}
+
+type CreativeBoardResponse struct {
+	Board    pr2.CreativeBoard `json:"board"`
+	Snapshot pr2.BoardSnapshot `json:"snapshot"`
+}
+
+type ApproveCreativeBoardRequest struct {
+	ApprovedBy     string `json:"approved_by"`
+	BoardVersion   int    `json:"board_version"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type ApproveCreativeBoardResponse struct {
+	Board pr2.CreativeBoard `json:"board"`
+	Patch *pr2.BoardPatch   `json:"patch,omitempty"`
+}
+
+type ApplyBoardPatchRequest struct {
+	Patch          pr2.BoardPatch `json:"patch"`
+	IdempotencyKey string         `json:"idempotency_key"`
+}
+
+type ApplyBoardPatchResponse struct {
+	Board pr2.CreativeBoard `json:"board"`
+	Patch pr2.BoardPatch    `json:"patch"`
+}
+
+type boardPatchAfterState struct {
+	BoardAfter        pr2.CreativeBoard     `json:"board_after"`
+	ElementsAfter     []pr2.CreativeElement `json:"elements_after"`
+	ChangedElementIDs []string              `json:"changed_element_ids"`
+}
+
+type GraphPlanResponse struct {
+	GraphPlan pr2.GraphPlan `json:"graph_plan"`
 }
 
 func (a *App) CreateSession(ctx context.Context, auth AuthContextDTO, req CreateSessionRequest, traceID string) (CreateSessionResponse, error) {
@@ -1217,7 +1272,14 @@ func (a *App) CancelRun(ctx context.Context, auth AuthContextDTO, runID string, 
 func (a *App) ReplayEvents(ctx context.Context, auth AuthContextDTO, runID string, afterSequence int64, limit int, traceID string) (EventReplayResponse, error) {
 	run, err := a.repo.GetRun(ctx, runID)
 	if err != nil {
-		return EventReplayResponse{}, apperror.New(apperror.CodeResourceNotFound, "run not found")
+		pr2Replay, pr2Err := a.replayPR2Events(ctx, auth, runID, afterSequence, limit, traceID)
+		if pr2Err == nil {
+			return pr2Replay, nil
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return EventReplayResponse{}, pr2Err
+		}
+		return EventReplayResponse{}, err
 	}
 	if _, err := a.requireSession(ctx, auth, run.SessionID); err != nil {
 		return EventReplayResponse{}, err
@@ -1243,12 +1305,203 @@ func (a *App) ReplayEvents(ctx context.Context, auth AuthContextDTO, runID strin
 	return EventReplayResponse{Events: items, NextSequence: next, HasMore: hasMore}, nil
 }
 
+func (a *App) replayPR2Events(ctx context.Context, auth AuthContextDTO, runID string, afterSequence int64, limit int, traceID string) (EventReplayResponse, error) {
+	run, err := a.requirePR2RunAccess(ctx, auth, runID, businessagent.ProjectAccessPurpose_VIEW, traceID)
+	if err != nil {
+		return EventReplayResponse{}, err
+	}
+	limit, _ = normalizePage(limit, 0, 200)
+	if replay, ok := a.replayPR2EventsFromBus(ctx, run, afterSequence, limit); ok {
+		return replay, nil
+	}
+	rows, err := a.repo.ListRunEventsV1AfterSeq(ctx, runID, afterSequence, limit+1)
+	if err != nil {
+		return EventReplayResponse{}, err
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	items := make([]EventDTO, 0, len(rows))
+	next := afterSequence
+	for _, row := range rows {
+		items = append(items, pr2EventDTO(run, row))
+		next = row.Seq
+	}
+	return EventReplayResponse{Events: items, NextSequence: next, HasMore: hasMore}, nil
+}
+
+func (a *App) replayPR2EventsFromBus(ctx context.Context, run model.AgentRunRecord, afterSequence int64, limit int) (EventReplayResponse, bool) {
+	if a.aguiEventBus == nil {
+		return EventReplayResponse{}, false
+	}
+	events, err := a.aguiEventBus.ReplayAGUI(ctx, run.RunID, afterSequence, limit+1)
+	if err != nil || len(events) == 0 {
+		return EventReplayResponse{}, false
+	}
+	for index, event := range events {
+		if event.RunID != run.RunID || event.Seq != afterSequence+int64(index)+1 {
+			return EventReplayResponse{}, false
+		}
+	}
+	hasMore := len(events) > limit
+	if hasMore {
+		events = events[:limit]
+	}
+	items := make([]EventDTO, 0, len(events))
+	next := afterSequence
+	for _, event := range events {
+		items = append(items, aguiEnvelopeDTO(run, event))
+		next = event.Seq
+	}
+	return EventReplayResponse{Events: items, NextSequence: next, HasMore: hasMore}, true
+}
+
 func (a *App) BuildRunSnapshot(ctx context.Context, auth AuthContextDTO, runID string, traceID string) (SnapshotResponse, error) {
 	run, err := a.repo.GetRun(ctx, runID)
 	if err != nil {
 		return SnapshotResponse{}, apperror.New(apperror.CodeResourceNotFound, "run not found")
 	}
 	return a.buildSnapshot(ctx, auth, run.SessionID, run, traceID)
+}
+
+func (a *App) GetCreativeBoard(ctx context.Context, auth AuthContextDTO, boardID string, traceID string) (CreativeBoardResponse, error) {
+	board, err := a.repo.GetCreativeBoardV1(ctx, boardID)
+	if err != nil {
+		return CreativeBoardResponse{}, apperror.New(apperror.CodeResourceNotFound, "board not found")
+	}
+	run, err := a.requirePR2RunAccess(ctx, auth, board.RunID, businessagent.ProjectAccessPurpose_VIEW, traceID)
+	if err != nil {
+		return CreativeBoardResponse{}, err
+	}
+	if run.ProjectID != board.ProjectID {
+		return CreativeBoardResponse{}, apperror.New(apperror.CodeStateConflict, "board project does not match run project")
+	}
+	snapshot, err := a.repo.GetBoardSnapshotV1(ctx, boardID)
+	if err != nil {
+		return CreativeBoardResponse{}, err
+	}
+	return CreativeBoardResponse{Board: board, Snapshot: snapshot}, nil
+}
+
+func (a *App) ApplyBoardPatch(ctx context.Context, auth AuthContextDTO, boardID string, req ApplyBoardPatchRequest, traceID string) (ApplyBoardPatchResponse, error) {
+	patch := req.Patch
+	if patch.IdempotencyKey == "" {
+		patch.IdempotencyKey = req.IdempotencyKey
+	} else if req.IdempotencyKey != "" && patch.IdempotencyKey != req.IdempotencyKey {
+		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeInvalidArgument, "idempotency_key must match patch")
+	}
+	if strings.TrimSpace(boardID) == "" || strings.TrimSpace(patch.IdempotencyKey) == "" {
+		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeInvalidArgument, "board_id and idempotency_key are required")
+	}
+	if patch.BoardID != boardID {
+		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeInvalidArgument, "patch board_id does not match path")
+	}
+	if patch.Operation == pr2.BoardPatchOperationApproveBoard {
+		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeInvalidArgument, "approve_board patch must use board approval endpoint")
+	}
+	current, err := a.repo.GetCreativeBoardV1(ctx, boardID)
+	if err != nil {
+		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeResourceNotFound, "board not found")
+	}
+	run, err := a.requirePR2RunAccess(ctx, auth, current.RunID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
+	if err != nil {
+		return ApplyBoardPatchResponse{}, err
+	}
+	if run.ProjectID != current.ProjectID {
+		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeStateConflict, "board project does not match run project")
+	}
+	if current.Status == "approved" || current.ToolPlanAllowed {
+		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeStateConflict, "approved board cannot be patched before PR-3 ToolPlan flow")
+	}
+	payload, err := boardPatchAfterStatePayload(patch.Payload)
+	if err != nil {
+		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeInvalidArgument, err.Error())
+	}
+	if payload.BoardAfter.BoardID != boardID || payload.BoardAfter.RunID != current.RunID || payload.BoardAfter.ProjectID != current.ProjectID || payload.BoardAfter.SessionID != current.SessionID {
+		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeStateConflict, "after-state board identity does not match current board")
+	}
+	if payload.BoardAfter.Version != patch.TargetVersion || patch.BaseVersion != current.Version {
+		return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeStateConflict, "patch version does not match current board")
+	}
+	if err := a.repo.ApplyBoardPatchAfterStateV1(ctx, patch, payload.BoardAfter, payload.ElementsAfter); err != nil {
+		if errors.Is(err, repository.ErrBoardVersionConflict) {
+			return ApplyBoardPatchResponse{}, apperror.New(apperror.CodeStateConflict, "board version conflict")
+		}
+		return ApplyBoardPatchResponse{}, err
+	}
+	if err := a.appendBoardPatchEvents(ctx, run, patch, payload.BoardAfter, auth.ActorUserID, traceID, payload.ChangedElementIDs); err != nil {
+		return ApplyBoardPatchResponse{}, err
+	}
+	return ApplyBoardPatchResponse{Board: payload.BoardAfter, Patch: patch}, nil
+}
+
+func (a *App) ApproveCreativeBoard(ctx context.Context, auth AuthContextDTO, boardID string, req ApproveCreativeBoardRequest, traceID string) (ApproveCreativeBoardResponse, error) {
+	if strings.TrimSpace(boardID) == "" || strings.TrimSpace(req.IdempotencyKey) == "" || req.BoardVersion < 1 {
+		return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodeInvalidArgument, "board_id, board_version and idempotency_key are required")
+	}
+	actor := strings.TrimSpace(req.ApprovedBy)
+	if actor == "" {
+		actor = auth.ActorUserID
+	}
+	if actor == "" {
+		return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodeUnauthenticated, "auth context is required")
+	}
+	if auth.ActorUserID != "" && actor != auth.ActorUserID {
+		return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodePermissionDenied, "approved_by must match current actor")
+	}
+	board, err := a.repo.GetCreativeBoardV1(ctx, boardID)
+	if err != nil {
+		return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodeResourceNotFound, "board not found")
+	}
+	run, err := a.requirePR2RunAccess(ctx, auth, board.RunID, businessagent.ProjectAccessPurpose_CONTINUE_CREATION, traceID)
+	if err != nil {
+		return ApproveCreativeBoardResponse{}, err
+	}
+	if run.ProjectID != board.ProjectID {
+		return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodeStateConflict, "board project does not match run project")
+	}
+	if board.Status == "approved" && board.Version == req.BoardVersion+1 {
+		return ApproveCreativeBoardResponse{Board: board}, nil
+	}
+	if board.Status != "ready" || board.Version != req.BoardVersion {
+		return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodeStateConflict, "board version or status is not approvable")
+	}
+	approvedAt := time.Now().UTC()
+	if approvedAt.Before(board.UpdatedAt) {
+		approvedAt = board.UpdatedAt.Add(time.Nanosecond)
+	}
+	runtime := creation.New(nil)
+	approval, err := runtime.ApproveBoard(ctx, creation.ApproveBoardInput{
+		Board:          board,
+		ActorUserID:    actor,
+		IdempotencyKey: req.IdempotencyKey,
+		ApprovedAt:     approvedAt,
+	})
+	if err != nil {
+		return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodeInvalidArgument, err.Error())
+	}
+	if err := a.repo.ApplyBoardApprovalV1(ctx, approval.Patch, approval.Board); err != nil {
+		if errors.Is(err, repository.ErrBoardVersionConflict) {
+			return ApproveCreativeBoardResponse{}, apperror.New(apperror.CodeStateConflict, "board version conflict")
+		}
+		return ApproveCreativeBoardResponse{}, err
+	}
+	if err := a.appendBoardApprovalEvents(ctx, run, approval.Patch, approval.Board, actor, traceID); err != nil {
+		return ApproveCreativeBoardResponse{}, err
+	}
+	return ApproveCreativeBoardResponse{Board: approval.Board, Patch: &approval.Patch}, nil
+}
+
+func (a *App) GetGraphPlan(ctx context.Context, auth AuthContextDTO, graphPlanID string, traceID string) (GraphPlanResponse, error) {
+	plan, err := a.repo.GetGraphPlanV1(ctx, graphPlanID)
+	if err != nil {
+		return GraphPlanResponse{}, apperror.New(apperror.CodeResourceNotFound, "graph plan not found")
+	}
+	if _, err := a.requirePR2RunAccess(ctx, auth, plan.RunID, businessagent.ProjectAccessPurpose_VIEW, traceID); err != nil {
+		return GraphPlanResponse{}, err
+	}
+	return GraphPlanResponse{GraphPlan: plan}, nil
 }
 
 func (a *App) BuildSessionSnapshot(ctx context.Context, auth AuthContextDTO, sessionID string, traceID string) (SnapshotResponse, error) {
@@ -1333,6 +1586,31 @@ func (a *App) requireViewProjectAccess(ctx context.Context, auth AuthContextDTO,
 		return ProjectAccessDTO{}, err
 	}
 	return access, nil
+}
+
+func (a *App) requirePR2RunAccess(ctx context.Context, auth AuthContextDTO, runID string, purpose businessagent.ProjectAccessPurpose, traceID string) (model.AgentRunRecord, error) {
+	if auth.ActorUserID == "" {
+		return model.AgentRunRecord{}, apperror.New(apperror.CodeUnauthenticated, "auth context is required")
+	}
+	run, err := a.repo.GetAgentRunV1(ctx, runID)
+	if err != nil {
+		return model.AgentRunRecord{}, apperror.New(apperror.CodeResourceNotFound, "run not found")
+	}
+	if a.gateway == nil {
+		return model.AgentRunRecord{}, apperror.New(apperror.CodeNotImplemented, "business gateway is not configured")
+	}
+	access, err := a.gateway.CheckProjectAccess(ctx, auth, run.ProjectID, purpose, traceID)
+	if err != nil {
+		return model.AgentRunRecord{}, mapBusinessError(err)
+	}
+	if purpose == businessagent.ProjectAccessPurpose_CONTINUE_CREATION {
+		if err := ensureCreativeProjectAccess(access); err != nil {
+			return model.AgentRunRecord{}, err
+		}
+	} else if err := ensureViewProjectAccess(access); err != nil {
+		return model.AgentRunRecord{}, err
+	}
+	return run, nil
 }
 
 func (a *App) requireInterrupt(ctx context.Context, auth AuthContextDTO, runID string, interruptID string, purpose businessagent.ProjectAccessPurpose, traceID string) (*model.Run, *model.Interrupt, error) {
@@ -3282,6 +3560,177 @@ func taskDTOs(tasks []model.Task) []TaskDTO {
 		})
 	}
 	return out
+}
+
+func boardPatchAfterStatePayload(payload map[string]any) (boardPatchAfterState, error) {
+	if payload == nil {
+		return boardPatchAfterState{}, errors.New("patch payload is required")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return boardPatchAfterState{}, err
+	}
+	var decoded boardPatchAfterState
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return boardPatchAfterState{}, err
+	}
+	if decoded.BoardAfter.BoardID == "" || decoded.ElementsAfter == nil {
+		return boardPatchAfterState{}, errors.New("patch payload requires board_after and elements_after")
+	}
+	if decoded.BoardAfter.ElementsCount != len(decoded.ElementsAfter) {
+		return boardPatchAfterState{}, errors.New("board_after.elements_count must match elements_after length")
+	}
+	if len(decoded.ChangedElementIDs) == 0 {
+		for _, element := range decoded.ElementsAfter {
+			decoded.ChangedElementIDs = append(decoded.ChangedElementIDs, element.ElementID)
+		}
+	}
+	return decoded, nil
+}
+
+func pr2EventDTO(run model.AgentRunRecord, event model.RunEventRecord) EventDTO {
+	payload := map[string]any{}
+	_ = json.Unmarshal(event.Payload, &payload)
+	return EventDTO{
+		EventID:              event.EventID,
+		Type:                 event.EventType,
+		SessionID:            run.SessionID,
+		RunID:                event.RunID,
+		ProjectID:            run.ProjectID,
+		Sequence:             event.Seq,
+		Timestamp:            event.CreatedAt,
+		Component:            "agent",
+		TraceID:              event.TraceID,
+		PayloadSchemaVersion: event.PayloadSchemaVersion,
+		Payload:              payload,
+	}
+}
+
+func aguiEnvelopeDTO(run model.AgentRunRecord, event pr1.AGUIEnvelope) EventDTO {
+	spaceID := ""
+	if event.SpaceID != nil {
+		spaceID = *event.SpaceID
+	}
+	actorUserID := ""
+	if event.ActorUserID != nil {
+		actorUserID = *event.ActorUserID
+	}
+	traceID := run.TraceID
+	if event.TraceID != nil {
+		traceID = *event.TraceID
+	}
+	return EventDTO{
+		EventID:              event.EventID,
+		Type:                 event.EventType,
+		SessionID:            event.SessionID,
+		RunID:                event.RunID,
+		ProjectID:            event.ProjectID,
+		SpaceID:              spaceID,
+		ActorUserID:          actorUserID,
+		Sequence:             event.Seq,
+		Timestamp:            event.CreatedAt,
+		Component:            "agent",
+		TraceID:              traceID,
+		PayloadSchemaVersion: event.PayloadSchemaVersion,
+		Payload:              event.Payload,
+	}
+}
+
+func (a *App) appendBoardApprovalEvents(ctx context.Context, run model.AgentRunRecord, patch pr2.BoardPatch, board pr2.CreativeBoard, actor string, traceID string) error {
+	return a.appendBoardPatchEvents(ctx, run, patch, board, actor, traceID, []string{})
+}
+
+func (a *App) appendBoardPatchEvents(ctx context.Context, run model.AgentRunRecord, patch pr2.BoardPatch, board pr2.CreativeBoard, actor string, traceID string, changedElementIDs []string) error {
+	seq, err := a.repo.NextRunEventSeqV1(ctx, run.RunID)
+	if err != nil {
+		return err
+	}
+	eventTime := board.UpdatedAt
+	if eventTime.IsZero() {
+		eventTime = time.Now().UTC()
+	}
+	patchPayload := pr2.BoardPatchAppliedPayload{
+		BoardID:       patch.BoardID,
+		PatchID:       patch.PatchID,
+		BaseVersion:   patch.BaseVersion,
+		TargetVersion: patch.TargetVersion,
+		Operation:     patch.Operation,
+		PatchDigest:   patch.PatchDigest,
+	}
+	if err := pr2.ValidateBoardPatchAppliedPayload(patchPayload); err != nil {
+		return err
+	}
+	patchEnvelope, err := pr2AGUIEnvelope(run, pr2.EventTypeBoardPatchApplied, seq, eventTime, actor, traceID, map[string]any{
+		"board_id":       patchPayload.BoardID,
+		"patch_id":       patchPayload.PatchID,
+		"base_version":   patchPayload.BaseVersion,
+		"target_version": patchPayload.TargetVersion,
+		"operation":      patchPayload.Operation,
+		"patch_digest":   patchPayload.PatchDigest,
+	})
+	if err != nil {
+		return err
+	}
+	snapshotPayload := pr2.BoardSnapshotUpdatedPayload{
+		BoardID:           board.BoardID,
+		BoardVersion:      board.Version,
+		BoardStatus:       board.Status,
+		BoardDigest:       board.BoardDigest,
+		ChangedElementIDs: changedElementIDs,
+		SnapshotRequired:  true,
+	}
+	if err := pr2.ValidateBoardSnapshotUpdatedPayload(snapshotPayload); err != nil {
+		return err
+	}
+	snapshotEnvelope, err := pr2AGUIEnvelope(run, pr2.EventTypeBoardSnapshotUpdated, seq+1, eventTime, actor, traceID, map[string]any{
+		"board_id":            snapshotPayload.BoardID,
+		"board_version":       snapshotPayload.BoardVersion,
+		"board_status":        snapshotPayload.BoardStatus,
+		"board_digest":        snapshotPayload.BoardDigest,
+		"changed_element_ids": snapshotPayload.ChangedElementIDs,
+		"snapshot_required":   snapshotPayload.SnapshotRequired,
+	})
+	if err != nil {
+		return err
+	}
+	events := []pr1.AGUIEnvelope{patchEnvelope, snapshotEnvelope}
+	if err := a.repo.AppendRunEventsV1(ctx, events); err != nil {
+		return err
+	}
+	a.publishPR2AGUIEvents(ctx, events)
+	return nil
+}
+
+func (a *App) publishPR2AGUIEvents(ctx context.Context, events []pr1.AGUIEnvelope) {
+	if a.aguiEventBus == nil {
+		return
+	}
+	for _, event := range events {
+		_ = a.aguiEventBus.PublishAGUI(ctx, event)
+	}
+}
+
+func pr2AGUIEnvelope(run model.AgentRunRecord, eventType string, seq int64, eventTime time.Time, actor string, traceID string, payload map[string]any) (pr1.AGUIEnvelope, error) {
+	payloadDigest, err := pr1.CanonicalDigest(payload)
+	if err != nil {
+		return pr1.AGUIEnvelope{}, err
+	}
+	if strings.TrimSpace(traceID) == "" {
+		traceID = run.TraceID
+	}
+	return pr1.BuildAGUIEnvelope(pr1.AGUIInput{
+		EventID:       securityID("evt_"),
+		EventType:     eventType,
+		ProjectID:     run.ProjectID,
+		ActorUserID:   actor,
+		SessionID:     run.SessionID,
+		RunID:         run.RunID,
+		Seq:           seq,
+		CreatedAt:     eventTime,
+		PayloadDigest: payloadDigest,
+		TraceID:       traceID,
+		Payload:       payload,
+	})
 }
 
 func (a *App) interruptSnapshotDTO(ctx context.Context, runID string, interrupt *model.Interrupt) InterruptDTO {

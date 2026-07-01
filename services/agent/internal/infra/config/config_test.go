@@ -41,6 +41,11 @@ AGENT_GENERATION_REDIS_DB=2
 AGENT_GENERATION_REDIS_LIST_KEY=dora:test:generation_jobs
 AGENT_GENERATION_WORKERS=3
 AGENT_GENERATION_RECOVERY_STALE_AFTER=30s
+AGENT_RUNTIME_REDIS_MODE=redis
+AGENT_RUNTIME_REDIS_ADDR=127.0.0.1:6380
+AGENT_RUNTIME_REDIS_DB=3
+AGENT_RUNTIME_REDIS_STREAM_MAX_LEN=2048
+AGENT_MODEL_ADAPTER=deepseek
 DEEPSEEK_API_KEY=sk-test
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
@@ -70,6 +75,12 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 	}
 	if cfg.GenerationRedisListKey != "dora:test:generation_jobs" || cfg.GenerationWorkers != 3 || cfg.GenerationRecoveryAge != 30*time.Second {
 		t.Fatalf("unexpected generation worker config: key=%s workers=%d stale=%s", cfg.GenerationRedisListKey, cfg.GenerationWorkers, cfg.GenerationRecoveryAge)
+	}
+	if cfg.RuntimeRedisMode != "redis" || cfg.RuntimeRedisAddress != "127.0.0.1:6380" || cfg.RuntimeRedisDB != 3 || cfg.RuntimeRedisStreamMaxLen != 2048 {
+		t.Fatalf("unexpected runtime redis config: %#v", cfg)
+	}
+	if cfg.ModelAdapter != "deepseek" {
+		t.Fatalf("unexpected model adapter: %s", cfg.ModelAdapter)
 	}
 	if cfg.DeepSeekAPIKey != "sk-test" || cfg.DeepSeekBaseURL != "https://api.deepseek.com" || cfg.DeepSeekModel != "deepseek-v4-flash" {
 		t.Fatalf("unexpected deepseek config: base=%s model=%s keySet=%t", cfg.DeepSeekBaseURL, cfg.DeepSeekModel, cfg.DeepSeekAPIKey != "")
@@ -110,6 +121,43 @@ AGENT_EVENT_REPLAY_PAGE_SIZE=abc
 	}
 }
 
+func TestLoadFromInvalidRuntimeRedisConfig(t *testing.T) {
+	unsetAgentEnv(t)
+	dir := t.TempDir()
+	example := filepath.Join(dir, ".env.example")
+	writeEnv(t, example, `
+AGENT_DATABASE_URL=postgres://example
+AGENT_HTTP_ADDR=0.0.0.0:18080
+AGENT_RUNTIME_REDIS_MODE=bad
+`)
+	if _, err := LoadFrom(example); err == nil {
+		t.Fatal("expected invalid runtime redis mode error")
+	}
+
+	writeEnv(t, example, `
+AGENT_DATABASE_URL=postgres://example
+AGENT_HTTP_ADDR=0.0.0.0:18080
+AGENT_RUNTIME_REDIS_MODE=redis
+`)
+	if _, err := LoadFrom(example); err == nil {
+		t.Fatal("expected missing runtime redis address error")
+	}
+}
+
+func TestLoadFromInvalidModelAdapter(t *testing.T) {
+	unsetAgentEnv(t)
+	dir := t.TempDir()
+	example := filepath.Join(dir, ".env.example")
+	writeEnv(t, example, `
+AGENT_DATABASE_URL=postgres://example
+AGENT_HTTP_ADDR=0.0.0.0:18080
+AGENT_MODEL_ADAPTER=unknown
+`)
+	if _, err := LoadFrom(example); err == nil {
+		t.Fatal("expected invalid model adapter error")
+	}
+}
+
 func TestLoadFromAgentConfigEtcdOverlayAndEnvFinal(t *testing.T) {
 	unsetAgentEnv(t)
 	dir := t.TempDir()
@@ -136,6 +184,9 @@ ETCD_NAMESPACE=/dora/local
 		if contains(opts.AllowedKeys, "AGENT_GENERATION_REDIS_PASSWORD") {
 			t.Fatal("redis password must not be allowed from etcd")
 		}
+		if contains(opts.AllowedKeys, "AGENT_RUNTIME_REDIS_PASSWORD") {
+			t.Fatal("runtime redis password must not be allowed from etcd")
+		}
 		if contains(opts.AllowedKeys, "DEEPSEEK_API_KEY") {
 			t.Fatal("deepseek api key must not be allowed from etcd")
 		}
@@ -143,7 +194,10 @@ ETCD_NAMESPACE=/dora/local
 			"LOG_LEVEL":                    "debug",
 			"AGENT_EVENT_REPLAY_PAGE_SIZE": "20",
 			"AGENT_TOOL_ALLOWLIST":         "image,video",
+			"AGENT_MODEL_ADAPTER":          "deepseek",
 			"AGENT_GENERATION_QUEUE":       "redis",
+			"AGENT_RUNTIME_REDIS_MODE":     "redis",
+			"AGENT_RUNTIME_REDIS_ADDR":     "127.0.0.1:6380",
 		}, nil
 	})
 	if err != nil {
@@ -161,6 +215,12 @@ ETCD_NAMESPACE=/dora/local
 	if cfg.GenerationQueue != "redis" {
 		t.Fatalf("expected etcd generation queue overlay, got %s", cfg.GenerationQueue)
 	}
+	if cfg.RuntimeRedisMode != "redis" {
+		t.Fatalf("expected etcd runtime redis mode overlay, got %s", cfg.RuntimeRedisMode)
+	}
+	if cfg.ModelAdapter != "deepseek" {
+		t.Fatalf("expected etcd model adapter overlay, got %s", cfg.ModelAdapter)
+	}
 }
 
 func unsetAgentEnv(t *testing.T) {
@@ -175,7 +235,9 @@ func unsetAgentEnv(t *testing.T) {
 		"AGENT_TOOL_DEFAULT_TIMEOUT_MS", "AGENT_SAFETY_POLICY_VERSION", "AGENT_GENERATION_QUEUE",
 		"AGENT_GENERATION_REDIS_ADDR", "AGENT_GENERATION_REDIS_PASSWORD", "AGENT_GENERATION_REDIS_DB",
 		"AGENT_GENERATION_REDIS_LIST_KEY", "AGENT_GENERATION_WORKERS", "AGENT_GENERATION_RECOVERY_STALE_AFTER",
-		"DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL", "DEEPSEEK_MAX_TOKENS",
+		"AGENT_RUNTIME_REDIS_MODE", "AGENT_RUNTIME_REDIS_ADDR", "AGENT_RUNTIME_REDIS_PASSWORD",
+		"AGENT_RUNTIME_REDIS_DB", "AGENT_RUNTIME_REDIS_STREAM_MAX_LEN",
+		"AGENT_MODEL_ADAPTER", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL", "DEEPSEEK_MAX_TOKENS",
 		"ETCD_ENDPOINTS", "ETCD_NAMESPACE",
 	}
 	for _, key := range keys {

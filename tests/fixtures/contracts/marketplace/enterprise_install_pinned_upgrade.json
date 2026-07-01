@@ -1,0 +1,41 @@
+{
+  "case_id": "enterprise_install_pinned_upgrade_v1",
+  "initial_installation": {
+    "schema_version": "skill_installation.v1",
+    "installation_id": "sinst_ent_city_001",
+    "account_id": "ent_001",
+    "account_scope": "enterprise",
+    "listing_id": "listing_city_tourism_creator_001",
+    "skill_id": "skill_city_tourism_creator_001",
+    "installed_version": "v1",
+    "version_strategy": "pinned",
+    "status": "installed",
+    "upgrade_status": "available",
+    "created_at": "2026-07-01T04:41:00Z",
+    "updated_at": "2026-07-01T05:00:00Z"
+  },
+  "upgrade_request": {
+    "installation_id": "sinst_ent_city_001",
+    "target_version": "v2",
+    "confirmed": true,
+    "idempotency_key": "sinst_ent_city_001:upgrade:v2"
+  },
+  "installation_after_upgrade": {
+    "schema_version": "skill_installation.v1",
+    "installation_id": "sinst_ent_city_001",
+    "account_id": "ent_001",
+    "account_scope": "enterprise",
+    "listing_id": "listing_city_tourism_creator_001",
+    "skill_id": "skill_city_tourism_creator_001",
+    "installed_version": "v2",
+    "version_strategy": "pinned",
+    "status": "installed",
+    "upgrade_status": "confirmed",
+    "created_at": "2026-07-01T04:41:00Z",
+    "updated_at": "2026-07-01T05:02:00Z"
+  },
+  "historical_run_rule": {
+    "run_id": "run_before_upgrade_001",
+    "must_resume_with_skill_version": "v1"
+  }
+}

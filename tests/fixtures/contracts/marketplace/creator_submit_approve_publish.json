@@ -1,0 +1,50 @@
+{
+  "case_id": "creator_submit_approve_publish_v1",
+  "skill_package": {
+    "schema_version": "skill_package.v1",
+    "skill_id": "skill_city_tourism_creator_001",
+    "creator_user_id": "user_creator_001",
+    "name": "城市文旅视频策划 Skill",
+    "description": "面向城市宣传片的 Storyboard 和提示词策划 Skill",
+    "visibility": "public",
+    "current_version": "v1",
+    "created_at": "2026-07-01T04:00:00Z",
+    "updated_at": "2026-07-01T04:30:00Z"
+  },
+  "skill_version": {
+    "schema_version": "skill_version.v1",
+    "skill_version_id": "skv_city_tourism_creator_v1",
+    "skill_id": "skill_city_tourism_creator_001",
+    "version": "v1",
+    "status": "published",
+    "runtime_spec_digest": "sha256:2525252525252525252525252525252525252525252525252525252525252525",
+    "pricing_policy_digest": "sha256:2626262626262626262626262626262626262626262626262626262626262626",
+    "submitted_at": "2026-07-01T04:10:00Z",
+    "published_at": "2026-07-01T04:30:00Z",
+    "created_at": "2026-07-01T04:00:00Z",
+    "updated_at": "2026-07-01T04:30:00Z"
+  },
+  "pricing_policy": {
+    "schema_version": "skill_pricing_policy.v1",
+    "pricing_policy_id": "spp_city_tourism_creator_v1",
+    "skill_id": "skill_city_tourism_creator_001",
+    "skill_version": "v1",
+    "pricing_model": "fixed_per_use",
+    "usage_credits": 20,
+    "value_delivered_stage": "storyboard_ready",
+    "pricing_policy_digest": "sha256:2626262626262626262626262626262626262626262626262626262626262626",
+    "created_at": "2026-07-01T04:00:00Z"
+  },
+  "listing": {
+    "schema_version": "marketplace_listing.v1",
+    "listing_id": "listing_city_tourism_creator_001",
+    "skill_id": "skill_city_tourism_creator_001",
+    "skill_version_id": "skv_city_tourism_creator_v1",
+    "status": "listed",
+    "pricing_policy_digest": "sha256:2626262626262626262626262626262626262626262626262626262626262626",
+    "published_by": "admin_001",
+    "listed_at": "2026-07-01T04:30:00Z",
+    "created_at": "2026-07-01T04:25:00Z",
+    "updated_at": "2026-07-01T04:30:00Z"
+  }
+}

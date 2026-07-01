@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/router/skill-catalog-summary.v1.schema.json",
+  "title": "SkillCatalogSummary.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "skill_id",
+    "skill_name",
+    "skill_source",
+    "skill_version",
+    "status",
+    "supported_output_types",
+    "routing_examples"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "skill_catalog_summary.v1"
+    },
+    "skill_id": {
+      "type": "string"
+    },
+    "skill_name": {
+      "type": "string"
+    },
+    "skill_source": {
+      "type": "string",
+      "enum": [
+        "system_default",
+        "installed",
+        "marketplace"
+      ]
+    },
+    "listing_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "skill_version": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "published",
+        "disabled",
+        "suspended"
+      ]
+    },
+    "supported_output_types": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "routing_examples": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pricing_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "creator_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "entitlement_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "available",
+        "install_required",
+        "enterprise_admin_required",
+        "unavailable",
+        null
+      ]
+    }
+  },
+  "additionalProperties": false
+}

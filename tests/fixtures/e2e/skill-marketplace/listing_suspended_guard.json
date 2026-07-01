@@ -1,0 +1,50 @@
+{
+  "case_id": "listing_suspended_guard_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域 / Business Marketplace / 管理端",
+  "depends_on_pr": [
+    "PR-4"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/marketplace/creator_submit_approve_publish.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/marketplace/enterprise_install_pinned_upgrade.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": true,
+    "tool_generation_v2": false,
+    "marketplace_v2": true
+  },
+  "preconditions": [
+    "listing 原状态为 listed。",
+    "管理端因治理原因 suspend listing。",
+    "已有 installation 保留，新增安装必须被拒绝。"
+  ],
+  "user_journey": [
+    "管理员暂停 listing。",
+    "新用户打开市场详情页看到不可安装状态。",
+    "新安装请求返回 MARKETPLACE_LISTING_SUSPENDED。",
+    "历史 run 仍可按 snapshot replay 或恢复。"
+  ],
+  "expected_business_state": {
+    "listing_status": "suspended",
+    "new_installation_allowed": false,
+    "historical_run_resume_allowed": true,
+    "error_code": "MARKETPLACE_LISTING_SUSPENDED"
+  },
+  "fake_provider": {
+    "provider_id": "fake_text_model",
+    "behavior_id": "terminal_failure"
+  },
+  "release_gates": [
+    "Contract Gate",
+    "Fixture Gate",
+    "Feature Flag Gate",
+    "Rollback Gate"
+  ]
+}

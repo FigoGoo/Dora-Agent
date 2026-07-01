@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/tool/tool-task.v1.schema.json",
+  "title": "ToolTask.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "tool_task_id",
+    "tool_plan_id",
+    "tool_plan_item_id",
+    "run_id",
+    "status",
+    "provider_policy",
+    "idempotency_key",
+    "input_digest",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "tool_task.v1"
+    },
+    "tool_task_id": {
+      "type": "string",
+      "pattern": "^ttask_[A-Za-z0-9_\\-]+$"
+    },
+    "tool_plan_id": {
+      "type": "string",
+      "pattern": "^tpl_[A-Za-z0-9_\\-]+$"
+    },
+    "tool_plan_item_id": {
+      "type": "string",
+      "pattern": "^tpi_[A-Za-z0-9_\\-]+$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "released"
+      ]
+    },
+    "progress": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 0
+    },
+    "provider_policy": {
+      "type": "object",
+      "required": [
+        "mode",
+        "timeout_ms",
+        "retryable"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "sync",
+            "async_callback",
+            "async_polling"
+          ]
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "input_digest": {
+      "$ref": "../common/digest.schema.json"
+    },
+    "output_digest": {
+      "$ref": "../common/digest.schema.json"
+    },
+    "error_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

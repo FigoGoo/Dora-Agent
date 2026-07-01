@@ -1,0 +1,83 @@
+{
+  "case_id": "paid_marketplace_skill_usage_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域 / Agent Runtime / Business Marketplace / Business Credit / 前端",
+  "depends_on_pr": [
+    "PR-1",
+    "PR-2",
+    "PR-3",
+    "PR-4"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/router/paid_marketplace_explicit_select.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/agui/paid_marketplace_skill_storyboard_ready.events.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/billing/skill_usage_precreate_confirm_charge.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/toolplan/city_video_toolplan.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/credit/freeze_commit_success.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": true,
+    "tool_generation_v2": true,
+    "marketplace_v2": true
+  },
+  "preconditions": [
+    "用户已安装付费市场 Skill。",
+    "用户在工作台显式选择该 Skill。",
+    "业务服务先 EstimateSkillUsageCredits，再 CreateSkillUsageRecord。"
+  ],
+  "user_journey": [
+    "打开 Skill 市场详情并确认已安装。",
+    "在工作台选择 Skill 并提交 brief。",
+    "确认 Skill 使用费披露。",
+    "Graph 生成 Board/Storyboard。",
+    "达到 value_delivered_stage 后扣 Skill 使用费。",
+    "Board approved 后生成 ToolPlan。",
+    "确认 Tool 生成费并完成生成。"
+  ],
+  "expected_agui_event_order": [
+    "agent.run.started",
+    "creative.router.decided",
+    "agent.skill.selected",
+    "cost_disclosure.skill_usage.presented",
+    "confirmation.required",
+    "credits.skill_usage.frozen",
+    "board.snapshot.updated",
+    "cost_disclosure.generation.presented",
+    "confirmation.required",
+    "tool.task.updated",
+    "asset.commit.updated"
+  ],
+  "expected_business_state": {
+    "usage_record_create_timing": "before_skill_usage_confirmation",
+    "skill_usage_charge_status_after_delivery": "charged",
+    "tool_generation_confirmation_timing": "after_board_approved_and_toolplan_estimated",
+    "combined_confirmation": "not_default"
+  },
+  "fake_provider": {
+    "provider_id": "fake_video_model",
+    "behavior_id": "deterministic_success"
+  },
+  "release_gates": [
+    "Contract Gate",
+    "Fixture Gate",
+    "Fake Provider Gate",
+    "Feature Flag Gate",
+    "Observability Gate",
+    "Rollback Gate"
+  ]
+}

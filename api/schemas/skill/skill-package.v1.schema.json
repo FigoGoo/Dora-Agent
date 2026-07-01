@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/skill/skill-package.v1.schema.json",
+  "title": "SkillPackage.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "skill_id",
+    "creator_user_id",
+    "name",
+    "description",
+    "visibility",
+    "current_version",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "skill_package.v1"
+    },
+    "skill_id": {
+      "type": "string",
+      "pattern": "^skill_[A-Za-z0-9_\\-]+$"
+    },
+    "creator_user_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "visibility": {
+      "type": "string",
+      "enum": [
+        "private",
+        "review_only",
+        "public"
+      ]
+    },
+    "current_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,60 @@
+{
+  "fixture_id": "router_select_city_tourism_system_default.v1",
+  "description": "用户明确请求城市文旅宣传视频，命中系统默认 Skill，不需要 Skill 使用费确认。",
+  "schema_ref": "api/schemas/router/router-decision.v1.schema.json",
+  "input": {
+    "user_input": "帮我做一个杭州夏季文旅宣传视频，现代国风，30 秒",
+    "skill_catalog": [
+      {
+        "schema_version": "skill_catalog_summary.v1",
+        "skill_id": "skill_city_tourism_video",
+        "skill_name": "城市文旅视频",
+        "skill_source": "system_default",
+        "listing_id": null,
+        "skill_version": "1.0.0",
+        "status": "published",
+        "supported_output_types": [
+          "video"
+        ],
+        "routing_examples": [
+          "城市文旅宣传片",
+          "旅游推广视频"
+        ],
+        "pricing_summary": null,
+        "creator_summary": null,
+        "entitlement_status": "available"
+      }
+    ]
+  },
+  "expected": {
+    "router_decision": {
+      "schema_version": "router_decision.v1",
+      "decision": "select_skill",
+      "skill_source": "system_default",
+      "skill_id": "skill_city_tourism_video",
+      "listing_id": null,
+      "confidence": 0.92,
+      "reason_code": "matched_city_tourism_video",
+      "safe_to_execute": false,
+      "requires_skill_usage_confirmation": false,
+      "extracted_params": {
+        "city_or_destination": "杭州",
+        "style": "现代国风",
+        "duration_sec": 30
+      },
+      "missing_fields": [],
+      "candidate_skills": [
+        {
+          "skill_id": "skill_city_tourism_video",
+          "score": 0.92,
+          "why": "命中城市文旅宣传视频场景"
+        }
+      ],
+      "marketplace_candidates": [],
+      "pricing_summary": null,
+      "creator_summary": null,
+      "entitlement_status": "available",
+      "fallback_reason": null
+    }
+  }
+}

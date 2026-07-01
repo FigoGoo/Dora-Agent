@@ -1,0 +1,56 @@
+{
+  "case_id": "refund_settlement_reverse_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域 / Admin Governance / Business Settlement",
+  "depends_on_pr": [
+    "PR-4"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/billing/skill_usage_refund_reversal.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/billing/skill_usage_precreate_confirm_charge.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/marketplace/data_visibility_creator_safe.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": false,
+    "tool_generation_v2": false,
+    "marketplace_v2": true
+  },
+  "preconditions": [
+    "SkillUsageRecord 已 charged 且 settlement_status 为 pending_hold。",
+    "用户提交退款申请。",
+    "管理员审批通过。"
+  ],
+  "user_journey": [
+    "管理端打开退款详情。",
+    "检查 usage record、交付证据和 creator 脱敏摘要。",
+    "审批退款。",
+    "业务服务释放或反向记账。",
+    "Settlement reverse 后 creator hold 不可结算。"
+  ],
+  "expected_business_state": {
+    "usage_status": "refunded",
+    "charge_status": "released",
+    "refund_status": "refund_reversed",
+    "settlement_status": "reversed",
+    "creator_data_visibility": "safe_summary_only"
+  },
+  "fake_provider": {
+    "provider_id": "fake_text_model",
+    "behavior_id": "deterministic_success"
+  },
+  "release_gates": [
+    "Contract Gate",
+    "Fixture Gate",
+    "Observability Gate",
+    "Rollback Gate"
+  ]
+}

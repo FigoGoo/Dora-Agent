@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS skill_review_records;
+DROP TABLE IF EXISTS skill_refund_cases;
+DROP TABLE IF EXISTS skill_settlement_records;
+DROP TABLE IF EXISTS skill_usage_records;
+DROP TABLE IF EXISTS skill_installations;
+DROP TABLE IF EXISTS marketplace_listings;
+DROP TABLE IF EXISTS skill_pricing_policies;
+DROP TABLE IF EXISTS skill_versions;
+DROP TABLE IF EXISTS skill_packages;

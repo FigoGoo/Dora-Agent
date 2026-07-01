@@ -1,0 +1,135 @@
+{
+  "schema_version": "fake_provider_manifest.v1",
+  "status": "active",
+  "owner": "测试与验收责任域 / Tool Runtime",
+  "updated_at": "2026-07-01",
+  "purpose": "PR-5 E2E 使用的确定性 fake provider 行为清单，禁止在 release gate 中直接依赖真实 provider。",
+  "providers": [
+    {
+      "provider_id": "fake_text_model",
+      "capability": "text",
+      "supported_behaviors": [
+        "deterministic_success",
+        "transient_failure",
+        "terminal_failure",
+        "slow_callback"
+      ],
+      "output_digest_policy": "sha256(input_digest + provider_id + behavior_id)"
+    },
+    {
+      "provider_id": "fake_image_model",
+      "capability": "image",
+      "supported_behaviors": [
+        "deterministic_success",
+        "async_pending",
+        "partial_success",
+        "transient_failure",
+        "terminal_failure",
+        "slow_callback"
+      ],
+      "output_digest_policy": "sha256(input_digest + provider_id + behavior_id)"
+    },
+    {
+      "provider_id": "fake_video_model",
+      "capability": "video",
+      "supported_behaviors": [
+        "deterministic_success",
+        "async_pending",
+        "partial_success",
+        "transient_failure",
+        "terminal_failure",
+        "slow_callback"
+      ],
+      "output_digest_policy": "sha256(input_digest + provider_id + behavior_id)"
+    },
+    {
+      "provider_id": "fake_audio_model",
+      "capability": "audio",
+      "supported_behaviors": [
+        "deterministic_success",
+        "async_pending",
+        "transient_failure",
+        "terminal_failure",
+        "slow_callback"
+      ],
+      "output_digest_policy": "sha256(input_digest + provider_id + behavior_id)"
+    }
+  ],
+  "behavior_contracts": [
+    {
+      "behavior_id": "deterministic_success",
+      "trigger": "request.accepted",
+      "expected_result": "succeeded",
+      "retryable": false,
+      "must_emit_stream_events": [
+        "tool:task:completed"
+      ]
+    },
+    {
+      "behavior_id": "async_pending",
+      "trigger": "request.accepted",
+      "expected_result": "succeeded_after_callback",
+      "retryable": true,
+      "must_emit_stream_events": [
+        "tool:task:requested",
+        "tool:task:progress",
+        "tool:task:completed"
+      ]
+    },
+    {
+      "behavior_id": "partial_success",
+      "trigger": "batch_asset_request",
+      "expected_result": "partially_succeeded",
+      "retryable": false,
+      "must_emit_stream_events": [
+        "tool:task:completed",
+        "asset:commit:requested"
+      ]
+    },
+    {
+      "behavior_id": "transient_failure",
+      "trigger": "first_attempt",
+      "expected_result": "succeeded_after_retry",
+      "retryable": true,
+      "must_emit_stream_events": [
+        "tool:task:failed_retryable",
+        "tool:task:completed"
+      ]
+    },
+    {
+      "behavior_id": "terminal_failure",
+      "trigger": "request.accepted",
+      "expected_result": "failed_terminal",
+      "retryable": false,
+      "must_emit_stream_events": [
+        "tool:task:failed_terminal",
+        "credit:hold:release_requested"
+      ]
+    },
+    {
+      "behavior_id": "slow_callback",
+      "trigger": "request.accepted",
+      "expected_result": "resume_after_worker_restart",
+      "retryable": true,
+      "must_emit_stream_events": [
+        "tool:task:progress",
+        "tool:task:completed"
+      ]
+    }
+  ],
+  "redis_streams": [
+    "tool:task:requested",
+    "tool:task:progress",
+    "tool:task:completed",
+    "tool:task:failed_retryable",
+    "tool:task:failed_terminal",
+    "asset:commit:requested",
+    "credit:hold:release_requested"
+  ],
+  "cache_keys": [
+    "fake-provider:response:{idempotency_key}",
+    "fake-provider:attempt:{tool_task_id}",
+    "fake-provider:callback:{tool_task_id}"
+  ],
+  "idempotency_rule": "相同 provider_id + idempotency_key + input_digest 必须返回相同 output_digest 和相同 stream dedupe_key。"
+}

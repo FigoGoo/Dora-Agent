@@ -1,0 +1,36 @@
+{
+  "fixture_id": "router_clarify_generic_promo_video.v1",
+  "description": "用户有创作意图但关键输出规格缺失，进入澄清，不执行 Graph。",
+  "schema_ref": "api/schemas/router/router-decision.v1.schema.json",
+  "input": {
+    "user_input": "帮我做一个产品宣传片，年轻一点"
+  },
+  "expected": {
+    "router_decision": {
+      "schema_version": "router_decision.v1",
+      "decision": "clarify",
+      "skill_source": null,
+      "skill_id": null,
+      "listing_id": null,
+      "confidence": 0.68,
+      "reason_code": "missing_output_specs",
+      "safe_to_execute": false,
+      "requires_skill_usage_confirmation": false,
+      "extracted_params": {
+        "topic": "产品宣传片",
+        "style": "年轻"
+      },
+      "missing_fields": [
+        "product_name",
+        "duration_sec",
+        "target_platform"
+      ],
+      "candidate_skills": [],
+      "marketplace_candidates": [],
+      "pricing_summary": null,
+      "creator_summary": null,
+      "entitlement_status": null,
+      "fallback_reason": "需要补充产品、时长和投放平台"
+    }
+  }
+}

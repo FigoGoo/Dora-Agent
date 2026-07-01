@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/board/board-snapshot.v1.schema.json",
+  "title": "BoardSnapshot.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "board_id",
+    "version",
+    "status",
+    "elements",
+    "board_digest",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "board_snapshot.v1"
+    },
+    "board_id": {
+      "type": "string",
+      "pattern": "^board_[A-Za-z0-9_\\-]+$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "ready",
+        "editing",
+        "approved",
+        "generating",
+        "completed",
+        "archived"
+      ]
+    },
+    "last_patch_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "elements": {
+      "type": "array",
+      "items": {
+        "$ref": "creative-element.v1.schema.json"
+      }
+    },
+    "board_digest": {
+      "$ref": "../common/digest.schema.json"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/router/router-decision.v1.schema.json",
+  "title": "RouterDecision.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "decision",
+    "confidence",
+    "reason_code",
+    "safe_to_execute",
+    "requires_skill_usage_confirmation",
+    "extracted_params",
+    "missing_fields",
+    "candidate_skills",
+    "marketplace_candidates"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "router_decision.v1"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "select_skill",
+        "clarify",
+        "capability_answer",
+        "generic_creation",
+        "text_answer",
+        "reject"
+      ]
+    },
+    "skill_source": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "system_default",
+        "installed",
+        "marketplace",
+        null
+      ]
+    },
+    "skill_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "listing_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "reason_code": {
+      "type": "string"
+    },
+    "safe_to_execute": {
+      "type": "boolean",
+      "const": false
+    },
+    "requires_skill_usage_confirmation": {
+      "type": "boolean"
+    },
+    "extracted_params": {
+      "type": "object"
+    },
+    "missing_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "candidate_skills": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/candidate_skill"
+      }
+    },
+    "marketplace_candidates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/marketplace_candidate"
+      }
+    },
+    "pricing_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "creator_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "entitlement_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "available",
+        "install_required",
+        "enterprise_admin_required",
+        "unavailable",
+        null
+      ]
+    },
+    "fallback_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "$defs": {
+    "candidate_skill": {
+      "type": "object",
+      "required": [
+        "skill_id",
+        "score",
+        "why"
+      ],
+      "properties": {
+        "skill_id": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "marketplace_candidate": {
+      "type": "object",
+      "required": [
+        "skill_id",
+        "listing_id",
+        "score",
+        "pricing_summary",
+        "creator_summary",
+        "entitlement_status"
+      ],
+      "properties": {
+        "skill_id": {
+          "type": "string"
+        },
+        "listing_id": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "pricing_summary": {
+          "type": "object"
+        },
+        "creator_summary": {
+          "type": "object"
+        },
+        "entitlement_status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "install_required",
+            "enterprise_admin_required",
+            "unavailable"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "schema_version": "router_decision.v1",
+      "decision": "select_skill",
+      "skill_source": "system_default",
+      "skill_id": "skill_city_tourism_video",
+      "listing_id": null,
+      "confidence": 0.92,
+      "reason_code": "matched_city_tourism_video",
+      "safe_to_execute": false,
+      "requires_skill_usage_confirmation": false,
+      "extracted_params": {
+        "city_or_destination": "杭州",
+        "style": "现代国风",
+        "duration_sec": 30
+      },
+      "missing_fields": [],
+      "candidate_skills": [
+        {
+          "skill_id": "skill_city_tourism_video",
+          "score": 0.92,
+          "why": "命中文旅宣传视频场景"
+        }
+      ],
+      "marketplace_candidates": [],
+      "pricing_summary": null,
+      "creator_summary": null,
+      "entitlement_status": "available",
+      "fallback_reason": null
+    }
+  ]
+}

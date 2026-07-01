@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/skill/skill-installation.v1.schema.json",
+  "title": "SkillInstallation.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "installation_id",
+    "account_id",
+    "account_scope",
+    "listing_id",
+    "skill_id",
+    "installed_version",
+    "version_strategy",
+    "status",
+    "upgrade_status",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "skill_installation.v1"
+    },
+    "installation_id": {
+      "type": "string",
+      "pattern": "^sinst_[A-Za-z0-9_\\-]+$"
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "account_scope": {
+      "type": "string",
+      "enum": [
+        "personal",
+        "enterprise"
+      ]
+    },
+    "listing_id": {
+      "type": "string"
+    },
+    "skill_id": {
+      "type": "string"
+    },
+    "installed_version": {
+      "type": "string"
+    },
+    "version_strategy": {
+      "type": "string",
+      "enum": [
+        "latest_published",
+        "pinned",
+        "manual"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "installed",
+        "disabled",
+        "removed",
+        "upgrade_required"
+      ]
+    },
+    "upgrade_status": {
+      "type": "string",
+      "enum": [
+        "none",
+        "available",
+        "manual_confirmation_required",
+        "confirmed",
+        "skipped",
+        "failed"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,26 +1,17 @@
-# 阶段交付归档入口
+# 阶段归档入口
 
 状态：active  
 owner：文档与契约责任域  
-更新时间：2026-06-28  
-适用范围：已完成阶段、里程碑、交付总结和历史开发计划归档
+更新时间：2026-06-30  
+适用范围：Agent 核心重构后的阶段交付归档导航
 
-## 管理原则
+## 当前状态
 
-`docs/releases/**` 保存已经完成阶段的交付范围、验收结论、遗留风险和历史设计入口。这里的文档用于追溯，不作为新迭代默认事实源。
+旧阶段交付文档已归档到 `docs/archive/pre-agent-core-refactor-2026-06-30/docs/releases/`。
 
-当前开发或新迭代应先读：
+本目录当前为空，等待 Agent 核心重构阶段完成后写入新的 release 结论。
 
-1. [`../current/README.md`](../current/README.md)
-2. [`../technical/README.md`](../technical/README.md)
-3. [`../contracts/README.md`](../contracts/README.md)
-4. [`../standards/README.md`](../standards/README.md)
-5. [`../test/README.md`](../test/README.md)
+## 使用规则
 
-进行中的产品变更写入 [`../product/iterations/README.md`](../product/iterations/README.md)，进行中的技术功能迭代写入 [`../technical/iterations/README.md`](../technical/iterations/README.md)。完成后的阶段性结论再进入本目录。
-
-## 阶段清单
-
-| 阶段 | 入口 | 状态 | 说明 |
-| --- | --- | --- | --- |
-| 第一阶段服务端开发 | [`phase-01-server/README.md`](./phase-01-server/README.md) | archived | 服务端第一阶段设计、范围和历史验收口径 |
+- 只有阶段完成后的交付范围、验证证据、风险和后续动作写入本目录。
+- 进行中的设计和开发计划写入 `docs/technical/**`、`docs/product/**` 或 `docs/contracts/**`。

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/graph/generic-creation-graph.v1.schema.json",
+  "title": "GenericCreationGraph.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generic_graph_id",
+    "skill_level",
+    "marketplace_listing_id",
+    "pricing_policy",
+    "usage_fee",
+    "version_strategy",
+    "default_nodes",
+    "allowed_outputs",
+    "graph_template_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "generic_creation_graph.v1"
+    },
+    "generic_graph_id": {
+      "const": "generic_creation_graph"
+    },
+    "skill_level": {
+      "const": "L0"
+    },
+    "marketplace_listing_id": {
+      "type": "null"
+    },
+    "pricing_policy": {
+      "const": "free"
+    },
+    "usage_fee": {
+      "const": 0
+    },
+    "version_strategy": {
+      "const": "platform_builtin"
+    },
+    "default_nodes": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "string"
+      }
+    },
+    "allowed_outputs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "brief_summary",
+          "clarifying_questions",
+          "creative_direction",
+          "prompt_draft",
+          "storyboard",
+          "skill_recommendations"
+        ]
+      }
+    },
+    "graph_template_digest": {
+      "$ref": "../common/digest.schema.json"
+    }
+  },
+  "additionalProperties": false
+}

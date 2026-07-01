@@ -1,0 +1,71 @@
+{
+  "case_id": "replay_after_restart_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域 / Agent Runtime / Tool Runtime / 前端",
+  "depends_on_pr": [
+    "PR-1",
+    "PR-2",
+    "PR-3"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/board/patch_replay_storyboard.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/graph/interrupt_resume_checkpoint.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/tool/provider_async_resume.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/agui/paid_marketplace_skill_storyboard_ready.events.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": true,
+    "tool_generation_v2": true,
+    "marketplace_v2": true
+  },
+  "preconditions": [
+    "Graph 已产生 checkpoint。",
+    "ToolTask 处于 running。",
+    "worker restart 发生在 provider callback 前。"
+  ],
+  "user_journey": [
+    "刷新工作台或断线重连。",
+    "前端按 run_id 拉取 AG-UI replay。",
+    "Graph 从 checkpoint 恢复。",
+    "provider callback 到达后重复事件按 dedupe_key 去重。",
+    "最终 Board、ToolTask 和 Asset 状态一致。"
+  ],
+  "expected_agui_event_order": [
+    "agent.run.started",
+    "creative.router.decided",
+    "cost_disclosure.skill_usage.presented",
+    "confirmation.required",
+    "board.snapshot.updated",
+    "tool.task.updated",
+    "asset.commit.updated"
+  ],
+  "expected_business_state": {
+    "agui_seq": "monotonic_per_run",
+    "dedupe_key": "duplicate_events_ignored",
+    "graph_checkpoint_status": "resumed",
+    "tool_task_final_status": "succeeded"
+  },
+  "fake_provider": {
+    "provider_id": "fake_audio_model",
+    "behavior_id": "slow_callback"
+  },
+  "release_gates": [
+    "Contract Gate",
+    "Fixture Gate",
+    "Fake Provider Gate",
+    "Observability Gate",
+    "Rollback Gate"
+  ]
+}

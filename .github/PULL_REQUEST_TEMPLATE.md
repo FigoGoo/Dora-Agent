@@ -38,6 +38,13 @@
 - 结果：
 - 无法验证原因：
 
+## CI Gate
+
+- Active Contract Gate：通过 / 未执行 / 不适用
+- PR-0 CI Gate：通过 / 未执行 / 不适用
+- 真实 PostgreSQL dry-run / down-test：通过 / 未执行 / 不适用
+- 真实 E2E：通过 / 未执行 / 不适用
+
 ## 风险
 
 - 
@@ -47,6 +54,7 @@
 - [ ] 按功能点提交。
 - [ ] 产品文档已 Done。
 - [ ] 契约和文档已同步。
+- [ ] `make active-contract-gate` 已通过或说明不适用。
 - [ ] 未提交真实密钥或本地 `.env`。
 - [ ] SQL 脚本已准备或说明不需要。
 - [ ] 无无关重构或格式化。

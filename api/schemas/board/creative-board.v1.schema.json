@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/board/creative-board.v1.schema.json",
+  "title": "CreativeBoard.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "board_id",
+    "project_id",
+    "session_id",
+    "run_id",
+    "title",
+    "status",
+    "version",
+    "elements_count",
+    "board_digest",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "creative_board.v1"
+    },
+    "board_id": {
+      "type": "string",
+      "pattern": "^board_[A-Za-z0-9_\\-]+$"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "graph_plan_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "ready",
+        "editing",
+        "approved",
+        "generating",
+        "completed",
+        "archived"
+      ]
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "elements_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "approved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "approved_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tool_plan_allowed": {
+      "type": "boolean",
+      "default": false
+    },
+    "board_digest": {
+      "$ref": "../common/digest.schema.json"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

@@ -2,21 +2,27 @@
 
 状态：active  
 owner：文档与契约责任域  
-更新时间：2026-06-28  
-适用范围：废弃方案、过期草案、历史讨论和不再作为当前事实源的文档导航
+更新时间：2026-07-01  
+适用范围：历史设计副本清理记录和当前归档规则
 
-## 管理原则
+## 当前清理结论
 
-- `archived` 文档用于历史追溯，不承接新需求。
-- `deprecated` 文档表示已废弃，必须说明替代文档或废弃原因。
-- 归档文档默认不进入 Codex 当前任务读取链路。
-- 需要复用历史结论时，先迁移成 current/technical/product/contracts/test 下的 active 文档，再进入实现。
+本次 AIGC Agent 重构 review 已完成并通过。为避免旧设计继续被搜索命中并污染 active 拆分，以下本地历史设计副本已删除：
 
-## 索引
+```text
+docs/archive/aigc-agent-refactor/2026-06-30/
+docs/archive/pre-agent-core-refactor-2026-06-30/
+```
+
+如需追溯历史设计，只能通过 git 历史查询；不得重新作为 active 拆分依据。
+
+## 当前有效入口
 
 | 文档 | 用途 |
 | --- | --- |
-| [`归档清单.md`](./归档清单.md) | 已归档范围、当前替代入口和使用规则。 |
+| [`归档清单.md`](./归档清单.md) | 已清理范围、当前替代入口和使用规则。 |
+| `docs/review/aigc-agent-refactor/2026-07-01/` | 已通过 review 的设计依据。 |
+| `docs/active/README.md` | M7 active 拆分和字段级契约事实源入口。 |
 
 ## 归档触发
 

@@ -1,0 +1,110 @@
+{
+  "schema_version": "fake_provider_scenarios.v1",
+  "status": "active",
+  "owner": "测试与验收责任域 / Tool Runtime",
+  "updated_at": "2026-07-01",
+  "scenarios": [
+    {
+      "case_id": "fake_provider_deterministic_success_v1",
+      "behavior_id": "deterministic_success",
+      "provider_id": "fake_video_model",
+      "request": {
+        "tool_task_id": "ttask_fake_success_001",
+        "idempotency_key": "tpl_fake_success_001:tpi_fake_success_001",
+        "input_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "expected": {
+        "status": "succeeded",
+        "output_digest": "sha256:fa000001fa000001fa000001fa000001fa000001fa000001fa000001fa000001",
+        "dedupe_key": "ttask_fake_success_001:provider_completed:v1",
+        "stream": "tool:task:completed"
+      }
+    },
+    {
+      "case_id": "fake_provider_async_pending_callback_v1",
+      "behavior_id": "async_pending",
+      "provider_id": "fake_image_model",
+      "request": {
+        "tool_task_id": "ttask_fake_async_001",
+        "idempotency_key": "tpl_fake_async_001:tpi_fake_async_001",
+        "input_digest": "sha256:abababababababababababababababababababababababababababababababab"
+      },
+      "expected": {
+        "initial_status": "running",
+        "final_status": "succeeded",
+        "callback_after_ms": 3000,
+        "streams": [
+          "tool:task:requested",
+          "tool:task:progress",
+          "tool:task:completed"
+        ]
+      }
+    },
+    {
+      "case_id": "fake_provider_partial_success_v1",
+      "behavior_id": "partial_success",
+      "provider_id": "fake_video_model",
+      "request": {
+        "tool_task_id": "ttask_fake_partial_001",
+        "idempotency_key": "tpl_fake_partial_001:tpi_fake_partial_001",
+        "asset_count": 3,
+        "input_digest": "sha256:acacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacac"
+      },
+      "expected": {
+        "status": "partially_succeeded",
+        "committed_asset_count": 2,
+        "failed_asset_count": 1,
+        "failed_assets_must_not_be_charged": true
+      }
+    },
+    {
+      "case_id": "fake_provider_transient_failure_retry_v1",
+      "behavior_id": "transient_failure",
+      "provider_id": "fake_image_model",
+      "request": {
+        "tool_task_id": "ttask_fake_retry_001",
+        "idempotency_key": "tpl_fake_retry_001:tpi_fake_retry_001",
+        "input_digest": "sha256:adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad"
+      },
+      "expected": {
+        "first_attempt_status": "failed_retryable",
+        "retry_attempt": 2,
+        "final_status": "succeeded",
+        "error_code": "PROVIDER_TRANSIENT_FAILURE"
+      }
+    },
+    {
+      "case_id": "fake_provider_terminal_failure_release_v1",
+      "behavior_id": "terminal_failure",
+      "provider_id": "fake_video_model",
+      "request": {
+        "tool_task_id": "ttask_fake_terminal_001",
+        "idempotency_key": "tpl_fake_terminal_001:tpi_fake_terminal_001",
+        "credit_hold_id": "chold_fake_terminal_001",
+        "input_digest": "sha256:aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae"
+      },
+      "expected": {
+        "status": "failed",
+        "error_code": "PROVIDER_TERMINAL_FAILURE",
+        "credit_hold_status": "released",
+        "released_credits_must_equal_frozen_credits": true
+      }
+    },
+    {
+      "case_id": "fake_provider_slow_callback_resume_v1",
+      "behavior_id": "slow_callback",
+      "provider_id": "fake_audio_model",
+      "request": {
+        "tool_task_id": "ttask_fake_slow_001",
+        "idempotency_key": "tpl_fake_slow_001:tpi_fake_slow_001",
+        "input_digest": "sha256:afafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafaf"
+      },
+      "expected": {
+        "worker_restart_required": true,
+        "resume_status": "succeeded",
+        "duplicate_callback_must_be_ignored": true,
+        "callback_after_ms": 90000
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "case_id": "credit_freeze_release_on_tool_failure_v1",
+  "hold_after_freeze": {
+    "schema_version": "credit_freeze.v1",
+    "credit_hold_id": "chold_city_video_failed_001",
+    "account_id": "acct_personal_001",
+    "account_scope": "personal",
+    "run_id": "run_city_tourism_002",
+    "tool_plan_id": "tpl_city_video_002",
+    "tool_plan_digest": "sha256:1515151515151515151515151515151515151515151515151515151515151515",
+    "status": "frozen",
+    "frozen_credits": 120,
+    "committed_credits": 0,
+    "released_credits": 0,
+    "idempotency_key": "run_city_tourism_002:tpl_city_video_002:acct_personal_001",
+    "created_at": "2026-07-01T02:21:00Z",
+    "updated_at": null
+  },
+  "tool_task_failure": {
+    "schema_version": "tool_task.v1",
+    "tool_task_id": "ttask_city_video_failed_001",
+    "tool_plan_id": "tpl_city_video_002",
+    "tool_plan_item_id": "tpi_city_video_002",
+    "run_id": "run_city_tourism_002",
+    "status": "failed",
+    "progress": 60,
+    "provider_policy": {
+      "mode": "async_callback",
+      "timeout_ms": 120000,
+      "retryable": false
+    },
+    "idempotency_key": "tpl_city_video_002:tpi_city_video_002",
+    "input_digest": "sha256:1616161616161616161616161616161616161616161616161616161616161616",
+    "output_digest": "sha256:1717171717171717171717171717171717171717171717171717171717171717",
+    "error_code": "PROVIDER_TERMINAL_FAILURE",
+    "created_at": "2026-07-01T02:22:00Z",
+    "updated_at": "2026-07-01T02:25:00Z"
+  },
+  "hold_after_release": {
+    "schema_version": "credit_freeze.v1",
+    "credit_hold_id": "chold_city_video_failed_001",
+    "account_id": "acct_personal_001",
+    "account_scope": "personal",
+    "run_id": "run_city_tourism_002",
+    "tool_plan_id": "tpl_city_video_002",
+    "tool_plan_digest": "sha256:1515151515151515151515151515151515151515151515151515151515151515",
+    "status": "released",
+    "frozen_credits": 120,
+    "committed_credits": 0,
+    "released_credits": 120,
+    "idempotency_key": "run_city_tourism_002:tpl_city_video_002:acct_personal_001",
+    "created_at": "2026-07-01T02:21:00Z",
+    "updated_at": "2026-07-01T02:26:00Z"
+  }
+}

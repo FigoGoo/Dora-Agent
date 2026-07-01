@@ -20,6 +20,165 @@ tags:
 - name: Public
 - name: Notification
 paths:
+  /api/marketplace/skills:
+    get:
+      tags:
+      - Skill
+      operationId: listMarketplaceSkills
+      responses:
+        '200':
+          description: Skill 市场列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  next_cursor:
+                    type: string
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/AuthProblem'
+        '403':
+          $ref: '#/components/responses/PermissionProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/marketplace/skills/{listing_id}:
+    get:
+      tags:
+      - Skill
+      operationId: getMarketplaceSkill
+      parameters:
+      - name: listing_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Skill 市场详情
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - listing
+                properties:
+                  listing:
+                    type: object
+        '404':
+          $ref: '#/components/responses/NotFoundProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/marketplace/installations:
+    post:
+      tags:
+      - Skill
+      operationId: installMarketplaceSkill
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - listing_id
+              - target_scope
+              properties:
+                listing_id:
+                  type: string
+                target_scope:
+                  type: string
+                  enum:
+                  - personal
+                  - enterprise
+      responses:
+        '200':
+          description: 安装成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - installation
+                properties:
+                  installation:
+                    type: object
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/marketplace/installations/{installation_id}/upgrade:
+    post:
+      tags:
+      - Skill
+      operationId: upgradeSkillInstallation
+      parameters:
+      - name: installation_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - target_version
+              - confirmed
+              properties:
+                target_version:
+                  type: string
+                confirmed:
+                  type: boolean
+      responses:
+        '200':
+          description: 升级成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - installation
+                properties:
+                  installation:
+                    type: object
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+        '500':
+          $ref: '#/components/responses/SystemProblem'
+  /api/marketplace/my-skills:
+    get:
+      tags:
+      - Skill
+      operationId: listInstalledSkills
+      responses:
+        '200':
+          description: 已安装 Skill
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        '500':
+          $ref: '#/components/responses/SystemProblem'
   /api/auth/register:
     post:
       tags:

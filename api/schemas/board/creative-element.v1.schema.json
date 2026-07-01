@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/board/creative-element.v1.schema.json",
+  "title": "CreativeElement.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "element_id",
+    "board_id",
+    "element_type",
+    "source",
+    "status",
+    "position",
+    "content",
+    "content_digest",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "creative_element.v1"
+    },
+    "element_id": {
+      "type": "string",
+      "pattern": "^elem_[A-Za-z0-9_\\-]+$"
+    },
+    "board_id": {
+      "type": "string",
+      "pattern": "^board_[A-Za-z0-9_\\-]+$"
+    },
+    "element_type": {
+      "type": "string",
+      "enum": [
+        "story_scene",
+        "storyboard_frame",
+        "prompt_block",
+        "reference_asset",
+        "text_note",
+        "tool_slot",
+        "skill_recommendation"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "user",
+        "agent",
+        "graph",
+        "tool",
+        "imported_asset"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "ready",
+        "approved",
+        "archived"
+      ]
+    },
+    "position": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height",
+        "order"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1
+        },
+        "height": {
+          "type": "number",
+          "minimum": 1
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "linked_asset_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "content_digest": {
+      "$ref": "../common/digest.schema.json"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

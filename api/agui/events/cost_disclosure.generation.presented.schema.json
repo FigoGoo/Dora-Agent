@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/agui/events/cost_disclosure.generation.presented.schema.json",
+  "title": "cost_disclosure.generation.presented.v1",
+  "type": "object",
+  "required": [
+    "tool_plan_id",
+    "tool_plan_digest",
+    "board_id",
+    "board_version",
+    "estimated_credits",
+    "currency",
+    "expires_at",
+    "skill_usage_status"
+  ],
+  "properties": {
+    "tool_plan_id": {
+      "type": "string"
+    },
+    "tool_plan_digest": {
+      "$ref": "../../schemas/common/digest.schema.json"
+    },
+    "board_id": {
+      "type": "string"
+    },
+    "board_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "estimated_credits": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "currency": {
+      "const": "credits"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "skill_usage_status": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/common/error.schema.json",
+  "title": "Error.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "error_code",
+    "error_class",
+    "message",
+    "recoverable"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "error.v1"
+    },
+    "error_code": {
+      "type": "string",
+      "examples": [
+        "BOARD_CONFLICT",
+        "SKILL_UNAVAILABLE",
+        "CREDIT_INSUFFICIENT"
+      ]
+    },
+    "error_class": {
+      "type": "string",
+      "enum": [
+        "user_input",
+        "router",
+        "permission",
+        "billing",
+        "tool",
+        "marketplace",
+        "system"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trace_id": {
+      "type": "string"
+    },
+    "recoverable": {
+      "type": "boolean"
+    },
+    "details": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "schema_version": "error.v1",
+      "error_code": "SKILL_UNAVAILABLE",
+      "error_class": "marketplace",
+      "message": "该 Skill 当前不可用。",
+      "trace_id": "trc_001",
+      "recoverable": true
+    }
+  ]
+}

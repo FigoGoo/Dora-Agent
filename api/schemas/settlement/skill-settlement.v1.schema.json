@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/settlement/skill-settlement.v1.schema.json",
+  "title": "SkillSettlement.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "settlement_id",
+    "usage_id",
+    "creator_user_id",
+    "status",
+    "gross_credits",
+    "platform_fee_credits",
+    "creator_credits",
+    "hold_until",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "skill_settlement.v1"
+    },
+    "settlement_id": {
+      "type": "string",
+      "pattern": "^settle_[A-Za-z0-9_\\-]+$"
+    },
+    "usage_id": {
+      "type": "string"
+    },
+    "creator_user_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending_hold",
+        "eligible",
+        "settling",
+        "settled",
+        "reversed",
+        "frozen",
+        "failed"
+      ]
+    },
+    "gross_credits": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "platform_fee_credits": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "creator_credits": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hold_until": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

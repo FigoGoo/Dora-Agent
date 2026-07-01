@@ -1,0 +1,139 @@
+openapi: 3.0.3
+info:
+  title: Dora Admin Skill Governance API
+  version: '2026-07-01'
+  description: 管理端 Skill 审核、listing 治理、退款和结算治理 API。
+servers:
+- url: /api/admin
+security:
+- bearerAuth: []
+paths:
+  /skill-reviews/{review_id}/approve:
+    post:
+      operationId: approveSkillReview
+      summary: 审核通过 SkillVersion
+      parameters:
+      - $ref: '#/components/parameters/ReviewID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 审核通过
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - skill_version
+                - listing
+                properties:
+                  skill_version:
+                    type: object
+                  listing:
+                    type: object
+        default:
+          $ref: '#/components/responses/Error'
+  /listings/{listing_id}/suspend:
+    post:
+      operationId: suspendMarketplaceListing
+      summary: 暂停 listing
+      parameters:
+      - $ref: '#/components/parameters/ListingID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason_code
+              properties:
+                reason_code:
+                  type: string
+      responses:
+        '200':
+          description: 暂停成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - listing
+                properties:
+                  listing:
+                    type: object
+        default:
+          $ref: '#/components/responses/Error'
+  /refund-cases/{refund_case_id}/approve:
+    post:
+      operationId: approveSkillUsageRefund
+      summary: 审核通过 Skill 使用费退款
+      parameters:
+      - $ref: '#/components/parameters/RefundCaseID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 退款通过
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - usage
+                - settlement
+                properties:
+                  usage:
+                    type: object
+                  settlement:
+                    type: object
+        default:
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        maxLength: 160
+    ReviewID:
+      name: review_id
+      in: path
+      required: true
+      schema:
+        type: string
+    ListingID:
+      name: listing_id
+      in: path
+      required: true
+      schema:
+        type: string
+    RefundCaseID:
+      name: refund_case_id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    Error:
+      description: 错误响应
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+            - code
+            - message
+            - trace_id
+            properties:
+              code:
+                type: string
+              message:
+                type: string
+              trace_id:
+                type: string

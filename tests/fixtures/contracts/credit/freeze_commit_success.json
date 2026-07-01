@@ -1,0 +1,45 @@
+{
+  "case_id": "credit_freeze_commit_success_v1",
+  "freeze_request": {
+    "credit_account_id": "acct_personal_001",
+    "credit_account_scope": "personal",
+    "run_id": "run_city_tourism_001",
+    "project_id": "proj_city_001",
+    "tool_plan_id": "tpl_city_video_001",
+    "tool_plan_digest": "sha256:1414141414141414141414141414141414141414141414141414141414141414",
+    "credits": 120,
+    "idempotency_key": "run_city_tourism_001:tpl_city_video_001:acct_personal_001"
+  },
+  "hold_after_freeze": {
+    "schema_version": "credit_freeze.v1",
+    "credit_hold_id": "chold_city_video_001",
+    "account_id": "acct_personal_001",
+    "account_scope": "personal",
+    "run_id": "run_city_tourism_001",
+    "tool_plan_id": "tpl_city_video_001",
+    "tool_plan_digest": "sha256:1414141414141414141414141414141414141414141414141414141414141414",
+    "status": "frozen",
+    "frozen_credits": 120,
+    "committed_credits": 0,
+    "released_credits": 0,
+    "idempotency_key": "run_city_tourism_001:tpl_city_video_001:acct_personal_001",
+    "created_at": "2026-07-01T02:21:00Z",
+    "updated_at": null
+  },
+  "hold_after_commit": {
+    "schema_version": "credit_freeze.v1",
+    "credit_hold_id": "chold_city_video_001",
+    "account_id": "acct_personal_001",
+    "account_scope": "personal",
+    "run_id": "run_city_tourism_001",
+    "tool_plan_id": "tpl_city_video_001",
+    "tool_plan_digest": "sha256:1414141414141414141414141414141414141414141414141414141414141414",
+    "status": "committed",
+    "frozen_credits": 120,
+    "committed_credits": 120,
+    "released_credits": 0,
+    "idempotency_key": "run_city_tourism_001:tpl_city_video_001:acct_personal_001",
+    "created_at": "2026-07-01T02:21:00Z",
+    "updated_at": "2026-07-01T02:28:00Z"
+  }
+}

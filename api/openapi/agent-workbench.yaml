@@ -245,6 +245,121 @@ paths:
                 $ref: '#/components/schemas/SnapshotResponse'
         default:
           $ref: '#/components/responses/Error'
+  /boards/{board_id}:
+    get:
+      operationId: getCreativeBoard
+      summary: 查询 Creative Board
+      parameters:
+      - $ref: '#/components/parameters/BoardID'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - board
+                - snapshot
+                properties:
+                  board:
+                    type: object
+                  snapshot:
+                    type: object
+        default:
+          $ref: '#/components/responses/Error'
+  /boards/{board_id}/patches:
+    post:
+      operationId: applyBoardPatch
+      summary: 应用 Board Patch
+      parameters:
+      - $ref: '#/components/parameters/BoardID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - patch
+              properties:
+                patch:
+                  type: object
+                  description: BoardPatch.v1。通用 patch handler 要求 patch.payload 携带 board_after、elements_after，可选 changed_element_ids；approve_board 必须走 /boards/{board_id}/approve。
+      responses:
+        '200':
+          description: 应用成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - board
+                - patch
+                properties:
+                  board:
+                    type: object
+                  patch:
+                    type: object
+        default:
+          $ref: '#/components/responses/Error'
+  /boards/{board_id}/approve:
+    post:
+      operationId: approveCreativeBoard
+      summary: 批准 Board 进入 ToolPlan 阶段
+      parameters:
+      - $ref: '#/components/parameters/BoardID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - approved_by
+              - board_version
+              properties:
+                approved_by:
+                  type: string
+                board_version:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: 批准成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - board
+                properties:
+                  board:
+                    type: object
+        default:
+          $ref: '#/components/responses/Error'
+  /graphs/{graph_plan_id}:
+    get:
+      operationId: getGraphPlan
+      summary: 查询 GraphPlan
+      parameters:
+      - $ref: '#/components/parameters/GraphPlanID'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - graph_plan
+                properties:
+                  graph_plan:
+                    type: object
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     bearerAuth:
@@ -265,6 +380,18 @@ components:
         type: string
     InterruptID:
       name: interrupt_id
+      in: path
+      required: true
+      schema:
+        type: string
+    BoardID:
+      name: board_id
+      in: path
+      required: true
+      schema:
+        type: string
+    GraphPlanID:
+      name: graph_plan_id
       in: path
       required: true
       schema:
@@ -728,21 +855,26 @@ components:
       additionalProperties: false
       required:
       - event_id
-      - type
+      - event_type
+      - schema_version
+      - payload_schema_version
       - session_id
       - run_id
       - project_id
-      - space_id
-      - actor_user_id
-      - sequence
-      - timestamp
-      - component
-      - trace_id
+      - seq
+      - created_at
+      - dedupe_key
       - payload
       properties:
         event_id:
           type: string
-        type:
+        event_type:
+          type: string
+        schema_version:
+          type: string
+          enum:
+          - agui.event.v1
+        payload_schema_version:
           type: string
         session_id:
           type: string
@@ -752,47 +884,31 @@ components:
           type: string
         space_id:
           type: string
+          nullable: true
         actor_user_id:
           type: string
-        sequence:
+          nullable: true
+        seq:
           type: integer
           format: int64
-        timestamp:
+        created_at:
           type: string
           format: date-time
-        component:
+        visibility:
           type: string
           enum:
-          - agent
-          - message
-          - tool
-          - confirmation
-          - workspace
-          - safety
-          - credit
-          - process
-          - project
-          - chat
+          - user_visible
+          - internal_summary
+          - admin_only
+        dedupe_key:
+          type: string
+        payload_digest:
+          type: string
         trace_id:
           type: string
+          nullable: true
         payload:
-          oneOf:
-          - $ref: '#/components/schemas/RunLifecycleEventPayloadDTO'
-          - $ref: '#/components/schemas/ThinkingEventPayloadDTO'
-          - $ref: '#/components/schemas/MessageEventPayloadDTO'
-          - $ref: '#/components/schemas/SkillEventPayloadDTO'
-          - $ref: '#/components/schemas/PlatformTagsEventPayloadDTO'
-          - $ref: '#/components/schemas/ChatControlsEventPayloadDTO'
-          - $ref: '#/components/schemas/SafetyEventPayloadDTO'
-          - $ref: '#/components/schemas/CreditEventPayloadDTO'
-          - $ref: '#/components/schemas/ConfirmationEventPayloadDTO'
-          - $ref: '#/components/schemas/ResumeEventPayloadDTO'
-          - $ref: '#/components/schemas/ToolCallEventPayloadDTO'
-          - $ref: '#/components/schemas/GenerationEventPayloadDTO'
-          - $ref: '#/components/schemas/AssetSaveEventPayloadDTO'
-          - $ref: '#/components/schemas/WorkspaceEventPayloadDTO'
-          - $ref: '#/components/schemas/ProcessSnapshotEventPayloadDTO'
-          - $ref: '#/components/schemas/ProjectArchivedEventPayloadDTO'
+          type: object
     RunLifecycleEventPayloadDTO:
       type: object
       additionalProperties: false

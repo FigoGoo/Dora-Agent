@@ -28,6 +28,10 @@ func registerWorkbenchRoutes(router *gin.Engine, app *workbench.App) {
 	router.POST("/api/agent/runs/:run_id/interrupts/:interrupt_id/reject", h.authRequired(), h.rejectInterrupt)
 	router.POST("/api/agent/runs/:run_id/cancel", h.authRequired(), h.cancelRun)
 	router.GET("/api/agent/runs/:run_id/snapshot", h.authRequired(), h.getRunSnapshot)
+	router.GET("/api/agent/boards/:board_id", h.authRequired(), h.getCreativeBoard)
+	router.POST("/api/agent/boards/:board_id/patches", h.authRequired(), h.applyBoardPatch)
+	router.POST("/api/agent/boards/:board_id/approve", h.authRequired(), h.approveCreativeBoard)
+	router.GET("/api/agent/graphs/:graph_plan_id", h.authRequired(), h.getGraphPlan)
 }
 
 type workbenchHandler struct {
@@ -171,6 +175,36 @@ func (h workbenchHandler) cancelRun(c *gin.Context) {
 
 func (h workbenchHandler) getRunSnapshot(c *gin.Context) {
 	out, err := h.app.BuildRunSnapshot(c.Request.Context(), auth(c), c.Param("run_id"), traceID(c))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) getCreativeBoard(c *gin.Context) {
+	out, err := h.app.GetCreativeBoard(c.Request.Context(), auth(c), c.Param("board_id"), traceID(c))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) applyBoardPatch(c *gin.Context) {
+	var req workbench.ApplyBoardPatchRequest
+	if !bind(c, &req) {
+		return
+	}
+	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	out, err := h.app.ApplyBoardPatch(c.Request.Context(), auth(c), c.Param("board_id"), req, traceID(c))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) approveCreativeBoard(c *gin.Context) {
+	var req workbench.ApproveCreativeBoardRequest
+	if !bind(c, &req) {
+		return
+	}
+	req.IdempotencyKey = idempotencyKey(c, req.IdempotencyKey)
+	out, err := h.app.ApproveCreativeBoard(c.Request.Context(), auth(c), c.Param("board_id"), req, traceID(c))
+	respond(c, out, err)
+}
+
+func (h workbenchHandler) getGraphPlan(c *gin.Context) {
+	out, err := h.app.GetGraphPlan(c.Request.Context(), auth(c), c.Param("graph_plan_id"), traceID(c))
 	respond(c, out, err)
 }
 

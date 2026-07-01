@@ -12,12 +12,14 @@ import (
 
 	agenthttp "github.com/FigoGoo/Dora-Agent/services/agent/internal/api/http"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/application/workbench"
+	runtimestream "github.com/FigoGoo/Dora-Agent/services/agent/internal/events/stream"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/config"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/queue"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
 	agentrpc "github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/rpc"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/observability"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/modeltool"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -47,17 +49,59 @@ func main() {
 		os.Exit(1)
 	}
 	app := workbench.New(repository.New(db), gateway, cfg.DefaultConfigVersion)
-	if cfg.DeepSeekAPIKey == "" {
-		logger.Error("deepseek api key is required", "env", "DEEPSEEK_API_KEY")
+	switch cfg.ModelAdapter {
+	case "local":
+		app.SetModelAdapter(modeltool.LocalAdapter{})
+		logger.Info("agent_model_adapter_enabled", "provider", "local")
+	case "deepseek":
+		if cfg.DeepSeekAPIKey == "" {
+			logger.Error("deepseek api key is required", "env", "DEEPSEEK_API_KEY")
+			os.Exit(1)
+		}
+		app.SetModelAdapter(modeltool.DeepSeekAdapter{
+			BaseURL:   cfg.DeepSeekBaseURL,
+			APIKey:    cfg.DeepSeekAPIKey,
+			Model:     cfg.DeepSeekModel,
+			MaxTokens: cfg.DeepSeekMaxTokens,
+		})
+		logger.Info("agent_model_adapter_enabled", "provider", "deepseek", "model", cfg.DeepSeekModel, "base_url", cfg.DeepSeekBaseURL)
+	default:
+		logger.Error("unsupported agent model adapter", "adapter", cfg.ModelAdapter)
 		os.Exit(1)
 	}
-	app.SetModelAdapter(modeltool.DeepSeekAdapter{
-		BaseURL:   cfg.DeepSeekBaseURL,
-		APIKey:    cfg.DeepSeekAPIKey,
-		Model:     cfg.DeepSeekModel,
-		MaxTokens: cfg.DeepSeekMaxTokens,
-	})
-	logger.Info("agent_model_adapter_enabled", "provider", "deepseek", "model", cfg.DeepSeekModel, "base_url", cfg.DeepSeekBaseURL)
+	var runtimeRedisClient *redis.Client
+	if cfg.RuntimeRedisMode == "redis" {
+		runtimeRedisClient = redis.NewClient(&redis.Options{
+			Addr:     cfg.RuntimeRedisAddress,
+			Password: cfg.RuntimeRedisPassword,
+			DB:       cfg.RuntimeRedisDB,
+		})
+		if err := runtimeRedisClient.Ping(context.Background()).Err(); err != nil {
+			logger.Error("ping runtime redis", "error", err)
+			os.Exit(1)
+		}
+		defer runtimeRedisClient.Close()
+		eventBus, err := runtimestream.NewRedisAGUIEventBus(runtimeRedisClient, cfg.RuntimeRedisStreamMaxLen)
+		if err != nil {
+			logger.Error("create runtime redis event bus", "error", err)
+			os.Exit(1)
+		}
+		snapshotCache, err := runtimestream.NewRedisSnapshotCache(runtimeRedisClient)
+		if err != nil {
+			logger.Error("create runtime redis snapshot cache", "error", err)
+			os.Exit(1)
+		}
+		turnLock, err := runtimestream.NewRedisTurnLock(runtimeRedisClient)
+		if err != nil {
+			logger.Error("create runtime redis turn lock", "error", err)
+			os.Exit(1)
+		}
+		app.SetRuntimePrimitives(eventBus, snapshotCache, turnLock)
+		logger.Info("agent_runtime_redis_enabled", "redis_addr", cfg.RuntimeRedisAddress, "redis_db", cfg.RuntimeRedisDB, "stream_max_len", cfg.RuntimeRedisStreamMaxLen)
+	} else {
+		app.SetRuntimePrimitives(runtimestream.NewMemoryAGUIEventBus(), runtimestream.NewMemorySnapshotCache(), runtimestream.NewMemoryTurnLock())
+		logger.Info("agent_runtime_memory_primitives_enabled")
+	}
 	var generationQueue *queue.RedisGenerationQueue
 	if cfg.GenerationQueue == "redis" {
 		generationQueue, err = queue.NewRedisGenerationQueue(queue.RedisGenerationQueueConfig{

@@ -2,12 +2,21 @@
 
 状态：active  
 owner：文档与契约责任域
-更新时间：2026-06-28
+更新时间：2026-07-01
 适用范围：智能体微服务到前端的实时事件协议  
 
 ## 事件类型
 
-字段级事件类型和 payload schema 以 `api/agui/agent-workbench-events.schema.json` 为准。当前 canonical 事件族：
+字段级 envelope schema 以 `api/agui/agent-workbench-events.schema.json` 为准。事件 payload schema 以 `api/agui/events/**` 为准。
+
+当前 PR-1 canonical 事件族：
+
+- `creative.guide.presented`
+- `creative.router.decided`
+- `cost_disclosure.skill_usage.presented`
+- `confirmation.required`
+
+后续阶段继续补齐：
 
 - `agent.run.started`
 - `agent.run.completed`
@@ -42,11 +51,15 @@ owner：文档与契约责任域
 ```json
 {
   "event_id": "evt_xxx",
-  "type": "agent.message.delta",
+  "event_type": "creative.router.decided",
+  "schema_version": "agui.event.v1",
+  "payload_schema_version": "creative.router.decided.v1",
+  "project_id": "proj_xxx",
   "session_id": "sess_xxx",
   "run_id": "run_xxx",
-  "sequence": 12,
-  "timestamp": "2026-06-22T08:00:00Z",
+  "seq": 12,
+  "created_at": "2026-07-01T00:00:00Z",
+  "dedupe_key": "run_xxx:creative.router.decided:12",
   "payload": {}
 }
 ```
@@ -65,7 +78,7 @@ payload 内容按事件类型定义，避免泄露 Eino 内部实现细节。
 - run_id 标识一次 Agent 运行。
 - 前端按 session_id 聚合历史，按 run_id 展示运行状态。
 
-## timestamp
+## created_at
 
 - 使用服务端时间。
 - 用于展示和排障，不作为唯一排序依据。
@@ -73,11 +86,13 @@ payload 内容按事件类型定义，避免泄露 Eino 内部实现细节。
 ## 顺序
 
 - 同一 run 内 sequence 单调递增。
-- 前端按 sequence 合并 `agent.message.delta` 和状态事件。
+- 同一 run 内 `seq` 单调递增。
+- 前端按 `seq` 合并消息增量和状态事件。
 
 ## 幂等
 
 - 前端遇到重复 event_id 必须忽略。
+- 前端遇到重复 `dedupe_key` 必须忽略。
 - 服务端重放历史事件时不得改变事件语义。
 
 ## 断线重连

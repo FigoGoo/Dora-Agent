@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dora.local/schemas/graph/graph-plan.v1.schema.json",
+  "title": "GraphPlan.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "graph_plan_id",
+    "graph_template_id",
+    "graph_template_version",
+    "run_id",
+    "board_id",
+    "status",
+    "current_node",
+    "value_delivered_stage",
+    "nodes",
+    "edges",
+    "graph_plan_digest",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "graph_plan.v1"
+    },
+    "graph_plan_id": {
+      "type": "string",
+      "pattern": "^gplan_[A-Za-z0-9_\\-]+$"
+    },
+    "graph_template_id": {
+      "type": "string"
+    },
+    "graph_template_version": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "board_id": {
+      "type": "string",
+      "pattern": "^board_[A-Za-z0-9_\\-]+$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "compiled",
+        "running",
+        "waiting_input",
+        "waiting_confirmation",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "current_node": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "value_delivered_stage": {
+      "type": "string",
+      "enum": [
+        "board_ready",
+        "storyboard_ready",
+        "asset_ready"
+      ]
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/GraphPlanNode"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "condition_result": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "graph_plan_digest": {
+      "$ref": "../common/digest.schema.json"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "GraphPlanNode": {
+      "type": "object",
+      "required": [
+        "node_id",
+        "node_type",
+        "status"
+      ],
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "node_type": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "waiting_input",
+            "waiting_confirmation",
+            "completed",
+            "failed",
+            "skipped"
+          ]
+        },
+        "input_digest": {
+          "$ref": "../common/digest.schema.json"
+        },
+        "output_digest": {
+          "$ref": "../common/digest.schema.json"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

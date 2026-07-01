@@ -1,0 +1,61 @@
+{
+  "case_id": "generic_creation_graph_fallback_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域 / Agent Runtime / 前端",
+  "depends_on_pr": [
+    "PR-1",
+    "PR-2"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/router/clarify_generic_promo_video.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/graph/generic_creation_graph_plan.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/board/create_city_tourism_board.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": true,
+    "tool_generation_v2": false,
+    "marketplace_v2": false
+  },
+  "preconditions": [
+    "用户 brief 无明确可执行 Skill。",
+    "Router 未命中具体 Skill，必须进入平台内置 L0 Generic Creation Graph。",
+    "Generic Creation Graph 不进入市场、不创建 installation、不创建 usage record、Skill 使用费为 0。"
+  ],
+  "user_journey": [
+    "提交模糊创作 brief。",
+    "查看澄清问题和创意方向。",
+    "查看 Board 或 Storyboard 草稿。",
+    "查看 Skill 推荐，但不默认调用生成 Tool。"
+  ],
+  "expected_agui_event_order": [
+    "agent.run.started",
+    "creative.guide.presented",
+    "creative.router.decided",
+    "graph.plan.created",
+    "board.snapshot.updated"
+  ],
+  "expected_business_state": {
+    "skill_source": "platform_builtin_l0",
+    "skill_usage_fee": 0,
+    "skill_usage_record": "not_created",
+    "tool_plan": "not_created_until_user_approves_generation"
+  },
+  "fake_provider": {
+    "provider_id": "fake_text_model",
+    "behavior_id": "deterministic_success"
+  },
+  "release_gates": [
+    "Contract Gate",
+    "Fixture Gate",
+    "Observability Gate"
+  ]
+}

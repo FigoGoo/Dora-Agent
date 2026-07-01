@@ -1,0 +1,50 @@
+{
+  "case_id": "enterprise_pinned_install_upgrade_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域 / Business Marketplace / 企业空间",
+  "depends_on_pr": [
+    "PR-4"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/marketplace/enterprise_install_pinned_upgrade.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/marketplace/user_install_latest_personal.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": true,
+    "tool_generation_v2": false,
+    "marketplace_v2": true
+  },
+  "preconditions": [
+    "企业空间已安装 v1，version_strategy 为 pinned。",
+    "市场 listing 发布 v2。",
+    "管理员或有权限成员触发升级确认。"
+  ],
+  "user_journey": [
+    "进入企业已安装 Skill 页面。",
+    "看到 v2 可升级提示。",
+    "确认升级。",
+    "新 run 使用 v2。",
+    "升级前历史 run 按 v1 snapshot 恢复。"
+  ],
+  "expected_business_state": {
+    "initial_version_strategy": "pinned",
+    "upgrade_requires_confirmation": true,
+    "installation_after_upgrade": "v2",
+    "historical_run_snapshot_version": "v1"
+  },
+  "fake_provider": {
+    "provider_id": "fake_text_model",
+    "behavior_id": "deterministic_success"
+  },
+  "release_gates": [
+    "Contract Gate",
+    "Fixture Gate",
+    "Feature Flag Gate"
+  ]
+}

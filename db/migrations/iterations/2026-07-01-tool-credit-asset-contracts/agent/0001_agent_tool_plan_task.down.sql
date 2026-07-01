@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS tool_tasks;
+DROP TABLE IF EXISTS tool_plans;
