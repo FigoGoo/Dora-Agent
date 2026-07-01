@@ -1,5 +1,6 @@
 DROP TABLE IF EXISTS skill_review_records;
 DROP TABLE IF EXISTS skill_refund_cases;
+DROP TABLE IF EXISTS skill_settlement_payout_records;
 DROP TABLE IF EXISTS skill_settlement_records;
 DROP TABLE IF EXISTS skill_usage_records;
 DROP TABLE IF EXISTS skill_installations;

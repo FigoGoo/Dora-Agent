@@ -273,6 +273,47 @@ DROP TABLE IF EXISTS skill_versions;
 	if refunded["data"].(map[string]any)["usage"].(map[string]any)["refund_status"] != "refund_reversed" {
 		t.Fatalf("unexpected approved refund: %#v", refunded)
 	}
+	payoutEstimate, err := marketplaceApp.EstimateSkillUsageCredits(t.Context(), marketplace.EstimateSkillUsageCreditsInput{
+		Auth: buyer, RunID: "run_payout_http_001", ListingID: listingID,
+	})
+	if err != nil {
+		t.Fatalf("estimate http payout usage: %v", err)
+	}
+	payoutUsage, err := marketplaceApp.CreateSkillUsageRecord(t.Context(), marketplace.CreateSkillUsageRecordInput{
+		Auth: buyer, Meta: accountspace.RequestMeta{IdempotencyKey: "run_payout_http_001:listing:v1"},
+		RunID: "run_payout_http_001", ListingID: listingID,
+		PricingPolicyDigest: payoutEstimate.PricingPolicyDigest, SkillUsageDigest: payoutEstimate.SkillUsageDigest,
+		EstimatedCredits: payoutEstimate.EstimatedCredits,
+	})
+	if err != nil {
+		t.Fatalf("create http payout usage: %v", err)
+	}
+	if _, err := marketplaceApp.FreezeSkillUsageCredits(t.Context(), marketplace.FreezeSkillUsageCreditsInput{
+		Auth: buyer, UsageID: payoutUsage.Usage.UsageID, SkillUsageDigest: payoutEstimate.SkillUsageDigest,
+	}); err != nil {
+		t.Fatalf("freeze http payout usage: %v", err)
+	}
+	payoutCommitted, err := marketplaceApp.CommitSkillUsageAndSettle(t.Context(), marketplace.CommitSkillUsageAndSettleInput{Auth: buyer, UsageID: payoutUsage.Usage.UsageID})
+	if err != nil {
+		t.Fatalf("commit http payout usage: %v", err)
+	}
+	if err := repo.DB().Model(&businesscore.PR4SkillSettlementRecord{}).
+		Where("settlement_id = ?", payoutCommitted.Settlement.SettlementID).
+		Update("hold_until", time.Now().UTC().Add(-time.Minute)).Error; err != nil {
+		t.Fatalf("expire settlement hold: %v", err)
+	}
+	released := requestJSON(t, router, http.MethodPost, "/api/admin/settlements/"+payoutCommitted.Settlement.SettlementID+"/release-hold", adminToken, "idem-admin-settlement-release-http", map[string]any{
+		"reason_code": "hold_period_completed", "request_hash": "hash-admin-settlement-release-http",
+	})
+	if released["data"].(map[string]any)["settlement"].(map[string]any)["status"] != "eligible" {
+		t.Fatalf("unexpected released settlement: %#v", released)
+	}
+	confirmed := requestJSON(t, router, http.MethodPost, "/api/admin/settlements/"+payoutCommitted.Settlement.SettlementID+"/confirm-payout", adminToken, "idem-admin-settlement-payout-http", map[string]any{
+		"payout_reference": "manual-ledger-http-001", "reason_code": "manual_payout_confirmed", "request_hash": "hash-admin-settlement-payout-http",
+	})
+	if confirmed["data"].(map[string]any)["settlement"].(map[string]any)["status"] != "settled" {
+		t.Fatalf("unexpected confirmed settlement payout: %#v", confirmed)
+	}
 	adminListings := requestJSON(t, router, http.MethodGet, "/api/admin/marketplace/listings?status=listed&page_size=10", adminToken, "", nil)
 	if len(adminListings["data"].(map[string]any)["items"].([]any)) == 0 {
 		t.Fatalf("expected admin marketplace listings: %#v", adminListings)
@@ -291,7 +332,7 @@ DROP TABLE IF EXISTS skill_versions;
 	}
 	analytics := requestJSON(t, router, http.MethodGet, "/api/creator/analytics/skill-usage", userToken, "", nil)
 	analyticsData := analytics["data"].(map[string]any)
-	if analyticsData["usage_count"].(float64) != 1 || analyticsData["revenue_hold_amount"].(float64) != 0 || analyticsData["refund_count"].(float64) != 1 {
+	if analyticsData["usage_count"].(float64) != 2 || analyticsData["revenue_hold_amount"].(float64) != 0 || analyticsData["refund_count"].(float64) != 1 {
 		t.Fatalf("unexpected creator analytics: %#v", analyticsData)
 	}
 	if analyticsData["failure_code_summary"].(map[string]any)["delivery_mismatch"].(float64) != 1 {

@@ -16,6 +16,71 @@
     "created_at",
     "updated_at"
   ],
+  "$defs": {
+    "skill_settlement_payout_record": {
+      "type": "object",
+      "required": [
+        "payout_id",
+        "settlement_id",
+        "creator_user_id",
+        "action",
+        "status_before",
+        "status_after",
+        "reason_code",
+        "operator_admin_id",
+        "idempotency_key",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "payout_id": {
+          "type": "string",
+          "pattern": "^spayout_[A-Za-z0-9_\\-]+$"
+        },
+        "settlement_id": {
+          "type": "string",
+          "pattern": "^settle_[A-Za-z0-9_\\-]+$"
+        },
+        "creator_user_id": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "release_hold",
+            "confirm_payout"
+          ]
+        },
+        "status_before": {
+          "type": "string"
+        },
+        "status_after": {
+          "type": "string"
+        },
+        "payout_reference": {
+          "type": "string"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "operator_admin_id": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
   "properties": {
     "schema_version": {
       "const": "skill_settlement.v1"

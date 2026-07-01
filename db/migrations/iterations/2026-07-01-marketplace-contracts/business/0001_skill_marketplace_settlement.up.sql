@@ -118,6 +118,25 @@ CREATE TABLE IF NOT EXISTS skill_settlement_records (
 CREATE INDEX IF NOT EXISTS idx_skill_settlement_creator
   ON skill_settlement_records (creator_user_id, status, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS skill_settlement_payout_records (
+  payout_id TEXT PRIMARY KEY,
+  settlement_id TEXT NOT NULL,
+  creator_user_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  status_before TEXT NOT NULL,
+  status_after TEXT NOT NULL,
+  payout_reference TEXT NOT NULL DEFAULT '',
+  reason_code TEXT NOT NULL,
+  operator_admin_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_skill_settlement_payout_settlement
+  ON skill_settlement_payout_records (settlement_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS skill_refund_cases (
   refund_case_id TEXT PRIMARY KEY,
   usage_id TEXT NOT NULL,

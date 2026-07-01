@@ -25,6 +25,7 @@ func TestPR4BusinessMarketplaceRepositoryWithActiveMigration(t *testing.T) {
 		"skill_installations",
 		"skill_usage_records",
 		"skill_settlement_records",
+		"skill_settlement_payout_records",
 		"skill_refund_cases",
 		"skill_review_records",
 	} {

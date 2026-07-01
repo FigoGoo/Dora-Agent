@@ -111,6 +111,25 @@ type PR4SkillSettlementRecord struct {
 
 func (PR4SkillSettlementRecord) TableName() string { return "skill_settlement_records" }
 
+type PR4SkillSettlementPayoutRecord struct {
+	PayoutID        string    `gorm:"column:payout_id;primaryKey"`
+	SettlementID    string    `gorm:"column:settlement_id"`
+	CreatorUserID   string    `gorm:"column:creator_user_id"`
+	Action          string    `gorm:"column:action"`
+	StatusBefore    string    `gorm:"column:status_before"`
+	StatusAfter     string    `gorm:"column:status_after"`
+	PayoutReference string    `gorm:"column:payout_reference"`
+	ReasonCode      string    `gorm:"column:reason_code"`
+	OperatorAdminID string    `gorm:"column:operator_admin_id"`
+	IdempotencyKey  string    `gorm:"column:idempotency_key"`
+	CreatedAt       time.Time `gorm:"column:created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at"`
+}
+
+func (PR4SkillSettlementPayoutRecord) TableName() string {
+	return "skill_settlement_payout_records"
+}
+
 type PR4SkillRefundCaseRecord struct {
 	RefundCaseID string    `gorm:"column:refund_case_id;primaryKey"`
 	UsageID      string    `gorm:"column:usage_id"`

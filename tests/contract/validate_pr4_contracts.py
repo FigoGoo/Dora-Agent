@@ -78,6 +78,8 @@ def validate_openapi_surfaces() -> None:
             "approveSkillReview",
             "suspendMarketplaceListing",
             "approveSkillUsageRefund",
+            "releaseSkillSettlementHold",
+            "confirmSkillSettlementPayout",
         ],
     }
     for filename, tokens in required_tokens.items():
@@ -230,6 +232,7 @@ def validate_migration() -> None:
         "skill_installations",
         "skill_usage_records",
         "skill_settlement_records",
+        "skill_settlement_payout_records",
         "skill_refund_cases",
         "skill_review_records",
     ]

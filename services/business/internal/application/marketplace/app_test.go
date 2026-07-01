@@ -347,6 +347,76 @@ func TestMarketplaceAppAdminGovernanceLifecycle(t *testing.T) {
 	if refunded.Usage.UsageStatus != "refunded" || refunded.Usage.RefundStatus != "refund_reversed" || refunded.Settlement.Status != "reversed" {
 		t.Fatalf("unexpected refund reversal: %#v", refunded)
 	}
+
+	payoutEstimate, err := app.EstimateSkillUsageCredits(t.Context(), EstimateSkillUsageCreditsInput{
+		Auth: buyer, RunID: "run_payout_admin_001", ListingID: publishFixture.Listing.ListingID,
+	})
+	if err != nil {
+		t.Fatalf("estimate payout usage: %v", err)
+	}
+	payoutUsage, err := app.CreateSkillUsageRecord(t.Context(), CreateSkillUsageRecordInput{
+		Auth: buyer, Meta: accountspace.RequestMeta{IdempotencyKey: "run_payout_admin_001:listing:v1"},
+		RunID: "run_payout_admin_001", ListingID: publishFixture.Listing.ListingID,
+		PricingPolicyDigest: payoutEstimate.PricingPolicyDigest, SkillUsageDigest: payoutEstimate.SkillUsageDigest,
+		EstimatedCredits: payoutEstimate.EstimatedCredits,
+	})
+	if err != nil {
+		t.Fatalf("create payout usage: %v", err)
+	}
+	if _, err := app.FreezeSkillUsageCredits(t.Context(), FreezeSkillUsageCreditsInput{
+		Auth: buyer, UsageID: payoutUsage.Usage.UsageID, SkillUsageDigest: payoutEstimate.SkillUsageDigest,
+	}); err != nil {
+		t.Fatalf("freeze payout usage: %v", err)
+	}
+	payoutCommitted, err := app.CommitSkillUsageAndSettle(t.Context(), CommitSkillUsageAndSettleInput{Auth: buyer, UsageID: payoutUsage.Usage.UsageID})
+	if err != nil {
+		t.Fatalf("commit payout usage: %v", err)
+	}
+	if _, err := app.ReleaseSkillSettlementHold(t.Context(), ReleaseSkillSettlementHoldInput{
+		AdminID: "admin_001", Meta: accountspace.RequestMeta{IdempotencyKey: "settlement-release-admin-early"},
+		SettlementID: payoutCommitted.Settlement.SettlementID, ReasonCode: "hold_period_completed",
+	}); err == nil {
+		t.Fatalf("release hold should wait until hold_until")
+	}
+
+	app.now = func() time.Time { return payoutCommitted.Settlement.HoldUntil.Add(time.Minute) }
+	released, err := app.ReleaseSkillSettlementHold(t.Context(), ReleaseSkillSettlementHoldInput{
+		AdminID: "admin_001", Meta: accountspace.RequestMeta{IdempotencyKey: "settlement-release-admin-001"},
+		SettlementID: payoutCommitted.Settlement.SettlementID, ReasonCode: "hold_period_completed",
+	})
+	if err != nil {
+		t.Fatalf("release settlement hold: %v", err)
+	}
+	if released.Settlement.Status != "eligible" || released.Payout.Action != "release_hold" || released.Payout.StatusAfter != "eligible" {
+		t.Fatalf("unexpected released settlement: %#v", released)
+	}
+	replayedRelease, err := app.ReleaseSkillSettlementHold(t.Context(), ReleaseSkillSettlementHoldInput{
+		AdminID: "admin_001", Meta: accountspace.RequestMeta{IdempotencyKey: "settlement-release-admin-001"},
+		SettlementID: payoutCommitted.Settlement.SettlementID, ReasonCode: "hold_period_completed",
+	})
+	if err != nil {
+		t.Fatalf("replay release settlement hold: %v", err)
+	}
+	if replayedRelease.Payout.PayoutID != released.Payout.PayoutID || replayedRelease.Settlement.Status != "eligible" {
+		t.Fatalf("unexpected replayed release: %#v", replayedRelease)
+	}
+	confirmed, err := app.ConfirmSkillSettlementPayout(t.Context(), ConfirmSkillSettlementPayoutInput{
+		AdminID: "admin_001", Meta: accountspace.RequestMeta{IdempotencyKey: "settlement-payout-admin-001"},
+		SettlementID: payoutCommitted.Settlement.SettlementID, PayoutReference: "manual-ledger-20260701-001", ReasonCode: "manual_payout_confirmed",
+	})
+	if err != nil {
+		t.Fatalf("confirm settlement payout: %v", err)
+	}
+	if confirmed.Settlement.Status != "settled" || confirmed.Payout.Action != "confirm_payout" || confirmed.Payout.PayoutReference == "" {
+		t.Fatalf("unexpected confirmed payout: %#v", confirmed)
+	}
+	var payoutUsageRecord businesscore.PR4SkillUsageRecord
+	if err := repo.DB().Where("usage_id = ?", payoutUsage.Usage.UsageID).First(&payoutUsageRecord).Error; err != nil {
+		t.Fatalf("load payout usage record: %v", err)
+	}
+	if payoutUsageRecord.SettlementStatus != "settled" {
+		t.Fatalf("usage settlement status should follow settlement payout, got %#v", payoutUsageRecord)
+	}
 }
 
 func readMarketplaceFixture(t *testing.T, relativePath string, target any) {

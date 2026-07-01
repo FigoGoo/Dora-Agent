@@ -580,7 +580,7 @@ export const pageConfigs = {
   'skills/settlements': {
     key: 'skill-settlements',
     title: 'Skill 结算',
-    description: '查看 Skill 使用费 settlement hold、平台分成、创作者收益和反转状态；当前阶段不做真实出账。',
+    description: '治理 Skill 使用费 settlement hold、平台分成、创作者收益、反转和内部出账确认；不接外部打款通道。',
     listPath: '/api/admin/marketplace/settlements',
     rowId: 'settlement_id',
     emptyText: '暂无结算记录',
@@ -595,7 +595,55 @@ export const pageConfigs = {
       { key: 'creator_credits', title: '创作者收益', width: 120, render: (row) => formatPoints(row.creator_credits) },
       { key: 'hold_until', title: 'Hold 到期', width: 180, render: (row) => formatDateTime(row.hold_until) }
     ],
-    detail: true
+    detail: true,
+    actions: [
+      {
+        label: '解除 hold',
+        method: 'POST',
+        visible: (row) => row.status === 'pending_hold',
+        path: (row) => `/api/admin/settlements/${row.settlement_id}/release-hold`,
+        fields: [
+          {
+            name: 'reason_code',
+            label: '解除原因码',
+            required: true,
+            defaultValue: 'hold_period_completed',
+            group: '结算治理',
+            groupHint: '仅当 hold 到期且无退款/风控冻结时允许解除。',
+            placeholder: 'hold_period_completed'
+          }
+        ],
+        idempotencyKey: ({ row }) => `settlement_release:${row.settlement_id}`,
+        body: ({ values }) => ({ reason_code: values.reason_code }),
+        successNotice: () => 'Settlement hold 已解除'
+      },
+      {
+        label: '确认出账',
+        method: 'POST',
+        visible: (row) => row.status === 'eligible',
+        path: (row) => `/api/admin/settlements/${row.settlement_id}/confirm-payout`,
+        fields: [
+          {
+            name: 'payout_reference',
+            label: '出账引用',
+            required: true,
+            group: '结算治理',
+            groupHint: '填写内部 ledger、批次号或人工出账凭证引用，不填写外部密钥或敏感账号。',
+            placeholder: 'manual-ledger-20260701-001'
+          },
+          {
+            name: 'reason_code',
+            label: '确认原因码',
+            required: true,
+            defaultValue: 'manual_payout_confirmed',
+            placeholder: 'manual_payout_confirmed'
+          }
+        ],
+        idempotencyKey: ({ row, values }) => `settlement_payout:${row.settlement_id}:${values.payout_reference || 'pending'}`,
+        body: ({ values }) => ({ payout_reference: values.payout_reference, reason_code: values.reason_code }),
+        successNotice: () => 'Settlement 已确认出账'
+      }
+    ]
   },
   'models/providers': {
     key: 'model-providers',

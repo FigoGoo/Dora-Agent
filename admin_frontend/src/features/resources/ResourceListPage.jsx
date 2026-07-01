@@ -359,6 +359,8 @@ const DETAIL_LABELS = {
   points: '积分',
   personal_space_id: '个人空间 ID',
   platform_fee_credits: '平台分成',
+  payout_id: '出账治理记录 ID',
+  payout_reference: '出账引用',
   pricing_model: '定价模型',
   pricing_snapshot_id: '价格快照 ID',
   provider_code: '供应商编码',

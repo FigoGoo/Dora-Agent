@@ -31,6 +31,8 @@ func registerM5Routes(router *gin.Engine, opts RouterOptions) {
 	router.POST("/api/admin/skill-reviews/:review_id/approve", auth.adminAuth(false), requireIdempotency(), h.adminApproveSkillReview)
 	router.POST("/api/admin/listings/:listing_id/suspend", auth.adminAuth(false), requireIdempotency(), h.adminSuspendMarketplaceListing)
 	router.POST("/api/admin/refund-cases/:refund_case_id/approve", auth.adminAuth(false), requireIdempotency(), h.adminApproveSkillUsageRefund)
+	router.POST("/api/admin/settlements/:settlement_id/release-hold", auth.adminAuth(false), requireIdempotency(), h.adminReleaseSkillSettlementHold)
+	router.POST("/api/admin/settlements/:settlement_id/confirm-payout", auth.adminAuth(false), requireIdempotency(), h.adminConfirmSkillSettlementPayout)
 
 	router.GET("/api/public/home", h.publicHome)
 	router.GET("/api/public/works", h.listPublicWorks)
@@ -318,6 +320,58 @@ func (h m5Handler) adminListSettlements(c *gin.Context) {
 		Status:  c.Query("status"),
 		Limit:   adminPageLimit(c, 10),
 		Offset:  adminPageOffset(c),
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) adminReleaseSkillSettlementHold(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		ReasonCode  string `json:"reason_code"`
+		RequestHash string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.marketplace.ReleaseSkillSettlementHold(c.Request.Context(), marketplace.ReleaseSkillSettlementHoldInput{
+		AdminID:      adminAuth(c).AdminID,
+		Meta:         meta,
+		SettlementID: c.Param("settlement_id"),
+		ReasonCode:   req.ReasonCode,
+	})
+	respond(c, out, err)
+}
+
+func (h m5Handler) adminConfirmSkillSettlementPayout(c *gin.Context) {
+	if h.marketplace == nil {
+		_ = c.Error(bizerrors.NotImplemented(c.FullPath()))
+		return
+	}
+	var req struct {
+		PayoutReference string `json:"payout_reference"`
+		ReasonCode      string `json:"reason_code"`
+		RequestHash     string `json:"request_hash"`
+	}
+	if !h.auth.bind(c, &req) {
+		return
+	}
+	meta := h.auth.meta(c, true)
+	if req.RequestHash != "" {
+		meta.RequestHash = req.RequestHash
+	}
+	out, err := h.marketplace.ConfirmSkillSettlementPayout(c.Request.Context(), marketplace.ConfirmSkillSettlementPayoutInput{
+		AdminID:         adminAuth(c).AdminID,
+		Meta:            meta,
+		SettlementID:    c.Param("settlement_id"),
+		PayoutReference: req.PayoutReference,
+		ReasonCode:      req.ReasonCode,
 	})
 	respond(c, out, err)
 }

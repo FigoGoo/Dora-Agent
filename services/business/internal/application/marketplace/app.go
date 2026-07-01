@@ -96,6 +96,20 @@ type SkillSettlementDTO struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+type SkillSettlementPayoutDTO struct {
+	PayoutID        string    `json:"payout_id"`
+	SettlementID    string    `json:"settlement_id"`
+	CreatorUserID   string    `json:"creator_user_id"`
+	Action          string    `json:"action"`
+	StatusBefore    string    `json:"status_before"`
+	StatusAfter     string    `json:"status_after"`
+	PayoutReference string    `json:"payout_reference,omitempty"`
+	ReasonCode      string    `json:"reason_code"`
+	OperatorAdminID string    `json:"operator_admin_id"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
 type CreatorSkillDTO struct {
 	SkillID             string     `json:"skill_id"`
 	Name                string     `json:"name"`
@@ -400,6 +414,26 @@ type ListAdminSettlementsInput struct {
 	Status  string
 	Limit   int
 	Offset  int
+}
+
+type ReleaseSkillSettlementHoldInput struct {
+	AdminID      string
+	Meta         RequestMeta
+	SettlementID string
+	ReasonCode   string
+}
+
+type ConfirmSkillSettlementPayoutInput struct {
+	AdminID         string
+	Meta            RequestMeta
+	SettlementID    string
+	PayoutReference string
+	ReasonCode      string
+}
+
+type SkillSettlementGovernanceOutput struct {
+	Settlement SkillSettlementDTO       `json:"settlement"`
+	Payout     SkillSettlementPayoutDTO `json:"payout"`
 }
 
 type listingRow struct {
@@ -1097,6 +1131,167 @@ func (a *App) ListAdminSettlements(ctx context.Context, in ListAdminSettlementsI
 	return AdminPage[AdminSettlementDTO]{Items: items, Limit: limit, Offset: offset, Total: int64(offset + len(items))}, nil
 }
 
+func (a *App) ReleaseSkillSettlementHold(ctx context.Context, in ReleaseSkillSettlementHoldInput) (SkillSettlementGovernanceOutput, error) {
+	if err := requireAdminID(in.AdminID); err != nil {
+		return SkillSettlementGovernanceOutput{}, err
+	}
+	settlementID := strings.TrimSpace(in.SettlementID)
+	if settlementID == "" {
+		return SkillSettlementGovernanceOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "settlement_id is required")
+	}
+	idempotencyKey := strings.TrimSpace(in.Meta.IdempotencyKey)
+	if idempotencyKey == "" {
+		return SkillSettlementGovernanceOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "idempotency_key is required")
+	}
+	reasonCode := strings.TrimSpace(in.ReasonCode)
+	if reasonCode == "" {
+		return SkillSettlementGovernanceOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "reason_code is required")
+	}
+
+	now := a.now().UTC()
+	var settlement pr4.SkillSettlement
+	var payout businesscore.PR4SkillSettlementPayoutRecord
+	err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		existing, found, err := findSettlementPayoutByIdempotencyTx(tx, idempotencyKey)
+		if err != nil {
+			return err
+		}
+		if found {
+			if existing.SettlementID != settlementID || existing.Action != "release_hold" {
+				return bizerrors.New(bizerrors.CodeIdempotencyConflict, "settlement payout idempotency key conflicts")
+			}
+			current, err := a.getSettlementContractTx(tx, &settlementID, "")
+			if err != nil {
+				return err
+			}
+			settlement = current
+			payout = existing
+			return nil
+		}
+
+		current, err := a.getSettlementContractTx(tx, &settlementID, "")
+		if err != nil {
+			return err
+		}
+		if current.Status != "pending_hold" {
+			return bizerrors.New(bizerrors.CodeStateConflict, "settlement hold can only be released from pending_hold")
+		}
+		if now.Before(current.HoldUntil) {
+			return bizerrors.New(bizerrors.CodeStateConflict, "settlement hold period is not over")
+		}
+		usage, err := a.getUsageContractTx(tx, current.UsageID)
+		if err != nil {
+			return err
+		}
+		after := current
+		after.Status = "eligible"
+		after.UpdatedAt = now
+		if err := pr4.ValidateSkillSettlement(after); err != nil {
+			return err
+		}
+		afterUsage := usage
+		afterUsage.SettlementStatus = after.Status
+		afterUsage.UpdatedAt = now
+		if err := pr4.ValidateSkillUsageRecord(afterUsage); err != nil {
+			return err
+		}
+		if err := updateSettlementAndUsageStatusTx(tx, after, afterUsage); err != nil {
+			return err
+		}
+		payout = buildSettlementPayoutRecord(after, "release_hold", current.Status, after.Status, "", reasonCode, in.AdminID, idempotencyKey, now)
+		if err := tx.Create(&payout).Error; err != nil {
+			return err
+		}
+		settlement = after
+		return nil
+	})
+	if err != nil {
+		return SkillSettlementGovernanceOutput{}, mapStoreError(err)
+	}
+	return SkillSettlementGovernanceOutput{Settlement: settlementDTO(settlement), Payout: settlementPayoutDTO(payout)}, nil
+}
+
+func (a *App) ConfirmSkillSettlementPayout(ctx context.Context, in ConfirmSkillSettlementPayoutInput) (SkillSettlementGovernanceOutput, error) {
+	if err := requireAdminID(in.AdminID); err != nil {
+		return SkillSettlementGovernanceOutput{}, err
+	}
+	settlementID := strings.TrimSpace(in.SettlementID)
+	if settlementID == "" {
+		return SkillSettlementGovernanceOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "settlement_id is required")
+	}
+	idempotencyKey := strings.TrimSpace(in.Meta.IdempotencyKey)
+	if idempotencyKey == "" {
+		return SkillSettlementGovernanceOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "idempotency_key is required")
+	}
+	payoutReference := strings.TrimSpace(in.PayoutReference)
+	if payoutReference == "" {
+		return SkillSettlementGovernanceOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "payout_reference is required")
+	}
+	reasonCode := strings.TrimSpace(in.ReasonCode)
+	if reasonCode == "" {
+		return SkillSettlementGovernanceOutput{}, bizerrors.New(bizerrors.CodeInvalidArgument, "reason_code is required")
+	}
+
+	now := a.now().UTC()
+	var settlement pr4.SkillSettlement
+	var payout businesscore.PR4SkillSettlementPayoutRecord
+	err := a.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		existing, found, err := findSettlementPayoutByIdempotencyTx(tx, idempotencyKey)
+		if err != nil {
+			return err
+		}
+		if found {
+			if existing.SettlementID != settlementID || existing.Action != "confirm_payout" {
+				return bizerrors.New(bizerrors.CodeIdempotencyConflict, "settlement payout idempotency key conflicts")
+			}
+			current, err := a.getSettlementContractTx(tx, &settlementID, "")
+			if err != nil {
+				return err
+			}
+			settlement = current
+			payout = existing
+			return nil
+		}
+
+		current, err := a.getSettlementContractTx(tx, &settlementID, "")
+		if err != nil {
+			return err
+		}
+		if current.Status != "eligible" {
+			return bizerrors.New(bizerrors.CodeStateConflict, "settlement payout can only be confirmed from eligible")
+		}
+		usage, err := a.getUsageContractTx(tx, current.UsageID)
+		if err != nil {
+			return err
+		}
+		after := current
+		after.Status = "settled"
+		after.UpdatedAt = now
+		if err := pr4.ValidateSkillSettlement(after); err != nil {
+			return err
+		}
+		afterUsage := usage
+		afterUsage.SettlementStatus = after.Status
+		afterUsage.UpdatedAt = now
+		if err := pr4.ValidateSkillUsageRecord(afterUsage); err != nil {
+			return err
+		}
+		if err := updateSettlementAndUsageStatusTx(tx, after, afterUsage); err != nil {
+			return err
+		}
+		payout = buildSettlementPayoutRecord(after, "confirm_payout", current.Status, after.Status, payoutReference, reasonCode, in.AdminID, idempotencyKey, now)
+		if err := tx.Create(&payout).Error; err != nil {
+			return err
+		}
+		settlement = after
+		return nil
+	})
+	if err != nil {
+		return SkillSettlementGovernanceOutput{}, mapStoreError(err)
+	}
+	return SkillSettlementGovernanceOutput{Settlement: settlementDTO(settlement), Payout: settlementPayoutDTO(payout)}, nil
+}
+
 func (a *App) ListMarketplaceSkills(ctx context.Context, in ListMarketplaceSkillsInput) (ListMarketplaceSkillsOutput, error) {
 	if err := requireAuth(in.Auth); err != nil {
 		return ListMarketplaceSkillsOutput{}, err
@@ -1761,6 +1956,48 @@ func (a *App) getSettlementContractTx(tx *gorm.DB, settlementID *string, usageID
 	return settlement, nil
 }
 
+func findSettlementPayoutByIdempotencyTx(tx *gorm.DB, idempotencyKey string) (businesscore.PR4SkillSettlementPayoutRecord, bool, error) {
+	var record businesscore.PR4SkillSettlementPayoutRecord
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("idempotency_key = ?", idempotencyKey).
+		First(&record).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return businesscore.PR4SkillSettlementPayoutRecord{}, false, nil
+	}
+	if err != nil {
+		return businesscore.PR4SkillSettlementPayoutRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func updateSettlementAndUsageStatusTx(tx *gorm.DB, settlement pr4.SkillSettlement, usage pr4.SkillUsageRecord) error {
+	if err := tx.Model(&businesscore.PR4SkillSettlementRecord{}).
+		Where("settlement_id = ?", settlement.SettlementID).
+		Updates(map[string]any{"status": settlement.Status, "updated_at": settlement.UpdatedAt}).Error; err != nil {
+		return err
+	}
+	return tx.Model(&businesscore.PR4SkillUsageRecord{}).
+		Where("usage_id = ?", usage.UsageID).
+		Updates(map[string]any{"settlement_status": usage.SettlementStatus, "updated_at": usage.UpdatedAt}).Error
+}
+
+func buildSettlementPayoutRecord(settlement pr4.SkillSettlement, action string, before string, after string, payoutReference string, reasonCode string, adminID string, idempotencyKey string, now time.Time) businesscore.PR4SkillSettlementPayoutRecord {
+	return businesscore.PR4SkillSettlementPayoutRecord{
+		PayoutID:        prefixedStableID("spayout_", settlement.SettlementID, action, idempotencyKey),
+		SettlementID:    settlement.SettlementID,
+		CreatorUserID:   settlement.CreatorUserID,
+		Action:          action,
+		StatusBefore:    before,
+		StatusAfter:     after,
+		PayoutReference: payoutReference,
+		ReasonCode:      reasonCode,
+		OperatorAdminID: adminID,
+		IdempotencyKey:  idempotencyKey,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+}
+
 func (a *App) getSkillCreatorUserID(ctx context.Context, skillID string) (string, error) {
 	var record businesscore.PR4SkillPackageRecord
 	if err := a.repo.DB().WithContext(ctx).Where("skill_id = ?", skillID).First(&record).Error; err != nil {
@@ -2148,5 +2385,21 @@ func settlementDTO(settlement pr4.SkillSettlement) SkillSettlementDTO {
 		HoldUntil:          settlement.HoldUntil.UTC(),
 		CreatedAt:          settlement.CreatedAt.UTC(),
 		UpdatedAt:          settlement.UpdatedAt.UTC(),
+	}
+}
+
+func settlementPayoutDTO(record businesscore.PR4SkillSettlementPayoutRecord) SkillSettlementPayoutDTO {
+	return SkillSettlementPayoutDTO{
+		PayoutID:        record.PayoutID,
+		SettlementID:    record.SettlementID,
+		CreatorUserID:   record.CreatorUserID,
+		Action:          record.Action,
+		StatusBefore:    record.StatusBefore,
+		StatusAfter:     record.StatusAfter,
+		PayoutReference: record.PayoutReference,
+		ReasonCode:      record.ReasonCode,
+		OperatorAdminID: record.OperatorAdminID,
+		CreatedAt:       record.CreatedAt.UTC(),
+		UpdatedAt:       record.UpdatedAt.UTC(),
 	}
 }

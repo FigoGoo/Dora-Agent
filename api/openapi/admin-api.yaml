@@ -194,6 +194,69 @@ paths:
                     type: object
         default:
           $ref: '#/components/responses/Error'
+  /settlements/{settlement_id}/release-hold:
+    post:
+      operationId: releaseSkillSettlementHold
+      summary: 解除 Skill 结算 hold
+      description: 仅做平台内部 settlement ledger 治理，不触发外部打款。
+      parameters:
+      - $ref: '#/components/parameters/SettlementID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason_code
+              properties:
+                reason_code:
+                  type: string
+                request_hash:
+                  type: string
+      responses:
+        '200':
+          description: hold 已解除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillSettlementGovernanceResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /settlements/{settlement_id}/confirm-payout:
+    post:
+      operationId: confirmSkillSettlementPayout
+      summary: 确认 Skill 结算内部出账
+      description: 记录人工或内部 ledger 出账确认，不接外部打款通道。
+      parameters:
+      - $ref: '#/components/parameters/SettlementID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - payout_reference
+              - reason_code
+              properties:
+                payout_reference:
+                  type: string
+                reason_code:
+                  type: string
+                request_hash:
+                  type: string
+      responses:
+        '200':
+          description: 出账已确认
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillSettlementGovernanceResponse'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     bearerAuth:
@@ -225,6 +288,12 @@ components:
       required: true
       schema:
         type: string
+    SettlementID:
+      name: settlement_id
+      in: path
+      required: true
+      schema:
+        type: string
     Status:
       name: status
       in: query
@@ -252,6 +321,17 @@ components:
       schema:
         type: integer
         minimum: 0
+  schemas:
+    SkillSettlementGovernanceResponse:
+      type: object
+      required:
+      - settlement
+      - payout
+      properties:
+        settlement:
+          type: object
+        payout:
+          type: object
   responses:
     Error:
       description: 错误响应
