@@ -59,81 +59,188 @@ func (a *App) recordRouterRunEvents(ctx context.Context, auth AuthContextDTO, ru
 		return a.completeRouterRun(ctx, run, traceID, map[string]any{"router_result": "capability_answered"})
 	default:
 		selectedSkillID, selectedListingID := selectedSkillFromControls(req.ControlInputs)
-		decision, err := a.chatRouter.Decide(ctx, runtimerouter.Input{
-			UserInput:         req.UserInput.Text,
+		return a.routeAndDispatch(ctx, auth, run, routeDispatchInput{
+			Prompt:            req.UserInput.Text,
 			RunIntent:         req.RunIntent,
 			SelectedSkillID:   selectedSkillID,
 			SelectedListingID: selectedListingID,
 			Catalog:           catalog,
+		}, traceID)
+	}
+}
+
+type routeDispatchInput struct {
+	Prompt            string
+	RunIntent         string
+	SelectedSkillID   string
+	SelectedListingID string
+	Catalog           []runtimerouter.CatalogSkill
+}
+
+// routeAndDispatch 执行一次意图路由并派发决策分支；
+// CreateRun 首轮与 AppendUserInput 澄清续跑共用此入口。
+func (a *App) routeAndDispatch(ctx context.Context, auth AuthContextDTO, run *model.Run, in routeDispatchInput, traceID string) error {
+	routed, err := a.chatRouter.Route(ctx, runtimerouter.Input{
+		UserInput:         in.Prompt,
+		RunIntent:         in.RunIntent,
+		SelectedSkillID:   in.SelectedSkillID,
+		SelectedListingID: in.SelectedListingID,
+		Catalog:           in.Catalog,
+	})
+	if err != nil {
+		return err
+	}
+	decision := routed.Decision
+	if err := foundation.ValidateRouterDecision(decision); err != nil {
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "ROUTER_DECISION_INVALID", err.Error())
+		_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
+			"error_type": "agent_runtime", "error_code": "ROUTER_DECISION_INVALID", "user_message": "路由结果不符合契约",
+			"retryable": true, "support_trace_id": traceID,
 		})
+		return apperror.New(apperror.CodeInternal, "router decision is invalid")
+	}
+	decisionDigest, err := foundation.CanonicalDigest(decision)
+	if err != nil {
+		return err
+	}
+	if err := a.persistRouterDecision(ctx, run, in.RunIntent, decision, decisionDigest, in.Catalog); err != nil {
+		return err
+	}
+	if err := a.appendRouterDecision(ctx, run, decision, decisionDigest, traceID); err != nil {
+		return err
+	}
+	switch decision.Decision {
+	case foundation.RouterDecisionSelectSkill, foundation.RouterDecisionGenericCreation:
+		if err := a.appendRouterSkillSelected(ctx, run, decision, decisionDigest, traceID); err != nil {
+			return err
+		}
+		if decision.RequiresSkillUsageConfirmation {
+			return a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusWaitingConfirmation, "", "")
+		}
+		if decision.Decision == foundation.RouterDecisionGenericCreation {
+			return a.startBoardRuntime(ctx, auth, run, in.Prompt, decisionDigest, traceID)
+		}
+		spec, err := a.loadSkillGraphPublishedSkillSpec(ctx, auth, decision, in.Catalog, traceID)
 		if err != nil {
+			_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_spec_unavailable", err.Error())
+			_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "SKILL_SPEC_UNAVAILABLE", "published skill spec unavailable")
 			return err
 		}
-		if err := foundation.ValidateRouterDecision(decision); err != nil {
-			_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "ROUTER_DECISION_INVALID", err.Error())
-			_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
-				"error_type": "agent_runtime", "error_code": "ROUTER_DECISION_INVALID", "user_message": "路由结果不符合契约",
-				"retryable": true, "support_trace_id": traceID,
-			})
-			return apperror.New(apperror.CodeInternal, "router decision is invalid")
+		return a.startSkillGraphRuntime(ctx, auth, run, in.Prompt, decision, decisionDigest, spec, traceID)
+	case foundation.RouterDecisionClarify:
+		question := strings.TrimSpace(routed.ClarifyQuestion)
+		if question == "" {
+			question = clarifyMessage(decision)
 		}
-		decisionDigest, err := foundation.CanonicalDigest(decision)
-		if err != nil {
+		if err := a.createRouterAssistantMessage(ctx, run, question, map[string]any{
+			"message_kind":           "clarify",
+			"missing_fields":         decision.MissingFields,
+			"suggested_questions":    routed.SuggestedQuestions,
+			"router_source":          routed.Source,
+			"router_decision_digest": decisionDigest,
+		}, traceID); err != nil {
 			return err
 		}
-		if err := a.persistRouterDecision(ctx, run, req.RunIntent, decision, decisionDigest, catalog); err != nil {
+		return a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusWaitingInput, "", "")
+	case foundation.RouterDecisionCapabilityAnswer, foundation.RouterDecisionTextAnswer:
+		if err := a.createRouterAssistantMessage(ctx, run, capabilityAnswer(in.Catalog), map[string]any{
+			"message_kind":           decision.Decision,
+			"router_decision_digest": decisionDigest,
+		}, traceID); err != nil {
 			return err
 		}
-		if err := a.appendRouterDecision(ctx, run, decision, decisionDigest, traceID); err != nil {
+		return a.completeRouterRun(ctx, run, traceID, map[string]any{"router_result": decision.Decision, "router_decision_digest": decisionDigest})
+	case foundation.RouterDecisionReject:
+		if err := a.createRouterAssistantMessage(ctx, run, "这个请求暂时无法继续，请调整创作目标后再试。", map[string]any{
+			"message_kind":           "reject",
+			"router_decision_digest": decisionDigest,
+		}, traceID); err != nil {
 			return err
 		}
-		switch decision.Decision {
-		case foundation.RouterDecisionSelectSkill, foundation.RouterDecisionGenericCreation:
-			if err := a.appendRouterSkillSelected(ctx, run, decision, decisionDigest, traceID); err != nil {
-				return err
-			}
-			if decision.RequiresSkillUsageConfirmation {
-				return a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusWaitingConfirmation, "", "")
-			}
-			if decision.Decision == foundation.RouterDecisionGenericCreation {
-				return a.startBoardRuntime(ctx, auth, run, req.UserInput.Text, decisionDigest, traceID)
-			}
-			spec, err := a.loadSkillGraphPublishedSkillSpec(ctx, auth, decision, catalog, traceID)
-			if err != nil {
-				_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_spec_unavailable", err.Error())
-				_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "SKILL_SPEC_UNAVAILABLE", "published skill spec unavailable")
-				return err
-			}
-			return a.startSkillGraphRuntime(ctx, auth, run, req.UserInput.Text, decision, decisionDigest, spec, traceID)
-		case foundation.RouterDecisionClarify:
-			if err := a.createRouterAssistantMessage(ctx, run, clarifyMessage(decision), map[string]any{
-				"message_kind":           "clarify",
-				"missing_fields":         decision.MissingFields,
-				"router_decision_digest": decisionDigest,
-			}, traceID); err != nil {
-				return err
-			}
-			return a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusWaitingInput, "", "")
-		case foundation.RouterDecisionCapabilityAnswer, foundation.RouterDecisionTextAnswer:
-			if err := a.createRouterAssistantMessage(ctx, run, capabilityAnswer(catalog), map[string]any{
-				"message_kind":           decision.Decision,
-				"router_decision_digest": decisionDigest,
-			}, traceID); err != nil {
-				return err
-			}
-			return a.completeRouterRun(ctx, run, traceID, map[string]any{"router_result": decision.Decision, "router_decision_digest": decisionDigest})
-		case foundation.RouterDecisionReject:
-			if err := a.createRouterAssistantMessage(ctx, run, "这个请求暂时无法继续，请调整创作目标后再试。", map[string]any{
-				"message_kind":           "reject",
-				"router_decision_digest": decisionDigest,
-			}, traceID); err != nil {
-				return err
-			}
-			return a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "ROUTER_REJECTED", "router rejected user input")
-		default:
-			return a.completeRouterRun(ctx, run, traceID, map[string]any{"router_result": decision.Decision, "router_decision_digest": decisionDigest})
+		return a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "ROUTER_REJECTED", "router rejected user input")
+	default:
+		return a.completeRouterRun(ctx, run, traceID, map[string]any{"router_result": decision.Decision, "router_decision_digest": decisionDigest})
+	}
+}
+
+const maxClarifyRounds = 3
+
+// continueClarifiedRouterRun 处理 clarify 后的追加输入：合并该 run 的全部用户输入重新路由；
+// 澄清满 maxClarifyRounds 轮后不再追问，直接进入内置场景引导（generic_creation Graph）。
+func (a *App) continueClarifiedRouterRun(ctx context.Context, auth AuthContextDTO, run *model.Run, traceID string) error {
+	skills, _, err := a.gateway.ListRoutableSkills(ctx, auth, "", 20, "", traceID)
+	if err != nil {
+		_ = a.appendRunEvent(ctx, run, "agent.run.failed", traceID, map[string]any{
+			"error_type": "business_rpc", "error_code": "SKILL_CATALOG_UNAVAILABLE", "user_message": "Skill Catalog 暂不可用",
+			"retryable": true, "support_trace_id": traceID,
+		})
+		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "SKILL_CATALOG_UNAVAILABLE", "skill catalog unavailable")
+		return mapBusinessError(err)
+	}
+	merged, err := a.mergedRunUserPrompt(ctx, run)
+	if err != nil {
+		return err
+	}
+	if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusRouting, "", ""); err != nil {
+		return err
+	}
+	rounds, err := a.clarifyRounds(ctx, run)
+	if err != nil {
+		return err
+	}
+	if rounds >= maxClarifyRounds {
+		// 引导兜底：不再追问，进入内置 L0 场景引导 Graph。
+		digest, digestErr := foundation.CanonicalDigest(map[string]any{"clarify_rounds": rounds, "prompt": merged})
+		if digestErr != nil {
+			return digestErr
+		}
+		return a.startBoardRuntime(ctx, auth, run, merged, digest, traceID)
+	}
+	return a.routeAndDispatch(ctx, auth, run, routeDispatchInput{
+		Prompt:    merged,
+		RunIntent: RunIntentNormal,
+		Catalog:   creativeRouterCatalog(skills),
+	}, traceID)
+}
+
+// mergedRunUserPrompt 汇总该 run 的全部用户输入（按 sequence 升序），作为续跑路由的上下文。
+func (a *App) mergedRunUserPrompt(ctx context.Context, run *model.Run) (string, error) {
+	messages, err := a.repo.ListMessages(ctx, run.SessionID, 100, 0)
+	if err != nil {
+		return "", err
+	}
+	parts := make([]string, 0, 4)
+	for _, message := range messages {
+		if message.RunID != run.ID || message.Role != "user" {
+			continue
+		}
+		if text := strings.TrimSpace(message.Content); text != "" {
+			parts = append(parts, text)
 		}
 	}
+	if len(parts) == 0 {
+		return "", apperror.New(apperror.CodeStateConflict, "run has no user input to resume")
+	}
+	return strings.Join(parts, "\n"), nil
+}
+
+// clarifyRounds 统计该 run 已发出的澄清轮数（assistant clarify 消息数）。
+func (a *App) clarifyRounds(ctx context.Context, run *model.Run) (int, error) {
+	messages, err := a.repo.ListMessages(ctx, run.SessionID, 100, 0)
+	if err != nil {
+		return 0, err
+	}
+	rounds := 0
+	for _, message := range messages {
+		if message.RunID != run.ID || message.Role != "assistant" {
+			continue
+		}
+		summary := jsonMapFromString(string(message.ContentSummary))
+		if summary != nil && summary["message_kind"] == "clarify" {
+			rounds++
+		}
+	}
+	return rounds, nil
 }
 
 func (a *App) loadSkillGraphPublishedSkillSpec(ctx context.Context, auth AuthContextDTO, decision foundation.RouterDecision, catalog []runtimerouter.CatalogSkill, traceID string) (SkillSpecDTO, error) {
@@ -448,11 +555,7 @@ func skillCatalogSource(scope string, hints map[string]string) string {
 }
 
 func skillRoutingExamples(hints map[string]string) []string {
-	values := splitRouteHints(firstNonEmpty(hints["intent_examples"], hints["routing_examples"], hints["example_prompt"], hints["intent"]))
-	if len(values) == 0 {
-		values = splitRouteHints(hints["keywords"])
-	}
-	return values
+	return splitRouteHints(firstNonEmpty(hints["intent_examples"], hints["routing_examples"], hints["example_prompt"], hints["intent"]))
 }
 
 func selectedSkillFromControls(inputs []ControlInputDTO) (string, string) {

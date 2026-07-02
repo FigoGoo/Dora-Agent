@@ -23,7 +23,9 @@ AGENT_DATABASE_URL=postgres://example
 AGENT_HTTP_ADDR=0.0.0.0:18080
 AGENT_SERVICE_NAME=dora.agent
 BUSINESS_SERVICE_NAME=dora.business
-BUSINESS_HOSTPORTS=127.0.0.1:19001,127.0.0.1:29001
+KITEX_REGISTRY=etcd
+ETCD_ENDPOINTS=http://127.0.0.1:2379
+ETCD_NAMESPACE=/dora/test
 KITEX_TIMEOUT_MS=3000
 AGENT_EVENT_REPLAY_PAGE_SIZE=10
 AGENT_EVENT_REPLAY_MAX_PAGE_SIZE=100
@@ -64,8 +66,8 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 	if cfg.KitexTimeout != 3*time.Second || cfg.ToolDefaultTimeout != 120*time.Second {
 		t.Fatalf("unexpected timeouts: kitex=%s tool=%s", cfg.KitexTimeout, cfg.ToolDefaultTimeout)
 	}
-	if len(cfg.BusinessHostPorts) != 2 || cfg.BusinessHostPorts[0] != "127.0.0.1:19001" || cfg.BusinessHostPorts[1] != "127.0.0.1:29001" {
-		t.Fatalf("unexpected business hostports: %#v", cfg.BusinessHostPorts)
+	if cfg.KitexRegistry != "etcd" || len(cfg.EtcdEndpoints) != 1 || cfg.EtcdEndpoints[0] != "http://127.0.0.1:2379" || cfg.EtcdNamespace != "/dora/test" {
+		t.Fatalf("unexpected rpc discovery config: registry=%s endpoints=%#v namespace=%s", cfg.KitexRegistry, cfg.EtcdEndpoints, cfg.EtcdNamespace)
 	}
 	if len(cfg.ToolAllowlist) != 2 || cfg.ToolAllowlist[0] != "image" || cfg.ToolAllowlist[1] != "video" {
 		t.Fatalf("unexpected allowlist: %#v", cfg.ToolAllowlist)
@@ -81,6 +83,9 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 	}
 	if cfg.ModelAdapter != "deepseek" {
 		t.Fatalf("unexpected model adapter: %s", cfg.ModelAdapter)
+	}
+	if cfg.RouterMode != "mock" {
+		t.Fatalf("default router mode should be mock, got %s", cfg.RouterMode)
 	}
 	if cfg.DeepSeekAPIKey != "sk-test" || cfg.DeepSeekBaseURL != "https://api.deepseek.com" || cfg.DeepSeekModel != "deepseek-v4-flash" {
 		t.Fatalf("unexpected deepseek config: base=%s model=%s keySet=%t", cfg.DeepSeekBaseURL, cfg.DeepSeekModel, cfg.DeepSeekAPIKey != "")
@@ -228,7 +233,7 @@ func unsetAgentEnv(t *testing.T) {
 	keys := []string{
 		"DORA_CONFIG_SOURCE", "DORA_CONFIG_ETCD_TIMEOUT",
 		"APP_ENV", "APP_NAME", "LOG_LEVEL", "AGENT_DATABASE_URL", "AGENT_HTTP_ADDR",
-		"AGENT_SERVICE_NAME", "BUSINESS_SERVICE_NAME", "BUSINESS_HOSTPORTS", "KITEX_REGISTRY", "KITEX_TIMEOUT_MS",
+		"AGENT_SERVICE_NAME", "BUSINESS_SERVICE_NAME", "KITEX_REGISTRY", "KITEX_TIMEOUT_MS",
 		"AGENT_SSE_ENABLED", "AGENT_WS_ENABLED", "AGENT_SSE_HEARTBEAT_SECONDS",
 		"AGENT_EVENT_REPLAY_PAGE_SIZE", "AGENT_EVENT_REPLAY_MAX_PAGE_SIZE", "AGENT_CONFIG_SOURCE",
 		"AGENT_DEFAULT_CONFIG_VERSION", "AGENT_TOOL_ALLOWLIST", "AGENT_MEMORY_ENABLED",
@@ -237,7 +242,7 @@ func unsetAgentEnv(t *testing.T) {
 		"AGENT_GENERATION_REDIS_LIST_KEY", "AGENT_GENERATION_WORKERS", "AGENT_GENERATION_RECOVERY_STALE_AFTER",
 		"AGENT_RUNTIME_REDIS_MODE", "AGENT_RUNTIME_REDIS_ADDR", "AGENT_RUNTIME_REDIS_PASSWORD",
 		"AGENT_RUNTIME_REDIS_DB", "AGENT_RUNTIME_REDIS_STREAM_MAX_LEN",
-		"AGENT_MODEL_ADAPTER", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL", "DEEPSEEK_MAX_TOKENS",
+		"AGENT_MODEL_ADAPTER", "AGENT_ROUTER_MODE", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL", "DEEPSEEK_MAX_TOKENS",
 		"ETCD_ENDPOINTS", "ETCD_NAMESPACE",
 	}
 	for _, key := range keys {

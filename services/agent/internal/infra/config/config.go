@@ -20,7 +20,6 @@ type AgentConfig struct {
 	DatabaseURL              string
 	ServiceName              string
 	BusinessServiceName      string
-	BusinessHostPorts        []string
 	KitexRegistry            string
 	EtcdEndpoints            []string
 	EtcdNamespace            string
@@ -53,6 +52,7 @@ type AgentConfig struct {
 	DeepSeekBaseURL          string
 	DeepSeekModel            string
 	DeepSeekMaxTokens        int
+	RouterMode               string
 }
 
 func Load() (AgentConfig, error) {
@@ -176,6 +176,13 @@ func loadFromWithEtcdLoader(paths []string, loader configsource.EtcdLoader) (Age
 	if modelAdapter != "local" && modelAdapter != "deepseek" {
 		return AgentConfig{}, fmt.Errorf("AGENT_MODEL_ADAPTER must be local or deepseek")
 	}
+	routerMode := strings.ToLower(strings.TrimSpace(values.String("AGENT_ROUTER_MODE", "mock")))
+	if routerMode == "" {
+		routerMode = "mock"
+	}
+	if routerMode != "mock" && routerMode != "llm" {
+		return AgentConfig{}, fmt.Errorf("AGENT_ROUTER_MODE must be mock or llm")
+	}
 
 	return AgentConfig{
 		AppEnv:                   values.String("APP_ENV", "local"),
@@ -186,8 +193,7 @@ func loadFromWithEtcdLoader(paths []string, loader configsource.EtcdLoader) (Age
 		DatabaseURL:              databaseURL,
 		ServiceName:              values.String("AGENT_SERVICE_NAME", "dora.agent"),
 		BusinessServiceName:      values.String("BUSINESS_SERVICE_NAME", "dora.business"),
-		BusinessHostPorts:        values.CSV("BUSINESS_HOSTPORTS"),
-		KitexRegistry:            values.String("KITEX_REGISTRY", "none"),
+		KitexRegistry:            values.String("KITEX_REGISTRY", "etcd"),
 		EtcdEndpoints:            values.CSV("ETCD_ENDPOINTS"),
 		EtcdNamespace:            values.String("ETCD_NAMESPACE", ""),
 		KitexTimeout:             kitexTimeout,
@@ -219,6 +225,7 @@ func loadFromWithEtcdLoader(paths []string, loader configsource.EtcdLoader) (Age
 		DeepSeekBaseURL:          values.String("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
 		DeepSeekModel:            values.String("DEEPSEEK_MODEL", "deepseek-v4-flash"),
 		DeepSeekMaxTokens:        deepSeekMaxTokens,
+		RouterMode:               routerMode,
 	}, nil
 }
 
@@ -229,7 +236,6 @@ var agentEtcdConfigKeys = []string{
 	"AGENT_HTTP_PORT",
 	"AGENT_HTTP_ADDR",
 	"BUSINESS_SERVICE_NAME",
-	"BUSINESS_HOSTPORTS",
 	"KITEX_REGISTRY",
 	"KITEX_TIMEOUT_MS",
 	"AGENT_SSE_ENABLED",
@@ -244,6 +250,7 @@ var agentEtcdConfigKeys = []string{
 	"AGENT_TOOL_DEFAULT_TIMEOUT_MS",
 	"AGENT_SAFETY_POLICY_VERSION",
 	"AGENT_MODEL_ADAPTER",
+	"AGENT_ROUTER_MODE",
 	"AGENT_GENERATION_QUEUE",
 	"AGENT_GENERATION_REDIS_ADDR",
 	"AGENT_GENERATION_REDIS_DB",

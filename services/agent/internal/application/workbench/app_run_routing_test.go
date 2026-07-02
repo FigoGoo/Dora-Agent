@@ -3,6 +3,7 @@ package workbench
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/FigoGoo/Dora-Agent/internal/contracts/boardgraph"
@@ -11,6 +12,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/model"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/domain/state"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/repository"
+	runtimerouter "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/router"
 )
 
 func TestRouterEntryGuideRunEmitsGuideOnly(t *testing.T) {
@@ -49,6 +51,23 @@ func TestRouterEntryGuideRunEmitsGuideOnly(t *testing.T) {
 
 func TestSkillGraphNormalRunRoutesPublishedSkillAndCreatesBoardWithoutToolOrCredit(t *testing.T) {
 	app, gateway := newRouterApp(t)
+	app.SetChatRouter(staticRouter{result: runtimerouter.Result{
+		Source: "test",
+		Decision: foundation.RouterDecision{
+			SchemaVersion:                  foundation.SchemaVersionRouterDecision,
+			Decision:                       foundation.RouterDecisionSelectSkill,
+			SkillSource:                    testStringPtr(foundation.SkillSourceSystemDefault),
+			SkillID:                        testStringPtr("skill_city_tourism_video"),
+			Confidence:                     0.95,
+			ReasonCode:                     "test_select_skill",
+			SafeToExecute:                  false,
+			RequiresSkillUsageConfirmation: false,
+			ExtractedParams:                map[string]any{},
+			MissingFields:                  []string{},
+			CandidateSkills:                []foundation.CandidateSkill{{SkillID: "skill_city_tourism_video", Score: 0.95, Why: "测试路由"}},
+			MarketplaceCandidates:          []foundation.MarketplaceCandidate{},
+		},
+	}})
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
 	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{
 		ProjectID: "prj_active_1001", InitialTitle: "router route", IdempotencyKey: "idem-router-session-route",
@@ -139,6 +158,22 @@ func TestSkillGraphNormalRunRoutesPublishedSkillAndCreatesBoardWithoutToolOrCred
 
 func TestRouterAmbiguousInputClarifiesWithoutGeneration(t *testing.T) {
 	app, _ := newRouterApp(t)
+	app.SetChatRouter(staticRouter{result: runtimerouter.Result{
+		Source:          "test",
+		ClarifyQuestion: "你想宣传什么产品？期望多长、投放在哪里？",
+		Decision: foundation.RouterDecision{
+			SchemaVersion:                  foundation.SchemaVersionRouterDecision,
+			Decision:                       foundation.RouterDecisionClarify,
+			Confidence:                     0.5,
+			ReasonCode:                     "test_clarify",
+			SafeToExecute:                  false,
+			RequiresSkillUsageConfirmation: false,
+			ExtractedParams:                map[string]any{},
+			MissingFields:                  []string{"product_name", "duration_sec", "target_platform"},
+			CandidateSkills:                []foundation.CandidateSkill{},
+			MarketplaceCandidates:          []foundation.MarketplaceCandidate{},
+		},
+	}})
 	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
 	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{
 		ProjectID: "prj_active_1001", InitialTitle: "router clarify", IdempotencyKey: "idem-router-session-clarify",
@@ -172,6 +207,33 @@ func TestRouterAmbiguousInputClarifiesWithoutGeneration(t *testing.T) {
 	if !hasAssistantMessage(messages) {
 		t.Fatalf("clarify run should persist assistant message, got %#v", messages)
 	}
+}
+
+type staticRouter struct {
+	result runtimerouter.Result
+	err    error
+}
+
+func (r staticRouter) Route(context.Context, runtimerouter.Input) (runtimerouter.Result, error) {
+	return r.result, r.err
+}
+
+type sequenceRouter struct {
+	results []runtimerouter.Result
+	index   int
+}
+
+func (r *sequenceRouter) Route(context.Context, runtimerouter.Input) (runtimerouter.Result, error) {
+	if r.index >= len(r.results) {
+		return r.results[len(r.results)-1], nil
+	}
+	result := r.results[r.index]
+	r.index++
+	return result, nil
+}
+
+func testStringPtr(value string) *string {
+	return &value
 }
 
 func newRouterApp(t *testing.T) (*App, *recordingGateway) {
@@ -322,4 +384,105 @@ func hasReplayType(events []EventDTO, eventType string) bool {
 		}
 	}
 	return false
+}
+
+func TestClarifyRunContinuesRoutingAfterAdditionalInput(t *testing.T) {
+	app, _ := newRouterApp(t)
+	app.SetChatRouter(&sequenceRouter{results: []runtimerouter.Result{
+		{
+			Source:          "test",
+			ClarifyQuestion: "你想宣传什么产品？期望多长、投放在哪里？",
+			Decision: foundation.RouterDecision{
+				SchemaVersion:                  foundation.SchemaVersionRouterDecision,
+				Decision:                       foundation.RouterDecisionClarify,
+				Confidence:                     0.5,
+				ReasonCode:                     "test_clarify",
+				SafeToExecute:                  false,
+				RequiresSkillUsageConfirmation: false,
+				ExtractedParams:                map[string]any{},
+				MissingFields:                  []string{"product_name", "duration_sec", "target_platform"},
+				CandidateSkills:                []foundation.CandidateSkill{},
+				MarketplaceCandidates:          []foundation.MarketplaceCandidate{},
+			},
+		},
+		{
+			Source: "test",
+			Decision: foundation.RouterDecision{
+				SchemaVersion:                  foundation.SchemaVersionRouterDecision,
+				Decision:                       foundation.RouterDecisionGenericCreation,
+				SkillSource:                    testStringPtr(foundation.SkillSourceSystemBuiltin),
+				SkillID:                        testStringPtr("skill_generic_creation"),
+				Confidence:                     0.8,
+				ReasonCode:                     "test_generic_after_clarify",
+				SafeToExecute:                  false,
+				RequiresSkillUsageConfirmation: false,
+				ExtractedParams:                map[string]any{},
+				MissingFields:                  []string{},
+				CandidateSkills:                []foundation.CandidateSkill{{SkillID: "skill_generic_creation", Score: 0.8, Why: "测试续跑"}},
+				MarketplaceCandidates:          []foundation.MarketplaceCandidate{},
+				PricingSummary:                 map[string]any{"skill_usage_points": 0, "tool_generation_points": "preflight_estimate"},
+				EntitlementStatus:              testStringPtr(foundation.EntitlementAvailable),
+			},
+		},
+	}})
+	auth := AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"}
+	session, err := app.CreateSession(t.Context(), auth, CreateSessionRequest{
+		ProjectID: "prj_active_1001", InitialTitle: "router clarify resume", IdempotencyKey: "idem-router-session-clarify-resume",
+	}, "trace-router-clarify-resume")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	run, err := app.CreateRun(t.Context(), auth, CreateRunRequest{
+		SessionID: session.SessionID, ProjectID: session.ProjectID, RunIntent: "normal", IdempotencyKey: "idem-router-run-clarify-resume",
+		UserInput: UserInputDTO{ClientMessageID: "cm_router_clarify_resume", ContentType: "text", Text: "帮我做一个产品宣传片，年轻一点"},
+	}, "trace-router-clarify-resume")
+	if err != nil {
+		t.Fatalf("create clarify run: %v", err)
+	}
+	if run.Status != state.RunStatusWaitingInput {
+		t.Fatalf("ambiguous router run should wait for user input, got %#v", run)
+	}
+
+	// clarify 文案必须是人话，不允许直出 missing_fields 内部字段名（docs/02 §4）。
+	messages, err := app.repo.ListMessages(t.Context(), session.SessionID, 20, 0)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	for _, message := range messages {
+		if message.Role != "assistant" {
+			continue
+		}
+		if strings.Contains(message.Content, "_") || strings.Contains(message.Content, "creative_goal") {
+			t.Fatalf("clarify message must not leak internal field names: %q", message.Content)
+		}
+	}
+
+	resumed, err := app.AppendUserInput(t.Context(), auth, run.RunID, AppendUserInputRequest{
+		UserInput:      UserInputDTO{ClientMessageID: "cm_router_clarify_more", ContentType: "text", Text: "产品是智能水杯，30秒，投放抖音"},
+		IdempotencyKey: "idem-router-append-clarify-resume",
+	}, "trace-router-clarify-resume")
+	if err != nil {
+		t.Fatalf("append user input: %v", err)
+	}
+	if resumed.Status == state.RunStatusWaitingInput || resumed.Status == state.RunStatusFailed {
+		t.Fatalf("clarify resume must continue routing instead of hanging, got %#v", resumed)
+	}
+
+	events := routerEvents(t, app, run.RunID)
+	decidedCount := 0
+	for _, event := range events {
+		if event.Type == "creative.router.decided" {
+			decidedCount++
+		}
+	}
+	if decidedCount < 2 {
+		t.Fatalf("append input must trigger a second router decision, got %d in %#v", decidedCount, routerEventTypes(events))
+	}
+	if !hasEvent(events, "agent.skill.selected") {
+		t.Fatalf("merged input should route into a creation path, got %#v", routerEventTypes(events))
+	}
+	if hasEvent(events, "generation.progress") || hasEvent(events, "credits.estimated") {
+		t.Fatalf("routing continuation must not enter generation or credit flow: %#v", routerEventTypes(events))
+	}
 }

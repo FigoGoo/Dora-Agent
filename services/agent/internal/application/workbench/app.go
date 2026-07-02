@@ -26,7 +26,6 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/modeltool"
 	runtimerouter "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/router"
 	runtimesafety "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/safety"
-	runtimeskill "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skill"
 	runtimeskilltest "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skilltest"
 	runtimetool "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/tool"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/turnloop"
@@ -462,8 +461,7 @@ type App struct {
 	gateway          BusinessGateway
 	configVersion    string
 	safetyEvaluator  runtimesafety.Evaluator
-	skillRouter      runtimeskill.Router
-	chatRouter       runtimerouter.ChatModelRouter
+	chatRouter       runtimerouter.Router
 	toolChecker      runtimetool.PolicyChecker
 	modelAdapter     modeltool.Adapter
 	artifactUploader ArtifactUploader
@@ -492,7 +490,6 @@ func New(repo *repository.Repository, gateway BusinessGateway, configVersion str
 		gateway:          gateway,
 		configVersion:    configVersion,
 		safetyEvaluator:  runtimesafety.NewEvaluator(nil),
-		skillRouter:      runtimeskill.NewRouter(),
 		chatRouter:       runtimerouter.NewChatModelRouter(),
 		toolChecker:      runtimetool.NewPolicyChecker(),
 		modelAdapter:     modeltool.LocalAdapter{},
@@ -504,6 +501,13 @@ func New(repo *repository.Repository, gateway BusinessGateway, configVersion str
 func (a *App) SetArtifactUploader(uploader ArtifactUploader) {
 	if uploader != nil {
 		a.artifactUploader = uploader
+	}
+}
+
+// SetChatRouter 切换意图路由实现（LLM ChatModel 路由或 mock 路由）。
+func (a *App) SetChatRouter(router runtimerouter.Router) {
+	if router != nil {
+		a.chatRouter = router
 	}
 }
 
@@ -1091,6 +1095,12 @@ func (a *App) AppendUserInput(ctx context.Context, auth AuthContextDTO, runID st
 			if err := a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusRunning, "", ""); err != nil {
 				return RunDTO{}, err
 			}
+		}
+	}
+	if run.Status == state.RunStatusWaitingInput {
+		// clarify 续跑：合并补充输入后重新路由（docs/02 §3.4），避免 run 滞留 running 并锁死会话。
+		if err := a.continueClarifiedRouterRun(ctx, auth, run, traceID); err != nil {
+			return RunDTO{}, err
 		}
 	}
 	updated, err := a.repo.GetRun(ctx, run.ID)
@@ -1791,54 +1801,49 @@ func (a *App) recordSkillRuntimeStartEvents(ctx context.Context, auth AuthContex
 	}
 	selectedSkillID := ""
 	var selectedOutputElements []SkillOutputElementDTO
-	skills, _, err := a.gateway.ListRoutableSkills(ctx, auth, "", 10, "", traceID)
-	if err != nil {
+	if skills, _, err := a.gateway.ListRoutableSkills(ctx, auth, "", 10, "", traceID); err != nil {
 		_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_catalog_unavailable", err.Error())
 		skillSelectionSnapshot["fallback_reason"] = "skill_catalog_unavailable"
-	} else {
-		route := a.skillRouter.Route(prompt, runtimeSkillSummaries(skills))
-		if !route.Matched {
-			_ = a.appendSkillMissingEvent(ctx, run, traceID, route.Reason, "未命中可路由 Skill，使用文本模型兜底")
-			skillSelectionSnapshot["fallback_reason"] = route.Reason
+	} else if skill, ok := singlePublishedRuntimeSkill(skills); ok {
+		selectedSkillID = skill.SkillID
+		skillSelectionSnapshot["skill_id"] = skill.SkillID
+		skillSelectionSnapshot["skill_version"] = skill.Version
+		skillSelectionSnapshot["version"] = skill.Version
+		skillSelectionSnapshot["skill_scope"] = skill.SkillScope
+		skillSelectionSnapshot["matched_reason"] = "single_published_skill"
+		_ = a.appendRunEvent(ctx, run, "agent.skill.selected", traceID, map[string]any{
+			"skill_id":       skill.SkillID,
+			"skill_name":     skill.SkillName,
+			"skill_scope":    skill.SkillScope,
+			"skill_version":  skill.Version,
+			"matched_reason": "single_published_skill",
+		})
+		spec, specErr := a.gateway.GetPublishedSkillSpec(ctx, auth, skill.SkillID, skill.Version, traceID)
+		if specErr != nil {
+			_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_spec_unavailable", specErr.Error())
+			skillSelectionSnapshot["fallback_reason"] = "skill_spec_unavailable"
 		} else {
-			selectedSkillID = route.Skill.SkillID
-			skillSelectionSnapshot["skill_id"] = route.Skill.SkillID
-			skillSelectionSnapshot["skill_version"] = route.Skill.Version
-			skillSelectionSnapshot["version"] = route.Skill.Version
-			skillSelectionSnapshot["skill_scope"] = route.Skill.SkillScope
-			skillSelectionSnapshot["matched_reason"] = route.Reason
-			_ = a.appendRunEvent(ctx, run, "agent.skill.selected", traceID, map[string]any{
-				"skill_id":       route.Skill.SkillID,
-				"skill_name":     route.Skill.SkillName,
-				"skill_scope":    route.Skill.SkillScope,
-				"skill_version":  route.Skill.Version,
-				"matched_reason": route.Reason,
-				"route_hints":    route.Skill.RouteHints,
-			})
-			spec, specErr := a.gateway.GetPublishedSkillSpec(ctx, auth, route.Skill.SkillID, route.Skill.Version, traceID)
-			if specErr != nil {
-				_ = a.appendSkillMissingEvent(ctx, run, traceID, "skill_spec_unavailable", specErr.Error())
-				skillSelectionSnapshot["fallback_reason"] = "skill_spec_unavailable"
-			} else {
-				selectedOutputElements = spec.OutputElements
-				skillSelectionSnapshot["confirmation_policy"] = spec.ConfirmationPolicyJSON
-				skillSelectionSnapshot["tool_refs_digest"] = digestStrings(spec.ToolRefs)
-				skillSelectionSnapshot["tool_refs_count"] = len(spec.ToolRefs)
-				skillSelectionSnapshot["output_elements"] = spec.OutputElements
-				skillSelectionSnapshot["output_elements_count"] = len(spec.OutputElements)
-				if err := a.recordToolPolicyEvents(ctx, auth, run, spec.ToolRefs, safetyEvidence, traceID); err != nil {
-					if errors.Is(err, errToolConfirmationRequired) {
-						return nil
-					}
-					return err
+			selectedOutputElements = spec.OutputElements
+			skillSelectionSnapshot["confirmation_policy"] = spec.ConfirmationPolicyJSON
+			skillSelectionSnapshot["tool_refs_digest"] = digestStrings(spec.ToolRefs)
+			skillSelectionSnapshot["tool_refs_count"] = len(spec.ToolRefs)
+			skillSelectionSnapshot["output_elements"] = spec.OutputElements
+			skillSelectionSnapshot["output_elements_count"] = len(spec.OutputElements)
+			if err := a.recordToolPolicyEvents(ctx, auth, run, spec.ToolRefs, safetyEvidence, traceID); err != nil {
+				if errors.Is(err, errToolConfirmationRequired) {
+					return nil
 				}
-				if skillRequiresConfirmation(spec.ConfirmationPolicyJSON) {
-					if err := a.createSkillConfirmationInterrupt(ctx, run, spec, traceID); err != nil {
-						return err
-					}
+				return err
+			}
+			if skillRequiresConfirmation(spec.ConfirmationPolicyJSON) {
+				if err := a.createSkillConfirmationInterrupt(ctx, run, spec, traceID); err != nil {
+					return err
 				}
 			}
 		}
+	} else {
+		_ = a.appendSkillMissingEvent(ctx, run, traceID, "explicit_skill_required", "未显式选择 Skill，继续使用直接生成链路")
+		skillSelectionSnapshot["fallback_reason"] = "explicit_skill_required"
 	}
 	modelID := ""
 	if models, nextCursor, err := a.gateway.ListAvailableGenerationModels(ctx, auth, "image", 10, "", traceID); err == nil {
@@ -1933,6 +1938,19 @@ func (a *App) recordSkillRuntimeStartEvents(ctx context.Context, auth AuthContex
 		_ = a.repo.UpdateRunStatus(ctx, run.ID, state.RunStatusFailed, "TURNLOOP_FAILED", result.Phase)
 	}
 	return nil
+}
+
+func singlePublishedRuntimeSkill(items []SkillSummaryDTO) (SkillSummaryDTO, bool) {
+	var selected SkillSummaryDTO
+	count := 0
+	for _, item := range items {
+		if item.Status != "published" || item.SkillID == "skill_generic_creation" {
+			continue
+		}
+		selected = item
+		count++
+	}
+	return selected, count == 1
 }
 
 func (a *App) recordToolPolicyEvents(ctx context.Context, auth AuthContextDTO, run *model.Run, toolRefs []string, safety *model.SafetyEvaluation, traceID string) error {
@@ -3452,17 +3470,6 @@ func (a *App) appendGenerationProgress(ctx context.Context, run *model.Run, trac
 		payload[key] = value
 	}
 	return a.appendRunEvent(ctx, run, "generation.progress", traceID, payload)
-}
-
-func runtimeSkillSummaries(items []SkillSummaryDTO) []runtimeskill.Summary {
-	out := make([]runtimeskill.Summary, 0, len(items))
-	for _, item := range items {
-		out = append(out, runtimeskill.Summary{
-			SkillID: item.SkillID, SkillName: item.SkillName, SkillScope: item.SkillScope, Version: item.Version,
-			Status: item.Status, RouteHints: item.RouteHints,
-		})
-	}
-	return out
 }
 
 func assetElementTags(items []AssetElementTypeDTO) []string {

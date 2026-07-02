@@ -4,7 +4,7 @@
 owner：Agent 服务责任域  
 更新时间：2026-07-01  
 适用范围：入口动态引导、能力问答、RouterDecision、Router Guard、Router Eval、Skill Catalog 摘要  
-相关代码路径：`services/agent/internal/runtime/guide/**`、`services/agent/internal/runtime/router/**`、`services/agent/internal/runtime/skill/**`、`services/agent/internal/application/workbench/**`  
+相关代码路径：`services/agent/internal/runtime/guide/**`、`services/agent/internal/runtime/router/**`、`services/agent/internal/application/workbench/**`
 相关契约：`RouterDecision.v1`、`CreativeGuideOutput.v1`、`SkillCatalogSummary.v1`、`api/openapi/agent-workbench.yaml`、`api/agui/agent-workbench-events.schema.json`
 
 ## 0. 阶段目标与闭环
@@ -415,9 +415,14 @@ services/agent/internal/runtime/router/
   router_guard.go
   router_prompt.go
   router_eval.go
-services/agent/internal/runtime/skill/
-  catalog_summary.go
 ```
+
+运行开关（实现约定）：
+
+- `AGENT_ROUTER_MODE=llm`：启用 ChatModel Router（DeepSeek chat completions，temperature 0.2 / timeout 15s / retry 1），结构化输出经 `ValidateRouterDecision` + Router Guard；缺少 `DEEPSEEK_API_KEY` 或任一步失败时自动降级 mock 路由。
+- `AGENT_ROUTER_MODE=mock`（默认）：无第三方 Key 的结构化 mock 路由，只使用 `run_intent`、显式选择的 `skill_id/listing_id` 和目录事实；不得扫描用户文本或 `route_hints` 做关键词匹配。
+- clarify 文案由路由结果的 `clarify_question` 提供（LLM 生成人话提问）；mock 路由或 LLM 缺省时用 missing_fields → 人话映射，禁止向用户直出内部字段名。
+- clarify 后的追加输入走 `AppendUserInput` 合并该 run 全部用户输入重新路由；连续澄清满 3 轮后不再追问，直接进入内置 `skill_generic_creation` 场景引导。
 
 测试：
 
@@ -427,6 +432,8 @@ services/agent/internal/runtime/skill/
 - 能力问答不展示内部 Tool。
 - 不存在 Skill 被 Guard 拦截。
 - 低置信不执行。
+- LLM 输出损坏/超时降级 mock 路由。
+- clarify 追加输入后续跑出创作路径，run 不滞留 waiting_input。
 
 ## 13. 开发注意事项
 
@@ -434,7 +441,7 @@ services/agent/internal/runtime/skill/
 - 不把付费市场 Skill 自动执行。
 - 不在 Router Prompt 中注入完整 Skill Prompt。
 - 不把 route_hints 写成前端固定推荐卡。
-- Router 失败应降级为澄清或文本回答。
+- Router 失败应降级到 mock 路由并保持契约可渲染。
 
 ## 14. 验收标准
 

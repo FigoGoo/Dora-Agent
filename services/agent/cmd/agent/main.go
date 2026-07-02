@@ -19,6 +19,7 @@ import (
 	agentrpc "github.com/FigoGoo/Dora-Agent/services/agent/internal/infra/rpc"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/observability"
 	"github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/modeltool"
+	runtimerouter "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/router"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -68,6 +69,24 @@ func main() {
 	default:
 		logger.Error("unsupported agent model adapter", "adapter", cfg.ModelAdapter)
 		os.Exit(1)
+	}
+	switch cfg.RouterMode {
+	case "llm":
+		if cfg.DeepSeekAPIKey == "" {
+			app.SetChatRouter(runtimerouter.NewChatModelRouter())
+			logger.Info("agent_router_enabled", "mode", "mock", "requested_mode", "llm", "reason", "missing_deepseek_api_key")
+			break
+		}
+		app.SetChatRouter(runtimerouter.NewLLMRouter(runtimerouter.DeepSeekChatClient{
+			BaseURL:   cfg.DeepSeekBaseURL,
+			APIKey:    cfg.DeepSeekAPIKey,
+			Model:     cfg.DeepSeekModel,
+			MaxTokens: cfg.DeepSeekMaxTokens,
+		}))
+		logger.Info("agent_router_enabled", "mode", "llm", "provider", "deepseek", "model", cfg.DeepSeekModel)
+	case "mock":
+		app.SetChatRouter(runtimerouter.NewChatModelRouter())
+		logger.Info("agent_router_enabled", "mode", "mock")
 	}
 	var runtimeRedisClient *redis.Client
 	if cfg.RuntimeRedisMode == "redis" {

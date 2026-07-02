@@ -2,12 +2,9 @@ package router
 
 import (
 	"context"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/FigoGoo/Dora-Agent/internal/contracts/foundation"
-	runtimeskill "github.com/FigoGoo/Dora-Agent/services/agent/internal/runtime/skill"
 )
 
 type CatalogSkill struct {
@@ -33,12 +30,12 @@ type Input struct {
 	Catalog           []CatalogSkill
 }
 
-type ChatModelRouter struct {
-	routeHints runtimeskill.Router
-}
+// ChatModelRouter 是无第三方 Key 环境下的结构化 mock router。
+// 它只使用显式 run_intent / selected_skill_id，不再扫描用户文本或 route_hints 做自动匹配。
+type ChatModelRouter struct{}
 
 func NewChatModelRouter() ChatModelRouter {
-	return ChatModelRouter{routeHints: runtimeskill.NewRouter()}
+	return ChatModelRouter{}
 }
 
 func (r ChatModelRouter) Decide(ctx context.Context, input Input) (foundation.RouterDecision, error) {
@@ -46,22 +43,16 @@ func (r ChatModelRouter) Decide(ctx context.Context, input Input) (foundation.Ro
 		return foundation.RouterDecision{}, err
 	}
 	text := strings.TrimSpace(input.UserInput)
-	if input.RunIntent == "capability_question" || isCapabilityQuestion(text) {
+	if input.RunIntent == "capability_question" {
 		return r.capabilityAnswer(input), nil
 	}
 	if input.SelectedSkillID != "" || input.SelectedListingID != "" || input.RunIntent == "select_skill" {
 		return r.explicitSelect(input), nil
 	}
-	if decision, ok := r.matchPublishedSkill(text, input.Catalog); ok {
-		return decision, nil
+	if text == "" {
+		return clarifyDecision(map[string]any{}, []string{"creative_goal"}, "empty_user_input", "user input is empty", 0.35), nil
 	}
-	if isAmbiguousPromo(text) {
-		return clarifyDecision(map[string]any{"topic": "产品宣传片", "style": "年轻"}, []string{"product_name", "duration_sec", "target_platform"}, "missing_output_specs", "需要补充产品、时长和投放平台", 0.68), nil
-	}
-	if hasCreativeIntent(text) {
-		return genericCreationDecision(text), nil
-	}
-	return clarifyDecision(map[string]any{"user_input_preview": trimForRouter(text, 80)}, []string{"creative_goal"}, "creative_intent_unclear", "请补充要创作的目标、媒介或限制", 0.42), nil
+	return genericCreationDecision(text), nil
 }
 
 func (r ChatModelRouter) capabilityAnswer(input Input) foundation.RouterDecision {
@@ -115,33 +106,9 @@ func (r ChatModelRouter) explicitSelect(input Input) foundation.RouterDecision {
 		if skill.Status != "published" {
 			return unavailableDecision(skill)
 		}
-		return selectSkillDecision(skill, 0.94, "explicit_skill_selected", extractedParams(input.UserInput), "用户显式选择 Skill")
+		return selectSkillDecision(skill, 0.94, "explicit_skill_selected", map[string]any{}, "用户显式选择 Skill")
 	}
 	return clarifyDecision(map[string]any{"requested_skill_id": input.SelectedSkillID, "requested_listing_id": input.SelectedListingID}, []string{"available_skill_choice"}, "selected_skill_unavailable", "listing removed", 0.73)
-}
-
-func (r ChatModelRouter) matchPublishedSkill(text string, catalog []CatalogSkill) (foundation.RouterDecision, bool) {
-	summaries := make([]runtimeskill.Summary, 0, len(catalog))
-	byID := map[string]CatalogSkill{}
-	for _, skill := range catalog {
-		byID[skill.SkillID] = skill
-		summaries = append(summaries, runtimeskill.Summary{
-			SkillID: skill.SkillID, SkillName: skill.SkillName, SkillScope: skill.SkillSource, Version: skill.SkillVersion,
-			Status: skill.Status, RouteHints: skill.RouteHints,
-		})
-	}
-	route := r.routeHints.Route(text, summaries)
-	if !route.Matched {
-		return foundation.RouterDecision{}, false
-	}
-	skill := byID[route.Skill.SkillID]
-	if skill.Status != "published" {
-		return unavailableDecision(skill), true
-	}
-	if skillSource(skill) == foundation.SkillSourceMarketplace && entitlementStatus(skill) != foundation.EntitlementAvailable {
-		return marketplaceCapabilityDecision(skill, text), true
-	}
-	return selectSkillDecision(skill, 0.92, reasonCodeForSkill(skill, route.Reason), extractedParams(text), "命中"+displaySkillName(skill)+"场景"), true
 }
 
 func selectSkillDecision(skill CatalogSkill, confidence float64, reasonCode string, params map[string]any, why string) foundation.RouterDecision {
@@ -170,32 +137,6 @@ func selectSkillDecision(skill CatalogSkill, confidence float64, reasonCode stri
 	}
 }
 
-func marketplaceCapabilityDecision(skill CatalogSkill, text string) foundation.RouterDecision {
-	return foundation.RouterDecision{
-		SchemaVersion:                  foundation.SchemaVersionRouterDecision,
-		Decision:                       foundation.RouterDecisionCapabilityAnswer,
-		Confidence:                     0.81,
-		ReasonCode:                     "marketplace_candidates_not_installed",
-		SafeToExecute:                  false,
-		RequiresSkillUsageConfirmation: false,
-		ExtractedParams:                extractedParams(text),
-		MissingFields:                  []string{},
-		CandidateSkills:                []foundation.CandidateSkill{},
-		MarketplaceCandidates: []foundation.MarketplaceCandidate{{
-			SkillID:           skill.SkillID,
-			ListingID:         skill.ListingID,
-			Score:             0.87,
-			PricingSummary:    nonNilMap(skill.PricingSummary),
-			CreatorSummary:    nonNilMap(skill.CreatorSummary),
-			EntitlementStatus: entitlementStatus(skill),
-		}},
-		PricingSummary:    nil,
-		CreatorSummary:    nil,
-		EntitlementStatus: nil,
-		FallbackReason:    stringPtr("展示市场候选，等待用户显式安装或选择"),
-	}
-}
-
 func genericCreationDecision(text string) foundation.RouterDecision {
 	source := foundation.SkillSourceSystemBuiltin
 	skillID := "skill_generic_creation"
@@ -206,12 +147,12 @@ func genericCreationDecision(text string) foundation.RouterDecision {
 		SkillID:                        &skillID,
 		ListingID:                      nil,
 		Confidence:                     0.72,
-		ReasonCode:                     "creative_intent_without_specific_skill",
+		ReasonCode:                     "mock_router_generic_creation",
 		SafeToExecute:                  false,
 		RequiresSkillUsageConfirmation: false,
-		ExtractedParams:                extractedParams(text),
+		ExtractedParams:                map[string]any{"user_input_preview": trimForRouter(text, 80)},
 		MissingFields:                  []string{},
-		CandidateSkills:                []foundation.CandidateSkill{{SkillID: skillID, Score: 0.72, Why: "未命中具体 Skill，进入内置自由创作"}},
+		CandidateSkills:                []foundation.CandidateSkill{{SkillID: skillID, Score: 0.72, Why: "无 LLM 路由结果，进入内置自由创作"}},
 		MarketplaceCandidates:          []foundation.MarketplaceCandidate{},
 		PricingSummary:                 map[string]any{"skill_usage_points": 0, "tool_generation_points": "preflight_estimate"},
 		CreatorSummary:                 nil,
@@ -241,37 +182,6 @@ func clarifyDecision(params map[string]any, missing []string, reasonCode, fallba
 
 func unavailableDecision(skill CatalogSkill) foundation.RouterDecision {
 	return clarifyDecision(map[string]any{"requested_skill_id": skill.SkillID, "requested_listing_id": skill.ListingID}, []string{"available_skill_choice"}, "selected_skill_unavailable", "listing removed", 0.73)
-}
-
-func extractedParams(text string) map[string]any {
-	params := map[string]any{}
-	if strings.Contains(text, "杭州") {
-		params["city_or_destination"] = "杭州"
-	}
-	if strings.Contains(text, "现代国风") {
-		params["style"] = "现代国风"
-	} else if strings.Contains(text, "年轻") {
-		params["style"] = "年轻"
-	}
-	if match := regexp.MustCompile(`([0-9]+)\s*秒`).FindStringSubmatch(text); len(match) == 2 {
-		if seconds, err := strconv.Atoi(match[1]); err == nil {
-			params["duration_sec"] = seconds
-		}
-	}
-	if strings.Contains(text, "产品宣传片") {
-		params["topic"] = "产品宣传片"
-	}
-	return params
-}
-
-func reasonCodeForSkill(skill CatalogSkill, fallback string) string {
-	if strings.Contains(skill.SkillID, "city_tourism") {
-		return "matched_city_tourism_video"
-	}
-	if fallback != "" {
-		return strings.ReplaceAll(fallback, ":", "_")
-	}
-	return "matched_published_skill"
 }
 
 func skillSource(skill CatalogSkill) string {
@@ -308,37 +218,6 @@ func skillRequiresUsageConfirmation(skill CatalogSkill) bool {
 	}
 	if value, ok := skill.PricingSummary["skill_usage_points"]; ok && value != nil {
 		return true
-	}
-	return false
-}
-
-func isCapabilityQuestion(text string) bool {
-	lower := strings.ToLower(text)
-	return strings.Contains(text, "你有什么能力") ||
-		strings.Contains(text, "你能做什么") ||
-		strings.Contains(text, "有哪些能力") ||
-		strings.Contains(lower, "what can you do") ||
-		strings.Contains(lower, "skill")
-}
-
-func isAmbiguousPromo(text string) bool {
-	return strings.Contains(text, "宣传片") && !strings.Contains(text, "文旅") && !strings.Contains(text, "30秒") && !strings.Contains(text, "30 秒")
-}
-
-func hasCreativeIntent(text string) bool {
-	if text == "" {
-		return false
-	}
-	verbs := []string{"做", "生成", "创作", "设计", "制作", "写", "整理"}
-	objects := []string{"视频", "宣传片", "海报", "文案", "脚本", "分镜", "音乐", "图片", "brief", "prompt"}
-	return containsAny(text, verbs) && containsAny(text, objects)
-}
-
-func containsAny(text string, values []string) bool {
-	for _, value := range values {
-		if strings.Contains(text, value) {
-			return true
-		}
 	}
 	return false
 }
