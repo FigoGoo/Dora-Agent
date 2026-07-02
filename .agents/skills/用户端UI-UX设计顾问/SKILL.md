@@ -35,20 +35,9 @@ description: 用于 Dora-Agent 用户端 UI/UX 设计、审查和改版，覆盖
 
 信息不足时，先列出关键假设并给出初版方案；只在无法判断核心页面或核心任务时停止追问。追问最多 3 个。
 
-## 文档使用规则
+## 文档入口
 
-- 开始任务先读 `AGENTS.md`、`docs/current/README.md` 和 `docs/design/README.md`。
-- 用户端视觉和交互事实源优先读取：
-  - `docs/design/00-UIUE设计总纲.md`
-  - `docs/design/01-站点信息架构与导航.md`
-  - `docs/design/08-视觉风格与设计Token规范.md`
-  - `docs/design/09-C端公共组件视觉规范.md`
-  - `docs/design/10-C端页面模板与布局规范.md`
-  - `docs/design/11-Agent工作台与A2UI组件视觉规范.md`
-  - `docs/design/12-项目与资产归属体验设计.md`
-- 首页、公开页、工作台或特定页面任务，继续读取对应 `docs/design/**` 页面设计和 `docs/design/wireframes/**` 草图。
-- 涉及 AG-UI、A2UI、API、RPC、字段、积分扣费、权限或资产归属时，读取 `docs/contracts/README.md` 和字段级事实源，不凭 UI 方案发明后端字段。
-- 进入前端实现时，联用 `前端开发实现`、`编码规范执行` 和必要测试 Skill。
+- 项目文档、契约、规范和测试口径统一以 `docs/` 下内容为准。
 
 ## 默认设计方向
 
