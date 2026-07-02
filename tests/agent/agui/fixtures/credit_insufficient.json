@@ -1,4 +1,0 @@
-[
-  {"event_id":"evt_credit_1","type":"credits.insufficient","session_id":"ses_1","run_id":"run_credit","project_id":"prj_1","space_id":"spc_1","actor_user_id":"usr_1","sequence":1,"timestamp":"2026-06-27T00:00:00Z","component":"agent-runtime","trace_id":"trc_credit","payload":{"estimate_points":100,"available_points":1,"user_message":"积分不足。","retryable":false}},
-  {"event_id":"evt_credit_2","type":"agent.run.failed","session_id":"ses_1","run_id":"run_credit","project_id":"prj_1","space_id":"spc_1","actor_user_id":"usr_1","sequence":2,"timestamp":"2026-06-27T00:00:01Z","component":"agent-runtime","trace_id":"trc_credit","payload":{"error_type":"credit_error","error_code":"CREDIT_INSUFFICIENT","user_message":"积分不足。","retryable":false,"support_trace_id":"trc_credit"}}
-]
