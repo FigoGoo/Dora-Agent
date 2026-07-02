@@ -37,7 +37,7 @@ Agent-facing RPC client 方法集合已纳入 M6 门禁：`ListAvailableGenerati
 
 ## HTTP
 
-HTTP 验收通过 M2-M5 route parity 和 M6 关键 route 检查兜底：身份/项目、后台用户状态、模型/Tool/Skill、积分/资产、作品公开、后台下架、通知列表/已读/跳转。写操作仍由既有中间件和应用测试覆盖 `Idempotency-Key`、canonical request hash、actor/admin 维度隔离和审计。
+HTTP 验收通过 M2-M5 route parity 和 M6 关键 route 检查兜底：身份/项目、后台用户状态、模型/Tool/Skill、积分/资产、作品公开、后台下架、通知列表/已读/跳转。写操作仍由既有中间件和应用测试覆盖 `Idempotency-Key`、业务逻辑幂等判断、actor/admin 维度隔离和审计。
 
 ## AG-UI
 

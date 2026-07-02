@@ -6,9 +6,7 @@
     "Authorization": "Bearer user_session_token",
     "Idempotency-Key": "idem_notification_read_001"
   },
-  "request_body": {
-    "request_hash": "sha256:work_marketplace-notification-read-request"
-  },
+  "request_body": {},
   "response_status": 200,
   "response_body": {
     "code": "OK",

@@ -19,15 +19,15 @@
 - Agent API：session 创建、run 创建、SSE stream、追加输入、interrupt accept/reject、同 session active run 冲突、取消、事件 replay、归档只读 snapshot；追加输入和 interrupt accept 覆盖 `allowed=false` / `creative_allowed=false` 正常 RPC 响应兜底拦截。
 - 契约一致性：`scripts/validate-account-agent-http.sh` 校验 Agent OpenAPI 与 Gin route parity、Business Project PATCH OpenAPI 与 Gin route parity。
 - DB 边界：业务 DB 与 Agent DB 仍由各自 Testcontainers migration 测试验证。
-- 幂等/审计：业务写操作通过 `Idempotency-Key`、request hash 和审计表写入测试覆盖。
+- 幂等/审计：业务写操作通过 `Idempotency-Key`、业务逻辑幂等判断和审计表写入测试覆盖。
 
 ## 未执行项
 
-未执行项：无（M2 范围内）。
+未执行项：无（account agent HTTP 范围内）。
 
 ## 范围外后续项
 
-Agent 07 中 Skill、Tool、模型、积分和资产 RPC 不属于 M2 完成口径，不在本报告中标记为通过；它们分别进入 M3 配置能力和 M4 积分资产闭环验收。
+Agent 07 中 Skill、Tool、模型、积分和资产 RPC 不属于 account agent HTTP 范围，不在本报告中标记为通过；它们分别进入 M3 配置能力和 M4 积分资产闭环验收。
 
 ## 阻塞问题
 

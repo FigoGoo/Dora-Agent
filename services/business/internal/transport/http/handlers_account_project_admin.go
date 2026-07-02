@@ -1,8 +1,6 @@
 package http
 
 import (
-	"bytes"
-	"io"
 	nethttp "net/http"
 	"strconv"
 	"time"
@@ -10,7 +8,6 @@ import (
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/accountspace"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/admin"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/application/project"
-	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/idempotency"
 	"github.com/FigoGoo/Dora-Agent/services/business/internal/infra/logger"
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
 	"github.com/gin-gonic/gin"
@@ -427,8 +424,6 @@ func (h accountProjectAdminHandler) adminAuth(allowRotate bool) gin.HandlerFunc 
 }
 
 func (h accountProjectAdminHandler) bind(c *gin.Context, out any) bool {
-	body := readBody(c)
-	c.Set("raw_body", body)
 	if err := c.ShouldBindJSON(out); err != nil {
 		_ = c.Error(bizerrors.New(bizerrors.CodeInvalidArgument, "invalid json request"))
 		return false
@@ -437,32 +432,14 @@ func (h accountProjectAdminHandler) bind(c *gin.Context, out any) bool {
 }
 
 func (h accountProjectAdminHandler) meta(c *gin.Context, requireIdempotency bool) accountspace.RequestMeta {
-	body, _ := c.Get("raw_body")
-	rawBody, _ := body.([]byte)
 	key := c.GetHeader("Idempotency-Key")
 	if requireIdempotency && key == "" {
 		_ = c.Error(bizerrors.New(bizerrors.CodeInvalidArgument, "Idempotency-Key is required"))
 	}
-	hash, _ := idempotency.HashRequest(idempotency.RequestHashInput{
-		TenantID:    tenantID(c),
-		SpaceID:     spaceID(c),
-		ActorUserID: actorID(c),
-		AdminID:     adminID(c),
-		Body:        rawBody,
-	})
 	return accountspace.RequestMeta{
 		TraceID: logger.TraceID(c.Request.Context()), RequestID: c.GetString("request_id"), IdempotencyKey: key,
-		Source: "business_http", RequestHash: hash,
+		Source: "business_http",
 	}
-}
-
-func readBody(c *gin.Context) []byte {
-	if c.Request.Body == nil {
-		return nil
-	}
-	body, _ := io.ReadAll(c.Request.Body)
-	c.Request.Body = io.NopCloser(bytes.NewReader(body))
-	return body
 }
 
 func respond(c *gin.Context, data any, err error) {

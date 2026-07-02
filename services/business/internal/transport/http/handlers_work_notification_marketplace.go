@@ -95,15 +95,11 @@ func (h workNotificationMarketplaceHandler) installMarketplaceSkill(c *gin.Conte
 		ListingID    string `json:"listing_id"`
 		TargetScope  string `json:"target_scope"`
 		EnterpriseID string `json:"enterprise_id"`
-		RequestHash  string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.marketplace.InstallSkill(c.Request.Context(), marketplace.InstallSkillInput{
 		Auth: userAuth(c), Meta: meta, ListingID: req.ListingID, TargetScope: req.TargetScope, EnterpriseID: req.EnterpriseID,
 	})
@@ -118,15 +114,11 @@ func (h workNotificationMarketplaceHandler) upgradeSkillInstallation(c *gin.Cont
 	var req struct {
 		TargetVersion string `json:"target_version"`
 		Confirmed     bool   `json:"confirmed"`
-		RequestHash   string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.marketplace.UpgradeSkillInstallation(c.Request.Context(), marketplace.UpgradeSkillInstallationInput{
 		Auth: userAuth(c), Meta: meta, InstallationID: c.Param("installation_id"), TargetVersion: req.TargetVersion, Confirmed: req.Confirmed,
 	})
@@ -152,15 +144,11 @@ func (h workNotificationMarketplaceHandler) createCreatorSkillDraft(c *gin.Conte
 	var req struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
-		RequestHash string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.marketplace.CreateCreatorSkillDraft(c.Request.Context(), marketplace.CreateCreatorSkillDraftInput{
 		Auth: userAuth(c), Meta: meta, Name: req.Name, Description: req.Description,
 	})
@@ -173,15 +161,11 @@ func (h workNotificationMarketplaceHandler) submitCreatorSkillVersion(c *gin.Con
 		return
 	}
 	var req struct {
-		RequestHash string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.marketplace.SubmitCreatorSkillVersion(c.Request.Context(), marketplace.SubmitCreatorSkillVersionInput{
 		Auth: userAuth(c), Meta: meta, SkillID: c.Param("skill_id"), Version: c.Param("version"),
 	})
@@ -229,8 +213,7 @@ func (h workNotificationMarketplaceHandler) adminApproveSkillReview(c *gin.Conte
 		return
 	}
 	var req struct {
-		Reason      string `json:"reason"`
-		RequestHash string `json:"request_hash"`
+		Reason string `json:"reason"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -264,8 +247,7 @@ func (h workNotificationMarketplaceHandler) adminSuspendMarketplaceListing(c *gi
 		return
 	}
 	var req struct {
-		ReasonCode  string `json:"reason_code"`
-		RequestHash string `json:"request_hash"`
+		ReasonCode string `json:"reason_code"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -298,7 +280,6 @@ func (h workNotificationMarketplaceHandler) adminApproveSkillUsageRefund(c *gin.
 		return
 	}
 	var req struct {
-		RequestHash string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -330,16 +311,12 @@ func (h workNotificationMarketplaceHandler) adminReleaseSkillSettlementHold(c *g
 		return
 	}
 	var req struct {
-		ReasonCode  string `json:"reason_code"`
-		RequestHash string `json:"request_hash"`
+		ReasonCode string `json:"reason_code"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.marketplace.ReleaseSkillSettlementHold(c.Request.Context(), marketplace.ReleaseSkillSettlementHoldInput{
 		AdminID:      adminAuth(c).AdminID,
 		Meta:         meta,
@@ -357,15 +334,11 @@ func (h workNotificationMarketplaceHandler) adminConfirmSkillSettlementPayout(c 
 	var req struct {
 		PayoutReference string `json:"payout_reference"`
 		ReasonCode      string `json:"reason_code"`
-		RequestHash     string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.marketplace.ConfirmSkillSettlementPayout(c.Request.Context(), marketplace.ConfirmSkillSettlementPayoutInput{
 		AdminID:         adminAuth(c).AdminID,
 		Meta:            meta,
@@ -412,15 +385,11 @@ func (h workNotificationMarketplaceHandler) likePublicWork(c *gin.Context) {
 		return
 	}
 	var req struct {
-		RequestHash string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.work.LikePublicWork(c.Request.Context(), work.LikePublicWorkInput{Auth: userAuth(c), Meta: meta, PublicWorkID: c.Param("public_work_id")})
 	respond(c, out, err)
 }
@@ -431,15 +400,11 @@ func (h workNotificationMarketplaceHandler) unlikePublicWork(c *gin.Context) {
 		return
 	}
 	var req struct {
-		RequestHash string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.work.UnlikePublicWork(c.Request.Context(), work.LikePublicWorkInput{Auth: userAuth(c), Meta: meta, PublicWorkID: c.Param("public_work_id")})
 	respond(c, out, err)
 }
@@ -469,15 +434,11 @@ func (h workNotificationMarketplaceHandler) createWork(c *gin.Context) {
 		CoverAssetID string   `json:"cover_asset_id"`
 		Category     string   `json:"category"`
 		Tags         []string `json:"tags"`
-		RequestHash  string   `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.work.CreateWork(c.Request.Context(), work.CreateWorkInput{
 		Auth: userAuth(c), Meta: meta, ProjectID: req.ProjectID, Title: req.Title, Description: req.Description,
 		AssetIDs: req.AssetIDs, CoverAssetID: req.CoverAssetID, Category: req.Category, Tags: req.Tags,
@@ -507,15 +468,11 @@ func (h workNotificationMarketplaceHandler) updateWork(c *gin.Context) {
 		Category      *string  `json:"category"`
 		Tags          []string `json:"tags"`
 		BaseUpdatedAt string   `json:"base_updated_at"`
-		RequestHash   string   `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.work.UpdateWork(c.Request.Context(), work.UpdateWorkInput{
 		Auth: userAuth(c), Meta: meta, WorkID: c.Param("work_id"), Title: req.Title, Description: req.Description,
 		AssetIDs: req.AssetIDs, CoverAssetID: req.CoverAssetID, Category: req.Category, Tags: req.Tags, BaseUpdatedAt: req.BaseUpdatedAt,
@@ -566,16 +523,12 @@ func (h workNotificationMarketplaceHandler) unshareWork(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Reason      string `json:"reason"`
-		RequestHash string `json:"request_hash"`
+		Reason string `json:"reason"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.work.UnshareWork(c.Request.Context(), work.UnshareWorkInput{Auth: userAuth(c), Meta: meta, WorkID: c.Param("work_id"), Reason: req.Reason})
 	respond(c, out, err)
 }
@@ -657,15 +610,11 @@ func (h workNotificationMarketplaceHandler) markNotificationRead(c *gin.Context)
 		return
 	}
 	var req struct {
-		RequestHash string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.notification.MarkNotificationRead(c.Request.Context(), userAuth(c), meta, c.Param("notification_id"))
 	respond(c, out, err)
 }
@@ -676,16 +625,12 @@ func (h workNotificationMarketplaceHandler) markAllNotificationsRead(c *gin.Cont
 		return
 	}
 	var req struct {
-		Type        string `json:"type"`
-		RequestHash string `json:"request_hash"`
+		Type string `json:"type"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.notification.MarkAllNotificationsRead(c.Request.Context(), userAuth(c), meta, req.Type)
 	respond(c, out, err)
 }

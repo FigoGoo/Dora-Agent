@@ -29,7 +29,7 @@
   },
   "assertions": [
     "admin preview token binds public_work_id, reason and admin id",
-    "preview does not require Idempotency-Key or request_hash",
+    "preview does not require Idempotency-Key or client request hash",
     "preview does not mutate public snapshot status"
   ]
 }

@@ -7,8 +7,7 @@
     "Idempotency-Key": "idem_archive_conflict_001"
   },
   "request_body": {
-    "reason": "archive again",
-    "request_hash": "sha256:archive-conflict-request"
+    "reason": "archive again"
   },
   "response_status": 409,
   "response_body": {
@@ -24,6 +23,6 @@
   },
   "assertions": [
     "state conflict does not mutate project again",
-    "same idempotency key with same request hash returns the same conflict result"
+    "same idempotency key with the same business request returns the same conflict result"
   ]
 }

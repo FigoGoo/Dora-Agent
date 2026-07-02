@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/contracts/toolasset"
 	"github.com/FigoGoo/Dora-Agent/internal/testdb"
@@ -115,6 +116,8 @@ func newToolGenerationPlanApp(t *testing.T) (*App, *recordingGateway) {
 	baseMigrator := testdb.ApplyMigrations(t, db.URL, "db/migrations/iterations/20260627_agent_runtime/agent")
 	t.Cleanup(func() { testdb.DownMigrations(t, baseMigrator) })
 	testdb.ExecSQL(t, db.DB, testdb.MustReadSQL(t, "db/migrations/iterations/2026-07-01-tool-credit-asset-contracts/agent/0001_agent_tool_plan_task.up.sql"))
+	estimateExpiresAt := time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+	freezeExpiresAt := time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339Nano)
 	gateway := &recordingGateway{StaticGateway: StaticGateway{
 		Auth:   AuthContextDTO{ActorUserID: "usr_1001", LoginIdentityType: "personal", SpaceID: "sp_personal_1001"},
 		Space:  SpaceContextDTO{SpaceID: "sp_personal_1001", SpaceType: "personal", CreditAccountID: "ca_personal_1001"},
@@ -176,9 +179,9 @@ func newToolGenerationPlanApp(t *testing.T) (*App, *recordingGateway) {
 				EstimateItemID: "est_item_tool_generation", ItemType: "model_generation", ToolName: "model_generation",
 				ToolType: "image", ModelID: "mdl_static_image", ResourceType: "image", BillingUnit: "image", EstimatePoints: 10,
 			}},
-			ExpiresAt: "2026-07-01T11:00:00Z",
+			ExpiresAt: estimateExpiresAt,
 		},
-		Freeze: FreezeCreditsDTO{FreezeID: "frz_tool_generation", FrozenPoints: 10, ExpiresAt: "2026-07-01T11:15:00Z"},
+		Freeze: FreezeCreditsDTO{FreezeID: "frz_tool_generation", FrozenPoints: 10, ExpiresAt: freezeExpiresAt},
 	}}
 	return New(repository.New(db.DB), gateway, "tool-generation-service"), gateway
 }

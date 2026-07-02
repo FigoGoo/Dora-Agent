@@ -90,7 +90,6 @@ def validate_business_write_idempotency() -> None:
     doc = yaml.safe_load(Path("api/openapi/business-api.yaml").read_text())
     components = doc.get("components", {})
     preview_operations = {"previewShareWork", "previewTakeDownPublicWork"}
-    server_hash_operations = {"confirmShareWork", "confirmTakeDownPublicWork"}
     for route, item in doc["paths"].items():
         for method, operation in item.items():
             if method.lower() not in {"post", "patch", "put", "delete"}:
@@ -112,13 +111,9 @@ def validate_business_write_idempotency() -> None:
                 fail(f"business OpenAPI write operation missing requestBody: {operation_id}")
             if "$ref" in request_body:
                 request_body = components["requestBodies"][request_body["$ref"].rsplit("/", 1)[-1]]
-            schema = request_body["content"]["application/json"]["schema"]
-            if "$ref" in schema:
-                schema = components["schemas"][schema["$ref"].rsplit("/", 1)[-1]]
-            if operation_id in server_hash_operations:
-                continue
-            if "request_hash" not in schema.get("properties", {}) or "request_hash" not in set(schema.get("required", [])):
-                fail(f"business OpenAPI write request missing required request_hash: {operation_id}")
+            schema = request_body["content"]["application/json"].get("schema")
+            if not schema:
+                fail(f"business OpenAPI write operation missing JSON schema: {operation_id}")
 
 
 business_count = validate_openapi(Path("api/openapi/business-api.yaml"), require_named_components=True)

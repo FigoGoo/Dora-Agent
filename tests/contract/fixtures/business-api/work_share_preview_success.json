@@ -47,7 +47,7 @@
   },
   "assertions": [
     "preview uses public_title/public_description/tags and full work_share safety evidence",
-    "preview does not require Idempotency-Key or request_hash",
+    "preview does not require Idempotency-Key or client request hash",
     "preview response contains no private object key or signed URL"
   ]
 }

@@ -29,7 +29,7 @@
   },
   "assertions": [
     "confirm writes moderation and audit records",
-    "confirm requires Idempotency-Key but request body does not carry request_hash",
+    "confirm requires Idempotency-Key but request body does not carry client request hash",
     "notification failure would be compensated without rolling back takedown"
   ]
 }

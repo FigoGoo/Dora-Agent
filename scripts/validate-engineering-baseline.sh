@@ -133,12 +133,9 @@ required_idempotency = [
     "ReplayResult *ResultRef",
     "ResultRefType",
     "ResultRefID",
-    "RequestHashInput",
-    "canonicalBody",
-    "shouldIgnoreHashField",
-    '"tenant_id": input.TenantID',
-    '"space_id"',
-    '"actor_user_id"',
+    "RequestHash    string",
+    'input.RequestHash == ""',
+    "record.RequestHash != input.RequestHash",
     "clause.OnConflict",
 ]
 for needle in required_idempotency:
@@ -146,12 +143,13 @@ for needle in required_idempotency:
         fail(f"idempotency implementation missing tenant/result semantic: {needle}")
 if 'Where("scope = ? AND idempotency_key = ?"' in idempotency_src:
     fail("idempotency implementation still queries by scope + key without tenant")
-if "sha256.Sum256(body)" in idempotency_src:
-    fail("idempotency request hash still hashes raw body bytes")
+for stale in ["RequestHashInput", "func HashRequest", "canonicalBody", "shouldIgnoreHashField", "sha256.Sum256(body)"]:
+    if stale in idempotency_src:
+        fail(f"idempotency implementation still carries raw request body hash helper: {stale}")
 
 required_idempotency_tests = [
-    "TestHashRequestCanonicalizesJSONAndIgnoresObservabilityFields",
-    "TestHashRequestRequiresTenantAndActor",
+    "business:project:create",
+    "business:project:different",
     "testConcurrentSameKeyBegin",
     "DecisionProcessing",
     "DecisionConflict",

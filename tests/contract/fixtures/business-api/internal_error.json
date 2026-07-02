@@ -7,8 +7,7 @@
     "Idempotency-Key": "idem_connectivity_internal_001"
   },
   "request_body": {
-    "test_reason": "scheduled toolchain baseline smoke fixture",
-    "request_hash": "sha256:model-provider-connectivity-internal-error"
+    "test_reason": "scheduled toolchain baseline smoke fixture"
   },
   "response_status": 500,
   "response_body": {

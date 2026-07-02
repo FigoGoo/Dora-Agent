@@ -9,8 +9,7 @@
   "request_body": {
     "filename": "",
     "content_type": "image/png",
-    "size_bytes": 0,
-    "request_hash": "sha256:upload-validation-error-request"
+    "size_bytes": 0
   },
   "response_status": 422,
   "response_body": {

@@ -40,15 +40,11 @@ func (h smokeAdminHandler) updateFeatureFlag(c *gin.Context) {
 	var req struct {
 		Enabled     bool   `json:"enabled"`
 		Description string `json:"description"`
-		RequestHash string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.smoke.UpdateFeatureFlag(c.Request.Context(), smoke.UpdateFeatureFlagInput{
 		Auth: adminAuth(c), Meta: meta, FlagKey: c.Param("flag_key"), Enabled: req.Enabled, Description: req.Description,
 	})
@@ -70,15 +66,11 @@ func (h smokeAdminHandler) runSmokeSeed(c *gin.Context) {
 		return
 	}
 	var req struct {
-		RequestHash string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.smoke.RunSmokeSeed(c.Request.Context(), smoke.SmokeRunInput{Auth: adminAuth(c), Meta: meta})
 	respond(c, out, err)
 }
@@ -89,16 +81,12 @@ func (h smokeAdminHandler) runSmokeSuite(c *gin.Context) {
 		return
 	}
 	var req struct {
-		SuiteKey    string `json:"suite_key"`
-		RequestHash string `json:"request_hash"`
+		SuiteKey string `json:"suite_key"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.smoke.RunSmokeSuite(c.Request.Context(), smoke.SmokeRunInput{Auth: adminAuth(c), Meta: meta, SuiteKey: req.SuiteKey})
 	respond(c, out, err)
 }

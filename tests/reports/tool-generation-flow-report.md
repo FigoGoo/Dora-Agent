@@ -12,7 +12,7 @@
 - `scripts/validate-account-agent-http.sh`：已由 `scripts/validate-tool-generation-flow.sh` 串行执行通过。
 - `scripts/validate-catalog-skill-runtime.sh`：已由 `scripts/validate-tool-generation-flow.sh` 串行执行通过。
 - `scripts/validate-tool-generation-flow.sh`：已执行通过，覆盖 Go toolchain、gofmt dry check、全量 Go 测试、SQL up/down 配对、OpenAPI 路由、上传安全证据契约、M4 RPC/HTTP/Agent 语义门禁、AG-UI fixture、RPC fixture、元素类型和无外键扫描。
-- `services/business/internal/application/credit`：已执行通过，覆盖兑换码 `account_type`、`bind_target_type`、`credit_expires_at` 持久化、幂等 request hash 冲突和目标账户类型不匹配不消耗兑换码。
+- `services/business/internal/application/credit`：已执行通过，覆盖兑换码 `account_type`、`bind_target_type`、`credit_expires_at` 持久化、业务幂等指纹冲突和目标账户类型不匹配不消耗兑换码。
 - `services/business/internal/application/assetcommit`：已执行通过，覆盖生成资产成功提交后 `assets`、`asset_storage_objects`、`project_assets`、`asset_commit_items`、积分 ledger、freeze/account 状态落库。
 - `rg -n "FOREIGN KEY|REFERENCES" db/migrations api code-plan services internal`：已由 `scripts/validate-tool-generation-flow.sh` 执行，通过。
 

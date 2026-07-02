@@ -23,14 +23,14 @@
 - Agent Runtime：`runtime/eino`、`runtime/turnloop`、`runtime/skill`、`runtime/tool`、`runtime/safety`、`runtime/modeltool`、`runtime/memory`、`runtime/skilltest`、`domain/event`、`events/agui`、`events/stream` 包结构存在、可编译，并由 TurnLoop / modeltool / skilltest 单测覆盖核心行为。
 - Agent TurnLoop 基线：创建 run 后加载 Published Skill、Tool policy、默认模型快照、元素字典，写入 `safety.prompt.evaluating` / `safety.prompt.evaluated` 事件和安全证据；`agent_runs.skill_selection` 保存 skill scope、命中/兜底原因、tool refs digest、运行空间和计费账户作用域；用户可见 `generation.progress` 不暴露 `provider_runtime_ref`。
 - 追加输入/确认/取消：追加输入执行安全重评并创建 safety evidence；确认恢复和追加输入通过 `ResumeTurn` 推进到 running；取消通过 `CancelRun` 决策后持久化 cancelled。
-- Skill Test：`SaveSkillTestResult` 使用 `request_meta.idempotency_key=skill_test:<test_run_id>` 与 request hash 区分 replay/conflict；`SafetyEvidenceDTO(scene=skill_test)` 缺失、过期、trace 不匹配或状态不一致会拒绝；`GetReviewCandidateSkillSpec` 对非管理员执行 owner/可见性校验。
+- Skill Test：`SaveSkillTestResult` 使用 `request_meta.idempotency_key=skill_test:<test_run_id>` 与业务指纹区分 replay/conflict；`SafetyEvidenceDTO(scene=skill_test)` 缺失、过期、trace 不匹配或状态不一致会拒绝；`GetReviewCandidateSkillSpec` 对非管理员执行 owner/可见性校验。
 - Skill 输出校验：`runtime/skilltest` 校验 3 个样例、安全阻断、必需元素、未知元素类型、usage stage 和 render hint。
 - fixture/seed：M3 RPC fixture 覆盖 token 成功/跨空间、Skill、Tool、Model、Dictionary、SkillTest；业务 seed 包含模型、Tool、Published Skill、Skill confirmation policy、3 个 Skill 测试样例和 14 个 active 资产元素类型。
 - schema/migration：`skill_versions.confirmation_policy_json` 已由 0014 增量 migration 落库；`skill_test_runs.idempotency_key/request_hash` 已由 0015 增量 migration 落库；`AssetElementTypeDTO` 对齐 `resource_type/status/usage_stage/draft_enabled/final_enabled/editable/referable/render_hint/schema_hint_json/render_hint_json`。
 
 ## 未执行项
 
-未执行项：无（M3 范围内）。
+未执行项：无（catalog skill runtime 范围内）。
 
 ## 范围外后续项
 

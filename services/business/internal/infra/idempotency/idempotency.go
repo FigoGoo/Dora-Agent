@@ -1,16 +1,11 @@
 package idempotency
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"sort"
-	"strings"
 	"time"
 
 	bizerrors "github.com/FigoGoo/Dora-Agent/services/business/internal/pkg/errors"
@@ -65,15 +60,6 @@ type ResultRef struct {
 	ID   string
 }
 
-type RequestHashInput struct {
-	TenantID    string
-	SpaceID     string
-	ActorUserID string
-	AdminID     string
-	Body        []byte
-	Extra       map[string]any
-}
-
 type Decision struct {
 	Mode         string
 	Record       IdempotencyRecord
@@ -94,142 +80,6 @@ func NewGuard(db *gorm.DB, ttl, lockDuration time.Duration) *IdempotencyGuard {
 		lockDuration = 30 * time.Second
 	}
 	return &IdempotencyGuard{db: db, ttl: ttl, lockDuration: lockDuration}
-}
-
-func HashRequest(input RequestHashInput) (string, error) {
-	if input.TenantID == "" {
-		return "", bizerrors.New(bizerrors.CodeInvalidArgument, "tenant id is required for request hash")
-	}
-	if input.ActorUserID == "" && input.AdminID == "" {
-		return "", bizerrors.New(bizerrors.CodeInvalidArgument, "actor user id or admin id is required for request hash")
-	}
-	body, err := canonicalBody(input.Body)
-	if err != nil {
-		return "", err
-	}
-	payload := map[string]any{
-		"tenant_id": input.TenantID,
-		"body":      body,
-	}
-	if input.SpaceID != "" {
-		payload["space_id"] = input.SpaceID
-	}
-	if input.ActorUserID != "" {
-		payload["actor_user_id"] = input.ActorUserID
-	}
-	if input.AdminID != "" {
-		payload["admin_id"] = input.AdminID
-	}
-	if len(input.Extra) > 0 {
-		payload["extra"] = normalizeValue(input.Extra)
-	}
-	canonical, err := canonicalJSON(payload)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(canonical)
-	return hex.EncodeToString(sum[:]), nil
-}
-
-func canonicalBody(body []byte) (any, error) {
-	if len(bytes.TrimSpace(body)) == 0 {
-		return map[string]any{}, nil
-	}
-	var value any
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	if err := decoder.Decode(&value); err != nil {
-		return nil, fmt.Errorf("canonicalize request body: %w", err)
-	}
-	return normalizeValue(value), nil
-}
-
-func canonicalJSON(value any) ([]byte, error) {
-	normalized := normalizeValue(value)
-	var buf bytes.Buffer
-	if err := writeCanonical(&buf, normalized); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func normalizeValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			if shouldIgnoreHashField(key) {
-				continue
-			}
-			out[key] = normalizeValue(item)
-		}
-		return out
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, normalizeValue(item))
-		}
-		return out
-	default:
-		return typed
-	}
-}
-
-func shouldIgnoreHashField(key string) bool {
-	normalized := strings.ToLower(strings.ReplaceAll(key, "-", "_"))
-	switch normalized {
-	case "request_id", "trace_id", "x_client_request_id", "client_request_id":
-		return true
-	default:
-		return false
-	}
-}
-
-func writeCanonical(buf *bytes.Buffer, value any) error {
-	switch typed := value.(type) {
-	case map[string]any:
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		buf.WriteByte('{')
-		for i, key := range keys {
-			if i > 0 {
-				buf.WriteByte(',')
-			}
-			keyBytes, err := json.Marshal(key)
-			if err != nil {
-				return err
-			}
-			buf.Write(keyBytes)
-			buf.WriteByte(':')
-			if err := writeCanonical(buf, typed[key]); err != nil {
-				return err
-			}
-		}
-		buf.WriteByte('}')
-	case []any:
-		buf.WriteByte('[')
-		for i, item := range typed {
-			if i > 0 {
-				buf.WriteByte(',')
-			}
-			if err := writeCanonical(buf, item); err != nil {
-				return err
-			}
-		}
-		buf.WriteByte(']')
-	case json.Number:
-		buf.WriteString(typed.String())
-	default:
-		valueBytes, err := json.Marshal(typed)
-		if err != nil {
-			return err
-		}
-		buf.Write(valueBytes)
-	}
-	return nil
 }
 
 func (g *IdempotencyGuard) Begin(ctx context.Context, input BeginInput) (Decision, error) {

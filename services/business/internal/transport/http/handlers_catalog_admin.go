@@ -312,7 +312,6 @@ func (h catalogAdminHandler) adminRegisterTool(c *gin.Context) {
 		FreeQuota            int               `json:"free_quota"`
 		MinChargePoints      int64             `json:"min_charge_points"`
 		Reason               string            `json:"reason"`
-		RequestHash          string            `json:"request_hash"`
 	}
 	if !bindJSON(c, &req) {
 		return

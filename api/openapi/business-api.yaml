@@ -4806,7 +4806,6 @@ components:
       required:
       - listing_id
       - target_scope
-      - request_hash
       additionalProperties: false
       properties:
         listing_id:
@@ -4817,8 +4816,6 @@ components:
           - personal
           - enterprise
         enterprise_id:
-          type: string
-        request_hash:
           type: string
     InstallMarketplaceSkillData:
       type: object
@@ -4836,15 +4833,12 @@ components:
       required:
       - target_version
       - confirmed
-      - request_hash
       additionalProperties: false
       properties:
         target_version:
           type: string
         confirmed:
           type: boolean
-        request_hash:
-          type: string
     UpgradeSkillInstallationData:
       type: object
       required:
@@ -4971,8 +4965,6 @@ components:
         resource_type:
           type: string
         resource_id:
-          type: string
-        request_hash:
           type: string
         audit_id:
           type: string
@@ -7706,7 +7698,6 @@ components:
       required:
       - account
       - password
-      - request_hash
       additionalProperties: false
       properties:
         account:
@@ -7719,16 +7710,11 @@ components:
           type: string
         invite_token:
           type: string
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
     LoginRequest:
       type: object
       required:
       - account
       - password
-      - request_hash
       additionalProperties: false
       properties:
         account:
@@ -7739,15 +7725,10 @@ components:
           maxLength: 128
         captcha_token:
           type: string
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
     SwitchIdentityRequest:
       type: object
       required:
       - target_identity_type
-      - request_hash
       additionalProperties: false
       properties:
         target_identity_type:
@@ -7756,13 +7737,10 @@ components:
           type: string
         return_path:
           type: string
-        request_hash:
-          type: string
     CreateEnterpriseRequest:
       type: object
       required:
       - enterprise_name
-      - request_hash
       additionalProperties: false
       properties:
         enterprise_name:
@@ -7771,14 +7749,11 @@ components:
           type: string
         contact_email:
           type: string
-        request_hash:
-          type: string
     CreateEnterpriseInviteRequest:
       type: object
       required:
       - target_account
       - role
-      - request_hash
       additionalProperties: false
       properties:
         target_account:
@@ -7790,70 +7765,51 @@ components:
         expires_at:
           type: string
           format: date-time
-        request_hash:
-          type: string
     PreviewRemoveEnterpriseMemberRequest:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         reason:
           type: string
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
     ConfirmRemoveEnterpriseMemberRequest:
       type: object
       required:
       - preview_token
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         preview_token:
           type: string
         reason:
-          type: string
-        request_hash:
           type: string
     PreviewTransferOwnerRequest:
       type: object
       required:
       - target_member_id
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         target_member_id:
           type: string
         reason:
           type: string
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
     ConfirmTransferOwnerRequest:
       type: object
       required:
       - preview_token
       - target_member_id
-      - request_hash
       additionalProperties: false
       properties:
         preview_token:
           type: string
         target_member_id:
           type: string
-        request_hash:
-          type: string
     CreateProjectRequest:
       type: object
       required:
       - title
-      - request_hash
       additionalProperties: false
       properties:
         title:
@@ -7864,12 +7820,8 @@ components:
           type: string
         source:
           type: string
-        request_hash:
-          type: string
     UpdateProjectRequest:
       type: object
-      required:
-      - request_hash
       additionalProperties: false
       properties:
         title:
@@ -7881,36 +7833,27 @@ components:
         base_updated_at:
           type: string
           format: date-time
-        request_hash:
-          type: string
     ArchiveProjectRequest:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         reason:
-          type: string
-        request_hash:
           type: string
     RestoreProjectRequest:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         reason:
-          type: string
-        request_hash:
           type: string
     SkillDraftMutationRequest:
       type: object
       required:
       - skill_name
       - skill_markdown
-      - request_hash
       additionalProperties: false
       properties:
         skill_key:
@@ -7948,8 +7891,6 @@ components:
           type: string
         confirmation_policy_json:
           type: string
-        request_hash:
-          type: string
     RunSkillTestRequest:
       type: object
       required:
@@ -7958,7 +7899,6 @@ components:
       - status
       - actual_elements_json
       - safety_evidence_json
-      - request_hash
       additionalProperties: false
       properties:
         version_id:
@@ -7979,39 +7919,30 @@ components:
           type: string
         safety_evidence_json:
           type: string
-        request_hash:
-          type: string
     SubmitSkillReviewRequest:
       type: object
       required:
       - version_id
-      - request_hash
       additionalProperties: false
       properties:
         version_id:
-          type: string
-        request_hash:
           type: string
     RollbackSkillRequest:
       type: object
       required:
       - target_version
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         target_version:
           type: string
         reason:
           type: string
-        request_hash:
-          type: string
     RedeemCodeRequest:
       type: object
       required:
       - redeem_code
       - target_account_type
-      - request_hash
       additionalProperties: false
       properties:
         redeem_code:
@@ -8023,13 +7954,10 @@ components:
           - enterprise
         redeem_channel:
           type: string
-        request_hash:
-          type: string
     CreateRechargeOrderRequest:
       type: object
       required:
       - package_id
-      - request_hash
       additionalProperties: false
       properties:
         package_id:
@@ -8041,14 +7969,11 @@ components:
           enum:
           - personal
           - enterprise
-        request_hash:
-          type: string
     MockPayRechargeOrderRequest:
       type: object
       required:
       - payment_result
       - provider_transaction_id
-      - request_hash
       additionalProperties: false
       properties:
         payment_result:
@@ -8058,8 +7983,6 @@ components:
           - failed
         provider_transaction_id:
           type: string
-        request_hash:
-          type: string
     CreateUploadIntentRequest:
       type: object
       required:
@@ -8067,7 +7990,6 @@ components:
       - content_type
       - size_bytes
       - safety_evidence
-      - request_hash
       additionalProperties: false
       properties:
         filename:
@@ -8083,8 +8005,6 @@ components:
           type: string
         safety_evidence:
           $ref: '#/components/schemas/SafetyEvidence'
-        request_hash:
-          type: string
     SafetyEvidence:
       type: object
       required:
@@ -8134,32 +8054,25 @@ components:
       required:
       - object_key
       - checksum
-      - request_hash
       additionalProperties: false
       properties:
         object_key:
           type: string
         checksum:
           type: string
-        request_hash:
-          type: string
     AbortUploadIntentRequest:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         reason:
-          type: string
-        request_hash:
           type: string
     CreateWorkRequest:
       type: object
       required:
       - title
       - asset_ids
-      - request_hash
       additionalProperties: false
       properties:
         title:
@@ -8170,13 +8083,10 @@ components:
           type: array
           items:
             type: string
-        request_hash:
-          type: string
     UpdateWorkRequest:
       type: object
       required:
       - base_updated_at
-      - request_hash
       additionalProperties: false
       properties:
         title:
@@ -8190,8 +8100,6 @@ components:
         base_updated_at:
           type: string
           format: date-time
-        request_hash:
-          type: string
     PreviewShareWorkRequest:
       type: object
       required:
@@ -8221,30 +8129,22 @@ components:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         reason:
           type: string
-        request_hash:
-          type: string
     MarkAllNotificationsReadRequest:
       type: object
-      required:
-      - request_hash
       additionalProperties: false
       properties:
         before_time:
           type: string
           format: date-time
-        request_hash:
-          type: string
     AdminLoginRequest:
       type: object
       required:
       - account
       - password
-      - request_hash
       additionalProperties: false
       properties:
         account:
@@ -8253,17 +8153,12 @@ components:
           type: string
         captcha_token:
           type: string
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
     RotateAdminPasswordRequest:
       type: object
       required:
       - current_password
       - new_password
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         current_password:
@@ -8272,15 +8167,12 @@ components:
           type: string
         reason:
           type: string
-        request_hash:
-          type: string
     CreateAdminRequest:
       type: object
       required:
       - account
       - initial_password
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         account:
@@ -8289,42 +8181,31 @@ components:
           type: string
         reason:
           type: string
-        request_hash:
-          type: string
     DisableAdminRequest:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         reason:
-          type: string
-        request_hash:
           type: string
     PreviewUserStatusRequest:
       type: object
       required:
       - target_status
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         target_status:
           type: string
         reason:
           type: string
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
     ConfirmUserStatusRequest:
       type: object
       required:
       - preview_token
       - target_status
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         preview_token:
@@ -8333,14 +8214,11 @@ components:
           type: string
         reason:
           type: string
-        request_hash:
-          type: string
     UpsertModelProviderRequest:
       type: object
       required:
       - provider_name
       - status
-      - request_hash
       additionalProperties: false
       properties:
         provider_code:
@@ -8360,12 +8238,8 @@ components:
         config:
           type: object
           additionalProperties: {}
-        request_hash:
-          type: string
     PatchModelProviderRequest:
       type: object
-      required:
-      - request_hash
       additionalProperties: false
       properties:
         provider_code:
@@ -8388,19 +8262,13 @@ components:
         base_updated_at:
           type: string
           format: date-time
-        request_hash:
-          type: string
     TestModelProviderConnectivityRequest:
       type: object
-      required:
-      - request_hash
       additionalProperties: false
       properties:
         test_reason:
           type: string
         model_id:
-          type: string
-        request_hash:
           type: string
     UpsertModelRequest:
       type: object
@@ -8409,7 +8277,6 @@ components:
       - model_code
       - display_name
       - resource_type
-      - request_hash
       additionalProperties: false
       properties:
         provider_id:
@@ -8440,12 +8307,8 @@ components:
           additionalProperties: {}
         credential_id:
           type: string
-        request_hash:
-          type: string
     PatchModelRequest:
       type: object
-      required:
-      - request_hash
       additionalProperties: false
       properties:
         model_code:
@@ -8475,14 +8338,11 @@ components:
         base_updated_at:
           type: string
           format: date-time
-        request_hash:
-          type: string
     SetDefaultModelRequest:
       type: object
       required:
       - model_id
       - resource_type
-      - request_hash
       additionalProperties: false
       properties:
         model_id:
@@ -8492,21 +8352,16 @@ components:
         pricing_snapshot_id:
           type: string
           description: Optional. When omitted, the backend binds the current active price snapshot or creates a zero-point default snapshot. Setting a default updates the single active default row for the resource type.
-        request_hash:
-          type: string
     SetModelStatusRequest:
       type: object
       required:
       - status
-      - request_hash
       additionalProperties: false
       properties:
         status:
           type: string
           description: Target status. Disabling an active default model returns STATE_CONFLICT.
         reason:
-          type: string
-        request_hash:
           type: string
     RegisterAdminToolRequest:
       type: object
@@ -8519,7 +8374,6 @@ components:
       - charge_mode
       - billing_unit
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         tool_name:
@@ -8569,12 +8423,8 @@ components:
           format: int64
         reason:
           type: string
-        request_hash:
-          type: string
     PreviewToolImpactRequest:
       type: object
-      required:
-      - request_hash
       additionalProperties: false
       properties:
         tool_type:
@@ -8583,16 +8433,11 @@ components:
           type: string
         target_risk_level:
           type: string
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
     UpdateToolPolicyRequest:
       type: object
       required:
       - risk_level
       - requires_confirmation
-      - request_hash
       additionalProperties: false
       properties:
         tool_type:
@@ -8613,15 +8458,12 @@ components:
           type: object
           additionalProperties:
             type: string
-        request_hash:
-          type: string
     UpdateToolPricingPolicyRequest:
       type: object
       required:
       - charge_mode
       - billing_unit
       - unit_points
-      - request_hash
       additionalProperties: false
       properties:
         tool_type:
@@ -8637,14 +8479,11 @@ components:
         min_charge_points:
           type: integer
           format: int64
-        request_hash:
-          type: string
     SetToolStatusRequest:
       type: object
       required:
       - status
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         tool_type:
@@ -8653,8 +8492,6 @@ components:
           type: string
         reason:
           type: string
-        request_hash:
-          type: string
     ReplaceToolWhitelistRequest:
       type: object
       required:
@@ -8662,7 +8499,6 @@ components:
       - scope_id
       - allowed
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         tool_type:
@@ -8675,35 +8511,26 @@ components:
           type: boolean
         reason:
           type: string
-        request_hash:
-          type: string
     PublishSystemSkillRequest:
       type: object
       required:
       - version_id
-      - request_hash
       additionalProperties: false
       properties:
         version_id:
-          type: string
-        request_hash:
           type: string
     DeprecateSystemSkillRequest:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         reason:
-          type: string
-        request_hash:
           type: string
     ConfirmSkillReviewRequest:
       type: object
       required:
       - decision
-      - request_hash
       additionalProperties: false
       properties:
         decision:
@@ -8713,8 +8540,6 @@ components:
           - reject
         reason:
           type: string
-        request_hash:
-          type: string
     AdminGrantCreditsRequest:
       type: object
       required:
@@ -8722,7 +8547,6 @@ components:
       - target_id
       - points
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         target_type:
@@ -8737,13 +8561,10 @@ components:
         expires_at:
           type: string
           format: date-time
-        request_hash:
-          type: string
     AdminExpireCreditLotsRequest:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         account_id:
@@ -8756,13 +8577,10 @@ components:
           maximum: 500
         reason:
           type: string
-        request_hash:
-          type: string
     AdminRefundCreditsRequest:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         account_id:
@@ -8779,18 +8597,13 @@ components:
           default: 7
         reason:
           type: string
-        request_hash:
-          type: string
     AdminReverseCreditLedgerEntryRequest:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         reason:
-          type: string
-        request_hash:
           type: string
     CreateRedeemCodesRequest:
       type: object
@@ -8801,7 +8614,6 @@ components:
       - credit_expires_at
       - account_type
       - bind_target_type
-      - request_hash
       additionalProperties: false
       properties:
         count:
@@ -8833,29 +8645,21 @@ components:
           type: string
         reason:
           type: string
-        request_hash:
-          type: string
     DisableRedeemCodeBatchRequest:
       type: object
       required:
       - reason
-      - request_hash
       additionalProperties: false
       properties:
         reason:
-          type: string
-        request_hash:
           type: string
     ExportRedeemCodesRequest:
       type: object
       required:
       - export_reason
-      - request_hash
       additionalProperties: false
       properties:
         export_reason:
-          type: string
-        request_hash:
           type: string
     AdminSaveBillingPackageRequest:
       type: object
@@ -8912,8 +8716,6 @@ components:
           type: string
         reason:
           type: string
-        request_hash:
-          type: string
     AdminSetBillingPackageStatusRequest:
       type: object
       required:
@@ -8924,8 +8726,6 @@ components:
         status:
           type: string
         reason:
-          type: string
-        request_hash:
           type: string
     AdminCreateBillingSkuRequest:
       type: object
@@ -8958,38 +8758,25 @@ components:
           format: date-time
         reason:
           type: string
-        request_hash:
-          type: string
     UpdateFeatureFlagRequest:
       type: object
       required:
       - enabled
-      - request_hash
       additionalProperties: false
       properties:
         enabled:
           type: boolean
         description:
           type: string
-        request_hash:
-          type: string
     RunSmokeSeedRequest:
       type: object
-      required:
-      - request_hash
       additionalProperties: false
-      properties:
-        request_hash:
-          type: string
+      properties: {}
     RunSmokeSuiteRequest:
       type: object
-      required:
-      - request_hash
       additionalProperties: false
       properties:
         suite_key:
-          type: string
-        request_hash:
           type: string
     PreviewTakeDownPublicWorkRequest:
       type: object
@@ -11337,50 +11124,20 @@ components:
     LogoutRequest:
       type: object
       additionalProperties: false
-      required:
-      - request_hash
-      properties:
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
+      properties: {}
     LikePublicWorkRequest:
       type: object
       additionalProperties: false
-      required:
-      - request_hash
-      properties:
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
+      properties: {}
     UnlikePublicWorkRequest:
       type: object
       additionalProperties: false
-      required:
-      - request_hash
-      properties:
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
+      properties: {}
     MarkNotificationReadRequest:
       type: object
       additionalProperties: false
-      required:
-      - request_hash
-      properties:
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
+      properties: {}
     AdminLogoutRequest:
       type: object
       additionalProperties: false
-      required:
-      - request_hash
-      properties:
-        request_hash:
-          type: string
-          description: SHA-256 digest of the semantic request body used with Idempotency-Key conflict detection.
-          maxLength: 128
+      properties: {}

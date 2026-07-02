@@ -14,28 +14,6 @@ export class ApiError extends Error {
   }
 }
 
-export function stableStringify(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
-  }
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-
-export async function createRequestHash(body = {}) {
-  const payload = stableStringify(body);
-  const bytes = new TextEncoder().encode(payload);
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
-}
-
 export function safeHeaderValue(value, fallback) {
   const text = String(value || '').trim();
   return text && /^[\x20-\x7E]+$/.test(text) ? text : fallback;
@@ -79,9 +57,6 @@ export async function adminRequest(path, options = {}) {
 
   if (WRITE_METHODS.has(method)) {
     body = { ...body };
-    if (!body.request_hash) {
-      body.request_hash = await createRequestHash(body);
-    }
     headers['Content-Type'] = 'application/json';
     headers['Idempotency-Key'] = safeHeaderValue(options.idempotencyKey, `admin-${crypto.randomUUID()}`);
   }

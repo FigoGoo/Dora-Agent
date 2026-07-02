@@ -115,15 +115,11 @@ func (h creditAssetHandler) redeemCode(c *gin.Context) {
 		RedeemCode        string `json:"redeem_code"`
 		TargetAccountType string `json:"target_account_type"`
 		RedeemChannel     string `json:"redeem_channel"`
-		RequestHash       string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.credit.RedeemCode(c.Request.Context(), credit.RedeemInput{
 		Auth: userAuth(c), Meta: meta, Code: req.RedeemCode,
 		TargetAccountType: req.TargetAccountType, RedeemChannel: req.RedeemChannel,
@@ -158,15 +154,11 @@ func (h creditAssetHandler) createRechargeOrder(c *gin.Context) {
 		PackageID         string `json:"package_id"`
 		SKUID             string `json:"sku_id"`
 		TargetAccountType string `json:"target_account_type"`
-		RequestHash       string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.credit.CreateRechargeOrder(c.Request.Context(), credit.CreateRechargeOrderInput{Auth: userAuth(c), Meta: meta, PackageID: req.PackageID, SKUID: req.SKUID, TargetAccountType: req.TargetAccountType})
 	respond(c, out, err)
 }
@@ -179,15 +171,11 @@ func (h creditAssetHandler) mockPayRechargeOrder(c *gin.Context) {
 	var req struct {
 		PaymentResult         string `json:"payment_result"`
 		ProviderTransactionID string `json:"provider_transaction_id"`
-		RequestHash           string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.credit.MockPayRechargeOrder(c.Request.Context(), credit.MockPayRechargeOrderInput{
 		Auth: userAuth(c), Meta: meta, OrderID: c.Param("order_id"),
 		PaymentResult: req.PaymentResult, ProviderTransactionID: req.ProviderTransactionID,
@@ -245,15 +233,11 @@ func (h creditAssetHandler) createUploadIntent(c *gin.Context) {
 		AssetType      string                           `json:"asset_type"`
 		MetadataText   string                           `json:"metadata_text"`
 		SafetyEvidence *businessagent.SafetyEvidenceDTO `json:"safety_evidence"`
-		RequestHash    string                           `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.asset.CreateUploadIntent(c.Request.Context(), asset.CreateUploadIntentInput{
 		Auth: userAuth(c), Meta: meta, ProjectID: req.ProjectID, AssetType: assetType(req.AssetType, req.ContentType),
 		Filename: req.Filename, ContentType: req.ContentType, SizeBytes: req.SizeBytes, Checksum: req.Checksum,
@@ -273,15 +257,11 @@ func (h creditAssetHandler) confirmUploadIntent(c *gin.Context) {
 		Etag        string `json:"etag"`
 		SizeBytes   int64  `json:"size_bytes"`
 		ContentType string `json:"content_type"`
-		RequestHash string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.asset.ConfirmUploadIntent(c.Request.Context(), asset.ConfirmUploadInput{
 		Auth: userAuth(c), Meta: meta, UploadIntentID: c.Param("upload_intent_id"),
 		Etag: req.Etag, SizeBytes: req.SizeBytes, ContentType: req.ContentType, Checksum: req.Checksum,
@@ -295,16 +275,12 @@ func (h creditAssetHandler) abortUploadIntent(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Reason      string `json:"reason"`
-		RequestHash string `json:"request_hash"`
+		Reason string `json:"reason"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.asset.AbortUploadIntent(c.Request.Context(), userAuth(c), meta, c.Param("upload_intent_id"))
 	respond(c, out, err)
 }
@@ -333,12 +309,11 @@ func (h creditAssetHandler) adminGrantCredits(c *gin.Context) {
 		return
 	}
 	var req struct {
-		TargetType  string `json:"target_type"`
-		TargetID    string `json:"target_id"`
-		Points      int64  `json:"points"`
-		Reason      string `json:"reason"`
-		ExpiresAt   string `json:"expires_at"`
-		RequestHash string `json:"request_hash"`
+		TargetType string `json:"target_type"`
+		TargetID   string `json:"target_id"`
+		Points     int64  `json:"points"`
+		Reason     string `json:"reason"`
+		ExpiresAt  string `json:"expires_at"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -349,9 +324,6 @@ func (h creditAssetHandler) adminGrantCredits(c *gin.Context) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.credit.AdminGrantCredits(c.Request.Context(), credit.AdminGrantInput{
 		Auth: adminAuth(c), Meta: meta, TargetType: req.TargetType, TargetID: req.TargetID,
 		Points: req.Points, ExpiresAt: expiresAt, Reason: req.Reason,
@@ -383,19 +355,15 @@ func (h creditAssetHandler) adminExpireCreditLots(c *gin.Context) {
 		return
 	}
 	var req struct {
-		AccountID   string `json:"account_id"`
-		LotID       string `json:"lot_id"`
-		Limit       int    `json:"limit"`
-		Reason      string `json:"reason"`
-		RequestHash string `json:"request_hash"`
+		AccountID string `json:"account_id"`
+		LotID     string `json:"lot_id"`
+		Limit     int    `json:"limit"`
+		Reason    string `json:"reason"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.credit.AdminExpireCreditLots(c.Request.Context(), credit.ExpireCreditLotsInput{
 		Auth: adminAuth(c), Meta: meta, AccountID: req.AccountID, LotID: req.LotID, Limit: req.Limit, Reason: req.Reason,
 	})
@@ -414,15 +382,11 @@ func (h creditAssetHandler) adminRefundCredits(c *gin.Context) {
 		OriginalLedgerEntryID string `json:"original_ledger_entry_id"`
 		GracePeriodDays       int    `json:"grace_period_days"`
 		Reason                string `json:"reason"`
-		RequestHash           string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.credit.AdminRefundCredits(c.Request.Context(), credit.RefundCreditsInput{
 		Auth: adminAuth(c), Meta: meta, AccountID: req.AccountID, Points: req.Points,
 		OriginalLotID: req.OriginalLotID, OriginalLedgerEntryID: req.OriginalLedgerEntryID,
@@ -437,16 +401,12 @@ func (h creditAssetHandler) adminReverseCreditLedgerEntry(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Reason      string `json:"reason"`
-		RequestHash string `json:"request_hash"`
+		Reason string `json:"reason"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.credit.AdminReverseCreditLedgerEntry(c.Request.Context(), credit.ReverseCreditLedgerEntryInput{
 		Auth: adminAuth(c), Meta: meta, LedgerEntryID: c.Param("entry_id"), Reason: req.Reason,
 	})
@@ -499,7 +459,6 @@ func (h creditAssetHandler) adminSaveBillingPackage(c *gin.Context) {
 		VisibleScope        string         `json:"visible_scope"`
 		Status              string         `json:"status"`
 		Reason              string         `json:"reason"`
-		RequestHash         string         `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -520,9 +479,6 @@ func (h creditAssetHandler) adminSaveBillingPackage(c *gin.Context) {
 		req.CreditExpiryPolicy = req.CreditValidDuration
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.credit.AdminSaveBillingPackage(c.Request.Context(), credit.SaveBillingPackageInput{
 		Auth: adminAuth(c), Meta: meta, PackageID: req.PackageID, PackageType: req.PackageType, Name: req.Name,
 		TargetScope: req.TargetScope, BillingMode: req.BillingMode, PriceAmount: req.PriceAmount, Currency: req.Currency,
@@ -540,17 +496,13 @@ func (h creditAssetHandler) adminSetBillingPackageStatus(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Status      string `json:"status"`
-		Reason      string `json:"reason"`
-		RequestHash string `json:"request_hash"`
+		Status string `json:"status"`
+		Reason string `json:"reason"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.credit.AdminSetBillingPackageStatus(c.Request.Context(), credit.BillingPackageStatusInput{
 		Auth: adminAuth(c), Meta: meta, PackageID: c.Param("package_id"), Status: req.Status, Reason: req.Reason,
 	})
@@ -581,7 +533,6 @@ func (h creditAssetHandler) adminCreateBillingSKU(c *gin.Context) {
 		EffectiveAt         string `json:"effective_at"`
 		ExpiredAt           string `json:"expired_at"`
 		Reason              string `json:"reason"`
-		RequestHash         string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -597,9 +548,6 @@ func (h creditAssetHandler) adminCreateBillingSKU(c *gin.Context) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.credit.AdminCreateBillingPackageSKU(c.Request.Context(), credit.CreateBillingSKUInput{
 		Auth: adminAuth(c), Meta: meta, PackageID: req.PackageID, SKUID: req.SKUID, ChannelCode: req.ChannelCode,
 		PriceAmount: req.PriceAmount, Currency: req.Currency, ActivityPriceAmount: req.ActivityPriceAmount,
@@ -672,7 +620,6 @@ func (h creditAssetHandler) createRedeemCodes(c *gin.Context) {
 		Channel         string `json:"channel"`
 		RedeemChannel   string `json:"redeem_channel"`
 		Reason          string `json:"reason"`
-		RequestHash     string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -705,9 +652,6 @@ func (h creditAssetHandler) createRedeemCodes(c *gin.Context) {
 		return
 	}
 	meta := h.auth.meta(c, true)
-	if req.RequestHash != "" {
-		meta.RequestHash = req.RequestHash
-	}
 	out, err := h.credit.CreateRedeemCodes(c.Request.Context(), credit.CreateCodesInput{
 		Auth: adminAuth(c), Meta: meta, Count: req.Count, Points: req.Points,
 		CodeExpiresAt: codeExpiresAt, CreditExpiresAt: creditExpiresAt, AccountType: req.AccountType,
@@ -722,8 +666,7 @@ func (h creditAssetHandler) disableRedeemCodeBatch(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Reason      string `json:"reason"`
-		RequestHash string `json:"request_hash"`
+		Reason string `json:"reason"`
 	}
 	if !h.auth.bind(c, &req) {
 		return
@@ -739,7 +682,6 @@ func (h creditAssetHandler) exportRedeemCodes(c *gin.Context) {
 	}
 	var req struct {
 		ExportReason string `json:"export_reason"`
-		RequestHash  string `json:"request_hash"`
 	}
 	if !h.auth.bind(c, &req) {
 		return

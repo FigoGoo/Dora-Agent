@@ -7,8 +7,7 @@
     "Idempotency-Key": "idem_redeem_mismatch_001"
   },
   "request_body": {
-    "redeem_code": "SEED-ENTERPRISE-ONLY",
-    "request_hash": "sha256:redeem-code-target-mismatch-request"
+    "redeem_code": "SEED-ENTERPRISE-ONLY"
   },
   "response_status": 403,
   "response_body": {

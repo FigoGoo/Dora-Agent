@@ -51,7 +51,7 @@ func TestWorkWorkPublicAndNotificationHTTP(t *testing.T) {
 	if got := publicData["public_work_id"].(string); got != "pubw_seed_storyboard" {
 		t.Fatalf("unexpected seed public work id %q", got)
 	}
-	anonymousLike := requestRaw(t, router, http.MethodPost, "/api/public/works/pubw_seed_storyboard/like", "", "idem-anon-like", map[string]any{"request_hash": "hash-anon-like"})
+	anonymousLike := requestRaw(t, router, http.MethodPost, "/api/public/works/pubw_seed_storyboard/like", "", "idem-anon-like", map[string]any{})
 	if anonymousLike.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous like should require login: status=%d body=%#v", anonymousLike.Code, anonymousLike.Body)
 	}
@@ -70,7 +70,7 @@ func TestWorkWorkPublicAndNotificationHTTP(t *testing.T) {
 	userToken := loginUser(t, router, "user1001@dora.local", "local-user-change-me")
 	created := requestJSON(t, router, http.MethodPost, "/api/works", userToken, "idem-http-work-create", map[string]any{
 		"project_id": "prj_active_1001", "title": "HTTP Work", "asset_ids": []string{"ast_generated_1001"},
-		"cover_asset_id": "ast_generated_1001", "category": "storyboard", "tags": []string{"http"}, "request_hash": "hash-http-work-create",
+		"cover_asset_id": "ast_generated_1001", "category": "storyboard", "tags": []string{"http"},
 	})
 	workID := created["data"].(map[string]any)["work"].(map[string]any)["work_id"].(string)
 	title := "HTTP Public Work"
@@ -89,7 +89,7 @@ func TestWorkWorkPublicAndNotificationHTTP(t *testing.T) {
 		"preview_token": previewToken,
 	})
 	publicWorkID := shared["data"].(map[string]any)["public_work_id"].(string)
-	requestJSON(t, router, http.MethodPost, "/api/public/works/"+publicWorkID+"/like", userToken, "idem-http-like", map[string]any{"request_hash": "hash-http-like"})
+	requestJSON(t, router, http.MethodPost, "/api/public/works/"+publicWorkID+"/like", userToken, "idem-http-like", map[string]any{})
 
 	adminToken := loginAdmin(t, router, "admin@dora.local", "local-admin-change-me")
 	takedownPreview := requestJSON(t, router, http.MethodPost, "/api/admin/works/public/"+publicWorkID+"/take-down/preview", adminToken, "", map[string]any{
@@ -131,7 +131,7 @@ func TestWorkWorkPublicAndNotificationHTTP(t *testing.T) {
 	if _, stale := navData["target_id"]; stale {
 		t.Fatalf("navigation response exposed stale target_id: %#v", navData)
 	}
-	requestJSON(t, router, http.MethodPost, "/api/notifications/"+notificationID+"/read", userToken, "idem-http-ntf-read", map[string]any{"request_hash": "hash-http-ntf-read"})
+	requestJSON(t, router, http.MethodPost, "/api/notifications/"+notificationID+"/read", userToken, "idem-http-ntf-read", map[string]any{})
 }
 
 func TestWorkCreatorSkillPortalHTTP(t *testing.T) {
@@ -163,7 +163,7 @@ DROP TABLE IF EXISTS skill_versions;
 
 	userToken := loginUser(t, router, "user1001@dora.local", "local-user-change-me")
 	created := requestJSON(t, router, http.MethodPost, "/api/creator/skills", userToken, "idem-creator-skill-draft-http", map[string]any{
-		"name": "文旅脚本策划", "description": "把城市卖点拆成 Storyboard 和提示词。", "request_hash": "hash-creator-skill-draft-http",
+		"name": "文旅脚本策划", "description": "把城市卖点拆成 Storyboard 和提示词。",
 	})
 	skill := created["data"].(map[string]any)["skill"].(map[string]any)
 	if skill["version_status"] != "draft" || skill["review_status"] != "not_submitted" || skill["listing_status"] != "not_listed" {
@@ -172,9 +172,7 @@ DROP TABLE IF EXISTS skill_versions;
 	skillID := skill["skill_id"].(string)
 	version := skill["version"].(string)
 
-	submitted := requestJSON(t, router, http.MethodPost, "/api/creator/skills/"+skillID+"/versions/"+version+"/submit", userToken, "idem-creator-skill-submit-http", map[string]any{
-		"request_hash": "hash-creator-skill-submit-http",
-	})
+	submitted := requestJSON(t, router, http.MethodPost, "/api/creator/skills/"+skillID+"/versions/"+version+"/submit", userToken, "idem-creator-skill-submit-http", map[string]any{})
 	submittedVersion := submitted["data"].(map[string]any)["skill_version"].(map[string]any)
 	if submittedVersion["version_status"] != "submitted" || submittedVersion["review_status"] != "submitted" {
 		t.Fatalf("unexpected creator submit response: %#v", submittedVersion)
@@ -188,7 +186,7 @@ DROP TABLE IF EXISTS skill_versions;
 		t.Fatalf("unexpected admin skill reviews: %#v", reviews)
 	}
 	approved := requestJSON(t, router, http.MethodPost, "/api/admin/skill-reviews/"+reviewID+"/approve", adminToken, "idem-admin-skill-review-approve-http", map[string]any{
-		"reason": "审核通过", "request_hash": "hash-admin-skill-review-approve-http",
+		"reason": "审核通过",
 	})
 	approvedData := approved["data"].(map[string]any)
 	listing := approvedData["listing"].(map[string]any)
@@ -267,9 +265,7 @@ DROP TABLE IF EXISTS skill_versions;
 	if len(settlements["data"].(map[string]any)["items"].([]any)) == 0 {
 		t.Fatalf("expected admin settlements: %#v", settlements)
 	}
-	refunded := requestJSON(t, router, http.MethodPost, "/api/admin/refund-cases/refund_case_http_001/approve", adminToken, "idem-admin-refund-approve-http", map[string]any{
-		"request_hash": "hash-admin-refund-approve-http",
-	})
+	refunded := requestJSON(t, router, http.MethodPost, "/api/admin/refund-cases/refund_case_http_001/approve", adminToken, "idem-admin-refund-approve-http", map[string]any{})
 	if refunded["data"].(map[string]any)["usage"].(map[string]any)["refund_status"] != "refund_reversed" {
 		t.Fatalf("unexpected approved refund: %#v", refunded)
 	}
@@ -303,13 +299,13 @@ DROP TABLE IF EXISTS skill_versions;
 		t.Fatalf("expire settlement hold: %v", err)
 	}
 	released := requestJSON(t, router, http.MethodPost, "/api/admin/settlements/"+payoutCommitted.Settlement.SettlementID+"/release-hold", adminToken, "idem-admin-settlement-release-http", map[string]any{
-		"reason_code": "hold_period_completed", "request_hash": "hash-admin-settlement-release-http",
+		"reason_code": "hold_period_completed",
 	})
 	if released["data"].(map[string]any)["settlement"].(map[string]any)["status"] != "eligible" {
 		t.Fatalf("unexpected released settlement: %#v", released)
 	}
 	confirmed := requestJSON(t, router, http.MethodPost, "/api/admin/settlements/"+payoutCommitted.Settlement.SettlementID+"/confirm-payout", adminToken, "idem-admin-settlement-payout-http", map[string]any{
-		"payout_reference": "manual-ledger-http-001", "reason_code": "manual_payout_confirmed", "request_hash": "hash-admin-settlement-payout-http",
+		"payout_reference": "manual-ledger-http-001", "reason_code": "manual_payout_confirmed",
 	})
 	if confirmed["data"].(map[string]any)["settlement"].(map[string]any)["status"] != "settled" {
 		t.Fatalf("unexpected confirmed settlement payout: %#v", confirmed)
@@ -319,7 +315,7 @@ DROP TABLE IF EXISTS skill_versions;
 		t.Fatalf("expected admin marketplace listings: %#v", adminListings)
 	}
 	suspended := requestJSON(t, router, http.MethodPost, "/api/admin/listings/"+listingID+"/suspend", adminToken, "idem-admin-listing-suspend-http", map[string]any{
-		"reason_code": "policy_risk", "request_hash": "hash-admin-listing-suspend-http",
+		"reason_code": "policy_risk",
 	})
 	if suspended["data"].(map[string]any)["listing"].(map[string]any)["status"] != "suspended" {
 		t.Fatalf("unexpected suspended listing: %#v", suspended)

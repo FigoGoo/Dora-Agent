@@ -44,7 +44,7 @@ owner：浏览器、RPC 与数据库测试工程师
 | 契约 | 结果 | 证据 |
 | --- | --- | --- |
 | RPC code-plan 对齐 | passed | `scripts/validate-toolchain-contract-baseline.sh` 校验 `GeneratedAssetObjectInput`、`GeneratedAssetUploadSlot`、`CommittedAssetRefDTO`、`skill_scope_filter`、`account_id` 等关键字段，并阻断旧 DTO。 |
-| 业务 OpenAPI | passed | `api/openapi/business-api.yaml` 解析通过，101 个 operation 均有命名 200 response；所有 POST/PATCH/PUT/DELETE 均有 `Idempotency-Key`、命名 request body 和必填 `request_hash`。 |
+| 业务 OpenAPI | passed | `api/openapi/business-api.yaml` 解析通过，101 个 operation 均有命名 200 response；所有 POST/PATCH/PUT/DELETE 均有 `Idempotency-Key` 和命名 request body，幂等冲突由业务逻辑判断。 |
 | Agent OpenAPI | passed | `api/openapi/agent-workbench.yaml` 解析通过，12 个 operation 无 `additionalProperties: true` 泛型兜底；消息、事件回放和 snapshot 使用命名 DTO。 |
 | OpenAPI 占位名 | passed | `rg -n "JsonBody\|ApiResponse\|PageResponse" api/openapi` 无输出。 |
 | AG-UI schema 与 fixture | passed | AG-UI schema 覆盖 40 个 payload 分支；`python3 tests/agent/agui/validate_fixtures.py` 通过 9 个 fixture，含 `additional_input_resume_safety.json`。 |
@@ -76,13 +76,13 @@ scripts/validate-toolchain-contract-baseline.sh
 | AG-UI schema 未覆盖 canonical payload | Agent event publisher、SSE replay、QA fixture | 已补 40 个 payload 分支、9 个 fixture 和 schema 覆盖门禁。 |
 | Contract fixture 覆盖不足 | B1 服务联调、RPC contract test | 已补七个领域目录和 38 个领域场景，并按 IDL 方法覆盖验证。 |
 | Agent OpenAPI 泛型兜底 | Agent API 开发和回放补偿 | 已替换为命名 DTO。 |
-| 业务 HTTP 幂等规则缺口 | 业务写操作、preview 操作、幂等冲突 | 已强制所有写操作携带 `Idempotency-Key` 和必填 `request_hash`。 |
+| 业务 HTTP 幂等规则缺口 | 业务写操作、preview 操作、幂等冲突 | 已强制所有持久化写操作携带 `Idempotency-Key`；不再要求客户端提交 `request_hash`。 |
 | 测试报告过早通过 | M0 Done Gate | 已撤回轻量结论，本报告仅记录真实执行结果。 |
 
 ## 回归风险
 
 - 后续修改 `api/thrift/business_agent_service.thrift` 后必须重新执行 Kitex 生成并提交 `kitex_gen/**`。
-- 后续新增业务 HTTP operation 时必须增加命名 request / response DTO，写操作必须带 `Idempotency-Key` 和必填 `request_hash`。
+- 后续新增业务 HTTP operation 时必须增加命名 request / response DTO，持久化写操作必须带 `Idempotency-Key`，幂等冲突由业务逻辑判断。
 - 后续新增 AG-UI event 时必须同步 schema 分支、payload required 表和最小 fixture。
 - 后续新增 RPC 方法时必须补充 contract fixture；validator 会直接扫描 IDL 方法覆盖。
 
