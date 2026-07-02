@@ -1,0 +1,71 @@
+{
+  "case_id": "paid_marketplace_skill_usage_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域",
+  "depends_on_contracts": [
+    "foundation",
+    "board graph",
+    "tool asset",
+    "skill market"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/marketplace/creator_submit_approve_publish.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/marketplace/user_install_latest_personal.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/billing/skill_usage_precreate_confirm_charge.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/agui/paid_marketplace_skill_storyboard_ready.events.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": true,
+    "tool_generation_v2": true,
+    "marketplace_v2": true
+  },
+  "preconditions": [
+    "listing 处于 listed 状态",
+    "用户已确认使用费"
+  ],
+  "user_journey": [
+    "用户安装付费市场 Skill",
+    "Router 显式选择市场 Skill",
+    "展示 Skill 使用费披露并确认",
+    "分镜交付后扣使用费并生成结算"
+  ],
+  "expected_agui_event_order": [
+    "agent.run.started",
+    "creative.router.decided",
+    "cost_disclosure.skill_usage.presented",
+    "confirmation.accepted",
+    "board.snapshot.updated",
+    "agent.run.completed"
+  ],
+  "expected_business_state": {
+    "skill_usage_status": "value_delivered",
+    "charge_status": "charged",
+    "settlement_status": "pending_hold",
+    "gross_credits": 120
+  },
+  "fake_provider": {
+    "provider_id": "fake.multimodal_gen",
+    "behavior_id": "deterministic_success"
+  },
+  "redis_expectations": [
+    "使用费冻结与扣费幂等"
+  ],
+  "release_gates": [
+    "Contract Gate",
+    "Migration Gate",
+    "Fixture Gate",
+    "Fake Provider Gate"
+  ]
+}

@@ -1,0 +1,126 @@
+{
+  "initial_snapshot": {
+    "schema_version": "board_snapshot.v1",
+    "board_id": "board_city_001",
+    "version": 1,
+    "status": "ready",
+    "last_patch_id": null,
+    "elements": [
+      {
+        "schema_version": "creative_element.v1",
+        "element_id": "elem_city_scene_001",
+        "board_id": "board_city_001",
+        "element_type": "story_scene",
+        "source": "agent",
+        "status": "ready",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "width": 320,
+          "height": 180,
+          "order": 1
+        },
+        "content": {
+          "scene_title": "西湖晨雾"
+        },
+        "linked_asset_ids": [],
+        "content_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "created_at": "2026-07-01T02:00:00Z",
+        "updated_at": "2026-07-01T02:00:00Z"
+      }
+    ],
+    "board_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "created_at": "2026-07-01T02:00:00Z"
+  },
+  "patches": [
+    {
+      "schema_version": "board_patch.v1",
+      "patch_id": "patch_city_replay_001",
+      "board_id": "board_city_001",
+      "base_version": 1,
+      "target_version": 2,
+      "operation": "update_element",
+      "actor": "agent",
+      "idempotency_key": "board_city_001:replay:v2",
+      "payload": {
+        "element_id": "elem_city_scene_001",
+        "content": {
+          "scene_title": "西湖晨雾（修订）"
+        }
+      },
+      "patch_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "created_at": "2026-07-01T02:10:00Z"
+    },
+    {
+      "schema_version": "board_patch.v1",
+      "patch_id": "patch_city_replay_002",
+      "board_id": "board_city_001",
+      "base_version": 2,
+      "target_version": 3,
+      "operation": "add_element",
+      "actor": "user",
+      "idempotency_key": "board_city_001:replay:v3",
+      "payload": {
+        "element_id": "elem_city_note_001",
+        "element_type": "text_note"
+      },
+      "patch_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "created_at": "2026-07-01T02:20:00Z"
+    }
+  ],
+  "expected_snapshot": {
+    "schema_version": "board_snapshot.v1",
+    "board_id": "board_city_001",
+    "version": 3,
+    "status": "editing",
+    "last_patch_id": "patch_city_replay_002",
+    "elements": [
+      {
+        "schema_version": "creative_element.v1",
+        "element_id": "elem_city_scene_001",
+        "board_id": "board_city_001",
+        "element_type": "story_scene",
+        "source": "agent",
+        "status": "ready",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "width": 320,
+          "height": 180,
+          "order": 1
+        },
+        "content": {
+          "scene_title": "西湖晨雾（修订）"
+        },
+        "linked_asset_ids": [],
+        "content_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "created_at": "2026-07-01T02:10:00Z",
+        "updated_at": "2026-07-01T02:10:00Z"
+      },
+      {
+        "schema_version": "creative_element.v1",
+        "element_id": "elem_city_note_001",
+        "board_id": "board_city_001",
+        "element_type": "text_note",
+        "source": "user",
+        "status": "draft",
+        "position": {
+          "x": 0,
+          "y": 200,
+          "width": 320,
+          "height": 180,
+          "order": 2
+        },
+        "content": {
+          "text": "结尾加城市 slogan"
+        },
+        "linked_asset_ids": [],
+        "content_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "created_at": "2026-07-01T02:20:00Z",
+        "updated_at": "2026-07-01T02:20:00Z"
+      }
+    ],
+    "board_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "created_at": "2026-07-01T02:20:00Z"
+  }
+}

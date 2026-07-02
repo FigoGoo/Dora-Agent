@@ -1,0 +1,46 @@
+{
+  "expected": {
+    "router_decision": {
+      "schema_version": "router_decision.v1",
+      "decision": "select_skill",
+      "skill_source": "system_default",
+      "skill_id": "skill_city_tourism_default",
+      "listing_id": null,
+      "confidence": 0.81,
+      "reason_code": "default_first_marketplace_candidate",
+      "safe_to_execute": false,
+      "requires_skill_usage_confirmation": false,
+      "extracted_params": {
+        "city": "苏州"
+      },
+      "missing_fields": [],
+      "candidate_skills": [
+        {
+          "skill_id": "skill_city_tourism_default",
+          "score": 0.81,
+          "why": "默认免费 Skill 优先"
+        }
+      ],
+      "marketplace_candidates": [
+        {
+          "skill_id": "skill_city_tourism_creator",
+          "listing_id": "listing_city_tourism_creator_001",
+          "score": 0.88,
+          "pricing_summary": {
+            "pricing_model": "fixed_per_use",
+            "usage_credits": 120
+          },
+          "creator_summary": {
+            "creator_name": "创作者A",
+            "rating": 4.8
+          },
+          "entitlement_status": "install_required"
+        }
+      ],
+      "pricing_summary": null,
+      "creator_summary": null,
+      "entitlement_status": null,
+      "fallback_reason": null
+    }
+  }
+}

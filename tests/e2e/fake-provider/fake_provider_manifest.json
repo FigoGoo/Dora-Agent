@@ -1,0 +1,96 @@
+{
+  "schema_version": "fake_provider_manifest.v1",
+  "status": "active",
+  "owner": "测试与验收责任域",
+  "updated_at": "2026-07-02",
+  "purpose": "发布验收阶段以确定性 fake provider 替代真实模型供应商，验证生成、扣费、资产提交与恢复链路。",
+  "providers": [
+    {
+      "provider_id": "fake.multimodal_gen",
+      "capability": "multimodal_generation",
+      "supported_behaviors": [
+        "deterministic_success",
+        "async_pending",
+        "partial_success",
+        "transient_failure",
+        "terminal_failure",
+        "slow_callback"
+      ],
+      "output_digest_policy": "sha256_of_canonical_request_json"
+    },
+    {
+      "provider_id": "fake.image_gen",
+      "capability": "image_generation",
+      "supported_behaviors": [
+        "deterministic_success",
+        "partial_success",
+        "terminal_failure"
+      ],
+      "output_digest_policy": "sha256_of_canonical_request_json"
+    }
+  ],
+  "behavior_contracts": [
+    {
+      "behavior_id": "deterministic_success",
+      "trigger": "default",
+      "expected_result": "同请求同输出摘要，任务一次成功",
+      "retryable": false,
+      "must_emit_stream_events": [
+        "tool:task:completed"
+      ]
+    },
+    {
+      "behavior_id": "async_pending",
+      "trigger": "input.async=true",
+      "expected_result": "先返回 pending，回调后 succeeded",
+      "retryable": false,
+      "must_emit_stream_events": [
+        "tool:task:completed"
+      ]
+    },
+    {
+      "behavior_id": "partial_success",
+      "trigger": "input.partial=true",
+      "expected_result": "部分资产成功、部分失败，失败资产不得扣费",
+      "retryable": false,
+      "must_emit_stream_events": [
+        "tool:task:completed"
+      ]
+    },
+    {
+      "behavior_id": "transient_failure",
+      "trigger": "input.flaky=true",
+      "expected_result": "首次失败可重试，第二次成功",
+      "retryable": true,
+      "must_emit_stream_events": [
+        "tool:task:completed"
+      ]
+    },
+    {
+      "behavior_id": "terminal_failure",
+      "trigger": "input.fail=true",
+      "expected_result": "终态失败，冻结积分必须全额释放",
+      "retryable": false,
+      "must_emit_stream_events": [
+        "tool:task:completed"
+      ]
+    },
+    {
+      "behavior_id": "slow_callback",
+      "trigger": "input.slow=true",
+      "expected_result": "回调晚于 worker 重启，恢复后按幂等键收敛",
+      "retryable": false,
+      "must_emit_stream_events": [
+        "tool:task:completed"
+      ]
+    }
+  ],
+  "redis_streams": [
+    "tool:task:completed"
+  ],
+  "cache_keys": [
+    "dora:agent:cache:tool_policy:{tool_id}",
+    "dora:agent:cache:model_registry:{model_type}"
+  ],
+  "idempotency_rule": "同一 tool_task_id 的完成事件按 dedupe_key 只生效一次，重复回调必须被忽略。"
+}

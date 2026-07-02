@@ -1,0 +1,132 @@
+[
+  {
+    "event_id": "evt_paid_market_001",
+    "event_type": "agent.run.started",
+    "schema_version": "agui.event.v1",
+    "payload_schema_version": "agent.run.started.v1",
+    "project_id": "proj_city_001",
+    "space_id": "sp_personal_1001",
+    "actor_user_id": "usr_1001",
+    "session_id": "sess_city_paid_001",
+    "run_id": "run_city_tourism_paid_001",
+    "seq": 1,
+    "created_at": "2026-07-01T05:00:01Z",
+    "visibility": "user_visible",
+    "dedupe_key": "run_city_tourism_paid_001:agent.run.started:1",
+    "payload": {
+      "run_status": "routing"
+    }
+  },
+  {
+    "event_id": "evt_paid_market_002",
+    "event_type": "creative.router.decided",
+    "schema_version": "agui.event.v1",
+    "payload_schema_version": "creative.router.decided.v1",
+    "project_id": "proj_city_001",
+    "space_id": "sp_personal_1001",
+    "actor_user_id": "usr_1001",
+    "session_id": "sess_city_paid_001",
+    "run_id": "run_city_tourism_paid_001",
+    "seq": 2,
+    "created_at": "2026-07-01T05:00:02Z",
+    "visibility": "user_visible",
+    "dedupe_key": "run_city_tourism_paid_001:creative.router.decided:2",
+    "payload": {
+      "decision": "select_skill",
+      "skill_source": "marketplace",
+      "skill_id": "skill_city_tourism_creator",
+      "listing_id": "listing_city_tourism_creator_001",
+      "requires_skill_usage_confirmation": true
+    }
+  },
+  {
+    "event_id": "evt_paid_market_003",
+    "event_type": "cost_disclosure.skill_usage.presented",
+    "schema_version": "agui.event.v1",
+    "payload_schema_version": "cost_disclosure.skill_usage.presented.v1",
+    "project_id": "proj_city_001",
+    "space_id": "sp_personal_1001",
+    "actor_user_id": "usr_1001",
+    "session_id": "sess_city_paid_001",
+    "run_id": "run_city_tourism_paid_001",
+    "seq": 3,
+    "created_at": "2026-07-01T05:00:03Z",
+    "visibility": "user_visible",
+    "dedupe_key": "run_city_tourism_paid_001:cost_disclosure.skill_usage.presented:3",
+    "payload": {
+      "disclosure_id": "disc_skill_usage_city_001",
+      "usage_id": "susage_city_tourism_paid_001",
+      "listing_id": "listing_city_tourism_creator_001",
+      "skill_usage_fee": {
+        "points": 120,
+        "charge_timing": "storyboard_ready",
+        "refund_policy_summary": "分镜交付前失败会自动释放冻结积分。"
+      },
+      "tool_generation_fee_notice": "后续生成图片、视频或音乐时会另行预估 Tool 生成费并再次确认。",
+      "creator_data_visibility_summary": "创作者不会看到你的原始输入、上传资产和 Board 详情。",
+      "confirmation_required": true,
+      "skill_usage_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "payload_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "payload_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  {
+    "event_id": "evt_paid_market_004",
+    "event_type": "confirmation.accepted",
+    "schema_version": "agui.event.v1",
+    "payload_schema_version": "confirmation.accepted.v1",
+    "project_id": "proj_city_001",
+    "space_id": "sp_personal_1001",
+    "actor_user_id": "usr_1001",
+    "session_id": "sess_city_paid_001",
+    "run_id": "run_city_tourism_paid_001",
+    "seq": 4,
+    "created_at": "2026-07-01T05:00:04Z",
+    "visibility": "user_visible",
+    "dedupe_key": "run_city_tourism_paid_001:confirmation.accepted:4",
+    "payload": {
+      "confirmation_type": "skill_usage",
+      "usage_id": "susage_city_tourism_paid_001",
+      "confirmed_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  },
+  {
+    "event_id": "evt_paid_market_005",
+    "event_type": "board.snapshot.updated",
+    "schema_version": "agui.event.v1",
+    "payload_schema_version": "board.snapshot.updated.v1",
+    "project_id": "proj_city_001",
+    "space_id": "sp_personal_1001",
+    "actor_user_id": "usr_1001",
+    "session_id": "sess_city_paid_001",
+    "run_id": "run_city_tourism_paid_001",
+    "seq": 5,
+    "created_at": "2026-07-01T05:00:05Z",
+    "visibility": "user_visible",
+    "dedupe_key": "run_city_tourism_paid_001:board.snapshot.updated:5",
+    "payload": {
+      "board_id": "board_city_paid_001",
+      "version": 2,
+      "stage": "storyboard_ready"
+    }
+  },
+  {
+    "event_id": "evt_paid_market_006",
+    "event_type": "agent.run.completed",
+    "schema_version": "agui.event.v1",
+    "payload_schema_version": "agent.run.completed.v1",
+    "project_id": "proj_city_001",
+    "space_id": "sp_personal_1001",
+    "actor_user_id": "usr_1001",
+    "session_id": "sess_city_paid_001",
+    "run_id": "run_city_tourism_paid_001",
+    "seq": 6,
+    "created_at": "2026-07-01T05:00:06Z",
+    "visibility": "user_visible",
+    "dedupe_key": "run_city_tourism_paid_001:agent.run.completed:6",
+    "payload": {
+      "run_status": "completed",
+      "value_delivered_stage": "storyboard_ready"
+    }
+  }
+]

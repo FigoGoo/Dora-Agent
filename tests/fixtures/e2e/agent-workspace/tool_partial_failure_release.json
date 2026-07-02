@@ -1,0 +1,61 @@
+{
+  "case_id": "tool_partial_failure_release_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域",
+  "depends_on_contracts": [
+    "board graph",
+    "tool asset"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/toolplan/city_video_toolplan.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/credit/freeze_release_on_tool_failure.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/asset/partial_commit_success.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": true,
+    "tool_generation_v2": true,
+    "marketplace_v2": true
+  },
+  "preconditions": [
+    "ToolPlan 已冻结对应积分"
+  ],
+  "user_journey": [
+    "用户确认 ToolPlan",
+    "部分任务失败",
+    "失败任务冻结积分全额释放",
+    "成功资产正常提交并扣费"
+  ],
+  "expected_agui_event_order": [
+    "cost_disclosure.generation.presented",
+    "confirmation.accepted",
+    "tool.task.updated",
+    "asset.commit.updated"
+  ],
+  "expected_business_state": {
+    "failed_task_credit_hold": "released",
+    "released_credits_equal_frozen": true,
+    "failed_assets_charged": 0
+  },
+  "fake_provider": {
+    "provider_id": "fake.multimodal_gen",
+    "behavior_id": "partial_success"
+  },
+  "redis_expectations": [
+    "失败任务也必须发布 tool:task:completed"
+  ],
+  "release_gates": [
+    "Contract Gate",
+    "Migration Gate",
+    "Fixture Gate",
+    "Fake Provider Gate"
+  ]
+}

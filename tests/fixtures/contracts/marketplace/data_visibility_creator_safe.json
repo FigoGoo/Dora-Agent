@@ -1,0 +1,23 @@
+{
+  "creator_api_response": {
+    "usage_count": 12,
+    "revenue_hold_amount": 960,
+    "refund_count": 1,
+    "failure_code_summary": {
+      "PROVIDER_TIMEOUT": 2
+    },
+    "review_status": "approved",
+    "listing_status": "listed",
+    "settlement_status": "pending_hold"
+  },
+  "forbidden_fields": [
+    "user_prompt",
+    "user_input",
+    "user_uploaded_assets",
+    "board_content",
+    "board_detail",
+    "generated_assets",
+    "user_id",
+    "project_detail"
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "skill_package": {
+    "schema_version": "skill_package.v1",
+    "skill_id": "skill_city_tourism_creator",
+    "creator_user_id": "user_creator_001",
+    "name": "城市文旅宣传视频 Skill",
+    "description": "把城市卖点拆成 Brief、分镜和提示词，并按模板生成宣传视频素材。",
+    "visibility": "public",
+    "current_version": "v1",
+    "created_at": "2026-07-01T00:00:00Z",
+    "updated_at": "2026-07-01T01:00:00Z"
+  },
+  "skill_version": {
+    "schema_version": "skill_version.v1",
+    "skill_version_id": "skv_city_tourism_creator_v1",
+    "skill_id": "skill_city_tourism_creator",
+    "version": "v1",
+    "status": "published",
+    "runtime_spec_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "pricing_policy_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "submitted_at": "2026-07-01T00:30:00Z",
+    "published_at": "2026-07-01T01:00:00Z",
+    "created_at": "2026-07-01T00:10:00Z",
+    "updated_at": "2026-07-01T01:00:00Z"
+  },
+  "pricing_policy": {
+    "schema_version": "skill_pricing_policy.v1",
+    "pricing_policy_id": "spp_city_tourism_creator_v1",
+    "skill_id": "skill_city_tourism_creator",
+    "skill_version": "v1",
+    "pricing_model": "fixed_per_use",
+    "usage_credits": 120,
+    "value_delivered_stage": "storyboard_ready",
+    "pricing_policy_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "created_at": "2026-07-01T00:10:00Z"
+  },
+  "listing": {
+    "schema_version": "marketplace_listing.v1",
+    "listing_id": "listing_city_tourism_creator_001",
+    "skill_id": "skill_city_tourism_creator",
+    "skill_version_id": "skv_city_tourism_creator_v1",
+    "status": "listed",
+    "pricing_policy_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "published_by": "user_creator_001",
+    "listed_at": "2026-07-01T01:10:00Z",
+    "created_at": "2026-07-01T01:05:00Z",
+    "updated_at": "2026-07-01T01:10:00Z"
+  }
+}

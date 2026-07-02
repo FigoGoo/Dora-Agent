@@ -1,0 +1,21 @@
+{
+  "schema_version": "e2e_suite.v1",
+  "suite_id": "admin_governance_e2e_suite_v1",
+  "status": "active",
+  "owner": "测试与验收责任域",
+  "updated_at": "2026-07-02",
+  "fixtures": [
+    {
+      "case_id": "refund_settlement_reverse_e2e_v1",
+      "fixture_path": "tests/fixtures/e2e/admin-governance/refund_settlement_reverse.json",
+      "required": true,
+      "fake_provider_behavior": "deterministic_success"
+    }
+  ],
+  "required_gates": [
+    "Contract Gate",
+    "Migration Gate",
+    "Fixture Gate",
+    "Fake Provider Gate"
+  ]
+}

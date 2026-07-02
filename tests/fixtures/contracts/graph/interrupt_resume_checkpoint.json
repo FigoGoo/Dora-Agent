@@ -1,0 +1,19 @@
+{
+  "graph_plan_id": "gplan_city_001",
+  "checkpoint": {
+    "schema_version": "graph_checkpoint.v1",
+    "checkpoint_id": "gchk_city_001",
+    "graph_plan_id": "gplan_city_001",
+    "run_id": "run_city_tourism_001",
+    "node_id": "board_confirmation_gate",
+    "checkpoint_type": "interrupt",
+    "status": "open",
+    "state_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "resumable": true,
+    "expires_at": "2026-07-02T02:35:00Z",
+    "created_at": "2026-07-01T02:35:00Z"
+  },
+  "expected": {
+    "checkpoint_status_after_resume": "resumed"
+  }
+}

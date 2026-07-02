@@ -1,0 +1,100 @@
+{
+  "schema_version": "fake_provider_scenarios.v1",
+  "status": "active",
+  "owner": "测试与验收责任域",
+  "updated_at": "2026-07-02",
+  "scenarios": [
+    {
+      "case_id": "fp_deterministic_success_001",
+      "behavior_id": "deterministic_success",
+      "provider_id": "fake.multimodal_gen",
+      "request": {
+        "tool_task_id": "ttask_fp_001",
+        "prompt": "West Lake dawn"
+      },
+      "expected": {
+        "status": "succeeded",
+        "output_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+        "dedupe_key": "tool:task:completed:ttask_fp_001",
+        "stream": "tool:task:completed"
+      }
+    },
+    {
+      "case_id": "fp_async_pending_001",
+      "behavior_id": "async_pending",
+      "provider_id": "fake.multimodal_gen",
+      "request": {
+        "tool_task_id": "ttask_fp_002",
+        "async": true
+      },
+      "expected": {
+        "initial_status": "pending",
+        "final_status": "succeeded",
+        "callback_after_ms": 1500,
+        "streams": [
+          "tool:task:completed"
+        ]
+      }
+    },
+    {
+      "case_id": "fp_partial_success_001",
+      "behavior_id": "partial_success",
+      "provider_id": "fake.multimodal_gen",
+      "request": {
+        "tool_task_id": "ttask_fp_003",
+        "partial": true
+      },
+      "expected": {
+        "status": "partially_succeeded",
+        "committed_asset_count": 2,
+        "failed_asset_count": 1,
+        "failed_assets_must_not_be_charged": true
+      }
+    },
+    {
+      "case_id": "fp_transient_failure_001",
+      "behavior_id": "transient_failure",
+      "provider_id": "fake.multimodal_gen",
+      "request": {
+        "tool_task_id": "ttask_fp_004",
+        "flaky": true
+      },
+      "expected": {
+        "first_attempt_status": "failed",
+        "retry_attempt": 1,
+        "final_status": "succeeded",
+        "error_code": "PROVIDER_TRANSIENT"
+      }
+    },
+    {
+      "case_id": "fp_terminal_failure_001",
+      "behavior_id": "terminal_failure",
+      "provider_id": "fake.multimodal_gen",
+      "request": {
+        "tool_task_id": "ttask_fp_005",
+        "fail": true
+      },
+      "expected": {
+        "status": "failed",
+        "error_code": "PROVIDER_TERMINAL_FAILURE",
+        "credit_hold_status": "released",
+        "released_credits_must_equal_frozen_credits": true
+      }
+    },
+    {
+      "case_id": "fp_slow_callback_001",
+      "behavior_id": "slow_callback",
+      "provider_id": "fake.multimodal_gen",
+      "request": {
+        "tool_task_id": "ttask_fp_006",
+        "slow": true
+      },
+      "expected": {
+        "worker_restart_required": true,
+        "resume_status": "succeeded",
+        "duplicate_callback_must_be_ignored": true,
+        "callback_after_ms": 8000
+      }
+    }
+  ]
+}

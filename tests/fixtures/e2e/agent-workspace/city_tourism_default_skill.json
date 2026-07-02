@@ -1,0 +1,84 @@
+{
+  "case_id": "city_tourism_default_skill_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域",
+  "depends_on_contracts": [
+    "foundation",
+    "board graph",
+    "tool asset"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/router/select_system_city_tourism.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/board/create_city_tourism_board.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/board/approve_board_for_toolplan.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/toolplan/city_video_toolplan.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/credit/freeze_commit_success.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/asset/partial_commit_success.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": true,
+    "tool_generation_v2": true,
+    "marketplace_v2": true
+  },
+  "preconditions": [
+    "用户有足够积分",
+    "默认 Skill 已发布"
+  ],
+  "user_journey": [
+    "用户输入城市文旅宣传视频需求",
+    "Router 选择默认 Skill",
+    "生成并编辑 Creative Board",
+    "用户批准 Board",
+    "确认 ToolPlan 与积分",
+    "生成素材并提交资产",
+    "按已提交资产扣费"
+  ],
+  "expected_agui_event_order": [
+    "agent.run.started",
+    "creative.router.decided",
+    "board.snapshot.updated",
+    "cost_disclosure.generation.presented",
+    "confirmation.accepted",
+    "tool.task.updated",
+    "asset.commit.updated",
+    "agent.run.completed"
+  ],
+  "expected_business_state": {
+    "credit_hold": "committed",
+    "asset_commit": "partially_committed",
+    "skill_usage_record": "not_created",
+    "credit_ledger_entries": 1
+  },
+  "fake_provider": {
+    "provider_id": "fake.multimodal_gen",
+    "behavior_id": "deterministic_success"
+  },
+  "redis_expectations": [
+    "tool:task:completed 每个任务只消费一次",
+    "dedupe_key 在 run 内唯一"
+  ],
+  "release_gates": [
+    "Contract Gate",
+    "Migration Gate",
+    "Fixture Gate",
+    "Fake Provider Gate"
+  ]
+}

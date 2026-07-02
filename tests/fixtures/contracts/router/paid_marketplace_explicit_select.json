@@ -1,0 +1,53 @@
+{
+  "expected": {
+    "router_decision": {
+      "schema_version": "router_decision.v1",
+      "decision": "select_skill",
+      "skill_source": "marketplace",
+      "skill_id": "skill_city_tourism_creator",
+      "listing_id": "listing_city_tourism_creator_001",
+      "confidence": 0.95,
+      "reason_code": "explicit_marketplace_selection",
+      "safe_to_execute": false,
+      "requires_skill_usage_confirmation": true,
+      "extracted_params": {
+        "city": "杭州"
+      },
+      "missing_fields": [],
+      "candidate_skills": [
+        {
+          "skill_id": "skill_city_tourism_creator",
+          "score": 0.95,
+          "why": "用户显式选择市场 Skill"
+        }
+      ],
+      "marketplace_candidates": [
+        {
+          "skill_id": "skill_city_tourism_creator",
+          "listing_id": "listing_city_tourism_creator_001",
+          "score": 0.95,
+          "pricing_summary": {
+            "pricing_model": "fixed_per_use",
+            "usage_credits": 120
+          },
+          "creator_summary": {
+            "creator_name": "创作者A",
+            "rating": 4.8
+          },
+          "entitlement_status": "available"
+        }
+      ],
+      "pricing_summary": {
+        "pricing_model": "fixed_per_use",
+        "usage_credits": 120,
+        "value_delivered_stage": "storyboard_ready"
+      },
+      "creator_summary": {
+        "creator_name": "创作者A",
+        "rating": 4.8
+      },
+      "entitlement_status": "available",
+      "fallback_reason": null
+    }
+  }
+}

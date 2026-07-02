@@ -1,0 +1,56 @@
+{
+  "case_id": "generic_creation_graph_fallback_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域",
+  "depends_on_contracts": [
+    "foundation",
+    "board graph"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/router/marketplace_candidate_not_installed.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/graph/generic_creation_graph_plan.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": true,
+    "tool_generation_v2": true,
+    "marketplace_v2": true
+  },
+  "preconditions": [
+    "Generic Creation Graph 为平台内置 L0 免费 fallback"
+  ],
+  "user_journey": [
+    "用户输入模糊创作想法",
+    "Router 无匹配 Skill 走 generic_creation",
+    "Generic Creation Graph 产出 Board 与 Skill 推荐"
+  ],
+  "expected_agui_event_order": [
+    "agent.run.started",
+    "creative.router.decided",
+    "board.snapshot.updated",
+    "agent.run.completed"
+  ],
+  "expected_business_state": {
+    "skill_usage_record": "not_created",
+    "graph_plan_status": "completed",
+    "usage_fee": 0
+  },
+  "fake_provider": {
+    "provider_id": "fake.multimodal_gen",
+    "behavior_id": "deterministic_success"
+  },
+  "redis_expectations": [
+    "无生成任务时不写 tool:task:completed"
+  ],
+  "release_gates": [
+    "Contract Gate",
+    "Migration Gate",
+    "Fixture Gate",
+    "Fake Provider Gate"
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "board_before": {
+    "schema_version": "creative_board.v1",
+    "board_id": "board_city_001",
+    "project_id": "proj_city_001",
+    "session_id": "sess_city_001",
+    "run_id": "run_city_tourism_001",
+    "graph_plan_id": "gplan_city_001",
+    "title": "杭州城市文旅宣传视频 Board",
+    "status": "ready",
+    "version": 2,
+    "elements_count": 3,
+    "approved_at": null,
+    "approved_by": null,
+    "tool_plan_allowed": false,
+    "board_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "created_at": "2026-07-01T02:00:00Z",
+    "updated_at": "2026-07-01T02:30:00Z"
+  },
+  "approval_patch": {
+    "schema_version": "board_patch.v1",
+    "patch_id": "patch_city_approve_001",
+    "board_id": "board_city_001",
+    "base_version": 2,
+    "target_version": 3,
+    "operation": "approve_board",
+    "actor": "user",
+    "idempotency_key": "board_city_001:approve:v3",
+    "payload": {
+      "note": "用户确认分镜与提示词"
+    },
+    "patch_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "created_at": "2026-07-01T02:40:00Z"
+  },
+  "board_after": {
+    "schema_version": "creative_board.v1",
+    "board_id": "board_city_001",
+    "project_id": "proj_city_001",
+    "session_id": "sess_city_001",
+    "run_id": "run_city_tourism_001",
+    "graph_plan_id": "gplan_city_001",
+    "title": "杭州城市文旅宣传视频 Board",
+    "status": "approved",
+    "version": 3,
+    "elements_count": 3,
+    "approved_at": "2026-07-01T02:40:00Z",
+    "approved_by": "user_buyer_001",
+    "tool_plan_allowed": true,
+    "board_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "created_at": "2026-07-01T02:00:00Z",
+    "updated_at": "2026-07-01T02:40:00Z"
+  }
+}

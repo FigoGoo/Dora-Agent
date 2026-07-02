@@ -1,0 +1,53 @@
+{
+  "hold_after_freeze": {
+    "schema_version": "credit_freeze.v1",
+    "credit_hold_id": "chold_city_video_fail_001",
+    "account_id": "acct_personal_001",
+    "account_scope": "personal",
+    "run_id": "run_city_tourism_001",
+    "tool_plan_id": "tpl_city_video_001",
+    "tool_plan_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "idempotency_key": "freeze:tpl_city_video_001:fail",
+    "created_at": "2026-07-01T03:20:00Z",
+    "status": "frozen",
+    "frozen_credits": 300,
+    "committed_credits": 0,
+    "released_credits": 0,
+    "updated_at": null
+  },
+  "tool_task_failure": {
+    "schema_version": "tool_task.v1",
+    "tool_task_id": "ttask_city_video_fail_001",
+    "tool_plan_id": "tpl_city_video_001",
+    "tool_plan_item_id": "tpi_city_video_001",
+    "run_id": "run_city_tourism_001",
+    "status": "failed",
+    "progress": 60,
+    "provider_policy": {
+      "mode": "sync",
+      "timeout_ms": 120000,
+      "retryable": false
+    },
+    "idempotency_key": "ttask_city_video_fail_001:run",
+    "input_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "error_code": "PROVIDER_TIMEOUT",
+    "created_at": "2026-07-01T03:21:00Z",
+    "updated_at": "2026-07-01T03:25:00Z"
+  },
+  "hold_after_release": {
+    "schema_version": "credit_freeze.v1",
+    "credit_hold_id": "chold_city_video_fail_001",
+    "account_id": "acct_personal_001",
+    "account_scope": "personal",
+    "run_id": "run_city_tourism_001",
+    "tool_plan_id": "tpl_city_video_001",
+    "tool_plan_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "idempotency_key": "freeze:tpl_city_video_001:fail",
+    "created_at": "2026-07-01T03:20:00Z",
+    "status": "released",
+    "frozen_credits": 300,
+    "committed_credits": 0,
+    "released_credits": 300,
+    "updated_at": "2026-07-01T03:30:00Z"
+  }
+}

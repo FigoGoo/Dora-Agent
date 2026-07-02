@@ -1,0 +1,58 @@
+{
+  "case_id": "replay_after_restart_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域",
+  "depends_on_contracts": [
+    "foundation",
+    "board graph",
+    "tool asset"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/tool/provider_async_resume.json",
+      "required": true
+    },
+    {
+      "path": "tests/fixtures/contracts/agui/paid_marketplace_skill_storyboard_ready.events.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": true,
+    "tool_generation_v2": true,
+    "marketplace_v2": true
+  },
+  "preconditions": [
+    "Redis stream 中存在未确认的完成事件"
+  ],
+  "user_journey": [
+    "异步生成进行中 worker 重启",
+    "Provider 完成回调经 Redis stream 补投",
+    "任务按幂等键恢复 succeeded",
+    "前端断线后按 Last-Event-ID replay AG-UI 事件"
+  ],
+  "expected_agui_event_order": [
+    "tool.task.updated",
+    "asset.commit.updated",
+    "agent.run.completed"
+  ],
+  "expected_business_state": {
+    "tool_task_status": "succeeded",
+    "duplicate_callback": "ignored",
+    "agui_replay": "gap_free"
+  },
+  "fake_provider": {
+    "provider_id": "fake.multimodal_gen",
+    "behavior_id": "slow_callback"
+  },
+  "redis_expectations": [
+    "重复回调必须被 dedupe_key 忽略",
+    "replay 事件 seq 连续"
+  ],
+  "release_gates": [
+    "Contract Gate",
+    "Migration Gate",
+    "Fixture Gate",
+    "Fake Provider Gate"
+  ]
+}

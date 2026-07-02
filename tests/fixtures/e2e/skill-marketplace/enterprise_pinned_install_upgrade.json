@@ -1,0 +1,49 @@
+{
+  "case_id": "enterprise_pinned_install_upgrade_e2e_v1",
+  "status": "active",
+  "owner": "测试与验收责任域",
+  "depends_on_contracts": [
+    "skill market"
+  ],
+  "contract_references": [
+    {
+      "path": "tests/fixtures/contracts/marketplace/enterprise_install_pinned_upgrade.json",
+      "required": true
+    }
+  ],
+  "feature_flags": {
+    "agent_runtime_v2": true,
+    "tool_generation_v2": true,
+    "marketplace_v2": true
+  },
+  "preconditions": [
+    "企业安装策略为 pinned"
+  ],
+  "user_journey": [
+    "企业管理员安装并 pin v1",
+    "新版本 v2 发布",
+    "管理员确认后升级到 v2",
+    "历史 run 仍按 v1 快照恢复"
+  ],
+  "expected_agui_event_order": [
+    "confirmation.accepted"
+  ],
+  "expected_business_state": {
+    "installation_version": "v2",
+    "upgrade_status": "confirmed",
+    "historical_run_version": "v1"
+  },
+  "fake_provider": {
+    "provider_id": "fake.multimodal_gen",
+    "behavior_id": "deterministic_success"
+  },
+  "redis_expectations": [
+    "升级请求按 idempotency_key 幂等"
+  ],
+  "release_gates": [
+    "Contract Gate",
+    "Migration Gate",
+    "Fixture Gate",
+    "Fake Provider Gate"
+  ]
+}

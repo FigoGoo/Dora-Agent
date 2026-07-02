@@ -1,0 +1,152 @@
+{
+  "generic_creation_graph": {
+    "schema_version": "generic_creation_graph.v1",
+    "generic_graph_id": "generic_creation_graph",
+    "skill_level": "L0",
+    "marketplace_listing_id": null,
+    "pricing_policy": "free",
+    "usage_fee": 0,
+    "version_strategy": "platform_builtin",
+    "default_nodes": [
+      "brief_parser",
+      "clarifier",
+      "creative_direction",
+      "board_writer",
+      "skill_recommendation"
+    ],
+    "allowed_outputs": [
+      "brief_summary",
+      "clarifying_questions",
+      "creative_direction",
+      "storyboard",
+      "skill_recommendations"
+    ],
+    "graph_template_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "graph_template": {
+    "schema_version": "graph_template.v1",
+    "graph_template_id": "gtemplate_generic_creation_v1",
+    "name": "Generic Creation Graph",
+    "version": "v1",
+    "graph_type": "generic_creation",
+    "skill_level": "L0",
+    "entry_node": "brief_parser",
+    "terminal_nodes": [
+      "skill_recommendation"
+    ],
+    "nodes": [
+      {
+        "node_id": "brief_parser",
+        "node_type": "brief_parser",
+        "display_name": "Brief 解析"
+      },
+      {
+        "node_id": "clarifier",
+        "node_type": "clarifier",
+        "display_name": "澄清问题"
+      },
+      {
+        "node_id": "creative_direction",
+        "node_type": "llm",
+        "display_name": "创意方向"
+      },
+      {
+        "node_id": "board_writer",
+        "node_type": "board_writer",
+        "display_name": "Board 写入"
+      },
+      {
+        "node_id": "skill_recommendation",
+        "node_type": "recommendation",
+        "display_name": "Skill 推荐"
+      }
+    ],
+    "edges": [
+      {
+        "from": "brief_parser",
+        "to": "clarifier",
+        "condition": "missing_fields_present"
+      },
+      {
+        "from": "brief_parser",
+        "to": "creative_direction",
+        "condition": "brief_complete"
+      },
+      {
+        "from": "clarifier",
+        "to": "creative_direction",
+        "condition": null
+      },
+      {
+        "from": "creative_direction",
+        "to": "board_writer",
+        "condition": null
+      },
+      {
+        "from": "board_writer",
+        "to": "skill_recommendation",
+        "condition": null
+      }
+    ],
+    "template_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "created_at": "2026-07-01T03:00:00Z"
+  },
+  "graph_plan": {
+    "schema_version": "graph_plan.v1",
+    "graph_plan_id": "gplan_generic_001",
+    "graph_template_id": "gtemplate_generic_creation_v1",
+    "graph_template_version": "v1",
+    "run_id": "run_generic_001",
+    "board_id": "board_generic_001",
+    "status": "completed",
+    "current_node": null,
+    "value_delivered_stage": "storyboard_ready",
+    "nodes": [
+      {
+        "node_id": "brief_parser",
+        "node_type": "brief_parser",
+        "status": "completed"
+      },
+      {
+        "node_id": "clarifier",
+        "node_type": "clarifier",
+        "status": "completed"
+      },
+      {
+        "node_id": "creative_direction",
+        "node_type": "llm",
+        "status": "completed"
+      },
+      {
+        "node_id": "board_writer",
+        "node_type": "board_writer",
+        "status": "completed"
+      },
+      {
+        "node_id": "skill_recommendation",
+        "node_type": "recommendation",
+        "status": "completed"
+      }
+    ],
+    "edges": [
+      {
+        "from": "brief_parser",
+        "to": "creative_direction",
+        "condition_result": "brief_complete"
+      },
+      {
+        "from": "creative_direction",
+        "to": "board_writer",
+        "condition_result": null
+      },
+      {
+        "from": "board_writer",
+        "to": "skill_recommendation",
+        "condition_result": null
+      }
+    ],
+    "graph_plan_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "created_at": "2026-07-01T03:00:00Z",
+    "updated_at": "2026-07-01T03:05:00Z"
+  }
+}
