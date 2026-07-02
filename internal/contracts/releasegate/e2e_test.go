@@ -51,7 +51,7 @@ func TestE2EFixtureRequiresFixtureGate(t *testing.T) {
 }
 
 func TestReleaseGovernanceText(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs/active/technical/release-governance.md"))
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs/11-M7-开发计划与发布治理.md"))
 	if err != nil {
 		t.Fatalf("read release governance: %v", err)
 	}

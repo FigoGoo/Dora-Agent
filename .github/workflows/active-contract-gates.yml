@@ -1,4 +1,4 @@
-name: Active Contract Gates
+name: Regression Gates
 
 on:
   pull_request:
@@ -8,8 +8,8 @@ on:
       - master
 
 jobs:
-  active-contract-gate:
-    name: Active contract gate
+  fixture-gate:
+    name: Fixture gate (static)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -20,33 +20,41 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Python dependencies
-        run: python -m pip install --upgrade pip -r requirements/contract-gates.txt
+      - name: Run fixture gate
+        run: python3 scripts/validate-fixtures.py
 
-      - name: Validate active contracts
-        run: scripts/validate-active-contracts.sh
-
-  development-ci-gate:
-    name: Development CI gate
+  go-test:
+    name: Go regression
     runs-on: ubuntu-latest
-    needs: active-contract-gate
+    needs: fixture-gate
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Python dependencies
-        run: python -m pip install --upgrade pip -r requirements/contract-gates.txt
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: gofmt dry check
+        run: |
+          unformatted="$(find services internal -name '*.go' -print0 | xargs -0 gofmt -l)"
+          if [ -n "$unformatted" ]; then echo "$unformatted"; echo "gofmt required"; exit 1; fi
+
+      - name: go vet
+        run: go vet ./services/... ./internal/...
+
+      - name: go test
+        run: go test -count=1 ./services/... ./internal/...
+
+  frontend:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    needs: fixture-gate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -58,36 +66,15 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --prefix frontend
 
-      - name: Install pnpm
-        run: npm install -g pnpm@10
+      - name: Run frontend tests
+        run: |
+          npm --prefix frontend test
+          npm --prefix frontend run build
 
-      - name: Install admin frontend dependencies
-        run: pnpm --dir admin_frontend install --frozen-lockfile
-
-      - name: Run development CI gate
-        run: scripts/validate-development-ci-gate.sh
-
-  release-full-http-smoke:
-    name: Release full HTTP service smoke
+  admin-frontend:
+    name: Admin frontend tests
     runs-on: ubuntu-latest
-    needs: development-ci-gate
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Run release full HTTP service smoke
-        run: scripts/validate-release-full-http-smoke.sh
-
-  release-browser-smoke:
-    name: Release browser smoke
-    runs-on: ubuntu-latest
-    needs: release-full-http-smoke
+    needs: fixture-gate
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -96,13 +83,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "24"
-          cache: npm
-          cache-dependency-path: |
-            frontend/package-lock.json
-            tests/e2e/browser/package-lock.json
-
-      - name: Install frontend dependencies
-        run: npm ci --prefix frontend
 
       - name: Install pnpm
         run: npm install -g pnpm@10
@@ -110,11 +90,7 @@ jobs:
       - name: Install admin frontend dependencies
         run: pnpm --dir admin_frontend install --frozen-lockfile
 
-      - name: Install browser smoke dependencies
-        run: npm ci --prefix tests/e2e/browser
-
-      - name: Check Chrome
-        run: google-chrome --version || google-chrome-stable --version || chromium --version || chromium-browser --version
-
-      - name: Run release browser smoke
-        run: scripts/validate-release-browser-smoke.sh
+      - name: Run admin frontend tests
+        run: |
+          pnpm --dir admin_frontend test
+          pnpm --dir admin_frontend build

@@ -15,7 +15,7 @@ func TestStateEnumsMatchSchemaRegistry(t *testing.T) {
 			Enum []string `json:"enum"`
 		} `json:"$defs"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(t), "api/schemas/common/state-enum-registry.schema.json"))
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "tests/fixtures/contracts/common/state-enum-registry.schema.json"))
 	if err != nil {
 		t.Fatalf("read state schema: %v", err)
 	}
