@@ -1,5 +1,0 @@
-[
-  {"event_id":"evt_save_1","type":"asset.save.failed","session_id":"ses_1","run_id":"run_save","project_id":"prj_1","space_id":"spc_1","actor_user_id":"usr_1","sequence":1,"timestamp":"2026-06-27T00:00:00Z","component":"agent-runtime","trace_id":"trc_save","payload":{"artifact_id":"art_1","error_code":"ASSET_SAVE_FAILED","user_message":"资产保存失败。","released_points":10,"retryable":true}},
-  {"event_id":"evt_save_2","type":"credits.released","session_id":"ses_1","run_id":"run_save","project_id":"prj_1","space_id":"spc_1","actor_user_id":"usr_1","sequence":2,"timestamp":"2026-06-27T00:00:01Z","component":"agent-runtime","trace_id":"trc_save","payload":{"freeze_id":"frz_1","released_points":10,"reason":"asset_save_failed"}},
-  {"event_id":"evt_save_3","type":"agent.run.failed","session_id":"ses_1","run_id":"run_save","project_id":"prj_1","space_id":"spc_1","actor_user_id":"usr_1","sequence":3,"timestamp":"2026-06-27T00:00:02Z","component":"agent-runtime","trace_id":"trc_save","payload":{"error_type":"asset_error","error_code":"ASSET_SAVE_FAILED","user_message":"资产保存失败。","retryable":true,"support_trace_id":"trc_save"}}
-]
