@@ -3,7 +3,6 @@ import {
   ArrowUp,
   Eye,
   Heart,
-  ImagePlus,
   Images,
   Maximize2,
   MessageCircle,
@@ -119,9 +118,6 @@ function PromptComposer({ prompt, onPromptChange, onLogin }) {
         placeholder="由一个想法或故事开始..."
       />
       <div className="prompt-composer__tools" aria-label="创作工具">
-        <button className="prompt-tool prompt-tool--plus" type="button" aria-label="添加素材" onClick={() => onLogin('添加素材')}>
-          <ImagePlus aria-hidden="true" size={16} />
-        </button>
         {promptTools.map((tool) => (
           <button className="prompt-tool" key={tool.label} type="button" aria-label={`打开${tool.label}`} onClick={() => onLogin(tool.label)}>
             {tool.label === '模型' ? <SlidersHorizontal aria-hidden="true" size={15} /> : null}
@@ -585,10 +581,10 @@ function AssetsPage({ onIntent }) {
       <PageHeader
         eyebrow="素材与生成结果"
         title="资产库"
-        copy="查看已经生成或上传的素材，快速带回当前创作。"
+        copy="查看已经生成的图片、视频与音频，快速带回当前创作。"
       >
-        <button className="start-button" type="button" onClick={() => onIntent('上传素材', '登录后会进入上传和内容安全检查。')}>
-          上传素材
+        <button className="start-button" type="button" onClick={() => onIntent('继续创作', '进入工作台后可以继续生成和管理素材。')}>
+          继续创作
         </button>
       </PageHeader>
       <div className="filter-row" aria-label="资产筛选">

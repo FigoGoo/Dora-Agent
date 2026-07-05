@@ -15,12 +15,12 @@ export const skillMocks = [
     tone: 'empty'
   },
   {
-    title: '剧本生视频（需上传剧本）',
+    title: '剧本生视频',
     author: '@脚本工坊',
     owner: '我的保存',
     status: '已启用',
     version: 'V23',
-    description: '分析上传的图片、PDF 或文本剧本，提取脚本、镜头结构、视觉语言和节奏，生成完整主题视频。',
+    description: '分析输入的剧本内容，提取脚本、镜头结构、视觉语言和节奏，生成完整主题视频。',
     cover: '/works/doraigc-aigc-movie-poster.png',
     models: ['Seedance 2.0'],
     tone: 'warm'
@@ -48,12 +48,12 @@ export const skillMocks = [
     tone: 'sunset'
   },
   {
-    title: '音乐 MV（需上传音乐）',
+    title: '音乐 MV',
     author: '@Flova',
     owner: '我的保存',
     status: '已启用',
     version: 'V17',
-    description: '根据上传音乐驱动主角演唱和镜头调度，适合快速生成音乐短片和封面视觉。',
+    description: '根据音乐方向驱动主角演唱和镜头调度，适合快速生成音乐短片和封面视觉。',
     cover: '/works/music-wave-generated.png',
     models: ['OmniHuman 1.5', 'Seedance 2.0'],
     tone: 'cool'

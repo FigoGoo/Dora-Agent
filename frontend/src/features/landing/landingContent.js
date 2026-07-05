@@ -58,7 +58,7 @@ export const hotSkills = [
     author: '@Yvonne',
     avatar: '/works/doraigc-ratio-movie-poster-3x4.png',
     preview: '/works/doraigc-ratio-movie-poster-3x4.png',
-    description: '上传剧本后生成主视觉、镜头方向和首版预告片结构。',
+    description: '输入剧本后生成主视觉、镜头方向和首版预告片结构。',
     tags: ['影视', '剧本']
   },
   {
@@ -353,7 +353,7 @@ export const assetMocks = [
     type: '生成图片',
     status: '可引用',
     project: '商品宣传短片',
-    source: '上传素材与创作工具',
+    source: '生成素材与创作工具',
     cover: '/works/doraigc-aigc-ecommerce-ad.png'
   },
   {

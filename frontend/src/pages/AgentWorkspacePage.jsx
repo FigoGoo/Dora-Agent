@@ -1,5 +1,5 @@
-import { AgentWorkspacePage as AgentWorkspaceExperience } from '../features/landing/LandingPage.jsx';
+import { AigcWorkspacePage } from '../features/aigc/AigcWorkspacePage.jsx';
 
 export function AgentWorkspacePage() {
-  return <AgentWorkspaceExperience />;
+  return <AigcWorkspacePage />;
 }
