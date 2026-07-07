@@ -71,6 +71,10 @@ export function AigcWorkspacePage() {
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [editing, setEditing] = useState(null);
   const [autoSkill, setAutoSkill] = useState(null); // {name, reason, fallback}
+  const [leftView, setLeftView] = useState('storyboard'); // 'storyboard' | 'docs'
+  const [docSpec, setDocSpec] = useState(null);
+  const [docSkill, setDocSkill] = useState(null);
+  const [activeDoc, setActiveDoc] = useState('spec'); // 'spec' | 'skill'
   const skillInputRef = useRef(null);
   const streamingAssistantID = useRef('');
 
@@ -128,6 +132,22 @@ export function AigcWorkspacePage() {
     },
     []
   );
+
+  const loadDocuments = useCallback(async () => {
+    if (!sessionID) {
+      return;
+    }
+    try {
+      setDocSpec(await requestOptionalJSON(`/api/aigc/sessions/${sessionID}/spec`));
+    } catch {
+      setDocSpec(null);
+    }
+    try {
+      setDocSkill(await requestOptionalJSON(`/api/aigc/sessions/${sessionID}/skill`));
+    } catch {
+      setDocSkill(null);
+    }
+  }, [sessionID]);
 
   const appendAssistantDelta = useCallback((text) => {
     if (!text) {
@@ -529,6 +549,60 @@ export function AigcWorkspacePage() {
             <span>{statusLabel(storyboard?.status) || '未生成'}</span>
           </div>
 
+          <div className="aigc-left-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={leftView === 'storyboard'}
+              onClick={() => setLeftView('storyboard')}
+            >
+              故事板
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={leftView === 'docs'}
+              onClick={() => {
+                setLeftView('docs');
+                void loadDocuments();
+              }}
+            >
+              文档
+            </button>
+          </div>
+
+          {leftView === 'docs' && (
+            <div className="aigc-docs-pane">
+              <div className="aigc-docs-tabs" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeDoc === 'spec'}
+                  onClick={() => setActiveDoc('spec')}
+                >
+                  Final_Video_Spec.md
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeDoc === 'skill'}
+                  onClick={() => setActiveDoc('skill')}
+                >
+                  skill.md
+                </button>
+              </div>
+              <pre className="aigc-doc-content">
+                {activeDoc === 'spec'
+                  ? docSpec?.markdown || '尚未生成 Final Video Spec。'
+                  : docSkill?.bound
+                    ? docSkill.content || ''
+                    : '当前会话未绑定 Skill。'}
+              </pre>
+            </div>
+          )}
+
+          {leftView === 'storyboard' && (
+          <>
           <div className="aigc-selected-target">
             <span>当前绑定</span>
             <strong>{selectedTarget?.label || '选择故事板项'}</strong>
@@ -632,6 +706,8 @@ export function AigcWorkspacePage() {
               );
             })}
           </StoryboardSection>
+          </>
+          )}
         </section>
 
         <section className="aigc-chat-pane" aria-label="对话">
