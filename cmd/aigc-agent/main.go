@@ -142,6 +142,11 @@ func main() {
 		os.Exit(1)
 	}
 	runnerInvoker := aigcserver.NewRunnerInvoker(runner)
+	selectorModel, err := aigcagent.NewDeepSeekChatModel(ctx, cfg)
+	if err != nil {
+		slog.Error("build skill selector model", "error", err)
+		os.Exit(1)
+	}
 	wakeupRunner := aigcserver.NewJobWakeupRunner(aigcserver.JobWakeupRunnerConfig{
 		Store:         sessionStore,
 		Invoker:       runnerInvoker,
@@ -172,6 +177,9 @@ func main() {
 			Invoker:        runnerInvoker,
 			MediaGraph:     mediaGraph,
 			SessionValues:  aigcturncontext.SessionValues,
+			SkillSelector:  aigcskill.NewLLMSkillSelector(selectorModel),
+			DefaultSkillID: "",
+			Publisher:      eventBroker,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
