@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -207,16 +208,35 @@ func (w *Worker) publishJobStatus(ctx context.Context, job GenerationJob) {
 	})
 }
 
+// storyboardBindMaxAttempts bounds the optimistic-lock retry when binding an
+// asset onto the storyboard. Multiple workers (concurrency > 1) can finish media
+// jobs for the same storyboard near-simultaneously; each computes its patch
+// against a base version, so all but one lose the race with ErrVersionConflict.
+// Re-reading the fresh board and recomputing the patch lets the losers succeed.
+const storyboardBindMaxAttempts = 8
+
 func (w *Worker) syncStoryboardAssets(ctx context.Context, job GenerationJob) error {
 	if w.cfg.Assets == nil || w.cfg.Storyboards == nil || strings.TrimSpace(job.StoryboardID) == "" || len(job.ResultAssetIDs) == 0 {
 		return nil
 	}
-	board, err := w.cfg.Storyboards.Get(ctx, job.StoryboardID)
+	for i, assetID := range job.ResultAssetIDs {
+		if err := w.bindAssetToStoryboard(ctx, job, assetID, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// bindAssetToStoryboard binds a single result asset onto the storyboard target,
+// retrying on version conflict by re-reading the board and recomputing the patch.
+func (w *Worker) bindAssetToStoryboard(ctx context.Context, job GenerationJob, assetID string, index int) error {
+	record, err := w.cfg.Assets.Get(ctx, assetID)
 	if err != nil {
 		return err
 	}
-	for i, assetID := range job.ResultAssetIDs {
-		record, err := w.cfg.Assets.Get(ctx, assetID)
+	var lastErr error
+	for attempt := 0; attempt < storyboardBindMaxAttempts; attempt++ {
+		board, err := w.cfg.Storyboards.Get(ctx, job.StoryboardID)
 		if err != nil {
 			return err
 		}
@@ -228,10 +248,13 @@ func (w *Worker) syncStoryboardAssets(ctx context.Context, job GenerationJob) er
 			Field:      jobPayloadString(job.Payload, "field"),
 		})
 		if err != nil {
+			if errors.Is(err, storyboard.ErrAssetAlreadyBound) {
+				return nil
+			}
 			return err
 		}
 		req := storyboard.PatchRequest{
-			EventID:      valueOrDefault(w.cfg.NewID(), fmt.Sprintf("%s-storyboard-sync-%d", job.ID, i+1)),
+			EventID:      valueOrDefault(w.cfg.NewID(), fmt.Sprintf("%s-storyboard-sync-%d", job.ID, index+1)),
 			SessionID:    job.SessionID,
 			StoryboardID: job.StoryboardID,
 			BaseVersion:  board.Version,
@@ -239,14 +262,18 @@ func (w *Worker) syncStoryboardAssets(ctx context.Context, job GenerationJob) er
 			ToolCallID:   job.ToolCallID,
 			Ops:          ops,
 		}
-		patched, event, err := w.cfg.Storyboards.ApplyPatch(ctx, req)
+		_, event, err := w.cfg.Storyboards.ApplyPatch(ctx, req)
 		if err != nil {
+			if errors.Is(err, storyboard.ErrVersionConflict) {
+				lastErr = err
+				continue
+			}
 			return err
 		}
 		w.publishStoryboardPatch(ctx, event, req)
-		board = patched
+		return nil
 	}
-	return nil
+	return lastErr
 }
 
 func (w *Worker) publishStoryboardPatch(ctx context.Context, event storyboard.EventRecord, req storyboard.PatchRequest) {

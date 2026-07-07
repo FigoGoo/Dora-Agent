@@ -1,12 +1,18 @@
 package storyboard
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/asset"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/patch"
 )
+
+// ErrAssetAlreadyBound signals that the asset is already bound to the target, so
+// the binding is a no-op. Callers (e.g. the generation worker's conflict-retry
+// loop) treat it as success rather than a failure.
+var ErrAssetAlreadyBound = errors.New("asset already bound to target")
 
 type AssetBindingRequest struct {
 	AssetID    string
@@ -50,7 +56,7 @@ func keyElementBindingOps(board Storyboard, req AssetBindingRequest) ([]patch.JS
 		}
 		for _, existing := range element.AssetIDs {
 			if existing == req.AssetID {
-				return nil, fmt.Errorf("asset is already bound to key element")
+				return nil, ErrAssetAlreadyBound
 			}
 		}
 		if len(element.AssetIDs) == 0 {
@@ -78,6 +84,10 @@ func shotBindingOps(board Storyboard, req AssetBindingRequest) ([]patch.JSONPatc
 		if shot.ShotID != req.TargetID {
 			continue
 		}
+		if (field == "video_asset_id" && shot.VideoAssetID == req.AssetID) ||
+			(field == "keyframe_asset_id" && shot.KeyframeAssetID == req.AssetID) {
+			return nil, ErrAssetAlreadyBound
+		}
 		return appendReadyStatus([]patch.JSONPatchOp{{
 			Op:    "add",
 			Path:  fmt.Sprintf("/shots/%d/%s", i, field),
@@ -91,6 +101,9 @@ func audioLayerBindingOps(board Storyboard, req AssetBindingRequest) ([]patch.JS
 	for i, layer := range board.AudioLayers {
 		if layer.LayerID != req.TargetID {
 			continue
+		}
+		if layer.AssetID == req.AssetID {
+			return nil, ErrAssetAlreadyBound
 		}
 		return appendReadyStatus([]patch.JSONPatchOp{{
 			Op:    "add",

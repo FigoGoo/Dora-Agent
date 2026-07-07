@@ -159,6 +159,65 @@ func TestWorkerRunOncePatchesStoryboardForResultAssets(t *testing.T) {
 	}
 }
 
+func TestWorkerRunOnceRetriesStoryboardBindOnVersionConflict(t *testing.T) {
+	store := &fakeJobStore{
+		jobs: map[string]GenerationJob{
+			"job-1": {
+				ID:             "job-1",
+				SessionID:      "s1",
+				StoryboardID:   "storyboard-1",
+				IdempotencyKey: "idem-1",
+				Provider:       ProviderImage2,
+				TargetType:     TargetKeyElement,
+				TargetID:       "suji",
+				Status:         StatusQueued,
+				StatusVersion:  1,
+			},
+		},
+	}
+	storyboards := &fakeStoryboardSyncStore{
+		board: storyboard.Storyboard{
+			ID:        "storyboard-1",
+			SessionID: "s1",
+			Version:   7,
+			KeyElements: []storyboard.KeyElement{
+				{Key: "suji", Name: "苏寂"},
+			},
+		},
+		conflictsBeforeSuccess: 3,
+	}
+	worker := NewWorker(WorkerConfig{
+		Store: store,
+		Queue: &fakeJobQueue{payload: QueuePayload{JobID: "job-1"}},
+		Assets: &fakeAssetLookup{
+			records: map[string]asset.Asset{"asset-1": {ID: "asset-1", SessionID: "s1", Kind: asset.KindImage}},
+		},
+		Storyboards: storyboards,
+		NewID:       sequentialWorkerIDs("patch-event-1"),
+		Handlers: map[string]JobHandler{
+			ProviderImage2: JobHandlerFunc(func(context.Context, GenerationJob) (HandlerResult, error) {
+				return HandlerResult{AssetIDs: []string{"asset-1"}}, nil
+			}),
+		},
+	})
+
+	processed, err := worker.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if !processed {
+		t.Fatal("RunOnce() did not process a job")
+	}
+	// 3 conflicts then success = 4 ApplyPatch attempts.
+	if storyboards.applyCalls != 4 {
+		t.Fatalf("ApplyPatch calls = %d, want 4 (3 conflicts + 1 success)", storyboards.applyCalls)
+	}
+	// The winning patch must have been recomputed against the freshly-read version.
+	if storyboards.seenPatch.BaseVersion != 7 || len(storyboards.seenPatch.Ops) != 2 {
+		t.Fatalf("final patch request = %#v", storyboards.seenPatch)
+	}
+}
+
 func TestWorkerRunOncePublishesStoryboardPatchEvent(t *testing.T) {
 	store := &fakeJobStore{
 		jobs: map[string]GenerationJob{
@@ -485,6 +544,11 @@ func (s *fakeAssetLookup) Get(_ context.Context, assetID string) (asset.Asset, e
 type fakeStoryboardSyncStore struct {
 	board     storyboard.Storyboard
 	seenPatch storyboard.PatchRequest
+	// conflictsBeforeSuccess makes the first N ApplyPatch calls fail with a version
+	// conflict, simulating concurrent workers racing on the same storyboard's
+	// optimistic lock. applyCalls records how many ApplyPatch calls were made.
+	conflictsBeforeSuccess int
+	applyCalls             int
 }
 
 func (s *fakeStoryboardSyncStore) Get(_ context.Context, storyboardID string) (storyboard.Storyboard, error) {
@@ -495,6 +559,10 @@ func (s *fakeStoryboardSyncStore) Get(_ context.Context, storyboardID string) (s
 }
 
 func (s *fakeStoryboardSyncStore) ApplyPatch(_ context.Context, req storyboard.PatchRequest) (storyboard.Storyboard, storyboard.EventRecord, error) {
+	s.applyCalls++
+	if s.applyCalls <= s.conflictsBeforeSuccess {
+		return storyboard.Storyboard{}, storyboard.EventRecord{}, storyboard.ErrVersionConflict
+	}
 	s.seenPatch = req
 	s.board.Version = req.BaseVersion + 1
 	return s.board, storyboard.EventRecord{NextVersion: s.board.Version}, nil
