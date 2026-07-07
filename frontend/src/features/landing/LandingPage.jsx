@@ -40,6 +40,9 @@ import {
   workspaceMock
 } from './landingContent.js';
 
+// 首页发送时暂存 brief，工作区挂载后自动发出这条首条消息（触发 Skill Router）。
+const PENDING_BRIEF_KEY = 'dora:aigc:pending_brief';
+
 const themeStyle = {
   '--dora-lime': '#cfff24',
   '--dora-green': '#77f165',
@@ -107,7 +110,7 @@ function createMasonryColumns(items, columnCount, cardWidth) {
   return columns.map((column) => column.works);
 }
 
-function PromptComposer({ prompt, onPromptChange, onLogin }) {
+function PromptComposer({ prompt, onPromptChange, onLogin, onStart }) {
   return (
     <section className="prompt-composer" aria-label="快速创作">
       <textarea
@@ -128,7 +131,7 @@ function PromptComposer({ prompt, onPromptChange, onLogin }) {
           </button>
         ))}
       </div>
-      <button className="prompt-composer__submit" type="button" aria-label="开始创作" onClick={() => onLogin('开始创作', prompt)}>
+      <button className="prompt-composer__submit" type="button" aria-label="开始创作" onClick={() => onStart(prompt)}>
         <ArrowUp aria-hidden="true" size={19} />
       </button>
       <div className="prompt-composer__count" aria-hidden="true">
@@ -707,6 +710,37 @@ export function LandingPage() {
     setIsAccountMenuOpen(false);
   }
 
+  // 首页「开始创作」：建一个新会话、把 brief 暂存，打开工作区（带 session_id）后由工作区自动发出首条消息 → 触发 Skill Router 自动选 Skill。
+  async function startCreationInWorkspace(promptValue) {
+    const brief = String(promptValue || '').trim();
+    if (!brief) {
+      // 空想法时维持原有的登录引导行为（不静默吞掉点击）。
+      requestLogin('开始创作', promptValue);
+      return;
+    }
+    try {
+      const response = await fetch('/api/aigc/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 'demo-user', title: brief.slice(0, 40) })
+      });
+      if (!response.ok) {
+        throw new Error('create session failed');
+      }
+      const session = await response.json();
+      try {
+        window.localStorage?.setItem(PENDING_BRIEF_KEY, JSON.stringify({ sessionId: session.id, brief }));
+      } catch {
+        // localStorage 不可用时降级：工作区仍会打开，只是不自动发首条。
+      }
+      window.open(`${WORKSPACE_ROUTE}?session_id=${encodeURIComponent(session.id)}`, '_blank', 'noopener,noreferrer');
+      setPrompt('');
+    } catch {
+      // 建会话失败不阻塞营销页：回退到原登录引导。
+      requestLogin('开始创作', brief, 'workspace');
+    }
+  }
+
   function navigateToPage(page, options = {}) {
     setActivePage(page);
     setIsAccountMenuOpen(false);
@@ -859,6 +893,7 @@ export function LandingPage() {
                     prompt={prompt}
                     onPromptChange={setPrompt}
                     onLogin={requestLogin}
+                    onStart={startCreationInWorkspace}
                   />
                 </div>
                 <HotSkills onUse={(skill) => requestLogin(skill.title, skill.title)} />

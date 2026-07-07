@@ -18,6 +18,8 @@ import {
 import { BrandLogo } from '../../components/brand/BrandLogo.jsx';
 
 const SESSION_STORAGE_KEY = 'dora:aigc:demo_session_id';
+// 首页「开始创作」暂存的首条 brief：{ sessionId, brief }。工作区挂载到该会话后自动发出并清除。
+const PENDING_BRIEF_KEY = 'dora:aigc:pending_brief';
 
 const EVENT_NAMES = [
   'chat.delta',
@@ -350,6 +352,37 @@ export function AigcWorkspacePage() {
       source.close();
     };
   }, [handleA2UIEvent, sessionID]);
+
+  // 首页「开始创作」带过来的首条 brief：会话就绪后自动发出一次（触发未绑会话的 Skill Router），随即清除暂存。
+  const pendingBriefSentRef = useRef(false);
+  useEffect(() => {
+    if (!sessionID || pendingBriefSentRef.current || typeof window === 'undefined') {
+      return;
+    }
+    let brief = '';
+    try {
+      const raw = window.localStorage?.getItem(PENDING_BRIEF_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.sessionId === sessionID && parsed.brief) {
+          brief = String(parsed.brief);
+        }
+      }
+    } catch {
+      brief = '';
+    }
+    if (!brief) {
+      return;
+    }
+    pendingBriefSentRef.current = true;
+    try {
+      window.localStorage?.removeItem(PENDING_BRIEF_KEY);
+    } catch {
+      // 清除失败无碍：ref 已守卫，不会重复发送。
+    }
+    void sendMessage(brief);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionID]);
 
   async function sendMessage(nextContent) {
     const fromComposer = nextContent == null;
