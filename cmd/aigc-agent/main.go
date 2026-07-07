@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/joho/godotenv"
 
 	aigca2ui "github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
 	aigcagent "github.com/FigoGoo/Dora-Agent/internal/aigc/agent"
@@ -31,6 +33,8 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	loadDotEnv()
 
 	cfg := aigcconfig.LoadFromEnv().Normalize()
 	db, err := aigcstorage.OpenAgentPostgres(ctx, cfg)
@@ -99,6 +103,22 @@ func main() {
 			Assets:        assetStore,
 			AssetUploader: assetUploader,
 		})
+	} else {
+		// 无 image2 key → demo 模式：关键元素参考图用固定图片，让 job 状态机走通到 succeeded。
+		generationHandlers[aigcgeneration.ProviderImage2] = aigcgenerationhandlers.NewDemoMediaJobHandler(aigcgenerationhandlers.DemoMediaJobHandlerConfig{
+			Assets:   assetStore,
+			Provider: aigcgeneration.ProviderImage2,
+			Kind:     aigcasset.KindImage,
+			MIMEType: "image/png",
+			URLs: []string{
+				"/works/doraigc-aigc-cultural-tourism.png",
+				"/works/doraigc-aigc-product-hero.png",
+				"/works/doraigc-aigc-ecommerce-ad.png",
+				"/works/doraigc-aigc-mv-shotboard.png",
+				"/works/mv-city-generated.png",
+				"/works/product-band-generated.png",
+			},
+		})
 	}
 	if cfg.Seedance.APIKey != "" {
 		generationHandlers[aigcgeneration.ProviderSeedance] = aigcgenerationhandlers.NewSeedanceJobHandler(aigcgenerationhandlers.SeedanceJobHandlerConfig{
@@ -106,8 +126,24 @@ func main() {
 			Assets:        assetStore,
 			AssetUploader: assetUploader,
 		})
+	} else {
+		// 无 seedance key → demo 模式：镜头视频用固定 mp4。
+		generationHandlers[aigcgeneration.ProviderSeedance] = aigcgenerationhandlers.NewDemoMediaJobHandler(aigcgenerationhandlers.DemoMediaJobHandlerConfig{
+			Assets:   assetStore,
+			Provider: aigcgeneration.ProviderSeedance,
+			Kind:     aigcasset.KindVideo,
+			MIMEType: "video/mp4",
+			URLs:     []string{"/demo/demo-shot.mp4"},
+		})
 	}
-	generationHandlers[aigcgeneration.ProviderAudio] = aigcgenerationhandlers.DemoAudioJobHandler{}
+	// 旁白/音乐：demo 固定音频（旁白 + BGM 两条），让音轨也绑上真资产。
+	generationHandlers[aigcgeneration.ProviderAudio] = aigcgenerationhandlers.NewDemoMediaJobHandler(aigcgenerationhandlers.DemoMediaJobHandlerConfig{
+		Assets:   assetStore,
+		Provider: aigcgeneration.ProviderAudio,
+		Kind:     aigcasset.KindAudio,
+		MIMEType: "audio/mpeg",
+		URLs:     []string{"/demo/demo-narration.mp3", "/demo/demo-music.mp3"},
+	})
 	eventBroker := aigca2ui.NewMemoryBroker(64)
 	mediaCheckpoints := aigcstorage.NewRedisCheckpointStore(runtimeRedis, "dora:aigc:media_graph_checkpoint:")
 	runnerCheckpoints := aigcstorage.NewRedisCheckpointStore(runtimeRedis, "dora:aigc:runner_checkpoint:")
@@ -206,5 +242,17 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown aigc agent server", "error", err)
 		os.Exit(1)
+	}
+}
+
+// loadDotEnv loads .env.local/.env into the process environment without
+// overriding variables already set by the caller, then maps the legacy
+// DEEPSEEK_API_KEY name onto DORA_DEEPSEEK_API_KEY when the latter is unset.
+func loadDotEnv() {
+	_ = godotenv.Load(".env.local", ".env")
+	if strings.TrimSpace(os.Getenv(aigcconfig.EnvDeepSeekAPIKey)) == "" {
+		if v := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY")); v != "" {
+			_ = os.Setenv(aigcconfig.EnvDeepSeekAPIKey, v)
+		}
 	}
 }
