@@ -70,6 +70,34 @@ func TestGetSessionSpecNotFound(t *testing.T) {
 	}
 }
 
+func TestGetSessionSpecStoreNotConfigured(t *testing.T) {
+	store := newFakeSessionStore()
+	store.sessions["s1"] = aigcsession.SessionRecord{ID: "s1"}
+	router := docRouter(store, &fakeSkillStore{records: map[string]aigcskill.SkillRecord{}}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/aigc/sessions/s1/spec", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, 期望 500", rec.Code)
+	}
+}
+
+func TestGetSessionSpecSessionNotFound(t *testing.T) {
+	store := newFakeSessionStore() // s1 不存在
+	specs := &fakeSpecReader{spec: aigcspec.FinalVideoSpec{SessionID: "s1", Markdown: "# spec"}}
+	router := docRouter(store, &fakeSkillStore{records: map[string]aigcskill.SkillRecord{}}, specs)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/aigc/sessions/s1/spec", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, 期望 404", rec.Code)
+	}
+}
+
 func TestGetSessionSkillBound(t *testing.T) {
 	store := newFakeSessionStore()
 	store.sessions["s1"] = aigcsession.SessionRecord{ID: "s1", SkillID: "sk_travel"}
@@ -91,7 +119,9 @@ func TestGetSessionSkillBound(t *testing.T) {
 		Name    string `json:"name"`
 		Content string `json:"content"`
 	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if !got.Bound || got.ID != "sk_travel" || got.Content == "" {
 		t.Fatalf("got = %+v", got)
 	}
@@ -112,7 +142,9 @@ func TestGetSessionSkillUnbound(t *testing.T) {
 	var got struct {
 		Bound bool `json:"bound"`
 	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if got.Bound {
 		t.Fatalf("未绑应 bound=false")
 	}
