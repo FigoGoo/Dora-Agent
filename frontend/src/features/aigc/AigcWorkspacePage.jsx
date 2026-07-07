@@ -74,6 +74,8 @@ export function AigcWorkspacePage() {
   const [editing, setEditing] = useState(null);
   const [autoSkill, setAutoSkill] = useState(null); // {name, reason, fallback}
   const [leftView, setLeftView] = useState('storyboard'); // 'storyboard' | 'docs'
+  const [generatingMedia, setGeneratingMedia] = useState(false);
+  const [mediaNotice, setMediaNotice] = useState('');
   const [docSpec, setDocSpec] = useState(null);
   const [docSkill, setDocSkill] = useState(null);
   const [activeDoc, setActiveDoc] = useState('spec'); // 'spec' | 'skill'
@@ -430,6 +432,32 @@ export function AigcWorkspacePage() {
     }
   }
 
+  async function generateMedia() {
+    if (!sessionID || generatingMedia) {
+      return;
+    }
+    setGeneratingMedia(true);
+    setError('');
+    setMediaNotice('');
+    try {
+      const result = await requestJSON(`/api/aigc/sessions/${sessionID}/media/generate`, { method: 'POST' });
+      const dispatched = result?.dispatched ?? 0;
+      const reused = result?.reused ?? 0;
+      const skipped = result?.skipped ?? 0;
+      setMediaNotice(
+        dispatched === 0 && reused === 0
+          ? `所有目标已生成，跳过 ${skipped} 个。`
+          : `已派发 ${dispatched} 个生成任务（复用 ${reused}，跳过已生成 ${skipped}）。资产将陆续绑上故事板。`
+      );
+      // 结果通过 SSE 实时回流；稍后再拉一次兜底。
+      await refreshSessionData(sessionID);
+    } catch (err) {
+      setError(err.message || '生成媒体失败');
+    } finally {
+      setGeneratingMedia(false);
+    }
+  }
+
   async function resumeInterrupt(action) {
     if (!interrupt || !sessionID || busy) {
       return;
@@ -579,8 +607,33 @@ export function AigcWorkspacePage() {
               <Clapperboard aria-hidden="true" size={17} />
               <strong>故事板</strong>
             </div>
-            <span>{statusLabel(storyboard?.status) || '未生成'}</span>
+            <div className="aigc-pane-header-right">
+              <span>{statusLabel(storyboard?.status) || '未生成'}</span>
+              {leftView === 'storyboard' && storyboard ? (
+                <button
+                  type="button"
+                  className="aigc-generate-media-button"
+                  onClick={() => void generateMedia()}
+                  disabled={generatingMedia}
+                  title="为尚未生成的关键元素/镜头/音轨直接派发媒体生成任务"
+                >
+                  {generatingMedia ? (
+                    <LoaderCircle aria-hidden="true" size={15} />
+                  ) : (
+                    <Film aria-hidden="true" size={15} />
+                  )}
+                  <span>{generatingMedia ? '生成中…' : '一键生成媒体'}</span>
+                </button>
+              ) : null}
+            </div>
           </div>
+
+          {mediaNotice ? (
+            <div className="aigc-media-notice" role="status">
+              <Sparkles aria-hidden="true" size={14} />
+              <span>{mediaNotice}</span>
+            </div>
+          ) : null}
 
           <div className="aigc-left-tabs" role="tablist">
             <button

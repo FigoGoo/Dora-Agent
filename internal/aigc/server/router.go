@@ -72,6 +72,14 @@ type AssetStore interface {
 	ListBySession(ctx context.Context, sessionID string) ([]asset.Asset, error)
 }
 
+// MediaDispatcher dispatches a generation job onto the async pipeline. Satisfied
+// by *generation.Dispatcher. Used by the "generate media" endpoint to trigger
+// media jobs directly, without depending on the model to call the media_generator
+// tool. Dispatch is idempotent by IdempotencyKey (returns created=false on reuse).
+type MediaDispatcher interface {
+	Dispatch(ctx context.Context, job generation.GenerationJob) (generation.GenerationJob, bool, error)
+}
+
 type GenerationJobStore interface {
 	ListBySession(ctx context.Context, sessionID string) ([]generation.GenerationJob, error)
 }
@@ -101,20 +109,21 @@ type AgentEvent struct {
 }
 
 type Config struct {
-	Store          SessionStore
-	Skills         SkillStore
-	Storyboards    StoryboardStore
-	Assets         AssetStore
-	GenerationJobs GenerationJobStore
-	AssetUploader  AssetUploader
-	Events         a2ui.EventSubscriber
-	Checkpoints    CheckpointStore
-	Invoker        AgentInvoker
-	MediaGraph     MediaGraphResumer
-	SessionValues  func(session.SessionRecord) map[string]any
-	MessageWindow  session.MessageWindow
-	NewID          func() string
-	Now            func() time.Time
+	Store           SessionStore
+	Skills          SkillStore
+	Storyboards     StoryboardStore
+	Assets          AssetStore
+	GenerationJobs  GenerationJobStore
+	MediaDispatcher MediaDispatcher
+	AssetUploader   AssetUploader
+	Events          a2ui.EventSubscriber
+	Checkpoints     CheckpointStore
+	Invoker         AgentInvoker
+	MediaGraph      MediaGraphResumer
+	SessionValues   func(session.SessionRecord) map[string]any
+	MessageWindow   session.MessageWindow
+	NewID           func() string
+	Now             func() time.Time
 
 	// Skill Router：未手动绑 Skill 时自动选一个。均可为 nil（则不启用 Router）。
 	SkillSelector  skill.SkillSelector
@@ -157,6 +166,7 @@ func NewRouter(cfg Config) *gin.Engine {
 	router.GET("/api/aigc/sessions/:session_id/skill", cfg.getSessionSkill)
 	router.PATCH("/api/aigc/sessions/:session_id/storyboards/:storyboard_id", cfg.patchStoryboard)
 	router.POST("/api/aigc/sessions/:session_id/storyboards/:storyboard_id/assets/:asset_id/bind", cfg.bindAssetToStoryboard)
+	router.POST("/api/aigc/sessions/:session_id/media/generate", cfg.generateSessionMedia)
 	router.POST("/api/aigc/sessions/:session_id/media-graph/resume", cfg.resumeMediaGraph)
 	router.POST("/api/aigc/sessions/:session_id/messages/stream", cfg.streamMessage)
 	router.POST("/api/aigc/sessions/:session_id/messages/resume/stream", cfg.resumeAgent)
