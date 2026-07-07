@@ -30,6 +30,7 @@ const EVENT_NAMES = [
   'storyboard.snapshot',
   'storyboard.patch',
   'job.status',
+  'skill.selected',
   'error'
 ];
 
@@ -69,6 +70,7 @@ export function AigcWorkspacePage() {
   const [a2uiData, setA2UIData] = useState({});
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [autoSkill, setAutoSkill] = useState(null); // {name, reason, fallback}
   const skillInputRef = useRef(null);
   const streamingAssistantID = useRef('');
 
@@ -222,6 +224,14 @@ export function AigcWorkspacePage() {
           if (protocolPayload.status === 'succeeded' && protocolPayload.result_asset_ids?.length) {
             void refreshAssets(protocolPayload.session_id || sessionID);
           }
+          return true;
+        }
+        if (protocolName === 'skill.selected') {
+          setAutoSkill({
+            name: protocolPayload.skill_name || protocolPayload.skill_id || '',
+            reason: protocolPayload.reason || '',
+            fallback: Boolean(protocolPayload.fallback)
+          });
           return true;
         }
         if (protocolName === 'a2ui.data_model_update') {
@@ -642,6 +652,13 @@ export function AigcWorkspacePage() {
           </div>
 
           <div className="aigc-message-list">
+            {autoSkill && (
+              <div className="aigc-auto-skill-notice" role="status">
+                🧭 已为你自动选择 Skill：<strong>{autoSkill.name}</strong>
+                {autoSkill.reason ? `——${autoSkill.reason}` : ''}
+                {autoSkill.fallback ? '（回落默认）' : ''}
+              </div>
+            )}
             {messages.map((message) => (
               <article className={`aigc-message aigc-message--${message.role}`} key={message.id}>
                 <div className="aigc-message__avatar">
