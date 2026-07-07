@@ -1710,9 +1710,13 @@ type fakeAgentInvoker struct {
 	seenMessages      []*schema.Message
 	seenSessionValues map[string]any
 	seenResume        AgentResumeRequest
+	invokeCalls       int
+	lastInvoke        AgentInvokeRequest
 }
 
 func (i *fakeAgentInvoker) Invoke(_ context.Context, req AgentInvokeRequest) (<-chan AgentEvent, error) {
+	i.invokeCalls++
+	i.lastInvoke = req
 	i.seenMessages = append([]*schema.Message(nil), req.Messages...)
 	i.seenSessionValues = req.SessionValues
 	ch := make(chan AgentEvent, len(i.events))
