@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -114,6 +115,11 @@ type Config struct {
 	MessageWindow  session.MessageWindow
 	NewID          func() string
 	Now            func() time.Time
+
+	// Skill Router：未手动绑 Skill 时自动选一个。均可为 nil（则不启用 Router）。
+	SkillSelector  skill.SkillSelector
+	DefaultSkillID string
+	Publisher      a2ui.EventPublisher
 }
 
 func NewRouter(cfg Config) *gin.Engine {
@@ -1023,6 +1029,21 @@ func (cfg Config) streamMessage(c *gin.Context) {
 	if len(messages) == 0 || messages[len(messages)-1].Content != userRecord.Content {
 		messages = append(messages, schema.UserMessage(userRecord.Content))
 	}
+
+	if sessionRecord.SkillID == "" && cfg.Skills != nil && cfg.SkillSelector != nil {
+		options := cfg.listEnabledSkillOptions(c.Request.Context())
+		if len(options) > 0 {
+			sel := cfg.resolveSkillSelection(c.Request.Context(), content, options)
+			sessionRecord.SkillID = sel.SkillID
+			sessionRecord.UpdatedAt = cfg.Now()
+			if err := cfg.Store.SaveSession(c.Request.Context(), sessionRecord); err != nil {
+				// 尽力而为，不中断本轮
+				slog.Error("skill router: save session binding", "session_id", sessionID, "skill_id", sessionRecord.SkillID, "error", err)
+			}
+			cfg.emitSkillSelected(c.Request.Context(), sessionID, runID, sel, options)
+		}
+	}
+
 	invokeReq := AgentInvokeRequest{
 		Messages:     messages,
 		CheckpointID: sessionID,
