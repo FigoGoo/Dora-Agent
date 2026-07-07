@@ -18,6 +18,7 @@ const (
 	EventStoryboardPatch    = "storyboard.patch"
 	EventToolProgress       = "tool.progress"
 	EventJobStatus          = "job.status"
+	EventSkillSelected      = "skill.selected"
 	EventError              = "error"
 )
 
@@ -50,6 +51,14 @@ type InterruptRequestPayload struct {
 	Title             string         `json:"title,omitempty"`
 	Message           string         `json:"message,omitempty"`
 	Actions           []ActionSchema `json:"actions,omitempty"`
+}
+
+// SkillSelectedPayload 随 skill.selected 事件发给前端，表示 Router 在用户未手动选 Skill 时自动选中了一个。
+type SkillSelectedPayload struct {
+	SkillID   string `json:"skill_id"`
+	SkillName string `json:"skill_name"`
+	Reason    string `json:"reason"`
+	Fallback  bool   `json:"fallback,omitempty"`
 }
 
 type ActionSchema struct {
