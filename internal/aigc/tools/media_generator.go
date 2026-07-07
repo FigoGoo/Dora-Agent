@@ -96,7 +96,7 @@ func (t MediaGeneratorTool) InvokableRun(ctx context.Context, argumentsInJSON st
 		return "", err
 	}
 	result, err := generator.Run(ctx, mediagraph.MediaGeneratorInput{
-		SessionID:         invocation.SessionID,
+		SessionID:         firstNonEmpty(invocation.SessionID, sessionIDFromContext(ctx)),
 		StoryboardID:      invocation.Payload.StoryboardID,
 		SpecVersion:       invocation.ExpectedSpecVersion,
 		StoryboardVersion: invocation.ExpectedStoryboardVersion,

@@ -144,7 +144,7 @@ func (t WritePromptTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	if err != nil {
 		return "", err
 	}
-	sessionID := strings.TrimSpace(firstNonEmpty(invocation.SessionID, invocation.Payload.SessionID))
+	sessionID := strings.TrimSpace(firstNonEmpty(invocation.SessionID, invocation.Payload.SessionID, sessionIDFromContext(ctx)))
 	if sessionID == "" {
 		return "", fmt.Errorf("session_id is required")
 	}

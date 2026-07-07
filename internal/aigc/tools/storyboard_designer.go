@@ -91,7 +91,7 @@ func (t StoryboardDesignerTool) InvokableRun(ctx context.Context, argumentsInJSO
 		return "", err
 	}
 	payload := invocation.Payload
-	sessionID := strings.TrimSpace(firstNonEmpty(invocation.SessionID, payload.SessionID))
+	sessionID := strings.TrimSpace(firstNonEmpty(invocation.SessionID, payload.SessionID, sessionIDFromContext(ctx)))
 	if sessionID == "" {
 		return "", fmt.Errorf("session_id is required")
 	}
