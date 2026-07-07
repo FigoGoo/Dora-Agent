@@ -180,6 +180,7 @@ func main() {
 			SkillSelector:  aigcskill.NewLLMSkillSelector(selectorModel),
 			DefaultSkillID: "",
 			Publisher:      eventBroker,
+			Specs:          specStore,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
