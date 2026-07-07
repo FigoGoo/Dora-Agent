@@ -120,6 +120,8 @@ type Config struct {
 	SkillSelector  skill.SkillSelector
 	DefaultSkillID string
 	Publisher      a2ui.EventPublisher
+
+	Specs FinalVideoSpecReader
 }
 
 func NewRouter(cfg Config) *gin.Engine {
@@ -151,6 +153,8 @@ func NewRouter(cfg Config) *gin.Engine {
 	router.GET("/api/aigc/sessions/:session_id/jobs", cfg.listSessionGenerationJobs)
 	router.GET("/api/aigc/sessions/:session_id/events/stream", cfg.streamSessionEvents)
 	router.GET("/api/aigc/sessions/:session_id/storyboard", cfg.getSessionStoryboard)
+	router.GET("/api/aigc/sessions/:session_id/spec", cfg.getSessionSpec)
+	router.GET("/api/aigc/sessions/:session_id/skill", cfg.getSessionSkill)
 	router.PATCH("/api/aigc/sessions/:session_id/storyboards/:storyboard_id", cfg.patchStoryboard)
 	router.POST("/api/aigc/sessions/:session_id/storyboards/:storyboard_id/assets/:asset_id/bind", cfg.bindAssetToStoryboard)
 	router.POST("/api/aigc/sessions/:session_id/media-graph/resume", cfg.resumeMediaGraph)
