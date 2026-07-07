@@ -470,6 +470,13 @@ func normalizeA2UIEvents(events []aigctools.RenderEventHint) []aigctools.RenderE
 		if !strings.HasPrefix(event.Event, "a2ui.") && event.Event != a2ui.EventStoryboardPatch {
 			continue
 		}
+		// 安全边界：确认卡点(interrupt)只能由真实工具 checkpoint 产生
+		// (media_graph / runner)，绝不接受 agent 在消息里自行发出的 interrupt_request。
+		// 否则 agent 可凭空伪造"确认参考图"卡点并谎称媒体已生成（无真实 job/资产/checkpoint）。
+		// 纵深防御：不依赖系统提示的自觉，服务端强制丢弃。
+		if event.Event == a2ui.EventInterruptRequest {
+			continue
+		}
 		if event.SurfaceID == "" {
 			event.SurfaceID = payloadString(payloadMap(event.Payload), "surface_id")
 		}

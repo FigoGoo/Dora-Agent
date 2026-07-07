@@ -165,7 +165,8 @@ const a2UIProtocolInstruction = `
 面向用户展示和交互必须走 A2UI 协议：
 1. 普通说明可以简短输出；但凡需要用户确认、补充信息、单选、多选、填写文本、查看图片/视频、查看阶段进度，都必须输出纯 JSON，不要包 Markdown，不要解释 JSON。
 2. JSON 顶层格式为 {"a2ui_events":[...]}，每个 event 包含 event、surface_id、data_model_key、payload。
-3. 支持的 event：a2ui.begin_rendering、a2ui.surface_update、a2ui.data_model_update、a2ui.interrupt_request。
+3. 支持的 event：a2ui.begin_rendering、a2ui.surface_update、a2ui.data_model_update。
+   ⚠️ 严禁自行输出 a2ui.interrupt_request 或任何"确认卡点/等待确认"的 interrupt 事件：确认卡点只能由真实工具（如 media_generator）在完成实际工作后返回，不能由你在消息里凭空生成。也不得声称"素材/视频/媒体已生成"，除非对应工具确已返回成功结果。
 4. a2ui.surface_update 的 payload 可使用 components 组件树，组件支持 Text、Column、Row、Card、TextInput、SingleChoice、MultiChoice、ImagePreview、VideoPreview、VerticalSteps。
 5. 组件示例：
 {"a2ui_events":[{"event":"a2ui.surface_update","surface_id":"brief-intake","data_model_key":"brief","payload":{"root":"root","title":"补充产品信息","submit_label":"提交信息","components":[{"id":"root","component":{"Card":{"children":["title","product","style","platform","steps"]}}},{"id":"title","component":{"Text":{"value":"请补充商品宣传短片信息","usageHint":"title"}}},{"id":"product","component":{"TextInput":{"key":"product_name","label":"产品名称/品类","required":true}}},{"id":"style","component":{"SingleChoice":{"key":"visual_style","label":"视觉风格","options":[{"value":"tech","label":"高级科技感"},{"value":"warm","label":"温暖生活感"}]}}},{"id":"platform","component":{"MultiChoice":{"key":"platforms","label":"投放平台","options":[{"value":"douyin","label":"抖音"},{"value":"xiaohongshu","label":"小红书"}]}}},{"id":"steps","component":{"VerticalSteps":{"steps":[{"title":"Agent 分析","status":"running"},{"title":"资产配置","status":"pending"}]}}}]}}]}。
@@ -288,9 +289,14 @@ func newRuntimeRegistry(runtime aigcconfig.Config, mediaCheckpoints compose.Chec
 		}
 	}
 
+	var mediaStoryboards aigctools.MediaGeneratorStoryboardReader
+	if typed, ok := storyboardStore.(aigctools.MediaGeneratorStoryboardReader); ok {
+		mediaStoryboards = typed
+	}
 	if err := registry.Register(aigctools.MediaGeneratorToolKey, aigctools.NewMediaGeneratorTool(aigctools.MediaGeneratorToolConfig{
 		Checkpoints: mediaCheckpoints,
 		Dispatcher:  mediaDispatcher,
+		Storyboards: mediaStoryboards,
 	}), aigctools.ToolMeta{
 		Category:    "media_generator",
 		StageHints:  []string{"key_elements", "shot_assets", "storyboard_assets", "reference_confirm"},
