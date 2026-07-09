@@ -57,7 +57,13 @@ func TestImage2GenerateToolAddsDataURLHeaderAndSendsRequest(t *testing.T) {
 		Endpoint: server.URL,
 	})
 
-	out, err := tool.InvokableRun(context.Background(), `{"prompt":"A cat"}`)
+	out, err := tool.InvokableRun(context.Background(), `{
+		"session_id":"s1",
+		"request_id":"req-1",
+		"idempotency_key":"idem-1",
+		"action":"generate_image",
+		"payload":{"prompt":"A cat"}
+	}`)
 	if err != nil {
 		t.Fatalf("InvokableRun() error = %v", err)
 	}
@@ -82,8 +88,8 @@ func TestImage2GenerateToolAddsDataURLHeaderAndSendsRequest(t *testing.T) {
 	if image.Kind != asset.KindImage || image.Status != "generated_not_persisted" {
 		t.Fatalf("asset business info = %#v", image)
 	}
-	if len(result.Data.RenderEvents) == 0 || result.Data.RenderEvents[0].Event == "" {
-		t.Fatalf("missing render hints: %#v", result.Data.RenderEvents)
+	if strings.Contains(out, "render_events") {
+		t.Fatalf("tool result should not include render events: %s", out)
 	}
 }
 
@@ -99,6 +105,7 @@ func TestImage2GenerateToolAcceptsEnvelope(t *testing.T) {
 		Endpoint: server.URL,
 	})
 	out, err := tool.InvokableRun(context.Background(), `{
+		"session_id":"s1",
 		"request_id":"req-1",
 		"idempotency_key":"idem-1",
 		"action":"generate",
@@ -156,7 +163,13 @@ func TestImage2GenerateToolUploadsAssetWhenConfigured(t *testing.T) {
 		Now:           func() time.Time { return time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC) },
 	})
 
-	out, err := tool.InvokableRun(context.Background(), `{"session_id":"s1","user_id":"u1","target_type":"shot","target_id":"shot-1","prompt":"A cat"}`)
+	out, err := tool.InvokableRun(context.Background(), `{
+		"session_id":"s1",
+		"request_id":"req-1",
+		"idempotency_key":"idem-1",
+		"action":"generate_image",
+		"payload":{"user_id":"u1","target_type":"shot","target_id":"shot-1","prompt":"A cat"}
+	}`)
 	if err != nil {
 		t.Fatalf("InvokableRun() error = %v", err)
 	}
@@ -184,8 +197,8 @@ func TestImage2GenerateToolUploadsAssetWhenConfigured(t *testing.T) {
 	if len(result.Data.StoryboardUpdates) != 1 || result.Data.StoryboardUpdates[0].AssetIDs[0] != "asset-1" {
 		t.Fatalf("storyboard updates = %#v", result.Data.StoryboardUpdates)
 	}
-	if len(result.Data.RenderEvents) == 0 {
-		t.Fatalf("render events are missing")
+	if strings.Contains(out, "render_events") {
+		t.Fatalf("tool result should not include render events: %s", out)
 	}
 	if string(uploader.body) != "\x89PNG\r\n\x1a\n" {
 		t.Fatalf("uploaded body = %q", string(uploader.body))
@@ -232,7 +245,13 @@ func TestImage2GenerateToolDownloadsProviderURLWhenB64Missing(t *testing.T) {
 		NewID:         sequentialToolIDs("asset-1"),
 	})
 
-	out, err := tool.InvokableRun(context.Background(), `{"session_id":"s1","target_type":"shot","target_id":"shot-1","prompt":"A cat"}`)
+	out, err := tool.InvokableRun(context.Background(), `{
+		"session_id":"s1",
+		"request_id":"req-1",
+		"idempotency_key":"idem-1",
+		"action":"generate_image",
+		"payload":{"target_type":"shot","target_id":"shot-1","prompt":"A cat"}
+	}`)
 	if err != nil {
 		t.Fatalf("InvokableRun() error = %v", err)
 	}
@@ -277,7 +296,13 @@ func TestImage2GenerateToolRejectsEmptyProviderImage(t *testing.T) {
 		NewID:         sequentialToolIDs("asset-1"),
 	})
 
-	_, err := tool.InvokableRun(context.Background(), `{"session_id":"s1","prompt":"A cat"}`)
+	_, err := tool.InvokableRun(context.Background(), `{
+		"session_id":"s1",
+		"request_id":"req-1",
+		"idempotency_key":"idem-1",
+		"action":"generate_image",
+		"payload":{"prompt":"A cat"}
+	}`)
 	if err == nil || !strings.Contains(err.Error(), "empty image") {
 		t.Fatalf("error = %v, want empty image error", err)
 	}
@@ -285,8 +310,21 @@ func TestImage2GenerateToolRejectsEmptyProviderImage(t *testing.T) {
 
 func TestImage2GenerateToolRequiresAPIKey(t *testing.T) {
 	tool := NewImage2GenerateTool(Image2ToolConfig{})
-	if _, err := tool.InvokableRun(context.Background(), `{"prompt":"A cat"}`); err == nil {
+	if _, err := tool.InvokableRun(context.Background(), `{
+		"session_id":"s1",
+		"request_id":"req-1",
+		"idempotency_key":"idem-1",
+		"action":"generate_image",
+		"payload":{"prompt":"A cat"}
+	}`); err == nil {
 		t.Fatalf("expected missing api key error")
+	}
+}
+
+func TestImage2GenerateToolRejectsDirectPayload(t *testing.T) {
+	tool := NewImage2GenerateTool(Image2ToolConfig{})
+	if _, err := tool.InvokableRun(context.Background(), `{"prompt":"A cat"}`); err == nil {
+		t.Fatal("expected direct payload to be rejected")
 	}
 }
 

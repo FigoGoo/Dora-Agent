@@ -26,6 +26,7 @@ const (
 	DefaultImage2Size     = "1024x1024"
 )
 
+// Image2ToolConfig 汇总 Image2 图片生成工具的外部服务、存储和时间/ID 依赖。
 type Image2ToolConfig struct {
 	APIKey        string
 	Endpoint      string
@@ -36,18 +37,22 @@ type Image2ToolConfig struct {
 	Now           func() time.Time
 }
 
+// Image2GenerateTool 是 Eino 可调用的图片生成工具，返回素材摘要而不是 UI 事件。
 type Image2GenerateTool struct {
 	cfg Image2ToolConfig
 }
 
+// Image2AssetStore 定义图片生成结果写入素材表所需能力。
 type Image2AssetStore interface {
 	Save(ctx context.Context, record asset.Asset) (asset.Asset, error)
 }
 
+// Image2AssetUploader 定义图片生成结果上传对象存储所需能力。
 type Image2AssetUploader interface {
 	Upload(ctx context.Context, input asset.UploadInput) (asset.UploadResult, error)
 }
 
+// Image2GenerateInput 是 Agent 调用图片生成工具时传入的业务参数。
 type Image2GenerateInput struct {
 	SessionID      string `json:"session_id,omitempty"`
 	UserID         string `json:"user_id,omitempty"`
@@ -60,14 +65,15 @@ type Image2GenerateInput struct {
 	Size           string `json:"size,omitempty"`
 }
 
+// Image2GenerateResult 是图片生成工具返回给 Agent 的紧凑业务结果。
 type Image2GenerateResult struct {
 	Model             string                 `json:"model"`
 	Created           int64                  `json:"created"`
 	Assets            []GeneratedAssetInfo   `json:"assets"`
 	StoryboardUpdates []StoryboardUpdateHint `json:"storyboard_updates,omitempty"`
-	RenderEvents      []RenderEventHint      `json:"render_events,omitempty"`
 }
 
+// Image2Image 是 provider 返回图片在内部流转时使用的中间结构。
 type Image2Image struct {
 	AssetID         string `json:"asset_id,omitempty"`
 	B64JSON         string `json:"-"`
@@ -81,6 +87,7 @@ type Image2Image struct {
 	ObjectKey       string `json:"object_key,omitempty"`
 }
 
+// Image2Usage 描述 Image2 provider 返回的 token 使用量。
 type Image2Usage struct {
 	InputTokens         int                 `json:"input_tokens,omitempty"`
 	OutputTokens        int                 `json:"output_tokens,omitempty"`
@@ -89,6 +96,7 @@ type Image2Usage struct {
 	OutputTokensDetails *Image2UsageDetails `json:"output_tokens_details,omitempty"`
 }
 
+// Image2UsageDetails 描述 Image2 provider 按类型拆分的 token 使用量。
 type Image2UsageDetails struct {
 	TextTokens      int `json:"text_tokens,omitempty"`
 	ImageTokens     int `json:"image_tokens,omitempty"`
@@ -96,6 +104,7 @@ type Image2UsageDetails struct {
 	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 }
 
+// image2APIRequest 是发送给 Image2 provider 的原始请求体。
 type image2APIRequest struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
@@ -103,6 +112,7 @@ type image2APIRequest struct {
 	Size   string `json:"size"`
 }
 
+// image2APIResponse 是 Image2 provider 原始响应的最小解析结构。
 type image2APIResponse struct {
 	Created int64 `json:"created"`
 	Data    []struct {
@@ -113,6 +123,7 @@ type image2APIResponse struct {
 	Usage *Image2Usage `json:"usage,omitempty"`
 }
 
+// NewImage2GenerateTool 创建图片生成工具，并补齐 endpoint、HTTP client、ID 和时间默认值。
 func NewImage2GenerateTool(cfg Image2ToolConfig) Image2GenerateTool {
 	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
 	cfg.Endpoint = strings.TrimSpace(cfg.Endpoint)
@@ -131,15 +142,12 @@ func NewImage2GenerateTool(cfg Image2ToolConfig) Image2GenerateTool {
 	return Image2GenerateTool{cfg: cfg}
 }
 
+// Info 返回 Eino 工具元信息和参数 schema，供 Agent 正确构造调用参数。
 func (Image2GenerateTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: Image2GenerateToolKey,
-		Desc: "Generate image assets with Image2 gpt-image-2. Provider payloads are never returned to the Agent; the result only contains compact asset, storyboard, and render hints.",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"session_id": {
-				Type: schema.String,
-				Desc: "Current AIGC session id. Required when generated images should be persisted as assets.",
-			},
+		Desc: "Generate image assets with Image2 gpt-image-2. Provider payloads are never returned to the Agent; the result only contains compact asset and storyboard hints.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(toolInvocationEnvelopeParams(map[string]*schema.ParameterInfo{
 			"user_id": {
 				Type: schema.String,
 				Desc: "Current user id, if available.",
@@ -171,16 +179,21 @@ func (Image2GenerateTool) Info(context.Context) (*schema.ToolInfo, error) {
 				Desc: "Output image size. Defaults to 1024x1024.",
 				Enum: []string{"1024x1024", "1024x1536", "1536x1024"},
 			},
-		}),
+		})),
 	}, nil
 }
 
+// InvokableRun 执行图片生成，必要时持久化资产，并返回无 UI 协议的工具结果。
 func (t Image2GenerateTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...einotool.Option) (string, error) {
 	invocation, err := decodeImage2Invocation(argumentsInJSON)
 	if err != nil {
 		return "", err
 	}
-	input, err := normalizeImage2Input(invocation.Payload)
+	payload := invocation.Payload
+	if strings.TrimSpace(payload.SessionID) == "" {
+		payload.SessionID = invocation.SessionID
+	}
+	input, err := normalizeImage2Input(payload)
 	if err != nil {
 		return "", err
 	}
@@ -211,7 +224,6 @@ func (t Image2GenerateTool) InvokableRun(ctx context.Context, argumentsInJSON st
 			Created:           apiResp.Created,
 			Assets:            assets,
 			StoryboardUpdates: updates,
-			RenderEvents:      generativeRenderEvents(assets, updates),
 		},
 	}
 
@@ -222,6 +234,7 @@ func (t Image2GenerateTool) InvokableRun(ctx context.Context, argumentsInJSON st
 	return string(out), nil
 }
 
+// generate 调用 Image2 provider，并解析原始 API 响应。
 func (t Image2GenerateTool) generate(ctx context.Context, input Image2GenerateInput) (*image2APIResponse, error) {
 	body, err := json.Marshal(image2APIRequest{
 		Model:  input.Model,
@@ -258,21 +271,14 @@ func (t Image2GenerateTool) generate(ctx context.Context, input Image2GenerateIn
 	return &apiResp, nil
 }
 
+// decodeImage2Invocation 只接受标准工具 envelope，图片生成参数必须放入 payload。
 func decodeImage2Invocation(argumentsInJSON string) (ToolInvocationEnvelope[Image2GenerateInput], error) {
-	var enveloped ToolInvocationEnvelope[Image2GenerateInput]
-	if err := json.Unmarshal([]byte(argumentsInJSON), &enveloped); err == nil && enveloped.Payload.Prompt != "" {
-		return enveloped, nil
-	}
-
-	var direct Image2GenerateInput
-	if err := json.Unmarshal([]byte(argumentsInJSON), &direct); err != nil {
-		return ToolInvocationEnvelope[Image2GenerateInput]{}, fmt.Errorf("decode image2 input: %w", err)
-	}
-	return ToolInvocationEnvelope[Image2GenerateInput]{
-		Payload: direct,
-	}, nil
+	return decodeToolInvocationEnvelope(Image2GenerateToolKey, argumentsInJSON, func(payload Image2GenerateInput) bool {
+		return strings.TrimSpace(payload.Prompt) != ""
+	})
 }
 
+// normalizeImage2Input 清理图片生成输入并补齐模型、数量和尺寸默认值。
 func normalizeImage2Input(input Image2GenerateInput) (Image2GenerateInput, error) {
 	input.SessionID = strings.TrimSpace(input.SessionID)
 	input.UserID = strings.TrimSpace(input.UserID)
@@ -300,10 +306,12 @@ func normalizeImage2Input(input Image2GenerateInput) (Image2GenerateInput, error
 	return input, nil
 }
 
+// shouldPersistAssets 判断本次生成结果是否具备入库和上传条件。
 func (t Image2GenerateTool) shouldPersistAssets(input Image2GenerateInput) bool {
 	return t.cfg.Assets != nil && t.cfg.AssetUploader != nil && input.SessionID != ""
 }
 
+// persistImages 下载/解码 provider 图片，上传对象存储并保存素材记录。
 func (t Image2GenerateTool) persistImages(ctx context.Context, input Image2GenerateInput, images []Image2Image) ([]Image2Image, error) {
 	out := make([]Image2Image, 0, len(images))
 	for i, image := range images {
@@ -382,6 +390,7 @@ func (t Image2GenerateTool) persistImages(ctx context.Context, input Image2Gener
 	return out, nil
 }
 
+// imageContent 从 b64_json 或 URL 中读取图片字节和媒体类型。
 func (t Image2GenerateTool) imageContent(ctx context.Context, image Image2Image) ([]byte, string, error) {
 	if strings.TrimSpace(image.B64JSON) != "" {
 		raw, err := decodeImageB64(image.B64JSON)
@@ -416,6 +425,7 @@ func (t Image2GenerateTool) imageContent(ctx context.Context, image Image2Image)
 	return raw, imageMediaType(resp.Header.Get("Content-Type"), image.MediaType), nil
 }
 
+// convertImage2Images 把 provider 响应转换成内部图片列表。
 func convertImage2Images(apiResp *image2APIResponse) []Image2Image {
 	images := make([]Image2Image, 0, len(apiResp.Data))
 	for _, item := range apiResp.Data {
@@ -430,6 +440,7 @@ func convertImage2Images(apiResp *image2APIResponse) []Image2Image {
 	return images
 }
 
+// image2GeneratedAssets 把图片列表转换成 Agent 可消费的素材摘要。
 func image2GeneratedAssets(input Image2GenerateInput, images []Image2Image) []GeneratedAssetInfo {
 	out := make([]GeneratedAssetInfo, 0, len(images))
 	field := generativeAssetField(asset.KindImage, input.TargetType)
@@ -456,6 +467,7 @@ func image2GeneratedAssets(input Image2GenerateInput, images []Image2Image) []Ge
 	return out
 }
 
+// safeGeneratedAssetURL 只在素材已持久化后向 Agent 暴露可用 URL。
 func safeGeneratedAssetURL(image Image2Image) string {
 	if strings.TrimSpace(image.AssetID) == "" {
 		return ""
@@ -463,6 +475,7 @@ func safeGeneratedAssetURL(image Image2Image) string {
 	return strings.TrimSpace(image.URL)
 }
 
+// imageDataURL 把裸 base64 图片转换成 data URL。
 func imageDataURL(mediaType string, b64 string) string {
 	if b64 == "" || strings.HasPrefix(b64, "data:") {
 		return b64
@@ -473,6 +486,7 @@ func imageDataURL(mediaType string, b64 string) string {
 	return "data:" + mediaType + ";base64," + b64
 }
 
+// inferImageMediaType 根据 base64 魔数粗略推断图片媒体类型。
 func inferImageMediaType(b64 string) string {
 	switch {
 	case strings.HasPrefix(b64, "iVBOR"):
@@ -488,6 +502,7 @@ func inferImageMediaType(b64 string) string {
 	}
 }
 
+// decodeImageB64 解码 provider 返回的 b64_json 或 data URL。
 func decodeImageB64(b64 string) ([]byte, error) {
 	b64 = strings.TrimSpace(b64)
 	if comma := strings.Index(b64, ","); comma >= 0 {
@@ -503,6 +518,7 @@ func decodeImageB64(b64 string) ([]byte, error) {
 	return raw, nil
 }
 
+// imageMediaType 在下载响应和 fallback 之间选择合法图片媒体类型。
 func imageMediaType(downloaded string, fallback string) string {
 	mediaType := strings.TrimSpace(downloaded)
 	if semi := strings.Index(mediaType, ";"); semi >= 0 {
@@ -517,6 +533,7 @@ func imageMediaType(downloaded string, fallback string) string {
 	return mediaType
 }
 
+// imageAssetFilename 根据前缀、序号和媒体类型生成图片文件名。
 func imageAssetFilename(prefix string, index int, mediaType string) string {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {
@@ -534,6 +551,7 @@ func imageAssetFilename(prefix string, index int, mediaType string) string {
 	return fmt.Sprintf("%s-%d.%s", prefix, index+1, ext)
 }
 
+// defaultImageAssetID 生成图片素材默认 ID，随机源失败时使用时间戳兜底。
 func defaultImageAssetID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err == nil {

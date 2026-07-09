@@ -30,19 +30,20 @@ func (SessionRecord) TableName() string {
 }
 
 type MessageRecord struct {
-	ID              string    `json:"id" gorm:"primaryKey;size:128"`
-	SessionID       string    `json:"session_id" gorm:"size:128;index:idx_aigc_messages_session_seq,priority:1"`
-	RunID           string    `json:"run_id,omitempty"`
-	Role            string    `json:"role" gorm:"size:32"`
-	Content         string    `json:"content,omitempty"`
-	MessageJSON     []byte    `json:"message_json,omitempty" gorm:"type:jsonb"`
-	ContentBlocks   []byte    `json:"content_blocks,omitempty"`
-	ToolCalls       []byte    `json:"tool_calls,omitempty" gorm:"type:jsonb"`
-	ToolCallID      string    `json:"tool_call_id,omitempty"`
-	ToolName        string    `json:"tool_name,omitempty"`
-	ParentMessageID string    `json:"parent_message_id,omitempty"`
-	Seq             int64     `json:"seq" gorm:"index:idx_aigc_messages_session_seq,priority:2"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID              string         `json:"id" gorm:"primaryKey;size:128"`
+	SessionID       string         `json:"session_id" gorm:"size:128;index:idx_aigc_messages_session_seq,priority:1"`
+	RunID           string         `json:"run_id,omitempty"`
+	Role            string         `json:"role" gorm:"size:32"`
+	Content         string         `json:"content,omitempty"`
+	Metadata        map[string]any `json:"metadata,omitempty" gorm:"type:jsonb;serializer:json"`
+	MessageJSON     []byte         `json:"message_json,omitempty" gorm:"type:jsonb"`
+	ContentBlocks   []byte         `json:"content_blocks,omitempty"`
+	ToolCalls       []byte         `json:"tool_calls,omitempty" gorm:"type:jsonb"`
+	ToolCallID      string         `json:"tool_call_id,omitempty"`
+	ToolName        string         `json:"tool_name,omitempty"`
+	ParentMessageID string         `json:"parent_message_id,omitempty"`
+	Seq             int64          `json:"seq" gorm:"index:idx_aigc_messages_session_seq,priority:2"`
+	CreatedAt       time.Time      `json:"created_at"`
 }
 
 func (MessageRecord) TableName() string {

@@ -29,6 +29,7 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+// SessionStore 定义路由层访问会话和消息历史所需的最小存储接口。
 type SessionStore interface {
 	SaveSession(ctx context.Context, record session.SessionRecord) error
 	GetSession(ctx context.Context, sessionID string) (session.SessionRecord, error)
@@ -36,59 +37,70 @@ type SessionStore interface {
 	ListMessages(ctx context.Context, sessionID string, window session.MessageWindow) ([]session.MessageRecord, error)
 }
 
+// AgentInvoker 封装 Agent 的普通调用和 interrupt resume 调用。
 type AgentInvoker interface {
 	Invoke(ctx context.Context, req AgentInvokeRequest) (<-chan AgentEvent, error)
 	Resume(ctx context.Context, req AgentResumeRequest) (<-chan AgentEvent, error)
 }
 
+// AgentInvokeRequest 是一次新用户消息触发 Agent 运行的输入。
 type AgentInvokeRequest struct {
 	Messages      []*schema.Message
 	CheckpointID  string
 	SessionValues map[string]any
 }
 
+// AgentResumeRequest 是一次用户确认/表单提交后恢复 Agent 的输入。
 type AgentResumeRequest struct {
 	CheckpointID  string
 	Targets       map[string]any
 	SessionValues map[string]any
 }
 
+// SkillStore 定义 Skill 导入、查询和列表读取能力。
 type SkillStore interface {
 	Save(ctx context.Context, record skill.SkillRecord) error
 	Get(ctx context.Context, skillID string) (skill.SkillRecord, error)
 	ListEnabled(ctx context.Context) ([]skill.SkillRecord, error)
 }
 
+// StoryboardStore 定义故事板读取与版本化 patch 写入能力。
 type StoryboardStore interface {
 	Get(ctx context.Context, storyboardID string) (storyboard.Storyboard, error)
 	GetLatestBySession(ctx context.Context, sessionID string) (storyboard.Storyboard, error)
 	ApplyPatch(ctx context.Context, req storyboard.PatchRequest) (storyboard.Storyboard, storyboard.EventRecord, error)
 }
 
+// AssetStore 定义素材记录的写入、读取和会话内列表能力。
 type AssetStore interface {
 	Save(ctx context.Context, record asset.Asset) (asset.Asset, error)
 	Get(ctx context.Context, assetID string) (asset.Asset, error)
 	ListBySession(ctx context.Context, sessionID string) ([]asset.Asset, error)
 }
 
+// GenerationJobStore 定义会话生成任务的列表读取能力。
 type GenerationJobStore interface {
 	ListBySession(ctx context.Context, sessionID string) ([]generation.GenerationJob, error)
 }
 
+// CheckpointStore 定义 interrupt checkpoint 的映射和恢复状态更新能力。
 type CheckpointStore interface {
 	SaveCheckpointMapping(ctx context.Context, record session.CheckpointMapping) (session.CheckpointMapping, error)
 	GetCheckpointMapping(ctx context.Context, sessionID string, interruptID string) (session.CheckpointMapping, error)
 	MarkCheckpointResumed(ctx context.Context, id string) (session.CheckpointMapping, error)
 }
 
+// AssetUploader 定义上传二进制素材到对象存储的能力。
 type AssetUploader interface {
 	Upload(ctx context.Context, input asset.UploadInput) (asset.UploadResult, error)
 }
 
+// MediaGraphResumer 定义媒体生成图在人审确认后继续运行的能力。
 type MediaGraphResumer interface {
 	Resume(ctx context.Context, checkpointID string, interruptID string, decision mediagraph.ReferenceConfirmDecision) (mediagraph.RunResult, error)
 }
 
+// AgentEvent 是后端 Agent runner 推给 HTTP/SSE 层的统一事件。
 type AgentEvent struct {
 	Event         string
 	SurfaceID     string
@@ -99,6 +111,7 @@ type AgentEvent struct {
 	Err           error
 }
 
+// Config 汇总 AIGC HTTP 路由依赖，方便测试替换存储、Agent 和事件 broker。
 type Config struct {
 	Store          SessionStore
 	Skills         SkillStore
@@ -106,7 +119,7 @@ type Config struct {
 	Assets         AssetStore
 	GenerationJobs GenerationJobStore
 	AssetUploader  AssetUploader
-	Events         a2ui.EventSubscriber
+	Events         a2ui.EventBroker
 	Checkpoints    CheckpointStore
 	Invoker        AgentInvoker
 	MediaGraph     MediaGraphResumer
@@ -116,6 +129,7 @@ type Config struct {
 	Now            func() time.Time
 }
 
+// NewRouter 构建 AIGC HTTP API，并为运行时依赖补齐默认 ID、时间和历史窗口。
 func NewRouter(cfg Config) *gin.Engine {
 	if cfg.NewID == nil {
 		cfg.NewID = randomID
@@ -148,18 +162,20 @@ func NewRouter(cfg Config) *gin.Engine {
 	router.PATCH("/api/aigc/sessions/:session_id/storyboards/:storyboard_id", cfg.patchStoryboard)
 	router.POST("/api/aigc/sessions/:session_id/storyboards/:storyboard_id/assets/:asset_id/bind", cfg.bindAssetToStoryboard)
 	router.POST("/api/aigc/sessions/:session_id/media-graph/resume", cfg.resumeMediaGraph)
-	router.POST("/api/aigc/sessions/:session_id/messages/stream", cfg.streamMessage)
-	router.POST("/api/aigc/sessions/:session_id/messages/resume/stream", cfg.resumeAgent)
+	router.POST("/api/aigc/sessions/:session_id/messages", cfg.createMessage)
+	router.POST("/api/aigc/sessions/:session_id/messages/resume", cfg.resumeAgent)
 
 	return router
 }
 
+// createSessionRequest 是创建会话的请求体。
 type createSessionRequest struct {
 	UserID  string `json:"user_id"`
 	SkillID string `json:"skill_id"`
 	Title   string `json:"title"`
 }
 
+// createSkillRequest 是导入 Skill.md 内容的请求体。
 type createSkillRequest struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
@@ -167,19 +183,23 @@ type createSkillRequest struct {
 	Enabled *bool  `json:"enabled"`
 }
 
+// bindSkillToSessionRequest 是给已有会话绑定 Skill 的请求体。
 type bindSkillToSessionRequest struct {
 	SkillID string `json:"skill_id"`
 }
 
+// createSkillResponse 返回保存后的 Skill 记录和解析出的 Skill plan。
 type createSkillResponse struct {
 	Skill skill.SkillRecord `json:"skill"`
 	Plan  skill.SkillPlan   `json:"plan"`
 }
 
+// listSkillsResponse 返回当前可用 Skill 列表。
 type listSkillsResponse struct {
 	Skills []skill.SkillRecord `json:"skills"`
 }
 
+// createSkill 导入 Skill.md，并把解析后的 plan 与原始内容一起保存。
 func (cfg Config) createSkill(c *gin.Context) {
 	if cfg.Skills == nil {
 		writeJSONError(c, http.StatusInternalServerError, "skill store is not configured")
@@ -232,6 +252,7 @@ func (cfg Config) createSkill(c *gin.Context) {
 	})
 }
 
+// listSkills 返回当前启用的 Skill 列表，供前端导入/选择入口使用。
 func (cfg Config) listSkills(c *gin.Context) {
 	if cfg.Skills == nil {
 		writeJSONError(c, http.StatusInternalServerError, "skill store is not configured")
@@ -245,6 +266,7 @@ func (cfg Config) listSkills(c *gin.Context) {
 	c.JSON(http.StatusOK, listSkillsResponse{Skills: records})
 }
 
+// getSkillPlan 读取指定 Skill 并实时解析 plan，便于前端查看可执行流程。
 func (cfg Config) getSkillPlan(c *gin.Context) {
 	if cfg.Skills == nil {
 		writeJSONError(c, http.StatusInternalServerError, "skill store is not configured")
@@ -277,6 +299,7 @@ func (cfg Config) getSkillPlan(c *gin.Context) {
 	c.JSON(http.StatusOK, plan)
 }
 
+// createSession 创建新的 AIGC 创作会话，是“新会话”按钮的后端入口。
 func (cfg Config) createSession(c *gin.Context) {
 	if cfg.Store == nil {
 		writeJSONError(c, http.StatusInternalServerError, "session store is not configured")
@@ -307,6 +330,7 @@ func (cfg Config) createSession(c *gin.Context) {
 	c.JSON(http.StatusCreated, record)
 }
 
+// bindSkillToSession 把用户选择的 Skill 绑定到已有会话，后续 Agent 可读取该上下文。
 func (cfg Config) bindSkillToSession(c *gin.Context) {
 	if cfg.Store == nil {
 		writeJSONError(c, http.StatusInternalServerError, "session store is not configured")
@@ -358,6 +382,7 @@ func (cfg Config) bindSkillToSession(c *gin.Context) {
 	c.JSON(http.StatusOK, record)
 }
 
+// uploadAsset 接收用户上传文件，写入对象存储并保存素材元数据。
 func (cfg Config) uploadAsset(c *gin.Context) {
 	if cfg.Store == nil {
 		writeJSONError(c, http.StatusInternalServerError, "session store is not configured")
@@ -466,6 +491,7 @@ func (cfg Config) uploadAsset(c *gin.Context) {
 	c.JSON(http.StatusCreated, saved)
 }
 
+// getAsset 按素材 ID 返回素材详情，供前端预览和故事板绑定使用。
 func (cfg Config) getAsset(c *gin.Context) {
 	if cfg.Assets == nil {
 		writeJSONError(c, http.StatusInternalServerError, "asset store is not configured")
@@ -488,6 +514,7 @@ func (cfg Config) getAsset(c *gin.Context) {
 	c.JSON(http.StatusOK, record)
 }
 
+// assetMetadataFromForm 从上传表单中拆出业务元数据和对象存储 metadata。
 func assetMetadataFromForm(c *gin.Context) (map[string]any, map[string]string) {
 	keys := []string{"element_key", "shot_id", "audio_layer_id", "binding_target"}
 	metadata := map[string]any{}
@@ -509,10 +536,19 @@ func assetMetadataFromForm(c *gin.Context) (map[string]any, map[string]string) {
 	return metadata, uploadMetadata
 }
 
-type streamMessageRequest struct {
-	Content string `json:"content"`
+// messageRequest 承载用户普通提示词；A2UI 表单提交前端会先渲染成 content。
+type messageRequest struct {
+	Content  string           `json:"content,omitempty"`
+	UISource *messageUISource `json:"ui_source,omitempty"`
 }
 
+// messageUISource 标记普通用户消息来自哪个临时 UI，用于刷新历史时关闭已提交 A2UI 表单。
+type messageUISource struct {
+	Type   string `json:"type,omitempty"`
+	CardID string `json:"card_id,omitempty"`
+}
+
+// patchStoryboardRequest 是前端直接修改故事板时提交的版本化 JSON Patch。
 type patchStoryboardRequest struct {
 	BaseVersion int                     `json:"base_version"`
 	Source      string                  `json:"source"`
@@ -520,6 +556,7 @@ type patchStoryboardRequest struct {
 	Ops         []aigctools.JSONPatchOp `json:"ops"`
 }
 
+// bindAssetRequest 描述把素材挂到故事板目标对象上的请求。
 type bindAssetRequest struct {
 	BaseVersion int    `json:"base_version"`
 	TargetType  string `json:"target_type"`
@@ -529,11 +566,13 @@ type bindAssetRequest struct {
 	ToolCallID  string `json:"tool_call_id,omitempty"`
 }
 
+// patchStoryboardResponse 返回 patch 后的故事板和可广播的 A2UI patch payload。
 type patchStoryboardResponse struct {
 	Storyboard storyboard.Storyboard       `json:"storyboard"`
 	Patch      a2ui.StoryboardPatchPayload `json:"patch"`
 }
 
+// resumeMediaGraphRequest 是媒体生成图等待人审确认后的恢复请求。
 type resumeMediaGraphRequest struct {
 	CheckpointID string `json:"checkpoint_id"`
 	InterruptID  string `json:"interrupt_id"`
@@ -541,6 +580,7 @@ type resumeMediaGraphRequest struct {
 	Note         string `json:"note"`
 }
 
+// resumeAgentRequest 是 Agent interrupt 被用户输入恢复时的请求体。
 type resumeAgentRequest struct {
 	CheckpointID string `json:"checkpoint_id"`
 	InterruptID  string `json:"interrupt_id"`
@@ -548,25 +588,34 @@ type resumeAgentRequest struct {
 	Data         any    `json:"data"`
 }
 
+// resumeMediaGraphResponse 只返回媒体图恢复状态；后续 A2UI 事件统一从 /events/stream 下发。
 type resumeMediaGraphResponse struct {
-	Status  string                          `json:"status"`
-	Event   string                          `json:"event,omitempty"`
-	Payload any                             `json:"payload,omitempty"`
-	Output  mediagraph.MediaGeneratorOutput `json:"output,omitempty"`
+	Status string                          `json:"status"`
+	Output mediagraph.MediaGeneratorOutput `json:"output,omitempty"`
 }
 
+// messageResponse 是提交用户输入后的同步确认；实际 A2UI 输出只从 /events/stream 下发。
+type messageResponse struct {
+	RunID  string `json:"run_id"`
+	Status string `json:"status"`
+}
+
+// listSessionGenerationJobsResponse 返回会话内生成任务列表。
 type listSessionGenerationJobsResponse struct {
 	Jobs []generation.GenerationJob `json:"jobs"`
 }
 
+// listSessionMessagesResponse 返回会话历史消息列表。
 type listSessionMessagesResponse struct {
 	Messages []session.MessageRecord `json:"messages"`
 }
 
+// listSessionAssetsResponse 返回会话内素材列表。
 type listSessionAssetsResponse struct {
 	Assets []asset.Asset `json:"assets"`
 }
 
+// listSessionMessages 返回会话消息窗口，前端用于刷新历史对话。
 func (cfg Config) listSessionMessages(c *gin.Context) {
 	if cfg.Store == nil {
 		writeJSONError(c, http.StatusInternalServerError, "session store is not configured")
@@ -590,6 +639,7 @@ func (cfg Config) listSessionMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, listSessionMessagesResponse{Messages: records})
 }
 
+// listSessionAssets 返回会话素材列表，前端用于构建素材映射和预览。
 func (cfg Config) listSessionAssets(c *gin.Context) {
 	if cfg.Assets == nil {
 		writeJSONError(c, http.StatusInternalServerError, "asset store is not configured")
@@ -613,6 +663,7 @@ func (cfg Config) listSessionAssets(c *gin.Context) {
 	c.JSON(http.StatusOK, listSessionAssetsResponse{Assets: records})
 }
 
+// listSessionGenerationJobs 返回会话后台生成任务，前端用于恢复工具进度状态。
 func (cfg Config) listSessionGenerationJobs(c *gin.Context) {
 	if cfg.GenerationJobs == nil {
 		writeJSONError(c, http.StatusInternalServerError, "generation job store is not configured")
@@ -636,6 +687,7 @@ func (cfg Config) listSessionGenerationJobs(c *gin.Context) {
 	c.JSON(http.StatusOK, listSessionGenerationJobsResponse{Jobs: jobs})
 }
 
+// streamSessionEvents 订阅会话级 broker，把后台事件持续写成 SSE。
 func (cfg Config) streamSessionEvents(c *gin.Context) {
 	if cfg.Events == nil {
 		writeJSONError(c, http.StatusInternalServerError, "event broker is not configured")
@@ -654,6 +706,17 @@ func (cfg Config) streamSessionEvents(c *gin.Context) {
 	events, unsubscribe := cfg.Events.Subscribe(c.Request.Context(), sessionID)
 	defer unsubscribe()
 	prepareSSE(c)
+	if err := writeSSE(c, a2ui.SSEEvent{
+		ID:        cfg.NewID(),
+		SessionID: sessionID,
+		Event:     a2ui.EventReady,
+		Payload: gin.H{
+			"status": "connected",
+		},
+		CreatedAt: cfg.Now(),
+	}); err != nil {
+		return
+	}
 
 	for {
 		select {
@@ -672,6 +735,9 @@ func (cfg Config) streamSessionEvents(c *gin.Context) {
 			if event.CreatedAt.IsZero() {
 				event.CreatedAt = cfg.Now()
 			}
+			if !isClientA2UIEvent(event.Event) {
+				continue
+			}
 			if err := writeSSE(c, event); err != nil {
 				return
 			}
@@ -682,6 +748,7 @@ func (cfg Config) streamSessionEvents(c *gin.Context) {
 	}
 }
 
+// getSessionStoryboard 返回会话最新故事板，未创建时返回 204。
 func (cfg Config) getSessionStoryboard(c *gin.Context) {
 	if cfg.Storyboards == nil {
 		writeJSONError(c, http.StatusInternalServerError, "storyboard store is not configured")
@@ -709,6 +776,7 @@ func (cfg Config) getSessionStoryboard(c *gin.Context) {
 	c.JSON(http.StatusOK, board)
 }
 
+// patchStoryboard 接收前端故事板 JSON Patch，校验版本后写入并返回 patch 事件。
 func (cfg Config) patchStoryboard(c *gin.Context) {
 	if cfg.Storyboards == nil {
 		writeJSONError(c, http.StatusInternalServerError, "storyboard store is not configured")
@@ -783,6 +851,7 @@ func (cfg Config) patchStoryboard(c *gin.Context) {
 	})
 }
 
+// bindAssetToStoryboard 将素材绑定到故事板目标，并以 patch 形式更新故事板。
 func (cfg Config) bindAssetToStoryboard(c *gin.Context) {
 	if cfg.Storyboards == nil {
 		writeJSONError(c, http.StatusInternalServerError, "storyboard store is not configured")
@@ -900,6 +969,7 @@ func (cfg Config) bindAssetToStoryboard(c *gin.Context) {
 	})
 }
 
+// resumeMediaGraph 恢复媒体生成图的人审节点，并处理可能出现的后续 interrupt。
 func (cfg Config) resumeMediaGraph(c *gin.Context) {
 	if cfg.MediaGraph == nil {
 		writeJSONError(c, http.StatusInternalServerError, "media graph is not configured")
@@ -953,16 +1023,28 @@ func (cfg Config) resumeMediaGraph(c *gin.Context) {
 		return
 	}
 	if result.Interrupted && result.Interrupt != nil {
+		if cfg.Events == nil {
+			writeJSONError(c, http.StatusInternalServerError, "event broker is not configured")
+			return
+		}
 		event := result.Interrupt.Event
 		if event == "" {
 			event = a2ui.EventInterruptRequest
 		}
 		payload := payloadMap(result.Interrupt.Payload)
 		payload["scope"] = session.CheckpointScopeMediaGraph
+		if err := cfg.Events.Publish(c.Request.Context(), a2ui.SSEEvent{
+			ID:        cfg.NewID(),
+			SessionID: sessionID,
+			Event:     event,
+			Payload:   payload,
+			CreatedAt: cfg.Now(),
+		}); err != nil {
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
 		c.JSON(http.StatusOK, resumeMediaGraphResponse{
-			Status:  "interrupted",
-			Event:   event,
-			Payload: payload,
+			Status: "interrupted",
 		})
 		return
 	}
@@ -974,13 +1056,18 @@ func (cfg Config) resumeMediaGraph(c *gin.Context) {
 	})
 }
 
-func (cfg Config) streamMessage(c *gin.Context) {
+// createMessage 写入用户消息并触发 Agent；A2UI 输出统一发布到 /events/stream。
+func (cfg Config) createMessage(c *gin.Context) {
 	if cfg.Store == nil {
 		writeJSONError(c, http.StatusInternalServerError, "session store is not configured")
 		return
 	}
 	if cfg.Invoker == nil {
 		writeJSONError(c, http.StatusInternalServerError, "agent invoker is not configured")
+		return
+	}
+	if cfg.Events == nil {
+		writeJSONError(c, http.StatusInternalServerError, "event broker is not configured")
 		return
 	}
 
@@ -995,7 +1082,7 @@ func (cfg Config) streamMessage(c *gin.Context) {
 		return
 	}
 
-	var req streamMessageRequest
+	var req messageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeJSONError(c, http.StatusBadRequest, "invalid message request")
 		return
@@ -1008,7 +1095,7 @@ func (cfg Config) streamMessage(c *gin.Context) {
 
 	runID := cfg.NewID()
 	userMessage := schema.UserMessage(content)
-	userRecord, err := cfg.appendSchemaMessage(c.Request.Context(), sessionID, runID, userMessage)
+	userRecord, err := cfg.appendSchemaMessageWithMetadata(c.Request.Context(), sessionID, runID, userMessage, messageMetadataFromRequest(req))
 	if err != nil {
 		writeJSONError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -1036,9 +1123,14 @@ func (cfg Config) streamMessage(c *gin.Context) {
 		return
 	}
 
-	cfg.streamAgentEvents(c, sessionID, runID, events)
+	if err := cfg.publishAgentEvents(c.Request.Context(), sessionID, runID, events); err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, messageResponse{RunID: runID, Status: "completed"})
 }
 
+// resumeAgent 恢复 Agent interrupt，把用户确认内容交给 Eino runner 继续执行。
 func (cfg Config) resumeAgent(c *gin.Context) {
 	if cfg.Store == nil {
 		writeJSONError(c, http.StatusInternalServerError, "session store is not configured")
@@ -1046,6 +1138,10 @@ func (cfg Config) resumeAgent(c *gin.Context) {
 	}
 	if cfg.Invoker == nil {
 		writeJSONError(c, http.StatusInternalServerError, "agent invoker is not configured")
+		return
+	}
+	if cfg.Events == nil {
+		writeJSONError(c, http.StatusInternalServerError, "event broker is not configured")
 		return
 	}
 
@@ -1081,19 +1177,42 @@ func (cfg Config) resumeAgent(c *gin.Context) {
 		return
 	}
 	if alreadyResumed {
-		prepareSSE(c)
-		_ = writeSSE(c, a2ui.SSEEvent{
+		runID := cfg.NewID()
+		if err := cfg.Events.Publish(c.Request.Context(), a2ui.SSEEvent{
 			ID:        cfg.NewID(),
 			SessionID: sessionID,
-			Event:     a2ui.EventSurfaceUpdate,
-			Payload: gin.H{
-				"checkpoint_id": req.CheckpointID,
-				"interrupt_id":  req.InterruptID,
-				"status":        session.CheckpointStatusResumed,
-				"message":       "确认已处理。",
+			RunID:     runID,
+			Seq:       1,
+			Event:     a2ui.EventAction,
+			Payload: a2ui.ActionEnvelope{
+				Version: a2ui.Version1,
+				Actions: []a2ui.Action{{
+					Type:    a2ui.ActionAppendCard,
+					Surface: "chat",
+					CardID:  "checkpoint-" + req.InterruptID,
+					Card: &a2ui.Card{
+						Type:    a2ui.CardTypeGeneric,
+						Title:   "确认已处理",
+						Message: "确认已处理。",
+						Status:  session.CheckpointStatusResumed,
+						Root:    "root",
+						Components: []a2ui.Component{
+							a2ui.CardContainer("root", []string{"message"}),
+							a2ui.Text("message", "确认已处理。", "", ""),
+						},
+						Data: map[string]any{
+							"checkpoint_id": req.CheckpointID,
+							"interrupt_id":  req.InterruptID,
+						},
+					},
+				}},
 			},
 			CreatedAt: cfg.Now(),
-		})
+		}); err != nil {
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, messageResponse{RunID: runID, Status: "already_resumed"})
 		return
 	}
 
@@ -1122,19 +1241,20 @@ func (cfg Config) resumeAgent(c *gin.Context) {
 		return
 	}
 
-	cfg.streamAgentEvents(c, sessionID, runID, events)
-	cfg.markCheckpointResumed(c.Request.Context(), sessionID, req.InterruptID)
-}
-
-func (cfg Config) streamAgentEvents(c *gin.Context, sessionID string, runID string, events <-chan AgentEvent) {
-	prepareSSE(c)
-	var assistant strings.Builder
-	var assistantMessages []*schema.Message
-	chatSurface := newChatA2UISurface(sessionID)
-	seq := int64(1)
-	if !cfg.writeRenderEvent(c, sessionID, runID, &seq, chatSurface.beginEvent()) {
+	if err := cfg.publishAgentEvents(c.Request.Context(), sessionID, runID, events); err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	cfg.markCheckpointResumed(c.Request.Context(), sessionID, req.InterruptID)
+	c.JSON(http.StatusOK, messageResponse{RunID: runID, Status: "completed"})
+}
+
+// publishAgentEvents 消费 AgentEvent，只发布最新完整 assistant 消息并顺序写入事件 broker。
+func (cfg Config) publishAgentEvents(ctx context.Context, sessionID string, runID string, events <-chan AgentEvent) error {
+	var assistant strings.Builder
+	var latestAssistantEvent *AgentEvent
+	chatSurface := newChatA2UISurface(sessionID)
+	seq := int64(1)
 	for event := range events {
 		if event.Event == "" {
 			event.Event = a2ui.EventChatDelta
@@ -1145,79 +1265,121 @@ func (cfg Config) streamAgentEvents(c *gin.Context, sessionID string, runID stri
 				event.Payload = gin.H{"message": event.Err.Error()}
 			}
 		}
+		// Eino 可能把历史完整消息也交给前端；这里只保留最新一条完整 assistant 消息。
+		if isCompleteAssistantMessageEvent(event) {
+			if event.AssistantText == "" {
+				event.AssistantText = event.Message.Content
+			}
+			latest := event
+			latestAssistantEvent = &latest
+			continue
+		}
 		if event.AssistantText != "" {
 			assistant.WriteString(event.AssistantText)
 		}
-		if !cfg.writeRenderEvents(c, sessionID, runID, &seq, chatSurface.eventsFromAgentEvent(event)) {
-			return
+		if event.Event == a2ui.EventChatDelta || event.Event == a2ui.EventChatMessage {
+			if event.Message != nil {
+				if shouldPersistImmediately(event.Message) {
+					if _, err := cfg.appendSchemaMessage(ctx, sessionID, runID, event.Message); err != nil {
+						return err
+					}
+				}
+			}
+			continue
+		}
+		if err := cfg.publishRenderEvents(ctx, sessionID, runID, &seq, chatSurface.eventsFromAgentEvent(event)); err != nil {
+			return err
 		}
 		if event.Message != nil {
-			if !cfg.writeRenderEvents(c, sessionID, runID, &seq, cfg.renderEventsFromToolMessage(c.Request.Context(), sessionID, event.Message)) {
-				return
-			}
 			if shouldPersistImmediately(event.Message) {
-				if _, err := cfg.appendSchemaMessage(c.Request.Context(), sessionID, runID, event.Message); err != nil {
-					_ = writeSSE(c, a2ui.SSEEvent{
-						ID:        cfg.NewID(),
-						SessionID: sessionID,
-						RunID:     runID,
-						Seq:       seq,
-						Event:     a2ui.EventError,
-						Payload:   gin.H{"message": err.Error()},
-						CreatedAt: cfg.Now(),
-					})
-					return
+				if _, err := cfg.appendSchemaMessage(ctx, sessionID, runID, event.Message); err != nil {
+					return err
 				}
-			} else if event.Message.Role == schema.Assistant && len(event.Message.ToolCalls) == 0 {
-				assistantMessages = append(assistantMessages, event.Message)
 			}
 		}
 		if event.Err != nil {
-			return
+			return event.Err
 		}
+	}
+
+	if latestAssistantEvent != nil {
+		rewritten := assistantEventWithA2UIInstanceCardIDs(*latestAssistantEvent, cfg.NewID)
+		latestAssistantEvent = &rewritten
+		if err := cfg.publishRenderEvents(ctx, sessionID, runID, &seq, chatSurface.eventsFromAgentEvent(*latestAssistantEvent)); err != nil {
+			return err
+		}
+		return cfg.appendAssistantEventMessage(ctx, sessionID, runID, latestAssistantEvent)
 	}
 
 	assistantText := assistant.String()
 	if assistantText == "" {
-		return
+		return nil
 	}
-	assistantText = displayTextWithoutA2UIEnvelope(assistantText)
+	if rewritten, ok := contentWithA2UIInstanceCardIDs(assistantText, cfg.NewID); ok {
+		assistantText = rewritten
+	}
+	if err := cfg.publishRenderEvents(ctx, sessionID, runID, &seq, chatSurface.assistantEvents(AgentEvent{
+		Event:         a2ui.EventChatDelta,
+		AssistantText: assistantText,
+	})); err != nil {
+		return err
+	}
+	assistantText = strings.TrimSpace(displayTextWithoutA2UIEnvelope(assistantText))
 	if assistantText == "" {
-		return
+		return nil
 	}
 	assistantMessage := schema.AssistantMessage(assistantText, nil)
-	if len(assistantMessages) == 1 && assistantMessages[0].Content == assistantText {
-		assistantMessage = assistantMessages[0]
-	}
-	if _, err := cfg.appendSchemaMessage(c.Request.Context(), sessionID, runID, assistantMessage); err != nil {
-		_ = writeSSE(c, a2ui.SSEEvent{
-			ID:        cfg.NewID(),
-			SessionID: sessionID,
-			RunID:     runID,
-			Seq:       seq,
-			Event:     a2ui.EventError,
-			Payload:   gin.H{"message": err.Error()},
-			CreatedAt: cfg.Now(),
-		})
-	}
+	_, err := cfg.appendSchemaMessage(ctx, sessionID, runID, assistantMessage)
+	return err
 }
 
-func (cfg Config) writeRenderEvents(c *gin.Context, sessionID string, runID string, seq *int64, events []aigctools.RenderEventHint) bool {
+// isCompleteAssistantMessageEvent 判断事件是否是可直接渲染/持久化的 assistant 完整消息。
+func isCompleteAssistantMessageEvent(event AgentEvent) bool {
+	return event.Message != nil &&
+		event.Message.Role == schema.Assistant &&
+		len(event.Message.ToolCalls) == 0 &&
+		strings.TrimSpace(event.Message.Content) != ""
+}
+
+// appendAssistantEventMessage 持久化最新完整 assistant 消息；纯 A2UI JSON 作为结构化历史保留。
+func (cfg Config) appendAssistantEventMessage(ctx context.Context, sessionID string, runID string, event *AgentEvent) error {
+	if event == nil || event.Message == nil {
+		return nil
+	}
+	content := strings.TrimSpace(event.AssistantText)
+	if content == "" {
+		content = strings.TrimSpace(event.Message.Content)
+	}
+	content = displayTextWithoutA2UIEnvelope(content)
+	if content == "" {
+		return nil
+	}
+	message := schema.AssistantMessage(content, nil)
+	if event.Message.Content == content {
+		message = event.Message
+	}
+	_, err := cfg.appendSchemaMessage(ctx, sessionID, runID, message)
+	return err
+}
+
+// publishRenderEvents 批量发布内部渲染事件，任一事件失败时停止本轮输出。
+func (cfg Config) publishRenderEvents(ctx context.Context, sessionID string, runID string, seq *int64, events []a2ui.RenderEventHint) error {
 	for _, event := range events {
-		if !cfg.writeRenderEvent(c, sessionID, runID, seq, event) {
-			return false
+		if err := cfg.publishRenderEvent(ctx, sessionID, runID, seq, event); err != nil {
+			return err
 		}
 	}
-	return true
+	return nil
 }
 
-func (cfg Config) writeRenderEvent(c *gin.Context, sessionID string, runID string, seq *int64, event aigctools.RenderEventHint) bool {
+// publishRenderEvent 发布单个 A2UI SSE，并在 interrupt 事件到达时保存 checkpoint 映射。
+func (cfg Config) publishRenderEvent(ctx context.Context, sessionID string, runID string, seq *int64, event a2ui.RenderEventHint) error {
 	if event.Event == "" {
-		return true
+		return nil
 	}
 	if event.Event == a2ui.EventInterruptRequest {
-		if err := cfg.saveInterruptCheckpoint(c.Request.Context(), sessionID, runID, event.Payload); err != nil {
-			_ = writeSSE(c, a2ui.SSEEvent{
+		if err := cfg.saveInterruptCheckpoint(ctx, sessionID, runID, event.Payload); err != nil {
+			_ = cfg.Events.Publish(ctx, a2ui.SSEEvent{
 				ID:        cfg.NewID(),
 				SessionID: sessionID,
 				RunID:     runID,
@@ -1226,10 +1388,10 @@ func (cfg Config) writeRenderEvent(c *gin.Context, sessionID string, runID strin
 				Payload:   gin.H{"message": err.Error()},
 				CreatedAt: cfg.Now(),
 			})
-			return false
+			return err
 		}
 	}
-	if err := writeSSE(c, a2ui.SSEEvent{
+	if err := cfg.Events.Publish(ctx, a2ui.SSEEvent{
 		ID:           cfg.NewID(),
 		SessionID:    sessionID,
 		RunID:        runID,
@@ -1240,12 +1402,13 @@ func (cfg Config) writeRenderEvent(c *gin.Context, sessionID string, runID strin
 		Payload:      event.Payload,
 		CreatedAt:    cfg.Now(),
 	}); err != nil {
-		return false
+		return err
 	}
 	*seq = *seq + 1
-	return true
+	return nil
 }
 
+// resumeContent 把恢复请求整理成可写入用户消息历史的文本内容。
 func resumeContent(req resumeAgentRequest) string {
 	content := strings.TrimSpace(req.Content)
 	if content != "" {
@@ -1261,6 +1424,7 @@ func resumeContent(req resumeAgentRequest) string {
 	return string(raw)
 }
 
+// shouldPersistImmediately 判断工具消息和带 tool call 的 assistant 消息是否需要立即入库。
 func shouldPersistImmediately(message *schema.Message) bool {
 	if message == nil {
 		return false
@@ -1268,163 +1432,7 @@ func shouldPersistImmediately(message *schema.Message) bool {
 	return message.Role == schema.Tool || (message.Role == schema.Assistant && len(message.ToolCalls) > 0)
 }
 
-func renderEventsFromToolMessage(message *schema.Message) []aigctools.RenderEventHint {
-	if message == nil || message.Role != schema.Tool || strings.TrimSpace(message.Content) == "" {
-		return nil
-	}
-	var result struct {
-		Data struct {
-			RenderEvents []aigctools.RenderEventHint `json:"render_events"`
-			Interrupt    *mediagraph.InterruptEvent  `json:"interrupt"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal([]byte(message.Content), &result); err != nil {
-		return nil
-	}
-	events := append([]aigctools.RenderEventHint(nil), result.Data.RenderEvents...)
-	if result.Data.Interrupt != nil && result.Data.Interrupt.Event != "" {
-		payload := map[string]any{}
-		raw, err := json.Marshal(result.Data.Interrupt.Payload)
-		if err == nil {
-			_ = json.Unmarshal(raw, &payload)
-		}
-		payload["scope"] = "media_graph"
-		events = append(events, aigctools.RenderEventHint{
-			Event:        result.Data.Interrupt.Event,
-			SurfaceID:    "storyboard",
-			DataModelKey: "interrupt",
-			Payload:      payload,
-		})
-	}
-	return events
-}
-
-func (cfg Config) renderEventsFromToolMessage(ctx context.Context, sessionID string, message *schema.Message) []aigctools.RenderEventHint {
-	events := renderEventsFromToolMessage(message)
-	if len(events) == 0 || cfg.Storyboards == nil {
-		return events
-	}
-	out := make([]aigctools.RenderEventHint, 0, len(events))
-	for _, event := range events {
-		if materialized, ok := cfg.materializeStoryboardUpdateEvent(ctx, sessionID, message, event); ok {
-			out = append(out, materialized)
-			continue
-		}
-		out = append(out, event)
-	}
-	return out
-}
-
-func (cfg Config) materializeStoryboardUpdateEvent(ctx context.Context, sessionID string, message *schema.Message, event aigctools.RenderEventHint) (aigctools.RenderEventHint, bool) {
-	if event.Event != a2ui.EventStoryboardPatch {
-		return aigctools.RenderEventHint{}, false
-	}
-	values := payloadMap(event.Payload)
-	if _, hasOps := values["ops"]; hasOps {
-		return aigctools.RenderEventHint{}, false
-	}
-	updates, ok := storyboardUpdatesFromPayload(values["updates"])
-	if !ok || len(updates) == 0 {
-		return aigctools.RenderEventHint{}, false
-	}
-
-	board, err := storyboardForUpdateEvent(ctx, cfg.Storyboards, sessionID, values)
-	if err != nil {
-		return aigctools.RenderEventHint{}, false
-	}
-	ops := make([]aigctools.JSONPatchOp, 0, len(updates)*2)
-	for _, update := range updates {
-		for _, assetID := range update.AssetIDs {
-			bindingOps, err := storyboard.AssetBindingOps(board, storyboard.AssetBindingRequest{
-				AssetID:    assetID,
-				AssetKind:  update.AssetKind,
-				TargetType: update.TargetType,
-				TargetID:   update.TargetID,
-				Field:      update.Field,
-			})
-			if err != nil {
-				return aigctools.RenderEventHint{}, false
-			}
-			ops = append(ops, bindingOps...)
-		}
-	}
-	if len(ops) == 0 {
-		return aigctools.RenderEventHint{}, false
-	}
-
-	source := payloadString(values, "source")
-	if source == "" {
-		source = "tool"
-	}
-	patched, patchEvent, err := cfg.Storyboards.ApplyPatch(ctx, storyboard.PatchRequest{
-		EventID:      cfg.NewID(),
-		SessionID:    sessionID,
-		StoryboardID: board.ID,
-		BaseVersion:  board.Version,
-		Source:       source,
-		ToolCallID:   strings.TrimSpace(message.ToolCallID),
-		Ops:          ops,
-	})
-	if err != nil {
-		return aigctools.RenderEventHint{}, false
-	}
-	if patchEvent.StoryboardID == "" {
-		patchEvent.StoryboardID = patched.ID
-	}
-	if patchEvent.BaseVersion == 0 {
-		patchEvent.BaseVersion = board.Version
-	}
-	if patchEvent.NextVersion == 0 {
-		patchEvent.NextVersion = patched.Version
-	}
-	if len(patchEvent.Ops) == 0 {
-		patchEvent.Ops = ops
-	}
-	if patchEvent.Source == "" {
-		patchEvent.Source = source
-	}
-	if patchEvent.ToolCallID == "" {
-		patchEvent.ToolCallID = strings.TrimSpace(message.ToolCallID)
-	}
-
-	return aigctools.RenderEventHint{
-		Event:        a2ui.EventStoryboardPatch,
-		SurfaceID:    "storyboard",
-		DataModelKey: "storyboard",
-		Payload: a2ui.StoryboardPatchPayload{
-			StoryboardID: patchEvent.StoryboardID,
-			BaseVersion:  patchEvent.BaseVersion,
-			NextVersion:  patchEvent.NextVersion,
-			Ops:          append([]aigctools.JSONPatchOp(nil), patchEvent.Ops...),
-			Source:       patchEvent.Source,
-			ToolCallID:   patchEvent.ToolCallID,
-		},
-	}, true
-}
-
-func storyboardForUpdateEvent(ctx context.Context, store StoryboardStore, sessionID string, values map[string]any) (storyboard.Storyboard, error) {
-	storyboardID := payloadString(values, "storyboard_id")
-	if storyboardID != "" {
-		return store.Get(ctx, storyboardID)
-	}
-	return store.GetLatestBySession(ctx, sessionID)
-}
-
-func storyboardUpdatesFromPayload(value any) ([]aigctools.StoryboardUpdateHint, bool) {
-	if value == nil {
-		return nil, false
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, false
-	}
-	var updates []aigctools.StoryboardUpdateHint
-	if err := json.Unmarshal(raw, &updates); err != nil {
-		return nil, false
-	}
-	return updates, len(updates) > 0
-}
-
+// saveInterruptCheckpoint 从 interrupt payload 中记录 checkpoint 映射，避免重复 resume。
 func (cfg Config) saveInterruptCheckpoint(ctx context.Context, sessionID string, runID string, payload any) error {
 	if cfg.Checkpoints == nil {
 		return nil
@@ -1459,6 +1467,7 @@ func (cfg Config) saveInterruptCheckpoint(ctx context.Context, sessionID string,
 	return err
 }
 
+// markCheckpointResumed 将 checkpoint 映射标记为已恢复，重复提交时可直接返回。
 func (cfg Config) markCheckpointResumed(ctx context.Context, sessionID string, interruptID string) {
 	if cfg.Checkpoints == nil {
 		return
@@ -1473,6 +1482,7 @@ func (cfg Config) markCheckpointResumed(ctx context.Context, sessionID string, i
 	_, _ = cfg.Checkpoints.MarkCheckpointResumed(ctx, record.ID)
 }
 
+// checkpointAlreadyResumed 查询 interrupt 是否已经被恢复过。
 func (cfg Config) checkpointAlreadyResumed(ctx context.Context, sessionID string, interruptID string) (bool, error) {
 	if cfg.Checkpoints == nil {
 		return false, nil
@@ -1487,6 +1497,7 @@ func (cfg Config) checkpointAlreadyResumed(ctx context.Context, sessionID string
 	return record.Status == session.CheckpointStatusResumed, nil
 }
 
+// payloadMap 把任意 payload 转成 map，便于从动态协议中读取字段。
 func payloadMap(payload any) map[string]any {
 	if values, ok := payload.(map[string]any); ok {
 		return values
@@ -1502,11 +1513,13 @@ func payloadMap(payload any) map[string]any {
 	return values
 }
 
+// payloadString 从动态字段表中读取并 trim 字符串值。
 func payloadString(values map[string]any, key string) string {
 	value, _ := values[key].(string)
 	return strings.TrimSpace(value)
 }
 
+// payloadInt 从动态字段表中读取 int/int64/float64 数字值。
 func payloadInt(values map[string]any, key string) int {
 	switch value := values[key].(type) {
 	case int:
@@ -1520,19 +1533,46 @@ func payloadInt(values map[string]any, key string) int {
 	}
 }
 
+// checkpointMappingID 为 checkpoint 映射生成可重复计算的稳定主键。
 func checkpointMappingID(sessionID string, scope string, interruptID string) string {
 	parts := []string{"checkpoint", strings.TrimSpace(scope), strings.TrimSpace(sessionID), strings.TrimSpace(interruptID)}
 	return strings.Join(parts, ":")
 }
 
+// messageMetadataFromRequest 提取不进入 Agent 的前端 UI 生命周期元数据。
+func messageMetadataFromRequest(req messageRequest) map[string]any {
+	if req.UISource == nil {
+		return nil
+	}
+	sourceType := strings.TrimSpace(req.UISource.Type)
+	cardID := strings.TrimSpace(req.UISource.CardID)
+	if sourceType != "a2ui_submit" || cardID == "" {
+		return nil
+	}
+	return map[string]any{
+		"ui_source": map[string]any{
+			"type":    sourceType,
+			"card_id": cardID,
+		},
+	}
+}
+
+// appendSchemaMessage 把 Eino 消息转换为会话记录并追加到存储。
 func (cfg Config) appendSchemaMessage(ctx context.Context, sessionID string, runID string, message *schema.Message) (session.MessageRecord, error) {
+	return cfg.appendSchemaMessageWithMetadata(ctx, sessionID, runID, message, nil)
+}
+
+// appendSchemaMessageWithMetadata 写入消息记录附带的 UI 元数据；元数据不会进入 Eino schema.Message。
+func (cfg Config) appendSchemaMessageWithMetadata(ctx context.Context, sessionID string, runID string, message *schema.Message, metadata map[string]any) (session.MessageRecord, error) {
 	record, err := schemaMessageRecord(cfg.NewID(), sessionID, runID, message, cfg.Now())
 	if err != nil {
 		return session.MessageRecord{}, err
 	}
+	record.Metadata = metadata
 	return cfg.Store.AppendMessage(ctx, record)
 }
 
+// schemaMessageRecord 将 schema.Message 序列化成数据库消息记录。
 func schemaMessageRecord(id string, sessionID string, runID string, message *schema.Message, createdAt time.Time) (session.MessageRecord, error) {
 	if message == nil {
 		return session.MessageRecord{}, fmt.Errorf("schema message is required")
@@ -1559,6 +1599,7 @@ func schemaMessageRecord(id string, sessionID string, runID string, message *sch
 	}, nil
 }
 
+// ensureSession 校验会话存在，并在失败时直接写 HTTP 错误响应。
 func (cfg Config) ensureSession(c *gin.Context, sessionID string) bool {
 	if cfg.Store == nil {
 		writeJSONError(c, http.StatusInternalServerError, "session store is not configured")
@@ -1571,6 +1612,7 @@ func (cfg Config) ensureSession(c *gin.Context, sessionID string) bool {
 	return true
 }
 
+// recordsToSchemaMessages 将数据库消息窗口还原成 Eino runner 可消费的 schema.Message。
 func recordsToSchemaMessages(records []session.MessageRecord) []*schema.Message {
 	messages := make([]*schema.Message, 0, len(records))
 	for _, record := range records {
@@ -1607,6 +1649,7 @@ func recordsToSchemaMessages(records []session.MessageRecord) []*schema.Message 
 	return messages
 }
 
+// marshalToolCalls 序列化 assistant tool calls，供消息历史持久化。
 func marshalToolCalls(toolCalls []schema.ToolCall) ([]byte, error) {
 	if len(toolCalls) == 0 {
 		return nil, nil
@@ -1618,6 +1661,7 @@ func marshalToolCalls(toolCalls []schema.ToolCall) ([]byte, error) {
 	return raw, nil
 }
 
+// unmarshalToolCalls 反序列化 assistant tool calls，供恢复历史上下文。
 func unmarshalToolCalls(raw []byte) ([]schema.ToolCall, error) {
 	if len(raw) == 0 {
 		return nil, nil
@@ -1629,6 +1673,7 @@ func unmarshalToolCalls(raw []byte) ([]schema.ToolCall, error) {
 	return toolCalls, nil
 }
 
+// prepareSSE 设置 SSE 响应头并立即返回 200 状态。
 func prepareSSE(c *gin.Context) {
 	header := c.Writer.Header()
 	header.Set("Content-Type", "text/event-stream; charset=utf-8")
@@ -1638,6 +1683,7 @@ func prepareSSE(c *gin.Context) {
 	c.Status(http.StatusOK)
 }
 
+// writeSSE 按 SSE 格式写入已经符合 A2UI 协议的事件。
 func writeSSE(c *gin.Context, event a2ui.SSEEvent) error {
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -1655,10 +1701,22 @@ func writeSSE(c *gin.Context, event a2ui.SSEEvent) error {
 	return nil
 }
 
+// isClientA2UIEvent 限制 HTTP SSE 只输出新 A2UI 协议事件，旧 worker 事件必须在发布前显式转换。
+func isClientA2UIEvent(event string) bool {
+	switch strings.TrimSpace(event) {
+	case a2ui.EventReady, a2ui.EventAction, a2ui.EventInterruptRequest, a2ui.EventError:
+		return true
+	default:
+		return false
+	}
+}
+
+// writeJSONError 以统一结构返回 HTTP JSON 错误。
 func writeJSONError(c *gin.Context, status int, message string) {
 	c.JSON(status, gin.H{"error": message})
 }
 
+// randomID 生成 128-bit 随机 ID，随机源失败时降级为时间戳字符串。
 func randomID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err == nil {

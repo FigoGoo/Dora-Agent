@@ -27,6 +27,50 @@ import (
 	aigctools "github.com/FigoGoo/Dora-Agent/internal/aigc/tools"
 )
 
+func assistantCardEnvelope(t testing.TB, cardID string, text string) string {
+	t.Helper()
+	raw, err := json.Marshal(a2ui.ActionEnvelope{
+		Version: a2ui.Version1,
+		Actions: []a2ui.Action{{
+			Type:    a2ui.ActionAppendCard,
+			Surface: "chat",
+			CardID:  cardID,
+			Card: &a2ui.Card{
+				Root:  "root",
+				Title: "Agent",
+				Components: []a2ui.Component{
+					a2ui.CardContainer("root", []string{"content"}),
+					a2ui.Text("content", text, "", ""),
+				},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal assistant card envelope: %v", err)
+	}
+	return string(raw)
+}
+
+func requirePublishedEvent(t testing.TB, broker *fakeEventSubscriber, eventName string) a2ui.SSEEvent {
+	t.Helper()
+	for _, event := range broker.published {
+		if event.Event == eventName {
+			return event
+		}
+	}
+	t.Fatalf("missing published event %q, events = %#v", eventName, broker.published)
+	return a2ui.SSEEvent{}
+}
+
+func publishedPayloadString(t testing.TB, event a2ui.SSEEvent) string {
+	t.Helper()
+	raw, err := json.Marshal(event.Payload)
+	if err != nil {
+		t.Fatalf("marshal event payload: %v", err)
+	}
+	return string(raw)
+}
+
 func TestCreateSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -341,8 +385,16 @@ func TestStreamSessionEvents(t *testing.T) {
 	events <- a2ui.SSEEvent{
 		ID:        "evt-1",
 		SessionID: "s1",
-		Event:     a2ui.EventJobStatus,
-		Payload:   generation.JobStatusPayload{JobID: "job-1", SessionID: "s1", Status: generation.StatusSucceeded},
+		Event:     a2ui.EventAction,
+		Payload: a2ui.ActionEnvelope{
+			Version: a2ui.Version1,
+			Actions: []a2ui.Action{{
+				Type:    a2ui.ActionUpdateCard,
+				Surface: "tool_runs",
+				Target:  &a2ui.ActionTarget{Surface: "tool_runs", CardID: "tool_run:media_generator"},
+				Payload: map[string]any{"tool_run": map[string]any{"job_id": "job-1"}},
+			}},
+		},
 		CreatedAt: fixedNow(),
 	}
 	subscriber := &fakeEventSubscriber{events: events}
@@ -364,8 +416,81 @@ func TestStreamSessionEvents(t *testing.T) {
 		t.Fatalf("content-type = %q", ct)
 	}
 	out := rec.Body.String()
-	if !strings.Contains(out, "event: job.status") || !strings.Contains(out, "job-1") {
-		t.Fatalf("missing job status event in %q", out)
+	if !strings.Contains(out, "event: a2ui.action") || !strings.Contains(out, `"type":"update_card"`) || !strings.Contains(out, "tool_run") || !strings.Contains(out, "job-1") {
+		t.Fatalf("missing a2ui tool run update in %q", out)
+	}
+	if subscriber.seenSessionID != "s1" || !subscriber.unsubscribed {
+		t.Fatalf("subscriber = %#v", subscriber)
+	}
+}
+
+func TestStreamSessionEventsDropsRawWorkerEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := newFakeSessionStore()
+	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
+	events := make(chan a2ui.SSEEvent, 1)
+	events <- a2ui.SSEEvent{
+		ID:        "evt-legacy",
+		SessionID: "s1",
+		Event:     generation.EventJobStatus,
+		Payload:   generation.JobStatusPayload{JobID: "job-1", SessionID: "s1", Status: generation.StatusSucceeded},
+		CreatedAt: fixedNow(),
+	}
+	close(events)
+	subscriber := &fakeEventSubscriber{events: events}
+	router := NewRouter(Config{
+		Store:   store,
+		Events:  subscriber,
+		Invoker: &fakeAgentInvoker{},
+		NewID:   sequentialIDs("evt-ready-1"),
+		Now:     fixedNow,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/aigc/sessions/s1/events/stream?once=1", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	out := rec.Body.String()
+	if !strings.Contains(out, "event: a2ui.ready") {
+		t.Fatalf("missing ready event in %q", out)
+	}
+	if strings.Contains(out, "event: job.status") || strings.Contains(out, "job-1") || strings.Contains(out, "update_card") {
+		t.Fatalf("raw worker event leaked to SSE: %q", out)
+	}
+}
+
+func TestStreamSessionEventsWritesReadyEventOnSubscribe(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := newFakeSessionStore()
+	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
+	events := make(chan a2ui.SSEEvent)
+	close(events)
+	subscriber := &fakeEventSubscriber{events: events}
+	router := NewRouter(Config{
+		Store:   store,
+		Events:  subscriber,
+		Invoker: &fakeAgentInvoker{},
+		NewID:   sequentialIDs("evt-ready-1"),
+		Now:     fixedNow,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/aigc/sessions/s1/events/stream?once=1", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	out := rec.Body.String()
+	if !strings.Contains(out, "event: a2ui.ready") || !strings.Contains(out, `"session_id":"s1"`) {
+		t.Fatalf("missing ready event in %q", out)
 	}
 	if subscriber.seenSessionID != "s1" || !subscriber.unsubscribed {
 		t.Fatalf("subscriber = %#v", subscriber)
@@ -544,7 +669,7 @@ func TestGetSkillPlan(t *testing.T) {
 	}
 }
 
-func TestStreamMessageInvokesAgentAndPersistsMessages(t *testing.T) {
+func TestCreateMessageInvokesAgentAndPersistsMessages(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	store := newFakeSessionStore()
@@ -552,22 +677,19 @@ func TestStreamMessageInvokesAgentAndPersistsMessages(t *testing.T) {
 	store.messages["s1"] = []session.MessageRecord{
 		{ID: "m0", SessionID: "s1", Role: "assistant", Content: "上一轮", Seq: 1},
 	}
+	assistantText := "好的，开始规划故事板。"
+	assistantEnvelope := assistantCardEnvelope(t, "storyboard-plan", assistantText)
 	invoker := &fakeAgentInvoker{
-		events: []AgentEvent{
-			{
-				Event:         a2ui.EventChatDelta,
-				Payload:       map[string]any{"text": "好的，"},
-				AssistantText: "好的，",
-			},
-			{
-				Event:         a2ui.EventChatDelta,
-				Payload:       map[string]any{"text": "开始规划故事板。"},
-				AssistantText: "开始规划故事板。",
-			},
-		},
+		events: []AgentEvent{{
+			Event:         a2ui.EventChatDelta,
+			Payload:       map[string]any{"text": assistantEnvelope},
+			AssistantText: assistantEnvelope,
+		}},
 	}
+	broker := &fakeEventSubscriber{}
 	router := NewRouter(Config{
 		Store:         store,
+		Events:        broker,
 		Invoker:       invoker,
 		NewID:         sequentialIDs("run-1", "msg-user-1", "evt-1", "evt-2", "msg-assistant-1"),
 		Now:           fixedNow,
@@ -575,7 +697,7 @@ func TestStreamMessageInvokesAgentAndPersistsMessages(t *testing.T) {
 	})
 
 	body := bytes.NewBufferString(`{"content":"帮我做一个武侠短片"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -584,17 +706,21 @@ func TestStreamMessageInvokesAgentAndPersistsMessages(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
 		t.Fatalf("content-type = %q", ct)
 	}
-	out := rec.Body.String()
-	if strings.Contains(out, "event: chat.delta") {
+	action := requirePublishedEvent(t, broker, a2ui.EventAction)
+	out := publishedPayloadString(t, action)
+	if action.RunID != "run-1" || action.Seq != 1 {
+		t.Fatalf("published action envelope = %#v", action)
+	}
+	if strings.Contains(out, "chat.delta") || strings.Contains(out, "a2ui.surface_update") || strings.Contains(out, "a2ui.data_model_update") {
 		t.Fatalf("assistant output should use a2ui protocol, got %q", out)
 	}
-	if !strings.Contains(out, "event: a2ui.surface_update") || !strings.Contains(out, "event: a2ui.data_model_update") {
-		t.Fatalf("missing a2ui text card events in %q", out)
+	if !strings.Contains(out, `"type":"append_card"`) {
+		t.Fatalf("missing a2ui action card event in %q", out)
 	}
-	if !strings.Contains(out, "开始规划故事板") {
+	if !strings.Contains(out, assistantText) {
 		t.Fatalf("missing assistant delta in %q", out)
 	}
 
@@ -605,8 +731,8 @@ func TestStreamMessageInvokesAgentAndPersistsMessages(t *testing.T) {
 	if appended[1].Role != "user" || appended[1].Content != "帮我做一个武侠短片" {
 		t.Fatalf("user message = %#v", appended[1])
 	}
-	if appended[2].Role != "assistant" || appended[2].Content != "好的，开始规划故事板。" {
-		t.Fatalf("assistant message = %#v", appended[2])
+	if appended[2].Role != string(schema.Assistant) || !strings.Contains(appended[2].Content, `"card_id":"storyboard-plan:evt-1"`) {
+		t.Fatalf("assistant a2ui message = %#v", appended[2])
 	}
 
 	if len(invoker.seenMessages) != 2 {
@@ -620,64 +746,13 @@ func TestStreamMessageInvokesAgentAndPersistsMessages(t *testing.T) {
 	}
 }
 
-func TestStreamMessageRendersAssistantMessageThroughA2UIProtocol(t *testing.T) {
+func TestCreateMessageRendersAssistantMessageThroughA2UIProtocol(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	store := newFakeSessionStore()
 	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
 	assistantText := "故事板草案已生成，请确认。"
-	invoker := &fakeAgentInvoker{
-		events: []AgentEvent{{
-			Event:         a2ui.EventChatDelta,
-			Payload:       map[string]any{"text": assistantText},
-			AssistantText: assistantText,
-			Message:       schema.AssistantMessage(assistantText, nil),
-		}},
-	}
-	router := NewRouter(Config{
-		Store:   store,
-		Invoker: invoker,
-		NewID:   sequentialIDs("run-1", "msg-user-1", "evt-surface", "msg-assistant-1"),
-		Now:     fixedNow,
-	})
-
-	body := bytes.NewBufferString(`{"content":"开始吧"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	out := rec.Body.String()
-	if strings.Contains(out, "event: chat.delta") {
-		t.Fatalf("assistant output should be rendered through a2ui protocol, got %q", out)
-	}
-	if !strings.Contains(out, "event: a2ui.begin_rendering") {
-		t.Fatalf("missing a2ui begin event in %q", out)
-	}
-	if !strings.Contains(out, "event: a2ui.surface_update") {
-		t.Fatalf("missing a2ui surface event in %q", out)
-	}
-	if !strings.Contains(out, "event: a2ui.data_model_update") {
-		t.Fatalf("missing a2ui data update event in %q", out)
-	}
-	if !strings.Contains(out, assistantText) {
-		t.Fatalf("missing assistant content in %q", out)
-	}
-	if appended := store.messages["s1"]; len(appended) != 2 || appended[1].Role != "assistant" || appended[1].Content != assistantText {
-		t.Fatalf("persisted messages = %#v", appended)
-	}
-}
-
-func TestStreamMessagePassesExplicitA2UIEnvelopeFromAssistant(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	store := newFakeSessionStore()
-	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
-	assistantEnvelope := `{"a2ui_events":[{"event":"a2ui.surface_update","surface_id":"brief-intake","data_model_key":"brief","payload":{"root":"root","title":"补充产品信息","submit_label":"提交信息","components":[{"id":"root","component":{"Card":{"children":["product","style","platforms","steps"]}}},{"id":"product","component":{"TextInput":{"key":"product_name","label":"产品名称/品类","required":true}}},{"id":"style","component":{"SingleChoice":{"key":"visual_style","label":"视觉风格","options":[{"value":"tech","label":"高级科技感"}]}}},{"id":"platforms","component":{"MultiChoice":{"key":"platforms","label":"投放平台","options":[{"value":"douyin","label":"抖音"}]}}},{"id":"steps","component":{"VerticalSteps":{"steps":[{"title":"Agent 分析","status":"running"}]}}}]}}]}`
+	assistantEnvelope := assistantCardEnvelope(t, "storyboard-review", assistantText)
 	invoker := &fakeAgentInvoker{
 		events: []AgentEvent{{
 			Event:         a2ui.EventChatDelta,
@@ -686,15 +761,17 @@ func TestStreamMessagePassesExplicitA2UIEnvelopeFromAssistant(t *testing.T) {
 			Message:       schema.AssistantMessage(assistantEnvelope, nil),
 		}},
 	}
+	broker := &fakeEventSubscriber{}
 	router := NewRouter(Config{
 		Store:   store,
+		Events:  broker,
 		Invoker: invoker,
-		NewID:   sequentialIDs("run-1", "msg-user-1", "evt-begin", "evt-surface", "msg-assistant-1"),
+		NewID:   sequentialIDs("run-1", "msg-user-1", "evt-surface", "msg-assistant-1"),
 		Now:     fixedNow,
 	})
 
 	body := bytes.NewBufferString(`{"content":"开始吧"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -703,22 +780,91 @@ func TestStreamMessagePassesExplicitA2UIEnvelopeFromAssistant(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	out := rec.Body.String()
-	if strings.Contains(out, "event: chat.delta") {
-		t.Fatalf("explicit a2ui envelope should not be emitted as chat.delta, got %q", out)
+	out := publishedPayloadString(t, requirePublishedEvent(t, broker, a2ui.EventAction))
+	if strings.Contains(out, "chat.delta") || strings.Contains(out, "a2ui.surface_update") || strings.Contains(out, "a2ui.data_model_update") {
+		t.Fatalf("assistant output should be rendered through a2ui protocol, got %q", out)
 	}
-	if !strings.Contains(out, "event: a2ui.surface_update") || !strings.Contains(out, "SingleChoice") || !strings.Contains(out, "VerticalSteps") {
-		t.Fatalf("missing explicit a2ui components in %q", out)
+	if !strings.Contains(out, `"type":"append_card"`) {
+		t.Fatalf("missing a2ui action card in %q", out)
+	}
+	if !strings.Contains(out, assistantText) {
+		t.Fatalf("missing assistant content in %q", out)
+	}
+	appended := store.messages["s1"]
+	if len(appended) != 2 || appended[0].Role != string(schema.User) || appended[1].Role != string(schema.Assistant) {
+		t.Fatalf("persisted messages = %#v", appended)
 	}
 }
 
-func TestStreamMessageExtractsEmbeddedA2UIEnvelopeFromAssistant(t *testing.T) {
+func TestCreateMessagePassesA2UIActionEnvelopeFromAssistant(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	store := newFakeSessionStore()
 	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
-	assistantEnvelope := `{"a2ui_events":[{"event":"a2ui.surface_update","surface_id":"brief-intake","data_model_key":"brief","payload":{"root":"root","title":"补充产品信息","submit_label":"提交信息","components":[{"id":"root","component":{"Card":{"children":["title","product","style","steps"]}}},{"id":"title","component":{"Text":{"value":"请补充商品宣传短片信息","usageHint":"title"}}},{"id":"product","component":{"TextInput":{"key":"product_name","label":"产品名称/品类","required":true}}},{"id":"style","component":{"SingleChoice":{"key":"visual_style","label":"视觉风格","options":[{"value":"tech","label":"高级科技感"}]}}},{"id":"steps","component":{"VerticalSteps":{"steps":[{"title":"Agent 分析","status":"running"}]}}}]}}]}`
-	assistantText := "好的！开始 Stage 1。请先补充资料：" + assistantEnvelope + "请填写以上信息，我收到后进入产品分析阶段。"
+	assistantEnvelope := `{
+		"a2ui_version":"1.0",
+		"actions":[{
+			"type":"append_card",
+			"surface":"chat",
+			"card_id":"brief-card",
+			"card":{
+				"card_type":"info_collection",
+				"title":"补充产品信息",
+				"submit_label":"提交",
+				"root":"root",
+				"components":[
+					{"id":"root","component":{"Card":{"children":["product"]}}},
+					{"id":"product","component":{"TextInput":{"key":"product_name","label":"产品名称/品类","required":true}}}
+				]
+			}
+		}]
+	}`
+	invoker := &fakeAgentInvoker{
+		events: []AgentEvent{{
+			Event:         a2ui.EventChatDelta,
+			Payload:       map[string]any{"text": assistantEnvelope},
+			AssistantText: assistantEnvelope,
+			Message:       schema.AssistantMessage(assistantEnvelope, nil),
+		}},
+	}
+	broker := &fakeEventSubscriber{}
+	router := NewRouter(Config{
+		Store:   store,
+		Events:  broker,
+		Invoker: invoker,
+		NewID:   sequentialIDs("run-1", "msg-user-1", "card-instance-1", "evt-action", "msg-assistant-1"),
+		Now:     fixedNow,
+	})
+
+	body := bytes.NewBufferString(`{"content":"开始吧"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	out := publishedPayloadString(t, requirePublishedEvent(t, broker, a2ui.EventAction))
+	if !strings.Contains(out, `"type":"append_card"`) || !strings.Contains(out, `"card_id":"brief-card:card-instance-1"`) {
+		t.Fatalf("missing a2ui action event in %q", out)
+	}
+	if strings.Contains(out, "a2ui.surface_update") || strings.Contains(out, "a2ui.data_model_update") {
+		t.Fatalf("new action envelope should not be downgraded to legacy a2ui events: %q", out)
+	}
+	appended := store.messages["s1"]
+	if len(appended) != 2 || appended[1].Role != string(schema.Assistant) || !strings.Contains(appended[1].Content, `"card_id":"brief-card:card-instance-1"`) {
+		t.Fatalf("pure a2ui action envelope should be persisted as structured assistant history, messages = %#v", appended)
+	}
+}
+
+func TestCreateMessageDoesNotInferProductBriefFormFromAssistantText(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := newFakeSessionStore()
+	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
+	assistantText := `请补充产品信息：产品名称、核心卖点、目标平台、视觉风格。`
 	invoker := &fakeAgentInvoker{
 		events: []AgentEvent{{
 			Event:         a2ui.EventChatDelta,
@@ -727,23 +873,17 @@ func TestStreamMessageExtractsEmbeddedA2UIEnvelopeFromAssistant(t *testing.T) {
 			Message:       schema.AssistantMessage(assistantText, nil),
 		}},
 	}
+	broker := &fakeEventSubscriber{}
 	router := NewRouter(Config{
 		Store:   store,
+		Events:  broker,
 		Invoker: invoker,
-		NewID: sequentialIDs(
-			"run-1",
-			"msg-user-1",
-			"evt-begin",
-			"evt-text-surface",
-			"evt-text-data",
-			"evt-form-surface",
-			"msg-assistant-1",
-		),
-		Now: fixedNow,
+		NewID:   sequentialIDs("run-1", "msg-user-1", "evt-begin", "evt-action", "msg-assistant-1"),
+		Now:     fixedNow,
 	})
 
-	body := bytes.NewBufferString(`{"content":"开始吧"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
+	body := bytes.NewBufferString(`{"content":"做个商品宣传片"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -752,91 +892,93 @@ func TestStreamMessageExtractsEmbeddedA2UIEnvelopeFromAssistant(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	out := rec.Body.String()
-	if strings.Contains(out, "event: chat.delta") {
-		t.Fatalf("embedded a2ui envelope should not be emitted as chat.delta, got %q", out)
+	out := publishedPayloadString(t, requirePublishedEvent(t, broker, a2ui.EventError))
+	if strings.Contains(out, "brief-intake") || strings.Contains(out, "TextInput") || strings.Contains(out, "a2ui.surface_update") {
+		t.Fatalf("assistant text should not trigger legacy product form inference: %q", out)
 	}
-	if !strings.Contains(out, "event: a2ui.surface_update") || !strings.Contains(out, "TextInput") || !strings.Contains(out, "VerticalSteps") {
-		t.Fatalf("missing extracted a2ui components in %q", out)
+	if !strings.Contains(out, "invalid_a2ui_action_envelope") {
+		t.Fatalf("non-protocol assistant text should be rejected, got %q", out)
 	}
-	if strings.Contains(out, `\"a2ui_events\"`) {
-		t.Fatalf("raw a2ui envelope leaked into SSE payload: %q", out)
+}
+
+func TestCreateMessageUsesLatestCompleteAssistantMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := newFakeSessionStore()
+	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
+	historyEnvelope := assistantCardEnvelope(t, "history-reply", "历史回复")
+	latestEnvelope := assistantCardEnvelope(t, "latest-reply", "最新回复")
+	invoker := &fakeAgentInvoker{
+		events: []AgentEvent{
+			{
+				Event:         a2ui.EventChatDelta,
+				Payload:       map[string]any{"text": historyEnvelope},
+				AssistantText: historyEnvelope,
+				Message:       schema.AssistantMessage(historyEnvelope, nil),
+			},
+			{
+				Event:         a2ui.EventChatDelta,
+				Payload:       map[string]any{"text": latestEnvelope},
+				AssistantText: latestEnvelope,
+				Message:       schema.AssistantMessage(latestEnvelope, nil),
+			},
+		},
+	}
+	broker := &fakeEventSubscriber{}
+	router := NewRouter(Config{
+		Store:   store,
+		Events:  broker,
+		Invoker: invoker,
+		NewID:   sequentialIDs("run-1", "msg-user-1", "evt-begin", "evt-surface", "evt-data", "msg-assistant-1"),
+		Now:     fixedNow,
+	})
+
+	body := bytes.NewBufferString(`{"content":"继续"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	out := publishedPayloadString(t, requirePublishedEvent(t, broker, a2ui.EventAction))
+	if strings.Contains(out, "历史回复") {
+		t.Fatalf("rendered stale assistant history: %q", out)
+	}
+	if !strings.Contains(out, "最新回复") {
+		t.Fatalf("missing latest assistant reply: %q", out)
 	}
 	appended := store.messages["s1"]
 	if len(appended) != 2 {
 		t.Fatalf("message count = %d, records = %#v", len(appended), appended)
 	}
-	if strings.Contains(appended[1].Content, "a2ui_events") || !strings.Contains(appended[1].Content, "Stage 1") {
-		t.Fatalf("assistant message should persist display text only, got %#v", appended[1])
+	if appended[0].Role != string(schema.User) {
+		t.Fatalf("user message = %#v", appended[0])
+	}
+	if appended[1].Role != string(schema.Assistant) || !strings.Contains(appended[1].Content, "最新回复") {
+		t.Fatalf("assistant message = %#v", appended[1])
 	}
 }
 
-func TestStreamMessageRendersProductBriefRequestAsA2UIForm(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	store := newFakeSessionStore()
-	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
-	assistantText := `好的，收到您的“开始”指令！不过我现在还没有获取到您的产品信息详情。让我换个方式，您可以直接用文字告诉我：
---- **请简单告诉我以下信息：**
-1. **产品是什么？**
-2. **品牌名称？**
-3. **核心卖点？**
-4. **目标平台和视频时长？**
-5. **想要的视觉风格？**
---- 您不用填表格，直接打字回复我就行！`
-	invoker := &fakeAgentInvoker{
-		events: []AgentEvent{{
-			Event:         a2ui.EventChatDelta,
-			Payload:       map[string]any{"text": assistantText},
-			AssistantText: assistantText,
-			Message:       schema.AssistantMessage(assistantText, nil),
-		}},
-	}
-	router := NewRouter(Config{
-		Store:   store,
-		Invoker: invoker,
-		NewID:   sequentialIDs("run-1", "msg-user-1", "evt-begin", "evt-brief-form", "msg-assistant-1"),
-		Now:     fixedNow,
-	})
-
-	body := bytes.NewBufferString(`{"content":"开始"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	out := rec.Body.String()
-	if !strings.Contains(out, "event: a2ui.surface_update") {
-		t.Fatalf("missing a2ui surface update in %q", out)
-	}
-	for _, want := range []string{"TextInput", "SingleChoice", "MultiChoice", "VerticalSteps", "产品名称/品类", "核心卖点"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("missing %q in a2ui form: %q", want, out)
-		}
-	}
-	if strings.Contains(out, "您不用填表格") {
-		t.Fatalf("raw text prompt should be replaced by a2ui form, got %q", out)
-	}
-}
-
-func TestStreamMessagePassesSessionValuesToInvoker(t *testing.T) {
+func TestCreateMessagePassesSessionValuesToInvoker(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	store := newFakeSessionStore()
 	store.sessions["s1"] = session.SessionRecord{ID: "s1", SkillID: "skill-video", Title: "武侠短片", Status: "active"}
+	assistantEnvelope := assistantCardEnvelope(t, "ack", "收到。")
 	invoker := &fakeAgentInvoker{
 		events: []AgentEvent{{
 			Event:         a2ui.EventChatDelta,
-			Payload:       map[string]any{"text": "收到。"},
-			AssistantText: "收到。",
+			Payload:       map[string]any{"text": assistantEnvelope},
+			AssistantText: assistantEnvelope,
 		}},
 	}
+	broker := &fakeEventSubscriber{}
 	router := NewRouter(Config{
 		Store:   store,
+		Events:  broker,
 		Invoker: invoker,
 		SessionValues: func(record session.SessionRecord) map[string]any {
 			return map[string]any{
@@ -850,7 +992,7 @@ func TestStreamMessagePassesSessionValuesToInvoker(t *testing.T) {
 	})
 
 	body := bytes.NewBufferString(`{"content":"把第一镜改成雨夜"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -870,11 +1012,66 @@ func TestStreamMessagePassesSessionValuesToInvoker(t *testing.T) {
 	}
 }
 
-func TestStreamMessagePersistsToolCallAndToolResult(t *testing.T) {
+func TestCreateMessagePersistsUISourceWithoutPassingItToAgent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	store := newFakeSessionStore()
 	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
+	assistantEnvelope := assistantCardEnvelope(t, "ack", "收到。")
+	invoker := &fakeAgentInvoker{
+		events: []AgentEvent{{
+			Event:         a2ui.EventChatDelta,
+			Payload:       map[string]any{"text": assistantEnvelope},
+			AssistantText: assistantEnvelope,
+		}},
+	}
+	broker := &fakeEventSubscriber{}
+	router := NewRouter(Config{
+		Store:   store,
+		Events:  broker,
+		Invoker: invoker,
+		NewID:   sequentialIDs("run-1", "msg-user-1", "card-instance-2", "evt-1", "msg-assistant-1"),
+		Now:     fixedNow,
+	})
+
+	body := bytes.NewBufferString(`{"content":"商品宣传短片_v2","ui_source":{"type":"a2ui_submit","card_id":"skill-selection:card-instance-1"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	appended := store.messages["s1"]
+	if len(appended) < 1 {
+		t.Fatalf("messages = %#v", appended)
+	}
+	metadata := appended[0].Metadata
+	uiSource, ok := metadata["ui_source"].(map[string]any)
+	if !ok || uiSource["type"] != "a2ui_submit" || uiSource["card_id"] != "skill-selection:card-instance-1" {
+		t.Fatalf("ui_source metadata = %#v", metadata)
+	}
+	if len(invoker.seenMessages) == 0 {
+		t.Fatalf("invoker messages = %#v", invoker.seenMessages)
+	}
+	last := invoker.seenMessages[len(invoker.seenMessages)-1]
+	if last.Content != "商品宣传短片_v2" {
+		t.Fatalf("agent should receive plain content only, got %#v", last)
+	}
+	rawExtra, _ := json.Marshal(last.Extra)
+	if strings.Contains(last.Content, "ui_source") || strings.Contains(string(rawExtra), "ui_source") {
+		t.Fatalf("ui_source leaked to agent message: %#v", last)
+	}
+}
+
+func TestCreateMessagePersistsToolCallAndToolResult(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := newFakeSessionStore()
+	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
+	assistantEnvelope := assistantCardEnvelope(t, "spec-updated", "规范已更新。")
 	invoker := &fakeAgentInvoker{
 		events: []AgentEvent{
 			{
@@ -896,13 +1093,15 @@ func TestStreamMessagePersistsToolCallAndToolResult(t *testing.T) {
 			},
 			{
 				Event:         a2ui.EventChatDelta,
-				Payload:       map[string]any{"text": "规范已更新。"},
-				AssistantText: "规范已更新。",
+				Payload:       map[string]any{"text": assistantEnvelope},
+				AssistantText: assistantEnvelope,
 			},
 		},
 	}
+	broker := &fakeEventSubscriber{}
 	router := NewRouter(Config{
 		Store:   store,
+		Events:  broker,
 		Invoker: invoker,
 		NewID: sequentialIDs(
 			"run-1",
@@ -918,7 +1117,7 @@ func TestStreamMessagePersistsToolCallAndToolResult(t *testing.T) {
 	})
 
 	body := bytes.NewBufferString(`{"content":"先写规范"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -937,8 +1136,8 @@ func TestStreamMessagePersistsToolCallAndToolResult(t *testing.T) {
 	if appended[2].Role != string(schema.Tool) || appended[2].ToolCallID != "call-1" || appended[2].ToolName != aigctools.TextEditorToolKey {
 		t.Fatalf("tool result record = %#v", appended[2])
 	}
-	if appended[3].Role != string(schema.Assistant) || appended[3].Content != "规范已更新。" {
-		t.Fatalf("assistant text record = %#v", appended[3])
+	if appended[3].Role != string(schema.Assistant) || !strings.Contains(appended[3].Content, `"card_id":"spec-updated:evt-tool-result"`) {
+		t.Fatalf("assistant a2ui result record = %#v", appended[3])
 	}
 
 	rebuilt := recordsToSchemaMessages(appended)
@@ -950,313 +1149,7 @@ func TestStreamMessagePersistsToolCallAndToolResult(t *testing.T) {
 	}
 }
 
-func TestStreamMessageRendersToolProgressWithoutRawToolPayloads(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	store := newFakeSessionStore()
-	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
-	invoker := &fakeAgentInvoker{
-		events: []AgentEvent{
-			{
-				Event:   a2ui.EventToolProgress,
-				Payload: map[string]any{"role": "assistant"},
-				Message: schema.AssistantMessage("", []schema.ToolCall{{
-					ID:   "call-1",
-					Type: "function",
-					Function: schema.FunctionCall{
-						Name:      aigctools.TextEditorToolKey,
-						Arguments: `{"document_type":"final_video_spec","markdown":"# Final_Video_Spec.md"}`,
-					},
-				}}),
-			},
-			{
-				Event:   a2ui.EventToolProgress,
-				Payload: map[string]any{"role": "tool"},
-				Message: schema.ToolMessage(`{"status":"error","error":{"tool_key":"text_editor","code":"validation_error","user_message":"工具参数不完整或格式不正确，需要重新组织参数。","technical_message":"session_id is required","trace_id":"call-1"}}`, "call-1", schema.WithToolName(aigctools.TextEditorToolKey)),
-			},
-			{
-				Event:   a2ui.EventToolProgress,
-				Payload: map[string]any{"role": "tool"},
-				Message: schema.ToolMessage(`{"status":"ok","data":{"document_type":"final_video_spec","spec":{"id":"final_video_spec:s1","markdown":"# Final_Video_Spec.md"}}}`, "call-2", schema.WithToolName(aigctools.TextEditorToolKey)),
-			},
-		},
-	}
-	router := NewRouter(Config{
-		Store:   store,
-		Invoker: invoker,
-		NewID: sequentialIDs(
-			"run-1",
-			"msg-user-1",
-			"evt-begin",
-			"evt-tool-call",
-			"msg-tool-call",
-			"evt-tool-error",
-			"msg-tool-error",
-			"evt-tool-ok",
-			"msg-tool-ok",
-		),
-		Now: fixedNow,
-	})
-
-	body := bytes.NewBufferString(`{"content":"先写规范"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	out := rec.Body.String()
-	for _, want := range []string{"event: a2ui.surface_update", "VerticalSteps", "text_editor", "工具参数不完整或格式不正确"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("missing %q in progress surface: %q", want, out)
-		}
-	}
-	for _, leaked := range []string{"document_type", "Final_Video_Spec.md", "session_id is required", "trace_id", `"status\":\"ok\"`} {
-		if strings.Contains(out, leaked) {
-			t.Fatalf("raw tool payload leaked %q in %q", leaked, out)
-		}
-	}
-}
-
-func TestStreamMessageRendersStageConfirmationAsA2UISurface(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	store := newFakeSessionStore()
-	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
-	assistantText := `**Final_Video_Spec.md** 已创建完毕！以下是视频规格概要，请您确认——如果有任何需要调整的地方，请告诉我：
---- ## 视频规格草案 | 项目 | 内容 |
-| **标题** | 蓝牙音箱品牌宣传短片 |
-| **类型** | 商品宣传短片 |
-| **比例** | 9:16 竖屏 |
-⚠️ **注意：** 由于您还没有提供具体的品牌名称和产品图片，目前规格基于“蓝牙音箱”做了通用设定。请您确认：
-1. 以上规格是否符合您的预期？
-2. 是否有具体的品牌名称要补充？`
-	invoker := &fakeAgentInvoker{
-		events: []AgentEvent{{
-			Event:         a2ui.EventChatDelta,
-			Payload:       map[string]any{"text": assistantText},
-			AssistantText: assistantText,
-			Message:       schema.AssistantMessage(assistantText, nil),
-		}},
-	}
-	router := NewRouter(Config{
-		Store:   store,
-		Invoker: invoker,
-		NewID:   sequentialIDs("run-1", "msg-user-1", "evt-begin", "evt-confirm-surface", "evt-confirm-data", "msg-assistant-1"),
-		Now:     fixedNow,
-	})
-
-	body := bytes.NewBufferString(`{"content":"开始"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	out := rec.Body.String()
-	for _, want := range []string{"event: a2ui.surface_update", "stage-confirmation", "SingleChoice", "TextInput", "VerticalSteps", "提交确认"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("missing %q in confirmation surface: %q", want, out)
-		}
-	}
-}
-
-func TestStreamMessageEmitsRenderEventsFromToolResult(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	store := newFakeSessionStore()
-	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
-	toolResult := `{
-		"status":"ok",
-		"data":{
-			"asset_ids":["asset-1"],
-			"render_events":[{
-				"event":"storyboard.patch",
-				"surface_id":"storyboard",
-				"data_model_key":"storyboard",
-				"payload":{"updates":[{"target_type":"shot","target_id":"shot-1","field":"keyframe_asset_id","asset_ids":["asset-1"],"status":"generated"}]}
-			}]
-		}
-	}`
-	invoker := &fakeAgentInvoker{
-		events: []AgentEvent{
-			{
-				Event:   a2ui.EventToolProgress,
-				Payload: map[string]any{"role": "tool"},
-				Message: schema.ToolMessage(toolResult, "call-1", schema.WithToolName(aigctools.Image2GenerateToolKey)),
-			},
-		},
-	}
-	router := NewRouter(Config{
-		Store:   store,
-		Invoker: invoker,
-		NewID:   sequentialIDs("run-1", "msg-user-1", "evt-tool", "evt-render", "msg-tool"),
-		Now:     fixedNow,
-	})
-
-	body := bytes.NewBufferString(`{"content":"生成第一镜关键帧"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	out := rec.Body.String()
-	if !strings.Contains(out, "event: storyboard.patch") {
-		t.Fatalf("missing storyboard.patch event in %q", out)
-	}
-	if !strings.Contains(out, "keyframe_asset_id") {
-		t.Fatalf("missing render payload in %q", out)
-	}
-}
-
-func TestStreamMessageMaterializesStoryboardUpdatesFromToolResult(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	store := newFakeSessionStore()
-	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
-	storyboards := &fakeStoryboardStore{
-		latest: storyboard.Storyboard{
-			ID:        "storyboard-1",
-			SessionID: "s1",
-			Version:   3,
-			Shots: []storyboard.Shot{{
-				ShotID:           "shot-1",
-				Index:            1,
-				SceneDescription: "竹林归隐",
-				Status:           storyboard.StatusGenerating,
-			}},
-		},
-		patched: storyboard.Storyboard{ID: "storyboard-1", SessionID: "s1", Version: 4},
-		event: storyboard.EventRecord{
-			ID:           "patch-event-1",
-			SessionID:    "s1",
-			StoryboardID: "storyboard-1",
-			BaseVersion:  3,
-			NextVersion:  4,
-			Source:       "tool",
-			Ops: []aigctools.JSONPatchOp{
-				{Op: "add", Path: "/shots/0/keyframe_asset_id", Value: "asset-1"},
-				{Op: "replace", Path: "/shots/0/status", Value: storyboard.StatusReady},
-			},
-		},
-	}
-	toolResult := `{
-		"status":"ok",
-		"data":{
-			"render_events":[{
-				"event":"storyboard.patch",
-				"surface_id":"storyboard",
-				"data_model_key":"storyboard",
-				"payload":{"updates":[{"target_type":"shot","target_id":"shot-1","field":"keyframe_asset_id","asset_kind":"image","asset_ids":["asset-1"],"status":"generated"}]}
-			}]
-		}
-	}`
-	invoker := &fakeAgentInvoker{
-		events: []AgentEvent{{
-			Event:   a2ui.EventToolProgress,
-			Payload: map[string]any{"role": "tool"},
-			Message: schema.ToolMessage(toolResult, "call-1", schema.WithToolName(aigctools.Image2GenerateToolKey)),
-		}},
-	}
-	router := NewRouter(Config{
-		Store:       store,
-		Storyboards: storyboards,
-		Invoker:     invoker,
-		NewID:       sequentialIDs("run-1", "msg-user-1", "evt-tool", "patch-event-1", "evt-render", "msg-tool"),
-		Now:         fixedNow,
-	})
-
-	body := bytes.NewBufferString(`{"content":"生成第一镜关键帧"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if storyboards.seenPatch.StoryboardID != "storyboard-1" || storyboards.seenPatch.BaseVersion != 3 {
-		t.Fatalf("storyboard patch request = %#v", storyboards.seenPatch)
-	}
-	if len(storyboards.seenPatch.Ops) != 2 ||
-		storyboards.seenPatch.Ops[0].Path != "/shots/0/keyframe_asset_id" ||
-		storyboards.seenPatch.Ops[0].Value != "asset-1" {
-		t.Fatalf("storyboard patch ops = %#v", storyboards.seenPatch.Ops)
-	}
-	out := rec.Body.String()
-	if !strings.Contains(out, `"ops"`) || strings.Contains(out, `"updates"`) {
-		t.Fatalf("render event should emit materialized JSON patch only, got %q", out)
-	}
-}
-
-func TestStreamMessageEmitsInterruptFromMediaGeneratorToolResult(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	store := newFakeSessionStore()
-	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
-	toolResult := `{
-		"status":"queued",
-		"next_confirmation_id":"interrupt-1",
-		"data":{
-			"interrupted":true,
-			"interrupt":{
-				"event":"a2ui.interrupt_request",
-				"payload":{
-					"checkpoint_id":"media-cp-1",
-					"interrupt_id":"interrupt-1",
-					"storyboard_version":7,
-					"title":"确认参考图",
-					"message":"请确认参考图",
-					"actions":[{"key":"confirm_reference_image","label":"确认参考图"}]
-				}
-			}
-		}
-	}`
-	invoker := &fakeAgentInvoker{
-		events: []AgentEvent{{
-			Event:   a2ui.EventToolProgress,
-			Payload: map[string]any{"role": "tool"},
-			Message: schema.ToolMessage(toolResult, "call-1", schema.WithToolName(aigctools.MediaGeneratorToolKey)),
-		}},
-	}
-	router := NewRouter(Config{
-		Store:   store,
-		Invoker: invoker,
-		NewID:   sequentialIDs("run-1", "msg-user-1", "evt-tool", "evt-interrupt", "msg-tool"),
-		Now:     fixedNow,
-	})
-
-	body := bytes.NewBufferString(`{"content":"生成参考图"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	out := rec.Body.String()
-	if !strings.Contains(out, "event: a2ui.interrupt_request") {
-		t.Fatalf("missing interrupt event in %q", out)
-	}
-	if !strings.Contains(out, `"scope":"media_graph"`) || !strings.Contains(out, "media-cp-1") {
-		t.Fatalf("missing media graph interrupt payload in %q", out)
-	}
-}
-
-func TestStreamMessagePersistsInterruptCheckpoint(t *testing.T) {
+func TestCreateMessagePersistsInterruptCheckpoint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	store := newFakeSessionStore()
@@ -1274,8 +1167,10 @@ func TestStreamMessagePersistsInterruptCheckpoint(t *testing.T) {
 			},
 		}},
 	}
+	broker := &fakeEventSubscriber{}
 	router := NewRouter(Config{
 		Store:       store,
+		Events:      broker,
 		Checkpoints: checkpoints,
 		Invoker:     invoker,
 		NewID:       sequentialIDs("run-1", "msg-user-1", "evt-interrupt"),
@@ -1283,7 +1178,7 @@ func TestStreamMessagePersistsInterruptCheckpoint(t *testing.T) {
 	})
 
 	body := bytes.NewBufferString(`{"content":"确认前暂停"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/stream", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -1303,6 +1198,9 @@ func TestStreamMessagePersistsInterruptCheckpoint(t *testing.T) {
 	}
 	if checkpoints.saved.StoryboardVersion != 7 {
 		t.Fatalf("checkpoint mapping = %#v", checkpoints.saved)
+	}
+	if event := requirePublishedEvent(t, broker, a2ui.EventInterruptRequest); event.RunID != "run-1" {
+		t.Fatalf("interrupt event = %#v", event)
 	}
 }
 
@@ -1328,8 +1226,10 @@ func TestResumeAgentMarksCheckpointResumed(t *testing.T) {
 			AssistantText: "继续。",
 		}},
 	}
+	broker := &fakeEventSubscriber{}
 	router := NewRouter(Config{
 		Store:       store,
+		Events:      broker,
 		Checkpoints: checkpoints,
 		Invoker:     invoker,
 		NewID:       sequentialIDs("run-1", "msg-user-1", "evt-1", "msg-assistant-1"),
@@ -1337,7 +1237,7 @@ func TestResumeAgentMarksCheckpointResumed(t *testing.T) {
 	})
 
 	body := bytes.NewBufferString(`{"checkpoint_id":"s1","interrupt_id":"interrupt-1","content":"确认","data":{"approved":true}}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/resume/stream", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/resume", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -1372,16 +1272,18 @@ func TestResumeAgentAlreadyResumedDoesNotInvokeRunner(t *testing.T) {
 			AssistantText: "不应被调用",
 		}},
 	}
+	broker := &fakeEventSubscriber{}
 	router := NewRouter(Config{
 		Store:       store,
+		Events:      broker,
 		Checkpoints: checkpoints,
 		Invoker:     invoker,
-		NewID:       sequentialIDs("evt-already"),
+		NewID:       sequentialIDs("run-already", "evt-already"),
 		Now:         fixedNow,
 	})
 
 	body := bytes.NewBufferString(`{"checkpoint_id":"s1","interrupt_id":"interrupt-1","content":"确认","data":{"approved":true}}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/resume/stream", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/resume", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -1393,8 +1295,11 @@ func TestResumeAgentAlreadyResumedDoesNotInvokeRunner(t *testing.T) {
 	if invoker.seenResume.CheckpointID != "" {
 		t.Fatalf("runner was invoked: %#v", invoker.seenResume)
 	}
-	if !strings.Contains(rec.Body.String(), `"status":"resumed"`) {
+	if !strings.Contains(rec.Body.String(), `"status":"already_resumed"`) {
 		t.Fatalf("resume response = %q", rec.Body.String())
+	}
+	if event := requirePublishedEvent(t, broker, a2ui.EventAction); event.RunID != "run-already" {
+		t.Fatalf("already resumed event = %#v", event)
 	}
 }
 
@@ -1560,27 +1465,91 @@ func TestResumeMediaGraph(t *testing.T) {
 	}
 }
 
-func TestResumeAgentStreamsAndPersistsDecision(t *testing.T) {
+func TestResumeMediaGraphPublishesInterruptToEventStream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	store := newFakeSessionStore()
 	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
+	resumer := &fakeMediaGraphResumer{
+		result: mediagraph.RunResult{
+			Interrupted: true,
+			Interrupt: &mediagraph.InterruptEvent{
+				Event: a2ui.EventInterruptRequest,
+				Payload: mediagraph.InterruptRequestPayload{
+					CheckpointID: "media-cp-2",
+					InterruptID:  "interrupt-2",
+					Message:      "再次确认参考图。",
+				},
+			},
+		},
+	}
+	events := &fakeEventSubscriber{}
+	router := NewRouter(Config{
+		Store:      store,
+		MediaGraph: resumer,
+		Events:     events,
+		Invoker:    &fakeAgentInvoker{},
+		NewID:      sequentialIDs("media-event-1"),
+		Now:        fixedNow,
+	})
+
+	body := bytes.NewBufferString(`{"checkpoint_id":"media-cp-1","interrupt_id":"interrupt-1","approved":true,"note":"继续"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/media-graph/resume", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if got["status"] != "interrupted" {
+		t.Fatalf("resume response = %#v", got)
+	}
+	if _, ok := got["event"]; ok {
+		t.Fatalf("resume response should not return an event payload: %#v", got)
+	}
+	if len(events.published) != 1 {
+		t.Fatalf("published events = %#v", events.published)
+	}
+	event := events.published[0]
+	if event.ID != "media-event-1" || event.SessionID != "s1" || event.Event != a2ui.EventInterruptRequest {
+		t.Fatalf("published event = %#v", event)
+	}
+	payload := payloadMap(event.Payload)
+	if payload["checkpoint_id"] != "media-cp-2" || payload["interrupt_id"] != "interrupt-2" || payload["scope"] != session.CheckpointScopeMediaGraph {
+		t.Fatalf("interrupt payload = %#v", payload)
+	}
+}
+
+func TestResumeAgentPublishesAndPersistsDecision(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := newFakeSessionStore()
+	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
+	assistantEnvelope := assistantCardEnvelope(t, "resume-next", "继续生成素材。")
 	invoker := &fakeAgentInvoker{
 		events: []AgentEvent{{
 			Event:         a2ui.EventChatDelta,
-			Payload:       map[string]any{"text": "继续生成素材。"},
-			AssistantText: "继续生成素材。",
+			Payload:       map[string]any{"text": assistantEnvelope},
+			AssistantText: assistantEnvelope,
 		}},
 	}
+	broker := &fakeEventSubscriber{}
 	router := NewRouter(Config{
 		Store:   store,
+		Events:  broker,
 		Invoker: invoker,
 		NewID:   sequentialIDs("run-1", "msg-user-1", "evt-1", "msg-assistant-1"),
 		Now:     fixedNow,
 	})
 
 	body := bytes.NewBufferString(`{"checkpoint_id":"s1","interrupt_id":"agent:A;tool:confirm","content":"确认参考图，可以继续","data":{"approved":true}}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/resume/stream", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/resume", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -1595,6 +1564,10 @@ func TestResumeAgentStreamsAndPersistsDecision(t *testing.T) {
 	if _, ok := invoker.seenResume.Targets["agent:A;tool:confirm"]; !ok {
 		t.Fatalf("resume targets = %#v", invoker.seenResume.Targets)
 	}
+	out := publishedPayloadString(t, requirePublishedEvent(t, broker, a2ui.EventAction))
+	if !strings.Contains(out, `"card_id":"resume-next:evt-1"`) {
+		t.Fatalf("missing resume a2ui action event: %q", out)
+	}
 	appended := store.messages["s1"]
 	if len(appended) != 2 {
 		t.Fatalf("message count = %d, records = %#v", len(appended), appended)
@@ -1602,7 +1575,7 @@ func TestResumeAgentStreamsAndPersistsDecision(t *testing.T) {
 	if appended[0].Role != string(schema.User) || appended[0].Content != "确认参考图，可以继续" {
 		t.Fatalf("resume user message = %#v", appended[0])
 	}
-	if appended[1].Role != string(schema.Assistant) || appended[1].Content != "继续生成素材。" {
+	if appended[1].Role != string(schema.Assistant) || !strings.Contains(appended[1].Content, `"card_id":"resume-next:evt-1"`) {
 		t.Fatalf("resume assistant message = %#v", appended[1])
 	}
 }
@@ -1824,6 +1797,12 @@ type fakeEventSubscriber struct {
 	events        <-chan a2ui.SSEEvent
 	seenSessionID string
 	unsubscribed  bool
+	published     []a2ui.SSEEvent
+}
+
+func (s *fakeEventSubscriber) Publish(_ context.Context, event a2ui.SSEEvent) error {
+	s.published = append(s.published, event)
+	return nil
 }
 
 func (s *fakeEventSubscriber) Subscribe(_ context.Context, sessionID string) (<-chan a2ui.SSEEvent, func()) {

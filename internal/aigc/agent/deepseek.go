@@ -16,12 +16,14 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
 	aigcconfig "github.com/FigoGoo/Dora-Agent/internal/aigc/config"
 	aigcmediagraph "github.com/FigoGoo/Dora-Agent/internal/aigc/mediagraph"
 	aigcmw "github.com/FigoGoo/Dora-Agent/internal/aigc/middleware"
 	aigctools "github.com/FigoGoo/Dora-Agent/internal/aigc/tools"
 )
 
+// DeepSeekRunnerConfig 汇总创建 AIGC ChatModelAgent Runner 所需的运行时依赖。
 type DeepSeekRunnerConfig struct {
 	Name              string
 	Description       string
@@ -40,6 +42,7 @@ type DeepSeekRunnerConfig struct {
 	ExtraHandlers     []adk.ChatModelAgentMiddleware
 }
 
+// NewDeepSeekChatModel 根据运行时配置创建 DeepSeek ToolCallingChatModel。
 func NewDeepSeekChatModel(ctx context.Context, cfg aigcconfig.Config) (einomodel.ToolCallingChatModel, error) {
 	cfg = cfg.Normalize()
 	if err := cfg.ValidateDeepSeek(); err != nil {
@@ -47,12 +50,16 @@ func NewDeepSeekChatModel(ctx context.Context, cfg aigcconfig.Config) (einomodel
 	}
 
 	return deepseekmodel.NewChatModel(ctx, &deepseekmodel.ChatModelConfig{
-		APIKey:  cfg.DeepSeek.APIKey,
-		Model:   cfg.DeepSeek.Model,
-		BaseURL: cfg.DeepSeek.BaseURL,
+		APIKey:             cfg.DeepSeek.APIKey,
+		Model:              cfg.DeepSeek.Model,
+		BaseURL:            cfg.DeepSeek.BaseURL,
+		MaxTokens:          8192,
+		Temperature:        0.2,
+		ResponseFormatType: deepseekmodel.ResponseFormatTypeJSONObject,
 	})
 }
 
+// NewDeepSeekRunner 组装 ChatModelAgent、工具注册表、中间件和 checkpoint runner。
 func NewDeepSeekRunner(ctx context.Context, cfg DeepSeekRunnerConfig) (*adk.Runner, error) {
 	chatModel, err := NewDeepSeekChatModel(ctx, cfg.Runtime)
 	if err != nil {
@@ -84,7 +91,7 @@ func NewDeepSeekRunner(ctx context.Context, cfg DeepSeekRunnerConfig) (*adk.Runn
 	if instruction == "" {
 		instruction = "你是一个 AIGC 内容创作智能体。根据用户需求规划内容、调用合适工具，并在关键阶段请求用户确认。"
 	}
-	instruction = strings.TrimSpace(instruction + "\n\n" + a2UIProtocolInstruction)
+	instruction = strings.TrimSpace(instruction + "\n\n" + a2ui.AgentInstruction())
 
 	patchToolCalls, err := patchtoolcalls.New(ctx, nil)
 	if err != nil {
@@ -128,11 +135,12 @@ func NewDeepSeekRunner(ctx context.Context, cfg DeepSeekRunnerConfig) (*adk.Runn
 
 	return adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           agent,
-		EnableStreaming: true,
+		EnableStreaming: false,
 		CheckPointStore: cfg.RunnerCheckpoints,
 	}), nil
 }
 
+// defaultAgentToolKeys 根据当前存储和运行配置选择 Agent 可调用的默认工具集。
 func defaultAgentToolKeys(runtime aigcconfig.Config, hasSpecStore bool, hasStoryboardStore bool) []string {
 	_ = runtime.Normalize()
 	toolKeys := []string{
@@ -152,6 +160,7 @@ func defaultAgentToolKeys(runtime aigcconfig.Config, hasSpecStore bool, hasStory
 	return toolKeys
 }
 
+// aigcGenModelInput 把系统指令放到消息窗口最前面，并保留原始会话消息顺序。
 func aigcGenModelInput(_ context.Context, instruction string, input *adk.AgentInput) ([]*schema.Message, error) {
 	msgs := make([]*schema.Message, 0, len(input.Messages)+1)
 	if instruction != "" {
@@ -161,18 +170,7 @@ func aigcGenModelInput(_ context.Context, instruction string, input *adk.AgentIn
 	return msgs, nil
 }
 
-const a2UIProtocolInstruction = `
-面向用户展示和交互必须走 A2UI 协议：
-1. 普通说明可以简短输出；但凡需要用户确认、补充信息、单选、多选、填写文本、查看图片/视频、查看阶段进度，都必须输出纯 JSON，不要包 Markdown，不要解释 JSON。
-2. JSON 顶层格式为 {"a2ui_events":[...]}，每个 event 包含 event、surface_id、data_model_key、payload。
-3. 支持的 event：a2ui.begin_rendering、a2ui.surface_update、a2ui.data_model_update、a2ui.interrupt_request。
-4. a2ui.surface_update 的 payload 可使用 components 组件树，组件支持 Text、Column、Row、Card、TextInput、SingleChoice、MultiChoice、ImagePreview、VideoPreview、VerticalSteps。
-5. 组件示例：
-{"a2ui_events":[{"event":"a2ui.surface_update","surface_id":"brief-intake","data_model_key":"brief","payload":{"root":"root","title":"补充产品信息","submit_label":"提交信息","components":[{"id":"root","component":{"Card":{"children":["title","product","style","platform","steps"]}}},{"id":"title","component":{"Text":{"value":"请补充商品宣传短片信息","usageHint":"title"}}},{"id":"product","component":{"TextInput":{"key":"product_name","label":"产品名称/品类","required":true}}},{"id":"style","component":{"SingleChoice":{"key":"visual_style","label":"视觉风格","options":[{"value":"tech","label":"高级科技感"},{"value":"warm","label":"温暖生活感"}]}}},{"id":"platform","component":{"MultiChoice":{"key":"platforms","label":"投放平台","options":[{"value":"douyin","label":"抖音"},{"value":"xiaohongshu","label":"小红书"}]}}},{"id":"steps","component":{"VerticalSteps":{"steps":[{"title":"Agent 分析","status":"running"},{"title":"资产配置","status":"pending"}]}}}]}}]}。
-6. 图片预览组件使用 {"ImagePreview":{"url":"...","title":"参考图"}}；视频预览组件使用 {"VideoPreview":{"url":"...","poster":"...","title":"预览视频"}}。
-7. 不要把生成模型原始大结果、base64、长 prompt 全量放入 A2UI 或普通回答；只返回业务摘要、asset_id、url、状态和需要用户决策的信息。
-`
-
+// newDefaultRegistry 注册不依赖外部服务的基础 demo 工具。
 func newDefaultRegistry() (*aigctools.Registry, error) {
 	registry := aigctools.NewRegistry()
 	if err := registry.Register("echo_tool", aigctools.EchoTool{}, aigctools.ToolMeta{
@@ -186,6 +184,7 @@ func newDefaultRegistry() (*aigctools.Registry, error) {
 	return registry, nil
 }
 
+// newContextControlMiddlewares 创建上下文裁剪和摘要中间件，防止长会话撑爆模型窗口。
 func newContextControlMiddlewares(ctx context.Context, model einomodel.BaseChatModel) ([]adk.ChatModelAgentMiddleware, error) {
 	reductionMW, err := reduction.New(ctx, &reduction.Config{
 		Backend:                   filesystem.NewInMemoryBackend(),
@@ -217,10 +216,12 @@ func newContextControlMiddlewares(ctx context.Context, model einomodel.BaseChatM
 	return []adk.ChatModelAgentMiddleware{reductionMW, summaryMW}, nil
 }
 
+// reductionTokenCounter 为 reduction 中间件提供粗略 token 估算。
 func reductionTokenCounter(_ context.Context, messages []*schema.Message, tools []*schema.ToolInfo) (int64, error) {
 	return int64(estimatedContextTokens(messages, tools)), nil
 }
 
+// summarizationTokenCounter 为 summarization 触发条件提供粗略 token 估算。
 func summarizationTokenCounter(_ context.Context, input *summarization.TokenCounterInput) (int, error) {
 	if input == nil {
 		return 0, nil
@@ -228,6 +229,7 @@ func summarizationTokenCounter(_ context.Context, input *summarization.TokenCoun
 	return estimatedContextTokens(input.Messages, input.Tools), nil
 }
 
+// estimatedContextTokens 用字符数近似估算上下文 token 数，避免引入额外 tokenizer 依赖。
 func estimatedContextTokens(messages []*schema.Message, tools []*schema.ToolInfo) int {
 	chars := 0
 	for _, message := range messages {
@@ -256,6 +258,7 @@ func estimatedContextTokens(messages []*schema.Message, tools []*schema.ToolInfo
 	return chars/4 + 1
 }
 
+// newRuntimeRegistry 注册生产运行时工具；工具只返回业务数据，UI 由 Agent A2UI action 决定。
 func newRuntimeRegistry(runtime aigcconfig.Config, mediaCheckpoints compose.CheckPointStore, mediaDispatcher aigcmediagraph.JobDispatcher, specStore aigctools.FinalVideoSpecStore, storyboardStore aigctools.StoryboardSnapshotStore, assetStore aigctools.Image2AssetStore, assetUploader aigctools.Image2AssetUploader, promptModel einomodel.BaseChatModel) (*aigctools.Registry, error) {
 	registry, err := newDefaultRegistry()
 	if err != nil {

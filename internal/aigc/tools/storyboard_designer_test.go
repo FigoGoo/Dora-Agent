@@ -47,13 +47,18 @@ func TestStoryboardDesignerToolSavesSnapshot(t *testing.T) {
 	}
 }
 
-func TestStoryboardDesignerToolDefaultsStoryboardIDForDirectInput(t *testing.T) {
+func TestStoryboardDesignerToolDefaultsStoryboardIDFromEnvelope(t *testing.T) {
 	store := &fakeStoryboardSnapshotStore{}
 	tool := NewStoryboardDesignerTool(StoryboardDesignerToolConfig{Storyboards: store})
 
 	_, err := tool.InvokableRun(context.Background(), `{
 		"session_id":"s1",
-		"shots":[{"shot_id":"shot-1","index":1}]
+		"request_id":"req-1",
+		"idempotency_key":"idem-1",
+		"action":"design_storyboard",
+		"payload":{
+			"shots":[{"shot_id":"shot-1","index":1}]
+		}
 	}`)
 	if err != nil {
 		t.Fatalf("InvokableRun() error = %v", err)
@@ -63,24 +68,42 @@ func TestStoryboardDesignerToolDefaultsStoryboardIDForDirectInput(t *testing.T) 
 	}
 }
 
+func TestStoryboardDesignerToolRejectsDirectPayload(t *testing.T) {
+	store := &fakeStoryboardSnapshotStore{}
+	tool := NewStoryboardDesignerTool(StoryboardDesignerToolConfig{Storyboards: store})
+
+	_, err := tool.InvokableRun(context.Background(), `{
+		"session_id":"s1",
+		"shots":[{"shot_id":"shot-1","index":1}]
+	}`)
+	if err == nil {
+		t.Fatal("expected direct payload to be rejected")
+	}
+}
+
 func TestStoryboardDesignerToolNormalizesMissingStableIDs(t *testing.T) {
 	store := &fakeStoryboardSnapshotStore{}
 	tool := NewStoryboardDesignerTool(StoryboardDesignerToolConfig{Storyboards: store})
 
 	out, err := tool.InvokableRun(context.Background(), `{
 		"session_id":"s1",
-		"key_elements":[
-			{"type":"product","name":"蓝牙音箱主体","status":"planned"},
-			{"type":"scene","name":"户外便携场景","status":"planned"}
-		],
-		"shots":[
-			{"scene_description":"开场展示产品","status":"planned"},
-			{"scene_description":"户外使用场景","status":"planned"}
-		],
-		"audio_layers":[
-			{"type":"background_music","description":"电子节奏"},
-			{"type":"sound_effects","description":"低频脉冲"}
-		]
+		"request_id":"req-1",
+		"idempotency_key":"idem-1",
+		"action":"design_storyboard",
+		"payload":{
+			"key_elements":[
+				{"type":"product","name":"蓝牙音箱主体","status":"planned"},
+				{"type":"scene","name":"户外便携场景","status":"planned"}
+			],
+			"shots":[
+				{"scene_description":"开场展示产品","status":"planned"},
+				{"scene_description":"户外使用场景","status":"planned"}
+			],
+			"audio_layers":[
+				{"type":"background_music","description":"电子节奏"},
+				{"type":"sound_effects","description":"低频脉冲"}
+			]
+		}
 	}`)
 	if err != nil {
 		t.Fatalf("InvokableRun() error = %v", err)

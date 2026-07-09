@@ -83,14 +83,19 @@ func TestSeedanceGenerateToolPollsAndUploadsAsset(t *testing.T) {
 
 	out, err := tool.InvokableRun(context.Background(), `{
 		"session_id":"s1",
-		"user_id":"u1",
-		"target_type":"shot",
-		"target_id":"shot-1",
-		"filename_prefix":"seedance-shot",
-		"prompt":"竹林中苏寂拔剑",
-		"ratio":"16:9",
-		"duration_seconds":5,
-		"resolution":"720p"
+		"request_id":"req-1",
+		"idempotency_key":"idem-1",
+		"action":"generate_video",
+		"payload":{
+			"user_id":"u1",
+			"target_type":"shot",
+			"target_id":"shot-1",
+			"filename_prefix":"seedance-shot",
+			"prompt":"竹林中苏寂拔剑",
+			"ratio":"16:9",
+			"duration_seconds":5,
+			"resolution":"720p"
+		}
 	}`)
 	if err != nil {
 		t.Fatalf("InvokableRun() error = %v", err)
@@ -121,14 +126,23 @@ func TestSeedanceGenerateToolPollsAndUploadsAsset(t *testing.T) {
 	if len(result.Data.StoryboardUpdates) != 1 || result.Data.StoryboardUpdates[0].Field != "video_asset_id" {
 		t.Fatalf("storyboard updates = %#v", result.Data.StoryboardUpdates)
 	}
-	if len(result.Data.RenderEvents) == 0 {
-		t.Fatalf("render events are missing")
+	if strings.Contains(out, "render_events") {
+		t.Fatalf("tool result should not include render events: %s", out)
 	}
 	if string(uploader.body) != "mp4bytes" || uploader.seen.MIMEType != "video/mp4" {
 		t.Fatalf("upload = %#v body=%q", uploader.seen, string(uploader.body))
 	}
 	if assets.saved.ID != "asset-video-1" || assets.saved.Kind != asset.KindVideo || assets.saved.SessionID != "s1" {
 		t.Fatalf("saved asset = %#v", assets.saved)
+	}
+}
+
+func TestSeedanceGenerateToolRejectsDirectPayload(t *testing.T) {
+	tool := NewSeedanceGenerateTool(SeedanceToolConfig{})
+
+	_, err := tool.InvokableRun(context.Background(), `{"session_id":"s1","prompt":"竹林中苏寂拔剑"}`)
+	if err == nil {
+		t.Fatal("expected direct payload to be rejected")
 	}
 }
 

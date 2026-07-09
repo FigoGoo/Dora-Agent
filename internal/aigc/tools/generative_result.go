@@ -1,12 +1,10 @@
 package tools
 
-import "strings"
-
-const (
-	renderEventDataModelUpdate = "a2ui.data_model_update"
-	renderEventStoryboardPatch = "storyboard.patch"
+import (
+	"strings"
 )
 
+// GeneratedAssetInfo 是生成类工具统一返回的素材摘要，只包含业务数据不包含 UI 协议。
 type GeneratedAssetInfo struct {
 	AssetID         string `json:"asset_id,omitempty"`
 	Kind            string `json:"kind"`
@@ -21,6 +19,7 @@ type GeneratedAssetInfo struct {
 	ObjectKey       string `json:"object_key,omitempty"`
 }
 
+// StoryboardUpdateHint 描述生成素材应该如何绑定回故事板目标。
 type StoryboardUpdateHint struct {
 	TargetType string   `json:"target_type,omitempty"`
 	TargetID   string   `json:"target_id,omitempty"`
@@ -30,13 +29,7 @@ type StoryboardUpdateHint struct {
 	Status     string   `json:"status"`
 }
 
-type RenderEventHint struct {
-	Event        string `json:"event"`
-	SurfaceID    string `json:"surface_id,omitempty"`
-	DataModelKey string `json:"data_model_key,omitempty"`
-	Payload      any    `json:"payload,omitempty"`
-}
-
+// generativeArtifactIDs 提取生成结果中的非空 asset_id 列表。
 func generativeArtifactIDs(assets []GeneratedAssetInfo) []string {
 	out := make([]string, 0, len(assets))
 	for _, item := range assets {
@@ -47,6 +40,7 @@ func generativeArtifactIDs(assets []GeneratedAssetInfo) []string {
 	return out
 }
 
+// generativeStoryboardUpdates 按目标对象聚合生成素材，供 Agent 决定是否 patch 故事板。
 func generativeStoryboardUpdates(assets []GeneratedAssetInfo) []StoryboardUpdateHint {
 	byTarget := map[string]int{}
 	out := make([]StoryboardUpdateHint, 0, len(assets))
@@ -82,29 +76,7 @@ func generativeStoryboardUpdates(assets []GeneratedAssetInfo) []StoryboardUpdate
 	return out
 }
 
-func generativeRenderEvents(assets []GeneratedAssetInfo, updates []StoryboardUpdateHint) []RenderEventHint {
-	payload := map[string]any{
-		"assets":             assets,
-		"storyboard_updates": updates,
-	}
-	return []RenderEventHint{
-		{
-			Event:        renderEventDataModelUpdate,
-			SurfaceID:    "storyboard",
-			DataModelKey: "assets",
-			Payload:      payload,
-		},
-		{
-			Event:        renderEventStoryboardPatch,
-			SurfaceID:    "storyboard",
-			DataModelKey: "storyboard",
-			Payload: map[string]any{
-				"updates": updates,
-			},
-		},
-	}
-}
-
+// generativeAssetField 根据素材类型和故事板目标推断默认绑定字段。
 func generativeAssetField(kind string, targetType string) string {
 	kind = strings.TrimSpace(kind)
 	targetType = strings.TrimSpace(targetType)

@@ -1,6 +1,14 @@
 package tools
 
-import "github.com/FigoGoo/Dora-Agent/internal/aigc/patch"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/cloudwego/eino/schema"
+
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/patch"
+)
 
 // JSONPatchOp is kept as a compatibility alias for existing tool callers.
 type JSONPatchOp = patch.JSONPatchOp
@@ -31,6 +39,78 @@ type ToolInvocationEnvelope[T any] struct {
 	ExpectedStoryboardVersion int    `json:"expected_storyboard_version,omitempty"`
 	Action                    string `json:"action" jsonschema:"required"`
 	Payload                   T      `json:"payload" jsonschema:"required"`
+}
+
+// decodeToolInvocationEnvelope 只接受新工具 envelope；旧版直接 payload 不再兼容。
+func decodeToolInvocationEnvelope[T any](toolKey string, argumentsInJSON string, payloadReady func(T) bool) (ToolInvocationEnvelope[T], error) {
+	var envelope ToolInvocationEnvelope[T]
+	if err := json.Unmarshal([]byte(argumentsInJSON), &envelope); err != nil {
+		return ToolInvocationEnvelope[T]{}, fmt.Errorf("decode %s input envelope: %w", toolKey, err)
+	}
+	if strings.TrimSpace(envelope.SessionID) == "" {
+		return ToolInvocationEnvelope[T]{}, fmt.Errorf("%s session_id is required", toolKey)
+	}
+	if strings.TrimSpace(envelope.RequestID) == "" {
+		return ToolInvocationEnvelope[T]{}, fmt.Errorf("%s request_id is required", toolKey)
+	}
+	if strings.TrimSpace(envelope.IdempotencyKey) == "" {
+		return ToolInvocationEnvelope[T]{}, fmt.Errorf("%s idempotency_key is required", toolKey)
+	}
+	if strings.TrimSpace(envelope.Action) == "" {
+		return ToolInvocationEnvelope[T]{}, fmt.Errorf("%s action is required", toolKey)
+	}
+	if payloadReady != nil && !payloadReady(envelope.Payload) {
+		return ToolInvocationEnvelope[T]{}, fmt.Errorf("%s payload is required", toolKey)
+	}
+	return envelope, nil
+}
+
+// toolInvocationEnvelopeParams 生成统一工具入参 schema，约束 Agent 只按 envelope 调用工具。
+func toolInvocationEnvelopeParams(payload map[string]*schema.ParameterInfo) map[string]*schema.ParameterInfo {
+	return map[string]*schema.ParameterInfo{
+		"session_id": {
+			Type:     schema.String,
+			Desc:     "Current AIGC session id.",
+			Required: true,
+		},
+		"skill_id": {
+			Type: schema.String,
+			Desc: "Current skill id when the call is bound to a skill.",
+		},
+		"stage_key": {
+			Type: schema.String,
+			Desc: "Current workflow stage key.",
+		},
+		"request_id": {
+			Type:     schema.String,
+			Desc:     "Stable request id for this tool call.",
+			Required: true,
+		},
+		"idempotency_key": {
+			Type:     schema.String,
+			Desc:     "Stable key used to deduplicate retries and correlate UI state.",
+			Required: true,
+		},
+		"expected_spec_version": {
+			Type: schema.Integer,
+			Desc: "Expected Final Video Spec version for optimistic concurrency.",
+		},
+		"expected_storyboard_version": {
+			Type: schema.Integer,
+			Desc: "Expected storyboard version for optimistic concurrency.",
+		},
+		"action": {
+			Type:     schema.String,
+			Desc:     "Business action name for this tool call.",
+			Required: true,
+		},
+		"payload": {
+			Type:      schema.Object,
+			Desc:      "Business payload for the tool. Put all tool-specific fields here.",
+			Required:  true,
+			SubParams: payload,
+		},
+	}
 }
 
 // ToolResultEnvelope is the stable result shape returned by business tools.

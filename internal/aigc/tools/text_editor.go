@@ -58,7 +58,7 @@ func (TextEditorTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: TextEditorToolKey,
 		Desc: "Create or update structured text documents for the AIGC flow. Demo supports final_video_spec: title, type, aspect ratio, duration, visual style, sound style, model preferences, and the canonical Final_Video_Spec.md markdown.",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+		ParamsOneOf: schema.NewParamsOneOfByParams(toolInvocationEnvelopeParams(map[string]*schema.ParameterInfo{
 			"document_type": {
 				Type:     schema.String,
 				Desc:     "Document type. Use final_video_spec for Final_Video_Spec.md.",
@@ -95,7 +95,7 @@ func (TextEditorTool) Info(context.Context) (*schema.ToolInfo, error) {
 				Desc: "Spec status: draft, reviewing, or confirmed.",
 				Enum: []string{spec.StatusDraft, spec.StatusReviewing, spec.StatusConfirmed},
 			},
-		}),
+		})),
 	}, nil
 }
 
@@ -162,22 +162,9 @@ func (t TextEditorTool) InvokableRun(ctx context.Context, argumentsInJSON string
 }
 
 func decodeTextEditorInvocation(argumentsInJSON string) (ToolInvocationEnvelope[TextEditorPayload], error) {
-	var enveloped ToolInvocationEnvelope[TextEditorPayload]
-	if err := json.Unmarshal([]byte(argumentsInJSON), &enveloped); err == nil && enveloped.Payload.DocumentType != "" {
-		return enveloped, nil
-	}
-
-	var direct TextEditorPayload
-	if err := json.Unmarshal([]byte(argumentsInJSON), &direct); err != nil {
-		return ToolInvocationEnvelope[TextEditorPayload]{}, fmt.Errorf("decode text editor input: %w", err)
-	}
-	return ToolInvocationEnvelope[TextEditorPayload]{
-		SessionID:      direct.SessionID,
-		RequestID:      "direct",
-		IdempotencyKey: direct.SpecID,
-		Action:         "write_text_document",
-		Payload:        direct,
-	}, nil
+	return decodeToolInvocationEnvelope(TextEditorToolKey, argumentsInJSON, func(payload TextEditorPayload) bool {
+		return strings.TrimSpace(payload.DocumentType) != ""
+	})
 }
 
 func firstNonEmpty(values ...string) string {

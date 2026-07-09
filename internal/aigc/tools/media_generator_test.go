@@ -66,8 +66,10 @@ func TestMediaGeneratorToolPassesDispatcher(t *testing.T) {
 
 	args := ToolInvocationEnvelope[MediaGeneratorPayload]{
 		SessionID:                 "session-1",
+		RequestID:                 "request-1",
 		IdempotencyKey:            "idem-1",
 		ExpectedStoryboardVersion: 7,
+		Action:                    "generate_element_assets",
 		Payload: MediaGeneratorPayload{
 			StoryboardID: "storyboard-1",
 			TargetType:   generation.TargetKeyElement,
@@ -86,6 +88,17 @@ func TestMediaGeneratorToolPassesDispatcher(t *testing.T) {
 	}
 	if len(dispatcher.jobs) != 1 || dispatcher.jobs[0].ID != "job-1" || dispatcher.jobs[0].Provider != generation.ProviderImage2 {
 		t.Fatalf("jobs = %#v", dispatcher.jobs)
+	}
+}
+
+func TestMediaGeneratorToolRejectsDirectPayload(t *testing.T) {
+	tool := NewMediaGeneratorTool(MediaGeneratorToolConfig{
+		Checkpoints: mediagraph.NewMemoryCheckpointStore(),
+	})
+
+	_, err := tool.InvokableRun(context.Background(), `{"storyboard_id":"storyboard-1","target_type":"all","media_kinds":["image"]}`)
+	if err == nil {
+		t.Fatal("expected direct payload to be rejected")
 	}
 }
 

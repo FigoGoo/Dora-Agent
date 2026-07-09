@@ -14,6 +14,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/tools"
 )
 
+// SeedanceJobHandlerConfig 汇总后台 Seedance 视频生成任务所需的配置和依赖。
 type SeedanceJobHandlerConfig struct {
 	APIKey          string
 	Endpoint        string
@@ -26,16 +27,19 @@ type SeedanceJobHandlerConfig struct {
 	MaxPollAttempts int
 }
 
+// SeedanceJobHandler 把队列中的视频生成任务委托给 Seedance tool 执行。
 type SeedanceJobHandler struct {
 	tool   tools.SeedanceGenerateTool
 	assets SeedanceJobAssetStore
 }
 
+// SeedanceJobAssetStore 扩展 Seedance tool 的素材存储能力，用于读取已绑定素材详情。
 type SeedanceJobAssetStore interface {
 	tools.SeedanceAssetStore
 	Get(ctx context.Context, assetID string) (asset.Asset, error)
 }
 
+// NewSeedanceJobHandler 创建 Seedance 后台任务处理器。
 func NewSeedanceJobHandler(cfg SeedanceJobHandlerConfig) SeedanceJobHandler {
 	return SeedanceJobHandler{
 		tool:   tools.NewSeedanceGenerateTool(toSeedanceToolConfig(cfg)),
@@ -43,6 +47,7 @@ func NewSeedanceJobHandler(cfg SeedanceJobHandlerConfig) SeedanceJobHandler {
 	}
 }
 
+// Handle 执行单个 Seedance 任务，并返回已持久化视频资产和业务结果。
 func (h SeedanceJobHandler) Handle(ctx context.Context, job generation.GenerationJob) (generation.HandlerResult, error) {
 	input, err := h.seedanceInputFromJob(ctx, job)
 	if err != nil {
@@ -85,12 +90,12 @@ func (h SeedanceJobHandler) Handle(ctx context.Context, job generation.Generatio
 			"provider_status":    result.Data.ProviderStatus,
 			"url":                result.Data.URL,
 			"storyboard_updates": result.Data.StoryboardUpdates,
-			"render_events":      result.Data.RenderEvents,
 			"model":              result.Data.Model,
 		},
 	}, nil
 }
 
+// toSeedanceToolConfig 把后台任务配置转换成可复用的 Seedance tool 配置。
 func toSeedanceToolConfig(cfg SeedanceJobHandlerConfig) tools.SeedanceToolConfig {
 	return tools.SeedanceToolConfig{
 		APIKey:          cfg.APIKey,
@@ -105,6 +110,7 @@ func toSeedanceToolConfig(cfg SeedanceJobHandlerConfig) tools.SeedanceToolConfig
 	}
 }
 
+// seedanceInputFromJob 从任务 payload 中解析视频生成输入，并补齐引用素材。
 func (h SeedanceJobHandler) seedanceInputFromJob(ctx context.Context, job generation.GenerationJob) (tools.SeedanceGenerateInput, error) {
 	var input tools.SeedanceGenerateInput
 	raw, err := json.Marshal(job.Payload)
@@ -129,6 +135,7 @@ func (h SeedanceJobHandler) seedanceInputFromJob(ctx context.Context, job genera
 	return input, nil
 }
 
+// addBoundAssetReferences 把故事板已绑定素材转换成 Seedance 可用的参考 URL。
 func (h SeedanceJobHandler) addBoundAssetReferences(ctx context.Context, payload map[string]any, input *tools.SeedanceGenerateInput) error {
 	if h.assets == nil {
 		return nil
@@ -153,6 +160,7 @@ func (h SeedanceJobHandler) addBoundAssetReferences(ctx context.Context, payload
 	return nil
 }
 
+// boundAssetIDs 从任务 payload 中解析需要作为参考的素材 ID 列表。
 func boundAssetIDs(payload map[string]any) []string {
 	if payload == nil {
 		return nil
@@ -183,6 +191,7 @@ func boundAssetIDs(payload map[string]any) []string {
 	}
 }
 
+// appendMissingString 追加非空且未重复的字符串。
 func appendMissingString(values []string, next string) []string {
 	next = strings.TrimSpace(next)
 	if next == "" {
@@ -196,6 +205,7 @@ func appendMissingString(values []string, next string) []string {
 	return append(values, next)
 }
 
+// seedanceFilenamePrefix 为持久化视频生成稳定文件名前缀。
 func seedanceFilenamePrefix(job generation.GenerationJob) string {
 	if strings.TrimSpace(job.TargetID) == "" {
 		return "seedance"

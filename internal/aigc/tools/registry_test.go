@@ -35,11 +35,23 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestEchoTool(t *testing.T) {
-	out, err := EchoTool{}.InvokableRun(context.Background(), `{"message":"hello"}`)
+	out, err := EchoTool{}.InvokableRun(context.Background(), `{
+		"session_id":"s1",
+		"request_id":"req-1",
+		"idempotency_key":"idem-1",
+		"action":"echo",
+		"payload":{"message":"hello"}
+	}`)
 	if err != nil {
 		t.Fatalf("InvokableRun() error = %v", err)
 	}
 	if out != `{"message":"hello"}` {
 		t.Fatalf("unexpected output: %s", out)
+	}
+}
+
+func TestEchoToolRejectsDirectPayload(t *testing.T) {
+	if _, err := (EchoTool{}).InvokableRun(context.Background(), `{"message":"hello"}`); err == nil {
+		t.Fatal("expected direct payload to be rejected")
 	}
 }

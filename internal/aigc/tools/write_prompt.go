@@ -18,20 +18,22 @@ import (
 const (
 	promptStatusReady        = "prompt_ready"
 	promptMaxReturnedExcerpt = 24
-	renderEventSurfaceUpdate = "a2ui.surface_update"
 )
 
+// PromptSpecStore 定义提示词生成读取 Final Video Spec 所需能力。
 type PromptSpecStore interface {
 	Get(ctx context.Context, specID string) (spec.FinalVideoSpec, error)
 	GetLatestBySession(ctx context.Context, sessionID string) (spec.FinalVideoSpec, error)
 }
 
+// PromptStoryboardStore 定义提示词生成读取和 patch 故事板所需能力。
 type PromptStoryboardStore interface {
 	Get(ctx context.Context, storyboardID string) (storyboard.Storyboard, error)
 	GetLatestBySession(ctx context.Context, sessionID string) (storyboard.Storyboard, error)
 	ApplyPatch(ctx context.Context, req storyboard.PatchRequest) (storyboard.Storyboard, storyboard.EventRecord, error)
 }
 
+// WritePromptToolConfig 汇总提示词生成工具的模型和存储依赖。
 type WritePromptToolConfig struct {
 	Model       einomodel.BaseChatModel
 	Specs       PromptSpecStore
@@ -39,10 +41,12 @@ type WritePromptToolConfig struct {
 	NewEventID  func() string
 }
 
+// WritePromptTool 根据规格和故事板上下文生成模型提示词，并把结果写回故事板。
 type WritePromptTool struct {
 	cfg WritePromptToolConfig
 }
 
+// WritePromptPayload 是 Agent 请求生成或改写提示词时传入的业务参数。
 type WritePromptPayload struct {
 	SessionID      string   `json:"session_id,omitempty"`
 	SpecID         string   `json:"spec_id,omitempty"`
@@ -55,18 +59,19 @@ type WritePromptPayload struct {
 	ExtraDirection string   `json:"extra_direction,omitempty"`
 }
 
+// WritePromptResult 是提示词工具返回给 Agent 的轻量业务结果。
 type WritePromptResult struct {
 	SessionID         string               `json:"session_id"`
 	SpecID            string               `json:"spec_id,omitempty"`
 	StoryboardID      string               `json:"storyboard_id"`
 	PromptPurpose     string               `json:"prompt_purpose,omitempty"`
 	UpdatedTargets    []PromptTargetResult `json:"updated_targets"`
-	RenderEvents      []RenderEventHint    `json:"render_events,omitempty"`
 	Summary           string               `json:"summary"`
 	StoryboardVersion int                  `json:"storyboard_version"`
 	Metadata          map[string]any       `json:"metadata,omitempty"`
 }
 
+// PromptTargetResult 描述单个故事板目标的提示词写入位置和摘要。
 type PromptTargetResult struct {
 	TargetType    string `json:"target_type"`
 	TargetID      string `json:"target_id"`
@@ -75,6 +80,7 @@ type PromptTargetResult struct {
 	PromptExcerpt string `json:"prompt_excerpt,omitempty"`
 }
 
+// promptTarget 是内部用于喂给 LLM 的故事板目标上下文。
 type promptTarget struct {
 	Type       string         `json:"target_type"`
 	ID         string         `json:"target_id"`
@@ -83,24 +89,28 @@ type promptTarget struct {
 	Context    map[string]any `json:"context"`
 }
 
+// promptModelResponse 是提示词模型返回 JSON 的顶层结构。
 type promptModelResponse struct {
 	Prompts []promptModelItem `json:"prompts"`
 }
 
+// promptModelItem 是提示词模型返回的单个目标提示词。
 type promptModelItem struct {
 	TargetType string `json:"target_type"`
 	TargetID   string `json:"target_id"`
 	Prompt     string `json:"prompt"`
 }
 
+// NewWritePromptTool 创建提示词生成工具。
 func NewWritePromptTool(cfg WritePromptToolConfig) WritePromptTool {
 	return WritePromptTool{cfg: cfg}
 }
 
+// Info 返回 Eino 工具元信息和参数 schema。
 func (WritePromptTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: WritePromptToolKey,
-		Desc: "Use DeepSeek to write compact generation prompts for storyboard key elements, shots, or audio layers. When stores are configured it reads Final Video Spec and storyboard context, writes prompts back through storyboard patches, and returns only lightweight business/render hints.",
+		Desc: "Use DeepSeek to write compact generation prompts for storyboard key elements, shots, or audio layers. When stores are configured it reads Final Video Spec and storyboard context, writes prompts back through storyboard patches, and returns only lightweight business hints.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(commonPipelineParams(map[string]*schema.ParameterInfo{
 			"storyboard_id": {
 				Type: schema.String,
@@ -135,6 +145,7 @@ func (WritePromptTool) Info(context.Context) (*schema.ToolInfo, error) {
 	}, nil
 }
 
+// InvokableRun 生成提示词并以 storyboard patch 写回，工具结果只返回业务摘要。
 func (t WritePromptTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...einotool.Option) (string, error) {
 	if t.cfg.Model == nil || t.cfg.Storyboards == nil {
 		return pipelineToolResult(WritePromptToolKey, "prompt_ready", argumentsInJSON)
@@ -190,8 +201,6 @@ func (t WritePromptTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	if err != nil {
 		return "", err
 	}
-	renderEvents := promptRenderEvents(event, updatedTargets)
-
 	out, err := json.Marshal(ToolResultEnvelope[WritePromptResult]{
 		Status:            ToolStatusOK,
 		RequestID:         invocation.RequestID,
@@ -205,7 +214,6 @@ func (t WritePromptTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 			StoryboardID:      board.ID,
 			PromptPurpose:     strings.TrimSpace(invocation.Payload.PromptPurpose),
 			UpdatedTargets:    updatedTargets,
-			RenderEvents:      renderEvents,
 			Summary:           fmt.Sprintf("prepared %d generation prompt(s)", len(updatedTargets)),
 			StoryboardVersion: patched.Version,
 		},
@@ -216,28 +224,25 @@ func (t WritePromptTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	return string(out), nil
 }
 
+// decodeWritePromptInvocation 只接受标准工具 envelope，提示词参数必须放入 payload。
 func decodeWritePromptInvocation(argumentsInJSON string) (ToolInvocationEnvelope[WritePromptPayload], error) {
-	var enveloped ToolInvocationEnvelope[WritePromptPayload]
-	if err := json.Unmarshal([]byte(argumentsInJSON), &enveloped); err == nil && (enveloped.Payload.StoryboardID != "" || enveloped.Payload.TargetType != "" || enveloped.Payload.TargetID != "" || len(enveloped.Payload.TargetIDs) > 0 || enveloped.Payload.Prompt != "") {
-		return enveloped, nil
+	invocation, err := decodeToolInvocationEnvelope(WritePromptToolKey, argumentsInJSON, func(payload WritePromptPayload) bool {
+		return strings.TrimSpace(payload.StoryboardID) != "" ||
+			strings.TrimSpace(payload.TargetType) != "" ||
+			strings.TrimSpace(payload.TargetID) != "" ||
+			len(payload.TargetIDs) > 0 ||
+			strings.TrimSpace(payload.Prompt) != ""
+	})
+	if err != nil {
+		return ToolInvocationEnvelope[WritePromptPayload]{}, err
 	}
-
-	var direct WritePromptPayload
-	if err := json.Unmarshal([]byte(argumentsInJSON), &direct); err != nil {
-		return ToolInvocationEnvelope[WritePromptPayload]{}, fmt.Errorf("decode write prompt input: %w", err)
+	if invocation.Payload.TargetID != "" && len(invocation.Payload.TargetIDs) == 0 {
+		invocation.Payload.TargetIDs = []string{invocation.Payload.TargetID}
 	}
-	if direct.TargetID != "" && len(direct.TargetIDs) == 0 {
-		direct.TargetIDs = []string{direct.TargetID}
-	}
-	return ToolInvocationEnvelope[WritePromptPayload]{
-		SessionID:      direct.SessionID,
-		RequestID:      "direct",
-		IdempotencyKey: firstNonEmpty(direct.StoryboardID, direct.TargetID),
-		Action:         "write_prompts",
-		Payload:        direct,
-	}, nil
+	return invocation, nil
 }
 
+// loadPromptStoryboard 优先按 ID 读取故事板，未指定时读取会话最新故事板。
 func loadPromptStoryboard(ctx context.Context, store PromptStoryboardStore, sessionID string, storyboardID string) (storyboard.Storyboard, error) {
 	storyboardID = strings.TrimSpace(storyboardID)
 	if storyboardID != "" {
@@ -246,6 +251,7 @@ func loadPromptStoryboard(ctx context.Context, store PromptStoryboardStore, sess
 	return store.GetLatestBySession(ctx, sessionID)
 }
 
+// loadPromptSpec 优先按 ID 读取 Final Video Spec，失败时退回会话最新规格。
 func loadPromptSpec(ctx context.Context, store PromptSpecStore, sessionID string, specID string) spec.FinalVideoSpec {
 	if store == nil {
 		return spec.FinalVideoSpec{}
@@ -262,6 +268,7 @@ func loadPromptSpec(ctx context.Context, store PromptSpecStore, sessionID string
 	return spec.FinalVideoSpec{}
 }
 
+// generatePrompts 调用模型为目标生成提示词；单目标显式 prompt 会直接复用。
 func (t WritePromptTool) generatePrompts(ctx context.Context, finalSpec spec.FinalVideoSpec, board storyboard.Storyboard, payload WritePromptPayload, targets []promptTarget) ([]promptModelItem, error) {
 	if strings.TrimSpace(payload.Prompt) != "" && len(targets) == 1 {
 		return []promptModelItem{{
@@ -324,6 +331,7 @@ func (t WritePromptTool) generatePrompts(ctx context.Context, finalSpec spec.Fin
 	return parsed.Prompts, nil
 }
 
+// decodePromptModelResponse 解析模型返回 JSON，并在有包裹文本时抽取 JSON 对象。
 func decodePromptModelResponse(content string) (promptModelResponse, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -347,6 +355,7 @@ func decodePromptModelResponse(content string) (promptModelResponse, error) {
 	return parsed, nil
 }
 
+// selectPromptTargets 根据 target_type 和 target_ids 从故事板中选出提示词写入目标。
 func selectPromptTargets(board storyboard.Storyboard, payload WritePromptPayload) ([]promptTarget, error) {
 	targetType := normalizePromptTargetType(payload.TargetType)
 	ids := promptTargetIDSet(payload)
@@ -416,6 +425,7 @@ func selectPromptTargets(board storyboard.Storyboard, payload WritePromptPayload
 	return out, nil
 }
 
+// promptTargetIDSet 汇总 target_id 和 target_ids，生成目标过滤集合。
 func promptTargetIDSet(payload WritePromptPayload) map[string]bool {
 	ids := append([]string(nil), payload.TargetIDs...)
 	if strings.TrimSpace(payload.TargetID) != "" {
@@ -431,6 +441,7 @@ func promptTargetIDSet(payload WritePromptPayload) map[string]bool {
 	return out
 }
 
+// normalizePromptTargetType 归一化故事板目标类型别名。
 func normalizePromptTargetType(targetType string) string {
 	switch strings.TrimSpace(targetType) {
 	case "key_element", "key_elements", "element", "elements":
@@ -446,6 +457,7 @@ func normalizePromptTargetType(targetType string) string {
 	}
 }
 
+// defaultPromptPurpose 根据目标类型推断默认提示词用途。
 func defaultPromptPurpose(targetType string) string {
 	switch normalizePromptTargetType(targetType) {
 	case "key_element":
@@ -459,6 +471,7 @@ func defaultPromptPurpose(targetType string) string {
 	}
 }
 
+// promptPatchOps 把模型提示词转换成故事板 JSON Patch 和返回摘要。
 func promptPatchOps(targets []promptTarget, prompts []promptModelItem) ([]JSONPatchOp, []PromptTargetResult, error) {
 	promptByTarget := map[string]string{}
 	for _, item := range prompts {
@@ -492,27 +505,12 @@ func promptPatchOps(targets []promptTarget, prompts []promptModelItem) ([]JSONPa
 	return ops, results, nil
 }
 
+// promptTargetKey 生成目标类型和目标 ID 的稳定组合 key。
 func promptTargetKey(targetType string, targetID string) string {
 	return strings.TrimSpace(targetType) + "\x00" + strings.TrimSpace(targetID)
 }
 
-func promptRenderEvents(event storyboard.EventRecord, updatedTargets []PromptTargetResult) []RenderEventHint {
-	return []RenderEventHint{{
-		Event:        renderEventSurfaceUpdate,
-		SurfaceID:    "storyboard",
-		DataModelKey: "storyboard",
-		Payload: map[string]any{
-			"message":          "提示词已写入故事板",
-			"storyboard_id":    event.StoryboardID,
-			"base_version":     event.BaseVersion,
-			"next_version":     event.NextVersion,
-			"source":           event.Source,
-			"updated_targets":  updatedTargets,
-			"redacted_payload": true,
-		},
-	}}
-}
-
+// truncateString 截断字符串到指定 rune 长度，避免工具结果返回过长 prompt。
 func truncateString(value string, maxRunes int) string {
 	value = strings.TrimSpace(value)
 	if maxRunes <= 0 || utf8.RuneCountInString(value) <= maxRunes {

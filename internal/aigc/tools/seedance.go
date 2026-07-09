@@ -27,6 +27,7 @@ const (
 	DefaultSeedancePollAttempts  = 120
 )
 
+// SeedanceToolConfig 汇总 Seedance 视频生成工具的 provider、存储和轮询配置。
 type SeedanceToolConfig struct {
 	APIKey          string
 	Endpoint        string
@@ -39,18 +40,22 @@ type SeedanceToolConfig struct {
 	MaxPollAttempts int
 }
 
+// SeedanceGenerateTool 是 Eino 可调用的视频生成工具，返回素材摘要而不是 UI 事件。
 type SeedanceGenerateTool struct {
 	cfg SeedanceToolConfig
 }
 
+// SeedanceAssetStore 定义视频生成结果写入素材表所需能力。
 type SeedanceAssetStore interface {
 	Save(ctx context.Context, record asset.Asset) (asset.Asset, error)
 }
 
+// SeedanceAssetUploader 定义视频生成结果上传对象存储所需能力。
 type SeedanceAssetUploader interface {
 	Upload(ctx context.Context, input asset.UploadInput) (asset.UploadResult, error)
 }
 
+// SeedanceGenerateInput 是 Agent 调用视频生成工具时传入的业务参数。
 type SeedanceGenerateInput struct {
 	SessionID          string   `json:"session_id,omitempty"`
 	UserID             string   `json:"user_id,omitempty"`
@@ -68,6 +73,7 @@ type SeedanceGenerateInput struct {
 	ReferenceAudioURLs []string `json:"reference_audio_urls,omitempty"`
 }
 
+// SeedanceGenerateResult 是视频生成工具返回给 Agent 的紧凑业务结果。
 type SeedanceGenerateResult struct {
 	Model             string                 `json:"model"`
 	ProviderTaskID    string                 `json:"provider_task_id"`
@@ -80,14 +86,15 @@ type SeedanceGenerateResult struct {
 	ObjectKey         string                 `json:"object_key,omitempty"`
 	Assets            []GeneratedAssetInfo   `json:"assets,omitempty"`
 	StoryboardUpdates []StoryboardUpdateHint `json:"storyboard_updates,omitempty"`
-	RenderEvents      []RenderEventHint      `json:"render_events,omitempty"`
 }
 
+// seedanceAPIRequest 是发送给 Seedance provider 的任务创建请求体。
 type seedanceAPIRequest struct {
 	Model   string            `json:"model"`
 	Content []seedanceContent `json:"content"`
 }
 
+// seedanceContent 表示 Seedance 多模态 content 数组中的一个输入块。
 type seedanceContent struct {
 	Type     string              `json:"type"`
 	Text     string              `json:"text,omitempty"`
@@ -97,14 +104,17 @@ type seedanceContent struct {
 	Role     string              `json:"role,omitempty"`
 }
 
+// seedanceURLContent 表示 Seedance 参考素材 URL。
 type seedanceURLContent struct {
 	URL string `json:"url"`
 }
 
+// seedanceCreateResponse 是 Seedance 创建任务响应的最小解析结构。
 type seedanceCreateResponse struct {
 	ID string `json:"id"`
 }
 
+// seedanceTaskResponse 是 Seedance 查询任务响应的最小解析结构。
 type seedanceTaskResponse struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
@@ -115,11 +125,13 @@ type seedanceTaskResponse struct {
 	Error *seedanceProviderError `json:"error,omitempty"`
 }
 
+// seedanceProviderError 描述 Seedance provider 返回的任务错误。
 type seedanceProviderError struct {
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
 }
 
+// NewSeedanceGenerateTool 创建视频生成工具，并补齐 endpoint、HTTP client、轮询和 ID 默认值。
 func NewSeedanceGenerateTool(cfg SeedanceToolConfig) SeedanceGenerateTool {
 	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
 	cfg.Endpoint = strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
@@ -144,15 +156,12 @@ func NewSeedanceGenerateTool(cfg SeedanceToolConfig) SeedanceGenerateTool {
 	return SeedanceGenerateTool{cfg: cfg}
 }
 
+// Info 返回 Eino 工具元信息和参数 schema，供 Agent 正确构造调用参数。
 func (SeedanceGenerateTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: SeedanceGenerateVideoToolKey,
-		Desc: "Generate video assets with Volcengine Ark Seedance. Provider payloads are never returned to the Agent; the result only contains compact asset, storyboard, and render hints.",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"session_id": {
-				Type: schema.String,
-				Desc: "Current AIGC session id. Required when generated videos should be persisted as assets.",
-			},
+		Desc: "Generate video assets with Volcengine Ark Seedance. Provider payloads are never returned to the Agent; the result only contains compact asset and storyboard hints.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(toolInvocationEnvelopeParams(map[string]*schema.ParameterInfo{
 			"user_id": {
 				Type: schema.String,
 				Desc: "Current user id, if available.",
@@ -191,16 +200,21 @@ func (SeedanceGenerateTool) Info(context.Context) (*schema.ToolInfo, error) {
 				Type: schema.Integer,
 				Desc: "Output frames per second.",
 			},
-		}),
+		})),
 	}, nil
 }
 
+// InvokableRun 创建并轮询 Seedance 任务，必要时持久化视频资产。
 func (t SeedanceGenerateTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...einotool.Option) (string, error) {
 	invocation, err := decodeSeedanceInvocation(argumentsInJSON)
 	if err != nil {
 		return "", err
 	}
-	input, err := normalizeSeedanceInput(invocation.Payload)
+	payload := invocation.Payload
+	if strings.TrimSpace(payload.SessionID) == "" {
+		payload.SessionID = invocation.SessionID
+	}
+	input, err := normalizeSeedanceInput(payload)
 	if err != nil {
 		return "", err
 	}
@@ -239,7 +253,6 @@ func (t SeedanceGenerateTool) InvokableRun(ctx context.Context, argumentsInJSON 
 		result.Assets = seedanceGeneratedAssets(input, result)
 	}
 	result.StoryboardUpdates = generativeStoryboardUpdates(result.Assets)
-	result.RenderEvents = generativeRenderEvents(result.Assets, result.StoryboardUpdates)
 
 	out, err := json.Marshal(ToolResultEnvelope[SeedanceGenerateResult]{
 		Status:         ToolStatusOK,
@@ -254,6 +267,7 @@ func (t SeedanceGenerateTool) InvokableRun(ctx context.Context, argumentsInJSON 
 	return string(out), nil
 }
 
+// createTask 调用 Seedance provider 创建异步视频生成任务。
 func (t SeedanceGenerateTool) createTask(ctx context.Context, input SeedanceGenerateInput) (string, error) {
 	body, err := json.Marshal(seedanceAPIRequest{
 		Model:   input.Model,
@@ -289,6 +303,7 @@ func (t SeedanceGenerateTool) createTask(ctx context.Context, input SeedanceGene
 	return out.ID, nil
 }
 
+// pollTask 按配置轮询 Seedance 任务，直到成功、失败或超时。
 func (t SeedanceGenerateTool) pollTask(ctx context.Context, taskID string) (seedanceTaskResponse, error) {
 	var last seedanceTaskResponse
 	for attempt := 0; attempt < t.cfg.MaxPollAttempts; attempt++ {
@@ -320,6 +335,7 @@ func (t SeedanceGenerateTool) pollTask(ctx context.Context, taskID string) (seed
 	return seedanceTaskResponse{}, fmt.Errorf("seedance task %s did not finish after %d polls, last status %q", taskID, t.cfg.MaxPollAttempts, last.Status)
 }
 
+// getTask 查询单个 Seedance 任务的当前状态。
 func (t SeedanceGenerateTool) getTask(ctx context.Context, taskID string) (seedanceTaskResponse, error) {
 	queryURL := t.cfg.Endpoint + "/" + url.PathEscape(strings.TrimSpace(taskID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, queryURL, nil)
@@ -344,21 +360,14 @@ func (t SeedanceGenerateTool) getTask(ctx context.Context, taskID string) (seeda
 	return out, nil
 }
 
+// decodeSeedanceInvocation 只接受标准工具 envelope，视频生成参数必须放入 payload。
 func decodeSeedanceInvocation(argumentsInJSON string) (ToolInvocationEnvelope[SeedanceGenerateInput], error) {
-	var enveloped ToolInvocationEnvelope[SeedanceGenerateInput]
-	if err := json.Unmarshal([]byte(argumentsInJSON), &enveloped); err == nil && enveloped.Payload.Prompt != "" {
-		return enveloped, nil
-	}
-
-	var direct SeedanceGenerateInput
-	if err := json.Unmarshal([]byte(argumentsInJSON), &direct); err != nil {
-		return ToolInvocationEnvelope[SeedanceGenerateInput]{}, fmt.Errorf("decode seedance input: %w", err)
-	}
-	return ToolInvocationEnvelope[SeedanceGenerateInput]{
-		Payload: direct,
-	}, nil
+	return decodeToolInvocationEnvelope(SeedanceGenerateVideoToolKey, argumentsInJSON, func(payload SeedanceGenerateInput) bool {
+		return strings.TrimSpace(payload.Prompt) != ""
+	})
 }
 
+// normalizeSeedanceInput 清理视频生成输入，并补齐默认模型和参考 URL 列表。
 func normalizeSeedanceInput(input SeedanceGenerateInput) (SeedanceGenerateInput, error) {
 	input.SessionID = strings.TrimSpace(input.SessionID)
 	input.UserID = strings.TrimSpace(input.UserID)
@@ -387,6 +396,7 @@ func normalizeSeedanceInput(input SeedanceGenerateInput) (SeedanceGenerateInput,
 	return input, nil
 }
 
+// seedanceContents 把 prompt 和参考素材 URL 转成 Seedance 多模态 content。
 func seedanceContents(input SeedanceGenerateInput) []seedanceContent {
 	out := []seedanceContent{{
 		Type: "text",
@@ -416,6 +426,7 @@ func seedanceContents(input SeedanceGenerateInput) []seedanceContent {
 	return out
 }
 
+// seedancePromptText 把比例、帧率、时长和分辨率参数附加到 Seedance prompt。
 func seedancePromptText(input SeedanceGenerateInput) string {
 	parts := []string{input.Prompt}
 	if input.Ratio != "" {
@@ -433,10 +444,12 @@ func seedancePromptText(input SeedanceGenerateInput) string {
 	return strings.Join(parts, " ")
 }
 
+// shouldPersistAsset 判断本次视频结果是否具备上传和入库条件。
 func (t SeedanceGenerateTool) shouldPersistAsset(input SeedanceGenerateInput) bool {
 	return t.cfg.Assets != nil && t.cfg.AssetUploader != nil && input.SessionID != ""
 }
 
+// persistVideo 下载 provider 视频，上传对象存储并保存素材记录。
 func (t SeedanceGenerateTool) persistVideo(ctx context.Context, input SeedanceGenerateInput, result SeedanceGenerateResult, providerVideoURL string) (SeedanceGenerateResult, error) {
 	raw, mediaType, err := t.downloadVideo(ctx, providerVideoURL)
 	if err != nil {
@@ -515,6 +528,7 @@ func (t SeedanceGenerateTool) persistVideo(ctx context.Context, input SeedanceGe
 	return result, nil
 }
 
+// seedanceGeneratedAssets 把 Seedance 结果转换成 Agent 可消费的素材摘要。
 func seedanceGeneratedAssets(input SeedanceGenerateInput, result SeedanceGenerateResult) []GeneratedAssetInfo {
 	status := "generated_not_persisted"
 	if strings.TrimSpace(result.AssetID) != "" {
@@ -535,6 +549,7 @@ func seedanceGeneratedAssets(input SeedanceGenerateInput, result SeedanceGenerat
 	}}
 }
 
+// safeSeedanceAssetURL 只在视频已持久化后向 Agent 暴露可用 URL。
 func safeSeedanceAssetURL(result SeedanceGenerateResult) string {
 	if strings.TrimSpace(result.AssetID) == "" {
 		return ""
@@ -542,6 +557,7 @@ func safeSeedanceAssetURL(result SeedanceGenerateResult) string {
 	return strings.TrimSpace(result.URL)
 }
 
+// downloadVideo 从 provider URL 下载生成视频并返回媒体类型。
 func (t SeedanceGenerateTool) downloadVideo(ctx context.Context, rawURL string) ([]byte, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(rawURL), nil)
 	if err != nil {
@@ -563,6 +579,7 @@ func (t SeedanceGenerateTool) downloadVideo(ctx context.Context, rawURL string) 
 	return raw, strings.TrimSpace(resp.Header.Get("Content-Type")), nil
 }
 
+// seedanceAssetFilename 根据前缀和媒体类型生成视频文件名。
 func seedanceAssetFilename(prefix string, mediaType string) string {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {
@@ -581,6 +598,7 @@ func seedanceAssetFilename(prefix string, mediaType string) string {
 	return prefix + "." + ext
 }
 
+// normalizeURLList 清理参考素材 URL 列表并移除空字符串。
 func normalizeURLList(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -592,6 +610,7 @@ func normalizeURLList(values []string) []string {
 	return out
 }
 
+// defaultSeedanceAssetID 生成视频素材默认 ID，随机源失败时使用时间戳兜底。
 func defaultSeedanceAssetID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err == nil {

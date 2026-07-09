@@ -94,8 +94,8 @@ func TestSeedanceJobHandlerGeneratesAndPersistsAsset(t *testing.T) {
 	if updates, ok := result.Result["storyboard_updates"].([]tools.StoryboardUpdateHint); !ok || len(updates) != 1 || updates[0].Field != "video_asset_id" {
 		t.Fatalf("storyboard updates = %#v", result.Result["storyboard_updates"])
 	}
-	if events, ok := result.Result["render_events"].([]tools.RenderEventHint); !ok || len(events) == 0 {
-		t.Fatalf("render events = %#v", result.Result["render_events"])
+	if _, ok := result.Result["render_events"]; ok {
+		t.Fatalf("handler result should not include render events: %#v", result.Result)
 	}
 	if string(uploader.body) != "mp4bytes" {
 		t.Fatalf("uploaded body = %q", string(uploader.body))

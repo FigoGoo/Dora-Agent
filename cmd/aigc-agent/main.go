@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	einomodel "github.com/cloudwego/eino/components/model"
 
 	aigca2ui "github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
 	aigcagent "github.com/FigoGoo/Dora-Agent/internal/aigc/agent"
@@ -141,7 +142,13 @@ func main() {
 		slog.Error("create aigc chatmodel agent", "error", err)
 		os.Exit(1)
 	}
-	runnerInvoker := aigcserver.NewRunnerInvoker(runner)
+	runnerInvoker := aigcserver.NewRunnerInvoker(
+		runner,
+		aigcserver.WithRunnerChatModelOptions(
+			einomodel.WithMaxTokens(8192),
+			einomodel.WithTemperature(0.2),
+		),
+	)
 	wakeupRunner := aigcserver.NewJobWakeupRunner(aigcserver.JobWakeupRunnerConfig{
 		Store:         sessionStore,
 		Invoker:       runnerInvoker,

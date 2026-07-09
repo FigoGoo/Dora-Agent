@@ -11,6 +11,7 @@ import (
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
 	aigcconfig "github.com/FigoGoo/Dora-Agent/internal/aigc/config"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/spec"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/storyboard"
@@ -44,7 +45,7 @@ func TestAIGCGenModelInputKeepsLiteralA2UIJSONWithSessionValues(t *testing.T) {
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          "test-aigc-agent",
 		Description:   "test",
-		Instruction:   a2UIProtocolInstruction,
+		Instruction:   a2ui.AgentInstruction(),
 		Model:         model,
 		GenModelInput: aigcGenModelInput,
 	})
@@ -67,8 +68,11 @@ func TestAIGCGenModelInputKeepsLiteralA2UIJSONWithSessionValues(t *testing.T) {
 	if model.input[0].Role != schema.System {
 		t.Fatalf("first model message role = %s, want system", model.input[0].Role)
 	}
-	if !strings.Contains(model.input[0].Content, `{"a2ui_events":[`) {
+	if !strings.Contains(model.input[0].Content, `{"a2ui_version":"1.0","actions":[`) {
 		t.Fatalf("system instruction lost literal A2UI JSON: %s", model.input[0].Content)
+	}
+	if strings.Contains(model.input[0].Content, `{"a2ui_events":[`) {
+		t.Fatalf("system instruction still teaches legacy A2UI JSON: %s", model.input[0].Content)
 	}
 }
 

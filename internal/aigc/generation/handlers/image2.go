@@ -14,6 +14,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/tools"
 )
 
+// Image2JobHandlerConfig 汇总后台 Image2 生成任务所需的工具配置和存储依赖。
 type Image2JobHandlerConfig struct {
 	APIKey        string
 	Endpoint      string
@@ -24,16 +25,19 @@ type Image2JobHandlerConfig struct {
 	Now           func() time.Time
 }
 
+// Image2JobHandler 把队列中的图片生成任务委托给 Image2 tool 执行。
 type Image2JobHandler struct {
 	tool tools.Image2GenerateTool
 }
 
+// NewImage2JobHandler 创建 Image2 后台任务处理器。
 func NewImage2JobHandler(cfg Image2JobHandlerConfig) Image2JobHandler {
 	return Image2JobHandler{
 		tool: tools.NewImage2GenerateTool(toImage2ToolConfig(cfg)),
 	}
 }
 
+// Handle 执行单个 Image2 任务，并返回已持久化资产 ID 和业务结果。
 func (h Image2JobHandler) Handle(ctx context.Context, job generation.GenerationJob) (generation.HandlerResult, error) {
 	input, err := image2InputFromJob(job)
 	if err != nil {
@@ -78,12 +82,12 @@ func (h Image2JobHandler) Handle(ctx context.Context, job generation.GenerationJ
 			"asset_ids":          assetIDs,
 			"assets":             result.Data.Assets,
 			"storyboard_updates": result.Data.StoryboardUpdates,
-			"render_events":      result.Data.RenderEvents,
 			"model":              result.Data.Model,
 		},
 	}, nil
 }
 
+// toImage2ToolConfig 把后台任务配置转换成可复用的 Image2 tool 配置。
 func toImage2ToolConfig(cfg Image2JobHandlerConfig) tools.Image2ToolConfig {
 	return tools.Image2ToolConfig{
 		APIKey:        cfg.APIKey,
@@ -96,6 +100,7 @@ func toImage2ToolConfig(cfg Image2JobHandlerConfig) tools.Image2ToolConfig {
 	}
 }
 
+// image2InputFromJob 从任务 payload 中解析图片生成输入，并补齐会话/目标信息。
 func image2InputFromJob(job generation.GenerationJob) (tools.Image2GenerateInput, error) {
 	var input tools.Image2GenerateInput
 	raw, err := json.Marshal(job.Payload)
@@ -117,6 +122,7 @@ func image2InputFromJob(job generation.GenerationJob) (tools.Image2GenerateInput
 	return input, nil
 }
 
+// image2FilenamePrefix 为持久化图片生成稳定文件名前缀。
 func image2FilenamePrefix(job generation.GenerationJob) string {
 	if strings.TrimSpace(job.TargetID) == "" {
 		return "image2"
@@ -124,6 +130,7 @@ func image2FilenamePrefix(job generation.GenerationJob) string {
 	return "image2-" + strings.TrimSpace(job.TargetID)
 }
 
+// valueOrDefault 返回 trim 后的 value，空值时返回 trim 后的 fallback。
 func valueOrDefault(value string, fallback string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
