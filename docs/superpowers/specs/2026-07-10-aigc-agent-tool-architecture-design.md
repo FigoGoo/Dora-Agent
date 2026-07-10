@@ -67,25 +67,84 @@
 
 ## 3. Graph Tool 规范
 
-### 3.1 定义
+### 3.1 定义与构成
 
-Graph Tool = 一段封装成工具的有向流程。对 Agent 表现为一次普通工具调用（一个 JSON schema 入参 + 一个摘要出参）；对运行时是一张节点图；对用户是一条可感知的进度流。
+Graph Tool = 一段封装成工具的有向流程。三副面孔：对 Agent 是一次普通工具调用（薄 schema 入参 + 摘要出参）；对运行时是一张节点 DAG；对用户是一条可感知的进度流。
 
-### 3.2 节点类型与双线结构
+一个 Graph Tool 由六部分**声明式定义**（是数据，不是代码——改图不发版）：
 
-每个 Graph Tool 内部分两条线：
+| 部分 | 内容 |
+|---|---|
+| 元数据 | key · 给 LLM 看的 description（Agent 据此决定何时调用）· 版本 |
+| 入参 schema | Agent 可见的薄参数：目标引用、媒体种类、意图备注。**不暴露内部路径** |
+| 节点集 | 每个节点：类型 · 输入/输出 · fanout · 重试/超时 · 业务切面声明 |
+| 依赖边 | 节点间 DAG（无环）；调度就绪判定的唯一依据 |
+| 暂停点 | 哪些节点后暂停 · 候选 actions · 触发条件（skill 可在允许范围内覆盖开/关） |
+| 输出映射 | 图终态 → 给 Agent 的摘要 envelope 各字段的来源 |
 
-- **能力线**：做事的节点。两种——LLM 节点（如"写提示词"）与能力节点（如"调生成模型"）。
-- **业务线**：保障性节点。权限校验 → 扣费 → 上传 OSS/写表 → 资产绑定 → 回执。确定性执行，Agent 不可见，但**用户可见**（CUSTOM 回执事件）。扣费采用**预扣 + 失败自动回冲**，两笔都发回执。
+定义示例（media_generate 精简版）：
 
-示意（media_generate 的一次图片生成）：
+```yaml
+graph_tool: media_generate
+description: 为蓝图中的目标生成媒体资产（图/视频/音频），必要时发起确认卡点
+params:                        # Agent 只看到这一层
+  targets: 蓝图目标引用[]       # element_id / shot_id / layer_id
+  kinds:   [image | video | audio]
+  note:    自由文本意图
+nodes:
+  write_prompt: { type: llm,        in: [targets, blueprint, spec], out: prompts }
+  generate:     { type: capability, in: [prompts, refs], out: outputs,
+                  fanout: per_target, path: auto,
+                  requires: [permission, billing, persist, bind] }  # 业务切面
+  confirm:      { type: pause, when: "kinds 含 image",
+                  actions: [confirm_reference, revise_reference] }
+edges: write_prompt → generate → confirm
+output: { asset_ids: generate.outputs, summary: auto }
+```
+
+### 3.2 节点契约（统一接口）
+
+所有节点实现同一契约，runtime 才能统一调度、统一发事件：
+
+```
+run(ctx, inputs) → outputs         # 正常完成
+                 | pause(payload)  # 请求暂停（仅 pause 型节点允许）
+                 | fail(error)     # 重试耗尽后失败
+```
+
+- **ctx 由 runtime 注入**：session、蓝图/规格版本、幂等键前缀、取消信号、事件发射器。节点**不直接发事件**，一律经 runtime 统一发——这是 P4"迁移=事件"的实现保证。
+- **inputs / outputs 只传引用**：`resource_id` / `asset_id` / 结构化小对象；媒体字节永不进图状态。
+- **节点属性**：`type`(llm | capability | business | pause) · `retry`(次数/退避/是否允许调参重试) · `timeout` · `fanout`(per_target 展开) · `requires`(业务切面声明)。
+- **fanout 实例是最小状态单元**：每个实例独立走状态机，STEP 事件带实例索引，前端按组渲染。
+
+### 3.3 双线结构与业务切面
+
+每个 Graph Tool 逻辑上分两条线：**能力线**（LLM 节点 + 能力节点，做事）与**业务线**（权限/扣费/写表/绑定/回执，保障）。
+
+**裁决：业务线不显式画进每张图，而是声明式切面织入。** 能力节点声明 `requires: [permission, billing, persist, bind]`，runtime 在其前后自动织入业务节点：
+
+```
+前置：权限校验 → 预扣费
+本体：能力节点执行（生成 → 产 resource）
+后置：传 OSS · 写表 → 绑定资产 → 回执（CUSTOM billing.charged）
+失败：自动回冲预扣（回冲也发回执）
+```
+
+选切面而非显式节点的三个理由：
+1. 图定义只画能力线，简洁可读；
+2. **业务逻辑变更只改业务工具与织入规则，所有图自动生效**——"业务变了只动 tool，图不用改"；
+3. 织入的业务节点与能力节点走同一状态机、同样发 STEP/回执事件，用户照样可感知。
+
+约束不变：业务工具仍只能存在于图内（禁止注册给 Agent）；织入顺序固定，属物理层，skill 不可改写。
+
+示意（media_generate 的一次图片生成，织入后）：
 
 ```
 能力线：写提示词(LLM) ──→ 生成 ×N(并行) ──→ 汇合/质检
-业务线：权限校验 → 扣费 → 传OSS·写表 → 绑定资产 → 回执(-N credits)
+织入线：[权限 → 预扣]生成前 · [传OSS·写表 → 绑定 → 回执]生成后
 ```
 
-### 3.3 节点状态机
+### 3.4 节点状态机与 checkpoint
 
 ```
 pending → running → succeeded
@@ -95,14 +154,26 @@ pending → running → succeeded
 
 - **paused 是一等状态**：确认卡点发生在图中途。进入 paused 时 checkpoint 持久化；resume 幂等且一次性（重复提交返回同一结果）；resume 载荷带蓝图/规格版本做冲突检测。
 - **每次状态迁移必然产出事件**（STEP_* 或 STATE_DELTA），见 §8。
+- **checkpoint 内容**：`{ graph_key, tool_call_id, 入参, 各节点/实例的状态与产物引用, 蓝图&规格版本, 已预扣费记录, 事件 seq }`。
+- **resume 校验**：一次性 + 版本——若蓝图版本已变，不硬续跑，转确认卡问用户"蓝图已变更：继续 / 重新评估"。
+- **图终态**：`succeeded / partial_succeeded / failed / paused`；partial_succeeded = fanout 部分实例失败但满足合并策略下限。
 
-### 3.4 并行语义
+### 3.5 调度语义（状态驱动推进）
+
+runtime 是一个纯状态机推进器，不含业务判断：
+
+- **就绪判定**：节点 pending 且全部依赖 succeeded → 入执行队列。
+- **fanout / 合并**：per_target 展开 N 个实例并行执行；合并策略由节点声明——`all`（全部成功才通过）或 `quorum`（达到比例即通过，失败实例列入确认卡由用户处置）。
+- **暂停**：pause 节点触发 → 整图挂起 → checkpoint（§3.4）→ 本轮 run 正常收尾（§8.3）。
+- **推进即事件**：所有调度与迁移由 runtime 统一广播，节点无权私发。
+
+### 3.6 并行语义
 
 - 串/并行**由依赖关系决定**，不是主观选择：节点间无输入输出依赖 → 可并行；有依赖 → 必串行。
 - 经验规则：**基本只有"生成、分析资产"类任务会并行**（多个独立镜头、多张元素图、旁白与 BGM）。
 - **设计异味**：出现"强关联的多个节点还想并行"，说明图切分错了，回炉。
 
-### 3.5 失败语义
+### 3.7 失败语义
 
 | 失败类型 | 处理 | 用户感知 |
 |---|---|---|
@@ -110,18 +181,57 @@ pending → running → succeeded
 | 合规拦截（提示词踩红线） | **绝不静默改写绕过**。节点转 paused，告知被拦原因 + 建议调整方向，等用户授权后按合规重写规则重试 | 确认卡点 |
 | 单节点失败 | 不扩散：无依赖的兄弟节点继续跑；依赖它的下游在依赖点停下问用户 | 局部红点，全局不倒 |
 
-### 3.6 粒度约束
+### 3.8 输出契约（给 Agent 的摘要）
+
+```json
+{
+  "status": "ok | paused | partial | failed",
+  "summary": "已生成 4 张元素参考图，进入参考图确认",
+  "asset_ids": ["…"],
+  "next_confirmation_id": "…（paused 时）",
+  "receipts": [{ "type": "billing", "credits": -20 }],
+  "blueprint_version": 13
+}
+```
+
+绝不含字节、base64、provider 原始负载、长日志——上下文卫生是 P1 的一部分。
+
+### 3.9 粒度约束
 
 - 一个 Graph Tool 对应**一个用户可感知的阶段性成果**（一版蓝图 / 一批资产 / 一个成片）。
 - 流程不过长：节点数收敛（能力线建议 ≤5 个节点）；过长说明该拆成两次 Agent 编排。
 - 加能力优先加**内部路径/参数**；只有当新能力的产物类型、权限边界、用户感知形态都不同于现有工具时，才允许新增 Graph Tool。
 
-### 3.7 胖工具内部路径选择（两级，不占 Agent 决策预算）
+### 3.10 胖工具内部路径选择（两级，不占 Agent 决策预算）
 
 1. **Skill 声明层**：本题材用什么模型栈、是否插首帧、对口型场景必须走音频驱动路径——写在 skill 文档里。
 2. **节点运行时兜底**：按输入判断——有参考图→图生图；有驱动音频→对口型；只有文字→文生路径。
 
 Agent 只说"给这些目标生成图/视频/音频"，不选路径。
+
+### 3.11 一次执行的完整事件序列（示例，对照 §8）
+
+"为 4 个关键元素生成参考图"从调用到暂停的全程：
+
+```
+TOOL_CALL_START media_generate                  ← Agent 发起
+STEP_STARTED  write_prompt
+STEP_FINISHED write_prompt
+STEP_STARTED  generate[e1..e4]                  ← fanout 4 实例并行
+  CUSTOM billing.charged（预扣 −20，回执）
+  CUSTOM media.generation_started ×4
+  STATE_DELTA /jobs/{id}/progress …             ← 各实例进度交错
+  CUSTOM media.resource.updated ×4
+  STATE_DELTA /blueprint/elements/{i}/asset_ids ← 逐个绑定回填
+STEP_FINISHED generate（合并策略 all 通过）
+STEP_STARTED  confirm → 节点 pause · checkpoint 落盘
+TOOL_CALL_END media_generate（status=paused）
+TOOL_CALL_START ui.request_confirmation（确认 / 调整 候选）
+RUN_FINISHED                                    ← 本轮收尾，等待用户
+--- 用户点"确认" → 新 RunInput(toolResult) ---
+新 run：resume → confirm succeeded → 图 succeeded
+TOOL_CALL_RESULT 摘要 envelope 回给 Agent → Agent 总结陈述
+```
 
 ---
 
