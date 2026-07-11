@@ -218,7 +218,8 @@ func (a StoryboardBindingAdapter) IsCommitted(ctx context.Context, job generatio
 			return false, nil
 		}
 	}
-	if strings.HasPrefix(job.BindingToken.TargetID, "assembly:") {
+	if strings.HasPrefix(job.BindingToken.TargetID, "assembly:") ||
+		job.BindingToken.NormalizedKind() == generation.TargetKindSessionDeliverable {
 		return true, nil
 	}
 	if a.Repository == nil {
@@ -282,6 +283,7 @@ func needsApproval(input generation.FinalizationCommit) bool {
 }
 
 func (a StoryboardBindingAdapter) commit(ctx context.Context, input generation.FinalizationCommit) error {
+	isDeliverable := input.BindingToken.NormalizedKind() == generation.TargetKindSessionDeliverable
 	if strings.HasPrefix(input.BindingToken.TargetID, "assembly:") {
 		check, err := a.Check(ctx, input.BindingToken)
 		if err != nil {
@@ -291,7 +293,7 @@ func (a StoryboardBindingAdapter) commit(ctx context.Context, input generation.F
 			return generation.NewExecutionError(generation.ErrorStageBinding, generation.ErrorResultSuperseded, false, fmt.Errorf("assembly input changed before commit"))
 		}
 	}
-	if !strings.HasPrefix(input.BindingToken.TargetID, "assembly:") {
+	if !strings.HasPrefix(input.BindingToken.TargetID, "assembly:") && !isDeliverable {
 		if a.Repository == nil || a.Commands == nil {
 			return fmt.Errorf("storyboard binding services are required")
 		}
@@ -321,7 +323,7 @@ func (a StoryboardBindingAdapter) commit(ctx context.Context, input generation.F
 			return err
 		}
 	}
-	if strings.HasPrefix(input.BindingToken.TargetID, "assembly:") {
+	if strings.HasPrefix(input.BindingToken.TargetID, "assembly:") || isDeliverable {
 		return nil
 	}
 	for index, assetID := range input.AssetIDs {
@@ -393,7 +395,10 @@ func (a StoryboardBindingAdapter) specMatchesStoryboard(ctx context.Context, agg
 }
 
 func (a StoryboardBindingAdapter) publishChanges(ctx context.Context, input generation.FinalizationCommit) error {
-	if a.Events == nil || strings.HasPrefix(input.BindingToken.TargetID, "assembly:") {
+	if a.Events == nil || strings.HasPrefix(input.BindingToken.TargetID, "assembly:") ||
+		input.BindingToken.NormalizedKind() == generation.TargetKindSessionDeliverable {
+		// deliverable 目标没有 storyboard 可投影；其 UI 事件形态在 Step 2
+		// 轻交付物视图中定义。
 		return nil
 	}
 	aggregate, err := a.Repository.GetAggregate(ctx, input.BindingToken.StoryboardID)
