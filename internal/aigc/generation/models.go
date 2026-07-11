@@ -147,10 +147,19 @@ func (p DeliveryPolicy) Validate() error {
 	return nil
 }
 
+// Binding target kinds. storyboard_slot is the historical default: every
+// token persisted before TargetKind existed keeps its original semantics via
+// NormalizedKind. session_deliverable targets have no storyboard anchor.
+const (
+	TargetKindStoryboardSlot     = "storyboard_slot"
+	TargetKindSessionDeliverable = "session_deliverable"
+)
+
 // BindingToken identifies the exact storyboard target/prompt/slot revision for
 // which a generation result is valid. Global storyboard version is deliberately
 // excluded because unrelated edits must not supersede a valid result.
 type BindingToken struct {
+	TargetKind       string `json:"target_kind,omitempty"`
 	StoryboardID     string `json:"storyboard_id"`
 	TargetID         string `json:"target_id"`
 	AssetSlot        string `json:"asset_slot"`
@@ -162,9 +171,26 @@ type BindingToken struct {
 	InputFingerprint string `json:"input_fingerprint"`
 }
 
+// NormalizedKind treats an empty TargetKind as storyboard_slot so that every
+// token persisted before this field existed keeps its original semantics.
+func (t BindingToken) NormalizedKind() string {
+	kind := strings.TrimSpace(t.TargetKind)
+	if kind == "" {
+		return TargetKindStoryboardSlot
+	}
+	return kind
+}
+
 func (t BindingToken) Validate() error {
-	if strings.TrimSpace(t.StoryboardID) == "" || strings.TrimSpace(t.TargetID) == "" || strings.TrimSpace(t.AssetSlot) == "" {
-		return fmt.Errorf("binding token storyboard, target and asset slot are required")
+	kind := t.NormalizedKind()
+	if kind != TargetKindStoryboardSlot && kind != TargetKindSessionDeliverable {
+		return fmt.Errorf("invalid binding target kind %q", t.TargetKind)
+	}
+	if strings.TrimSpace(t.TargetID) == "" || strings.TrimSpace(t.AssetSlot) == "" {
+		return fmt.Errorf("binding token target and asset slot are required")
+	}
+	if kind == TargetKindStoryboardSlot && strings.TrimSpace(t.StoryboardID) == "" {
+		return fmt.Errorf("binding token storyboard id is required for storyboard slot targets")
 	}
 	if t.TargetRevision < 0 || t.PromptRevision < 0 || t.GenerationEpoch < 0 || t.SpecVersion < 0 || t.AggregateVersion < 0 {
 		return fmt.Errorf("binding token revisions cannot be negative")
@@ -176,7 +202,8 @@ func (t BindingToken) Validate() error {
 }
 
 func (t BindingToken) Equal(other BindingToken) bool {
-	return strings.TrimSpace(t.StoryboardID) == strings.TrimSpace(other.StoryboardID) &&
+	return t.NormalizedKind() == other.NormalizedKind() &&
+		strings.TrimSpace(t.StoryboardID) == strings.TrimSpace(other.StoryboardID) &&
 		strings.TrimSpace(t.TargetID) == strings.TrimSpace(other.TargetID) &&
 		strings.TrimSpace(t.AssetSlot) == strings.TrimSpace(other.AssetSlot) &&
 		t.TargetRevision == other.TargetRevision &&
