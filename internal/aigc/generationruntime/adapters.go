@@ -107,6 +107,11 @@ type StoryboardBindingAdapter struct {
 }
 
 func (a StoryboardBindingAdapter) Check(ctx context.Context, token generation.BindingToken) (generation.BindingCheck, error) {
+	if token.NormalizedKind() == generation.TargetKindSessionDeliverable {
+		// session_deliverable 无可漂移的绑定目标（无 storyboard 结构可比对），
+		// 目标恒存在、恒匹配；漂移防护由 job 级 request_fingerprint 承担。
+		return generation.BindingCheck{TargetExists: true, Matches: true, Current: token}, nil
+	}
 	if strings.HasPrefix(token.TargetID, "assembly:") {
 		if a.Repository == nil {
 			return generation.BindingCheck{}, fmt.Errorf("storyboard repository is required")
