@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +14,34 @@ import (
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/generation"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/tools"
 )
+
+func TestSeedanceJobHandlerDistinguishesCancelledPendingAndUnknownStatuses(t *testing.T) {
+	status := "cancelled"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"task-status","status":"` + status + `"}`))
+	}))
+	defer server.Close()
+
+	handler := NewSeedanceJobHandler(SeedanceJobHandlerConfig{APIKey: "test-key", Endpoint: server.URL + "/tasks", PollInterval: time.Millisecond})
+	job := generation.GenerationJob{ID: "job-status", SessionID: "session-status", Provider: generation.ProviderSeedance, ProviderTaskID: "task-status", Payload: map[string]any{"prompt": "scene"}}
+
+	response, err := handler.Poll(context.Background(), job)
+	if err != nil || response.State != generation.ProviderStateCancelled {
+		t.Fatalf("cancelled response = %+v err=%v", response, err)
+	}
+	status = "running"
+	response, err = handler.Poll(context.Background(), job)
+	if err != nil || response.State != generation.ProviderStatePending {
+		t.Fatalf("pending response = %+v err=%v", response, err)
+	}
+	status = "brand_new_provider_state"
+	_, err = handler.Poll(context.Background(), job)
+	var execution *generation.ExecutionError
+	if !errors.As(err, &execution) || execution.Retryable || execution.Code != "seedance_unknown_status" {
+		t.Fatalf("unknown status error = %#v", err)
+	}
+}
 
 func TestSeedanceJobHandlerGeneratesAndPersistsAsset(t *testing.T) {
 	var server *httptest.Server
@@ -82,9 +112,10 @@ func TestSeedanceJobHandlerGeneratesAndPersistsAsset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
-	if len(result.AssetIDs) != 1 || result.AssetIDs[0] != "asset-video-1" {
+	if len(result.AssetIDs) != 1 || !strings.HasPrefix(result.AssetIDs[0], "video_") {
 		t.Fatalf("asset ids = %#v", result.AssetIDs)
 	}
+	assetID := result.AssetIDs[0]
 	if result.Result["provider_task_id"] != "cgt-1" {
 		t.Fatalf("handler result = %#v", result.Result)
 	}
@@ -94,13 +125,13 @@ func TestSeedanceJobHandlerGeneratesAndPersistsAsset(t *testing.T) {
 	if updates, ok := result.Result["storyboard_updates"].([]tools.StoryboardUpdateHint); !ok || len(updates) != 1 || updates[0].Field != "video_asset_id" {
 		t.Fatalf("storyboard updates = %#v", result.Result["storyboard_updates"])
 	}
-	if events, ok := result.Result["render_events"].([]tools.RenderEventHint); !ok || len(events) == 0 {
-		t.Fatalf("render events = %#v", result.Result["render_events"])
+	if _, ok := result.Result["render_events"]; ok {
+		t.Fatalf("handler result should not include render events: %#v", result.Result)
 	}
 	if string(uploader.body) != "mp4bytes" {
 		t.Fatalf("uploaded body = %q", string(uploader.body))
 	}
-	if assets.saved.ID != "asset-video-1" || assets.saved.Kind != asset.KindVideo || assets.saved.SessionID != "s1" {
+	if assets.saved.ID != assetID || assets.saved.Kind != asset.KindVideo || assets.saved.SessionID != "s1" {
 		t.Fatalf("saved asset = %#v", assets.saved)
 	}
 }

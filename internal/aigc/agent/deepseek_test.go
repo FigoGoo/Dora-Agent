@@ -11,9 +11,9 @@ import (
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/capability"
 	aigcconfig "github.com/FigoGoo/Dora-Agent/internal/aigc/config"
-	"github.com/FigoGoo/Dora-Agent/internal/aigc/spec"
-	"github.com/FigoGoo/Dora-Agent/internal/aigc/storyboard"
 	aigctools "github.com/FigoGoo/Dora-Agent/internal/aigc/tools"
 )
 
@@ -24,17 +24,14 @@ func TestNewDeepSeekChatModelRequiresAPIKey(t *testing.T) {
 	}
 }
 
-func TestNewDeepSeekRunnerBuildsWithFakeKey(t *testing.T) {
-	runner, err := NewDeepSeekRunner(context.Background(), DeepSeekRunnerConfig{
+func TestNewDeepSeekRunnerRequiresCapabilityRegistry(t *testing.T) {
+	_, err := NewDeepSeekRunner(context.Background(), DeepSeekRunnerConfig{
 		Runtime: aigcconfig.Config{
 			DeepSeek: aigcconfig.DeepSeekConfig{APIKey: "test-deepseek-key"},
 		},
 	})
-	if err != nil {
+	if err == nil || !strings.Contains(err.Error(), "registry is required") {
 		t.Fatalf("NewDeepSeekRunner() error = %v", err)
-	}
-	if runner == nil {
-		t.Fatalf("NewDeepSeekRunner() returned nil runner")
 	}
 }
 
@@ -44,7 +41,7 @@ func TestAIGCGenModelInputKeepsLiteralA2UIJSONWithSessionValues(t *testing.T) {
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          "test-aigc-agent",
 		Description:   "test",
-		Instruction:   a2UIProtocolInstruction,
+		Instruction:   a2ui.AgentInstruction(),
 		Model:         model,
 		GenModelInput: aigcGenModelInput,
 	})
@@ -67,8 +64,144 @@ func TestAIGCGenModelInputKeepsLiteralA2UIJSONWithSessionValues(t *testing.T) {
 	if model.input[0].Role != schema.System {
 		t.Fatalf("first model message role = %s, want system", model.input[0].Role)
 	}
-	if !strings.Contains(model.input[0].Content, `{"a2ui_events":[`) {
+	if !strings.Contains(model.input[0].Content, `{"a2ui_version":"1.0","actions":[`) {
 		t.Fatalf("system instruction lost literal A2UI JSON: %s", model.input[0].Content)
+	}
+	if strings.Contains(model.input[0].Content, `{"a2ui_events":[`) {
+		t.Fatalf("system instruction still teaches legacy A2UI JSON: %s", model.input[0].Content)
+	}
+	if strings.Contains(model.input[0].Content, "response_format.type=json_object") {
+		t.Fatalf("system instruction still couples JSON Output to native Tool Calling: %s", model.input[0].Content)
+	}
+}
+
+func TestAIGCGenModelInputHoistsTrustedSystemEvents(t *testing.T) {
+	user := schema.UserMessage("创建短片")
+	assistant := schema.AssistantMessage("旧阶段结果", nil)
+	got, err := aigcGenModelInput(context.Background(), "基础系统指令", &adk.AgentInput{Messages: []*schema.Message{
+		user,
+		assistant,
+		schema.SystemMessage("可信审批事件：creation_spec_revision 已 approved，必须调用 plan_storyboard。"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].Role != schema.System {
+		t.Fatalf("model input=%#v, want one leading system plus two conversation messages", got)
+	}
+	if !strings.Contains(got[0].Content, "基础系统指令") || !strings.Contains(got[0].Content, "可信审批事件") {
+		t.Fatalf("hoisted system content=%q", got[0].Content)
+	}
+	if got[1] != user || got[2] != assistant {
+		t.Fatalf("conversation order changed: %#v", got)
+	}
+	for _, message := range got[1:] {
+		if message.Role == schema.System {
+			t.Fatalf("trailing system message was not hoisted: %#v", got)
+		}
+	}
+}
+
+func TestA2UIModelRetryConfigRetriesOnlyInvalidFinalAssistant(t *testing.T) {
+	config := newA2UIModelRetryConfig()
+	baseInput := []*schema.Message{schema.UserMessage("创建短片")}
+	valid := `{"a2ui_version":"1.0","actions":[{"type":"update_card","surface":"tool_runs","payload":{"status":"running"}}]}`
+	invalid := `{"a2ui_version":"1.0","actions":[{"type":"append_card","card":{"root":"root","components":[{"id":"root","component":{"Card":{"children":[]}}}]}}}]}`
+
+	decision := config.ShouldRetry(context.Background(), &adk.RetryContext{
+		InputMessages: baseInput,
+		OutputMessage: schema.AssistantMessage(invalid, nil),
+	})
+	if decision == nil || !decision.Retry || len(decision.ModifiedInputMessages) != 2 {
+		t.Fatalf("invalid final decision = %#v", decision)
+	}
+	correction := decision.ModifiedInputMessages[len(decision.ModifiedInputMessages)-1]
+	if correction.Role != schema.System || !strings.Contains(correction.Content, "A2UI 1.0") || strings.Contains(correction.Content, invalid) {
+		t.Fatalf("correction message = %#v", correction)
+	}
+	if decision.PersistModifiedInputMessages {
+		t.Fatalf("retry correction must not persist into Agent history")
+	}
+
+	pseudoApproval := `{"a2ui_version":"1.0","actions":[{"type":"append_card","surface":"chat","card_id":"storyboard","card":{"root":"root","components":[{"id":"root","component":{"Card":{"children":["details"]}}},{"id":"details","component":{"Markdown":{"value":"故事板已生成，请回复「确认」开始生成素材。"}}}]}}]}`
+	decision = config.ShouldRetry(context.Background(), &adk.RetryContext{
+		InputMessages: baseInput,
+		OutputMessage: schema.AssistantMessage(pseudoApproval, nil),
+	})
+	if decision == nil || !decision.Retry || decision.RejectReason != "forbidden_model_authored_approval" {
+		t.Fatalf("pseudo Approval decision = %#v", decision)
+	}
+	policyCorrection := decision.ModifiedInputMessages[len(decision.ModifiedInputMessages)-1]
+	for _, expected := range []string{"禁止自行生成 Approval 卡", "禁止携带 approval_id", "权威审核卡"} {
+		if !strings.Contains(policyCorrection.Content, expected) {
+			t.Fatalf("policy correction missing %q: %s", expected, policyCorrection.Content)
+		}
+	}
+
+	decision = config.ShouldRetry(context.Background(), &adk.RetryContext{
+		InputMessages: baseInput,
+		OutputMessage: schema.AssistantMessage(valid, nil),
+	})
+	if decision == nil || decision.Retry {
+		t.Fatalf("valid final decision = %#v", decision)
+	}
+
+	decision = config.ShouldRetry(context.Background(), &adk.RetryContext{
+		InputMessages: baseInput,
+		OutputMessage: schema.AssistantMessage("", []schema.ToolCall{{
+			ID: "call-1", Type: "function", Function: schema.FunctionCall{Name: capability.PlanCreationSpecToolKey, Arguments: `{}`},
+		}}),
+	})
+	if decision == nil || decision.Retry {
+		t.Fatalf("ToolCall decision = %#v", decision)
+	}
+}
+
+func TestA2UIModelRetryExhaustionDoesNotEmitPseudoApproval(t *testing.T) {
+	pseudoApproval := `{"a2ui_version":"1.0","actions":[{"type":"append_card","surface":"chat","card_id":"storyboard","card":{"root":"root","components":[{"id":"root","component":{"Card":{"children":["details"]}}},{"id":"details","component":{"Markdown":{"value":"故事板已生成，请回复「确认」开始生成素材。"}}}]}}]}`
+	underlying := &sequenceChatModel{outputs: []*schema.Message{
+		schema.AssistantMessage(pseudoApproval, nil),
+		schema.AssistantMessage(pseudoApproval, nil),
+	}}
+	agent, err := adk.NewChatModelAgent(context.Background(), &adk.ChatModelAgentConfig{
+		Name: "pseudo-approval-retry", Description: "test", Model: underlying,
+		ModelRetryConfig: newA2UIModelRetryConfig(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iter := adk.NewRunner(context.Background(), adk.RunnerConfig{Agent: agent}).Query(context.Background(), "生成故事板")
+	var terminalErr error
+	for {
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if event.Err != nil {
+			var retrying *adk.WillRetryError
+			if errors.As(event.Err, &retrying) {
+				continue
+			}
+			terminalErr = event.Err
+			continue
+		}
+		if event.Output == nil || event.Output.MessageOutput == nil {
+			continue
+		}
+		message, messageErr := event.Output.MessageOutput.GetMessage()
+		if messageErr != nil {
+			terminalErr = messageErr
+			continue
+		}
+		if message != nil && strings.Contains(message.Content, "回复「确认」") {
+			t.Fatalf("pseudo Approval escaped bounded retry: %s", message.Content)
+		}
+	}
+	if underlying.CallCount() != 2 {
+		t.Fatalf("model calls = %d, want initial + one bounded retry", underlying.CallCount())
+	}
+	if terminalErr == nil {
+		t.Fatal("retry exhaustion did not fail closed")
 	}
 }
 
@@ -85,91 +218,65 @@ func TestEstimatedContextTokensIncludesMessagesAndTools(t *testing.T) {
 	}
 }
 
-func TestNewDeepSeekRunnerBuildsWithSkillBackend(t *testing.T) {
-	runner, err := NewDeepSeekRunner(context.Background(), DeepSeekRunnerConfig{
+func TestNewDeepSeekRunnerDoesNotFallbackToLegacyToolsWithSkillBackend(t *testing.T) {
+	_, err := NewDeepSeekRunner(context.Background(), DeepSeekRunnerConfig{
 		Runtime: aigcconfig.Config{
 			DeepSeek: aigcconfig.DeepSeekConfig{APIKey: "test-deepseek-key"},
 		},
 		SkillBackend: fakeSkillBackend{},
 	})
-	if err != nil {
+	if err == nil || !strings.Contains(err.Error(), "registry is required") {
 		t.Fatalf("NewDeepSeekRunner() error = %v", err)
 	}
-	if runner == nil {
-		t.Fatalf("NewDeepSeekRunner() returned nil runner")
-	}
 }
 
-func TestNewRuntimeRegistryIncludesImage2WhenConfigured(t *testing.T) {
-	registry, err := newRuntimeRegistry(aigcconfig.Config{
-		Image2: aigcconfig.ProviderConfig{APIKey: "test-image2-key"},
-	}, nil, nil, nil, nil, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("newRuntimeRegistry() error = %v", err)
-	}
-	if _, ok := registry.Get(aigctools.Image2GenerateToolKey); !ok {
-		t.Fatalf("expected image2 tool to be registered")
-	}
-}
-
-func TestNewRuntimeRegistryIncludesSeedanceWhenConfigured(t *testing.T) {
-	registry, err := newRuntimeRegistry(aigcconfig.Config{
-		Seedance: aigcconfig.ProviderConfig{APIKey: "test-seedance-key"},
-	}, nil, nil, nil, nil, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("newRuntimeRegistry() error = %v", err)
-	}
-	if _, ok := registry.Get(aigctools.SeedanceGenerateVideoToolKey); !ok {
-		t.Fatalf("expected seedance video tool to be registered")
-	}
-}
-
-func TestNewRuntimeRegistryIncludesMediaGenerator(t *testing.T) {
-	registry, err := newRuntimeRegistry(aigcconfig.Config{}, nil, nil, nil, nil, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("newRuntimeRegistry() error = %v", err)
-	}
-	if _, ok := registry.Get(aigctools.MediaGeneratorToolKey); !ok {
-		t.Fatalf("expected media generator tool to be registered")
-	}
-	for _, toolKey := range []string{
-		aigctools.ResourcePrepareAnalyzeToolKey,
-		aigctools.MultimodalAnalyzeToolKey,
-		aigctools.WritePromptToolKey,
-		aigctools.VideoAssemblerToolKey,
-	} {
-		if _, ok := registry.Get(toolKey); !ok {
-			t.Fatalf("expected %s tool to be registered", toolKey)
+func TestNewDeepSeekRunnerRejectsRegistryWithExtraTool(t *testing.T) {
+	registry := aigctools.NewRegistry()
+	for _, key := range append(append([]string(nil), capability.AgentToolKeys...), "forbidden_business_tool") {
+		if err := registry.Register(key, aigctools.EchoTool{}, aigctools.ToolMeta{Category: "test"}); err != nil {
+			t.Fatal(err)
 		}
 	}
+	_, err := NewDeepSeekRunner(context.Background(), DeepSeekRunnerConfig{
+		Runtime:  aigcconfig.Config{DeepSeek: aigcconfig.DeepSeekConfig{APIKey: "test-deepseek-key"}},
+		Registry: registry,
+	})
+	if err == nil || !strings.Contains(err.Error(), "exactly the five capability tools") {
+		t.Fatalf("NewDeepSeekRunner() error = %v", err)
+	}
 }
 
-func TestDefaultAgentToolKeysPreferMediaGraphOverProviderTools(t *testing.T) {
-	keys := defaultAgentToolKeys(aigcconfig.Config{
-		Image2:   aigcconfig.ProviderConfig{APIKey: "image-key"},
-		Seedance: aigcconfig.ProviderConfig{APIKey: "seedance-key"},
-	}, true, true)
-
-	if !containsToolKey(keys, aigctools.MediaGeneratorToolKey) {
-		t.Fatalf("expected media generator in agent tools: %#v", keys)
-	}
-	for _, providerTool := range []string{aigctools.Image2GenerateToolKey, aigctools.SeedanceGenerateVideoToolKey} {
-		if containsToolKey(keys, providerTool) {
-			t.Fatalf("provider tool %s should not be exposed by default: %#v", providerTool, keys)
+func TestNewDeepSeekRunnerRejectsCapabilityKeyAliasing(t *testing.T) {
+	registry := aigctools.NewRegistry()
+	for _, key := range capability.AgentToolKeys {
+		if err := registry.Register(key, aigctools.EchoTool{}, aigctools.ToolMeta{Category: "test"}); err != nil {
+			t.Fatal(err)
 		}
 	}
+	_, err := NewDeepSeekRunner(context.Background(), DeepSeekRunnerConfig{
+		Runtime:  aigcconfig.Config{DeepSeek: aigcconfig.DeepSeekConfig{APIKey: "test-deepseek-key"}},
+		Registry: registry,
+	})
+	if err == nil || !strings.Contains(err.Error(), "key/name mismatch") {
+		t.Fatalf("NewDeepSeekRunner() error = %v", err)
+	}
 }
 
-func TestNewRuntimeRegistryIncludesPlanningToolsWhenStoresConfigured(t *testing.T) {
-	registry, err := newRuntimeRegistry(aigcconfig.Config{}, nil, nil, fakeSpecStore{}, fakeStoryboardStore{}, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("newRuntimeRegistry() error = %v", err)
+func TestDefaultAgentToolKeysExposeOnlyFiveCapabilities(t *testing.T) {
+	keys := defaultAgentToolKeys()
+
+	if len(keys) != len(capability.AgentToolKeys) {
+		t.Fatalf("agent tools = %#v, want exactly %#v", keys, capability.AgentToolKeys)
 	}
-	if _, ok := registry.Get(aigctools.TextEditorToolKey); !ok {
-		t.Fatalf("expected text editor tool to be registered")
+	for _, expected := range capability.AgentToolKeys {
+		if !containsToolKey(keys, expected) {
+			t.Fatalf("capability %s is missing: %#v", expected, keys)
+		}
 	}
-	if _, ok := registry.Get(aigctools.StoryboardDesignerToolKey); !ok {
-		t.Fatalf("expected storyboard designer tool to be registered")
+	for _, internalTool := range []string{aigctools.WritePromptToolKey, aigctools.Image2GenerateToolKey, aigctools.SeedanceGenerateVideoToolKey} {
+		if containsToolKey(keys, internalTool) {
+			t.Fatalf("internal tool %s leaked: %#v", internalTool, keys)
+		}
 	}
 }
 
@@ -193,18 +300,6 @@ func (fakeSkillBackend) Get(context.Context, string) (adkskill.Skill, error) {
 		FrontMatter: adkskill.FrontMatter{Name: "video", Description: "video creation"},
 		Content:     "video skill",
 	}, nil
-}
-
-type fakeSpecStore struct{}
-
-func (fakeSpecStore) Save(_ context.Context, in spec.FinalVideoSpec) (spec.FinalVideoSpec, error) {
-	return in, nil
-}
-
-type fakeStoryboardStore struct{}
-
-func (fakeStoryboardStore) SaveSnapshot(_ context.Context, _ storyboard.Storyboard) error {
-	return nil
 }
 
 type captureInputModel struct {

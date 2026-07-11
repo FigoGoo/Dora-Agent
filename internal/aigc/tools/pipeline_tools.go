@@ -91,27 +91,21 @@ func (VideoAssemblerTool) InvokableRun(_ context.Context, argumentsInJSON string
 }
 
 func commonPipelineParams(extra map[string]*schema.ParameterInfo) map[string]*schema.ParameterInfo {
-	params := map[string]*schema.ParameterInfo{
-		"session_id": {
-			Type:     schema.String,
-			Desc:     "Current AIGC session id.",
-			Required: true,
-		},
-		"request_id": {
-			Type: schema.String,
-			Desc: "Optional request id for idempotent UI correlation.",
-		},
-	}
+	params := map[string]*schema.ParameterInfo{}
 	for key, value := range extra {
 		params[key] = value
 	}
-	return params
+	return toolInvocationEnvelopeParams(params)
 }
 
 func pipelineToolResult(toolKey string, state string, argumentsInJSON string) (string, error) {
-	payload, err := decodePipelinePayload(argumentsInJSON)
+	invocation, err := decodePipelineInvocation(toolKey, argumentsInJSON)
 	if err != nil {
 		return "", err
+	}
+	payload := invocation.Payload
+	if sessionID := strings.TrimSpace(pipelineString(payload, "session_id")); sessionID == "" {
+		payload["session_id"] = invocation.SessionID
 	}
 	payload["tool_key"] = toolKey
 	payload["state"] = state
@@ -119,8 +113,12 @@ func pipelineToolResult(toolKey string, state string, argumentsInJSON string) (s
 		payload["summary"] = defaultPipelineSummary(toolKey)
 	}
 	out, err := json.Marshal(ToolResultEnvelope[map[string]any]{
-		Status: ToolStatusOK,
-		Data:   payload,
+		Status:            ToolStatusOK,
+		RequestID:         invocation.RequestID,
+		IdempotencyKey:    invocation.IdempotencyKey,
+		SpecVersion:       invocation.ExpectedSpecVersion,
+		StoryboardVersion: invocation.ExpectedStoryboardVersion,
+		Data:              payload,
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal %s result: %w", toolKey, err)
@@ -128,16 +126,15 @@ func pipelineToolResult(toolKey string, state string, argumentsInJSON string) (s
 	return string(out), nil
 }
 
-func decodePipelinePayload(argumentsInJSON string) (map[string]any, error) {
-	var enveloped ToolInvocationEnvelope[map[string]any]
-	if err := json.Unmarshal([]byte(argumentsInJSON), &enveloped); err == nil && enveloped.Payload != nil {
-		return normalizePipelinePayload(enveloped.Payload), nil
+func decodePipelineInvocation(toolKey string, argumentsInJSON string) (ToolInvocationEnvelope[map[string]any], error) {
+	invocation, err := decodeToolInvocationEnvelope(toolKey, argumentsInJSON, func(payload map[string]any) bool {
+		return payload != nil
+	})
+	if err != nil {
+		return ToolInvocationEnvelope[map[string]any]{}, err
 	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(argumentsInJSON), &payload); err != nil {
-		return nil, fmt.Errorf("decode pipeline tool input: %w", err)
-	}
-	return normalizePipelinePayload(payload), nil
+	invocation.Payload = normalizePipelinePayload(invocation.Payload)
+	return invocation, nil
 }
 
 func normalizePipelinePayload(payload map[string]any) map[string]any {
@@ -148,6 +145,11 @@ func normalizePipelinePayload(payload map[string]any) map[string]any {
 		payload["session_id"] = strings.TrimSpace(sessionID)
 	}
 	return payload
+}
+
+func pipelineString(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
+	return strings.TrimSpace(value)
 }
 
 func defaultPipelineSummary(toolKey string) string {

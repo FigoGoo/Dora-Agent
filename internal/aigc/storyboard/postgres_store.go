@@ -29,6 +29,14 @@ func NewPostgresStore(db *gorm.DB) *PostgresStore {
 	return &PostgresStore{db: db}
 }
 
+func (s *PostgresStore) WithTx(tx *gorm.DB) *PostgresStore { return &PostgresStore{db: tx} }
+func (s *PostgresStore) DB() *gorm.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
+
 type storyboardRecord struct {
 	ID          string `gorm:"primaryKey;size:128"`
 	SessionID   string `gorm:"size:128;index"`
@@ -66,8 +74,22 @@ func (s *PostgresStore) AutoMigrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres storyboard store db is required")
 	}
-	if err := s.db.WithContext(ctx).AutoMigrate(&storyboardRecord{}, &storyboardEventRecord{}); err != nil {
+	if err := s.db.WithContext(ctx).AutoMigrate(
+		&storyboardRecord{},
+		&storyboardEventRecord{},
+		&storyboardAggregateRecord{},
+		&storyboardDomainEventRecord{},
+	); err != nil {
 		return fmt.Errorf("migrate storyboard tables: %w", err)
+	}
+	// Older demo builds made command_id globally unique. Command identity is
+	// scoped to a storyboard aggregate, so remove that legacy index after the
+	// composite (storyboard_id, command_id) index has been migrated.
+	const legacyCommandIndex = "idx_aigc_storyboard_domain_events_command_id"
+	if s.db.Migrator().HasIndex(&storyboardDomainEventRecord{}, legacyCommandIndex) {
+		if err := s.db.Migrator().DropIndex(&storyboardDomainEventRecord{}, legacyCommandIndex); err != nil {
+			return fmt.Errorf("drop legacy global storyboard command index: %w", err)
+		}
 	}
 	return nil
 }
@@ -140,8 +162,17 @@ func (s *PostgresStore) ApplyPatch(ctx context.Context, req PatchRequest) (Story
 	if strings.TrimSpace(req.StoryboardID) == "" {
 		return Storyboard{}, EventRecord{}, fmt.Errorf("%w: storyboard id is required", ErrInvalidPatch)
 	}
+	if strings.TrimSpace(req.SessionID) == "" {
+		return Storyboard{}, EventRecord{}, fmt.Errorf("%w: session id is required", ErrInvalidPatch)
+	}
 	if len(req.Ops) == 0 {
 		return Storyboard{}, EventRecord{}, fmt.Errorf("%w: ops are required", ErrInvalidPatch)
+	}
+	for _, op := range req.Ops {
+		path := strings.TrimSpace(op.Path)
+		if !strings.HasPrefix(path, "/key_elements/") && !strings.HasPrefix(path, "/shots/") && !strings.HasPrefix(path, "/audio_layers/") {
+			return Storyboard{}, EventRecord{}, fmt.Errorf("%w: patch path %q is not an editable storyboard content path", ErrInvalidPatch, path)
+		}
 	}
 
 	var patched Storyboard
@@ -149,7 +180,7 @@ func (s *PostgresStore) ApplyPatch(ctx context.Context, req PatchRequest) (Story
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var record storyboardRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&record, "id = ?", req.StoryboardID).Error; err != nil {
+			First(&record, "id = ? AND session_id = ?", req.StoryboardID, strings.TrimSpace(req.SessionID)).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("%w: %s", ErrNotFound, req.StoryboardID)
 			}
@@ -167,6 +198,14 @@ func (s *PostgresStore) ApplyPatch(ctx context.Context, req PatchRequest) (Story
 		if err != nil {
 			return err
 		}
+		// Identity, ownership and lifecycle are not JSON-Patch-editable. Keep the
+		// locked row authoritative even if a future patch implementation becomes
+		// more permissive.
+		board.ID = record.ID
+		board.SessionID = record.SessionID
+		board.SpecID = record.SpecID
+		board.Status = record.Status
+		board.CreatedAt = record.CreatedAt
 		board.Version = req.BaseVersion + 1
 		board.UpdatedAt = time.Now()
 

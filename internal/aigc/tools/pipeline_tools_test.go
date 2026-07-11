@@ -23,25 +23,25 @@ func TestPipelineToolsReturnStandardEnvelope(t *testing.T) {
 			name:     "resource prepare",
 			tool:     ResourcePrepareAnalyzeTool{},
 			wantName: ResourcePrepareAnalyzeToolKey,
-			args:     `{"session_id":"s1","asset_ids":["asset-1"],"brief":"分析剧本"}`,
+			args:     `{"session_id":"s1","request_id":"req-1","idempotency_key":"idem-1","action":"analyze_resources","payload":{"asset_ids":["asset-1"],"brief":"分析剧本"}}`,
 		},
 		{
 			name:     "multimodal analyze",
 			tool:     MultimodalAnalyzeTool{},
 			wantName: MultimodalAnalyzeToolKey,
-			args:     `{"session_id":"s1","asset_ids":["asset-1"],"brief":"分析参考图"}`,
+			args:     `{"session_id":"s1","request_id":"req-1","idempotency_key":"idem-1","action":"analyze_multimodal","payload":{"asset_ids":["asset-1"],"brief":"分析参考图"}}`,
 		},
 		{
 			name:     "write prompt",
 			tool:     WritePromptTool{},
 			wantName: WritePromptToolKey,
-			args:     `{"session_id":"s1","target_id":"shot-1","prompt":"竹林拔剑"}`,
+			args:     `{"session_id":"s1","request_id":"req-1","idempotency_key":"idem-1","action":"write_prompts","payload":{"target_id":"shot-1","prompt":"竹林拔剑"}}`,
 		},
 		{
 			name:     "video assembler",
 			tool:     VideoAssemblerTool{},
 			wantName: VideoAssemblerToolKey,
-			args:     `{"session_id":"s1","storyboard_id":"storyboard-1","video_asset_ids":["asset-video-1"]}`,
+			args:     `{"session_id":"s1","request_id":"req-1","idempotency_key":"idem-1","action":"assemble_video","payload":{"storyboard_id":"storyboard-1","video_asset_ids":["asset-video-1"]}}`,
 		},
 	}
 
@@ -66,5 +66,12 @@ func TestPipelineToolsReturnStandardEnvelope(t *testing.T) {
 				t.Fatalf("result = %#v", result)
 			}
 		})
+	}
+}
+
+func TestPipelineToolsRejectDirectPayload(t *testing.T) {
+	_, err := ResourcePrepareAnalyzeTool{}.InvokableRun(context.Background(), `{"session_id":"s1","brief":"分析剧本"}`)
+	if err == nil {
+		t.Fatal("expected direct payload to be rejected")
 	}
 }

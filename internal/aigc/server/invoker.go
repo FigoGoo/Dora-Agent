@@ -2,20 +2,40 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/cloudwego/eino/adk"
+	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
 )
 
 type RunnerInvoker struct {
-	runner *adk.Runner
+	runner           *adk.Runner
+	chatModelOptions []einomodel.Option
 }
 
-func NewRunnerInvoker(runner *adk.Runner) *RunnerInvoker {
-	return &RunnerInvoker{runner: runner}
+// RunnerInvokerOption 调整 RunnerInvoker 调用 Agent 时传入的运行级配置。
+type RunnerInvokerOption func(*RunnerInvoker)
+
+// WithRunnerChatModelOptions 把 Eino ChatModel options 透传给 ChatModelAgent。
+func WithRunnerChatModelOptions(options ...einomodel.Option) RunnerInvokerOption {
+	return func(invoker *RunnerInvoker) {
+		invoker.chatModelOptions = append([]einomodel.Option(nil), options...)
+	}
+}
+
+// NewRunnerInvoker 创建 Agent Runner 调用器。
+func NewRunnerInvoker(runner *adk.Runner, options ...RunnerInvokerOption) *RunnerInvoker {
+	invoker := &RunnerInvoker{runner: runner}
+	for _, option := range options {
+		if option != nil {
+			option(invoker)
+		}
+	}
+	return invoker
 }
 
 func (i *RunnerInvoker) Invoke(ctx context.Context, req AgentInvokeRequest) (<-chan AgentEvent, error) {
@@ -23,12 +43,15 @@ func (i *RunnerInvoker) Invoke(ctx context.Context, req AgentInvokeRequest) (<-c
 		return nil, fmt.Errorf("runner is required")
 	}
 
-	opts := make([]adk.AgentRunOption, 0, 2)
+	opts := make([]adk.AgentRunOption, 0, 3)
 	if req.CheckpointID != "" {
 		opts = append(opts, adk.WithCheckPointID(req.CheckpointID))
 	}
 	if len(req.SessionValues) > 0 {
 		opts = append(opts, adk.WithSessionValues(req.SessionValues))
+	}
+	if len(i.chatModelOptions) > 0 {
+		opts = append(opts, adk.WithChatModelOptions(i.chatModelOptions))
 	}
 
 	iter := i.runner.Run(ctx, req.Messages, opts...)
@@ -43,9 +66,12 @@ func (i *RunnerInvoker) Resume(ctx context.Context, req AgentResumeRequest) (<-c
 		return nil, fmt.Errorf("checkpoint id is required")
 	}
 
-	opts := make([]adk.AgentRunOption, 0, 1)
+	opts := make([]adk.AgentRunOption, 0, 2)
 	if len(req.SessionValues) > 0 {
 		opts = append(opts, adk.WithSessionValues(req.SessionValues))
+	}
+	if len(i.chatModelOptions) > 0 {
+		opts = append(opts, adk.WithChatModelOptions(i.chatModelOptions))
 	}
 	iter, err := i.runner.ResumeWithParams(ctx, req.CheckpointID, &adk.ResumeParams{
 		Targets: req.Targets,
@@ -69,9 +95,13 @@ func runnerEvents(iter *adk.AsyncIterator[*adk.AgentEvent], checkpointID string)
 				continue
 			}
 			if event.Err != nil {
+				if isWillRetryEvent(event.Err) {
+					continue
+				}
+				payload := map[string]any{"message": event.Err.Error()}
 				out <- AgentEvent{
 					Event:   a2ui.EventError,
-					Payload: map[string]any{"message": event.Err.Error()},
+					Payload: payload,
 					Err:     event.Err,
 				}
 				return
@@ -92,9 +122,13 @@ func runnerEvents(iter *adk.AsyncIterator[*adk.AgentEvent], checkpointID string)
 
 			message, err := event.Output.MessageOutput.GetMessage()
 			if err != nil {
+				if isWillRetryEvent(err) {
+					continue
+				}
+				payload := map[string]any{"message": err.Error()}
 				out <- AgentEvent{
 					Event:   a2ui.EventError,
-					Payload: map[string]any{"message": err.Error()},
+					Payload: payload,
 					Err:     err,
 				}
 				return
@@ -107,6 +141,11 @@ func runnerEvents(iter *adk.AsyncIterator[*adk.AgentEvent], checkpointID string)
 		}
 	}()
 	return out
+}
+
+func isWillRetryEvent(err error) bool {
+	var willRetry *adk.WillRetryError
+	return errors.As(err, &willRetry)
 }
 
 func messageToAgentEvent(message *schema.Message) AgentEvent {

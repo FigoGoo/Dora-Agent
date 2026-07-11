@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/cloudwego/eino/adk"
+	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
@@ -42,6 +43,95 @@ func TestRunnerInvokerConvertsAssistantMessageToChatDelta(t *testing.T) {
 	}
 	if event.AssistantText != "故事板草案已生成" {
 		t.Fatalf("assistant text = %q", event.AssistantText)
+	}
+	if _, ok := <-events; ok {
+		t.Fatal("expected events channel to close")
+	}
+}
+
+func TestRunnerInvokerPassesChatModelOptionsToAgent(t *testing.T) {
+	model := &captureChatModelOptionsModel{}
+	agent, err := adk.NewChatModelAgent(context.Background(), &adk.ChatModelAgentConfig{
+		Name:        "test-agent",
+		Description: "test",
+		Model:       model,
+	})
+	if err != nil {
+		t.Fatalf("NewChatModelAgent: %v", err)
+	}
+	runner := adk.NewRunner(context.Background(), adk.RunnerConfig{Agent: agent})
+	invoker := NewRunnerInvoker(
+		runner,
+		WithRunnerChatModelOptions(einomodel.WithMaxTokens(8192), einomodel.WithTemperature(0.2)),
+	)
+
+	events, err := invoker.Invoke(context.Background(), AgentInvokeRequest{
+		Messages: []*schema.Message{schema.UserMessage("开始")},
+	})
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if _, ok := <-events; !ok {
+		t.Fatal("expected an event")
+	}
+
+	options := einomodel.GetCommonOptions(&einomodel.Options{}, model.options...)
+	if options.MaxTokens == nil || *options.MaxTokens != 8192 {
+		t.Fatalf("max tokens option = %#v", options.MaxTokens)
+	}
+	if options.Temperature == nil || *options.Temperature != 0.2 {
+		t.Fatalf("temperature option = %#v", options.Temperature)
+	}
+}
+
+func TestRunnerInvokerIgnoresStreamingWillRetryErrors(t *testing.T) {
+	rejectedStream, rejectedWriter := schema.Pipe[*schema.Message](1)
+	go func() {
+		defer rejectedWriter.Close()
+		rejectedWriter.Send(schema.AssistantMessage("bad protocol", nil), nil)
+		rejectedWriter.Send(nil, &adk.WillRetryError{
+			ErrStr:       "model call will retry at attempt 1",
+			RetryAttempt: 1,
+		})
+	}()
+
+	agent := &mockRunnerAgent{
+		events: []*adk.AgentEvent{
+			{
+				Output: &adk.AgentOutput{
+					MessageOutput: &adk.MessageVariant{
+						IsStreaming:   true,
+						MessageStream: rejectedStream,
+						Role:          schema.Assistant,
+					},
+				},
+			},
+			{
+				Output: &adk.AgentOutput{
+					MessageOutput: &adk.MessageVariant{
+						Message: schema.AssistantMessage("good protocol", nil),
+						Role:    schema.Assistant,
+					},
+				},
+			},
+		},
+	}
+	runner := adk.NewRunner(context.Background(), adk.RunnerConfig{Agent: agent, EnableStreaming: true})
+	invoker := NewRunnerInvoker(runner)
+
+	events, err := invoker.Invoke(context.Background(), AgentInvokeRequest{
+		Messages: []*schema.Message{schema.UserMessage("开始")},
+	})
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+
+	event, ok := <-events
+	if !ok {
+		t.Fatal("expected final retry event")
+	}
+	if event.Event != a2ui.EventChatDelta || event.AssistantText != "good protocol" {
+		t.Fatalf("event = %#v", event)
 	}
 	if _, ok := <-events; ok {
 		t.Fatal("expected events channel to close")
@@ -134,4 +224,21 @@ func (a *mockRunnerAgent) Run(context.Context, *adk.AgentInput, ...adk.AgentRunO
 		}
 	}()
 	return iter
+}
+
+type captureChatModelOptionsModel struct {
+	options []einomodel.Option
+}
+
+func (m *captureChatModelOptionsModel) Generate(_ context.Context, _ []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
+	m.options = append([]einomodel.Option(nil), opts...)
+	return schema.AssistantMessage(`{"a2ui_version":"1.0","actions":[{"type":"append_card","surface":"chat","card_id":"ok","card":{"root":"root","components":[{"id":"root","component":{"Card":{"children":["text"]}}},{"id":"text","component":{"Text":{"value":"ok"}}}]}}]}`, nil), nil
+}
+
+func (m *captureChatModelOptionsModel) Stream(_ context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
+	message, err := m.Generate(context.Background(), input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return schema.StreamReaderFromArray([]*schema.Message{message}), nil
 }

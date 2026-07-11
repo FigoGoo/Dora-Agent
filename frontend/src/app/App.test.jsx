@@ -1,12 +1,57 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.jsx';
 
 afterEach(() => {
   vi.restoreAllMocks();
+  DefaultMockEventSource.instances = [];
   window.history.pushState({}, '', '/');
 });
+
+class DefaultMockEventSource {
+  static instances = [];
+
+  constructor(url) {
+    this.url = url;
+    this.listeners = {};
+    this.close = vi.fn();
+    DefaultMockEventSource.instances.push(this);
+  }
+
+  addEventListener(eventName, listener) {
+    this.listeners[eventName] = listener;
+  }
+
+  removeEventListener(eventName) {
+    delete this.listeners[eventName];
+  }
+
+  emit(event) {
+    const listener = this.listeners[event.event];
+    if (listener) {
+      listener({ data: JSON.stringify(event) });
+    }
+  }
+}
+
+function ensureDefaultEventSource() {
+  if (typeof window.EventSource !== 'function') {
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+  }
+}
+
+function emitMockEvents(events) {
+  if (!events.length || window.EventSource !== DefaultMockEventSource) {
+    return;
+  }
+  act(() => {
+    DefaultMockEventSource.instances.forEach((source) => {
+      events.forEach((event) => source.emit(event));
+    });
+  });
+}
 
 describe('DORAIGC landing page', () => {
   it('renders the approved brand and prompt-first creation entry', () => {
@@ -271,32 +316,281 @@ describe('DORAIGC static client pages', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/aigc/sessions', expect.objectContaining({ method: 'POST' }));
   });
 
-  it('resumes a media graph interrupt from the confirmation card', async () => {
+  it('starts a fresh workspace session from the topbar', async () => {
     window.history.pushState({}, '', '/workspace');
     const user = userEvent.setup();
     const fetchMock = mockAigcFetch({
-      messageStream: [
+      sessionIDs: ['s1', 's2'],
+      messages: [{ id: 'm1', role: 'assistant', content: '旧会话故事板已生成。' }],
+      jobs: [{ job_id: 'job-1', session_id: 's1', target_id: 'shot-1', status: 'running' }]
+    });
+    const storage = mockLocalStorage();
+    class MockEventSource {
+      static instances = [];
+
+      constructor(url) {
+        this.url = url;
+        this.addEventListener = vi.fn();
+        this.removeEventListener = vi.fn();
+        this.close = vi.fn();
+        MockEventSource.instances.push(this);
+      }
+    }
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('EventSource', MockEventSource);
+
+    render(<App />);
+
+    expect(await screen.findByText('Session s1')).toBeInTheDocument();
+    expect(screen.getByText('旧会话故事板已生成。')).toBeInTheDocument();
+    expect(screen.getByText('竹林归隐')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '新会话' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Session s2')).toBeInTheDocument();
+    });
+    expect(storage.setItem).toHaveBeenLastCalledWith('dora:aigc:demo_session_id', 's2');
+    expect(screen.queryByText('旧会话故事板已生成。')).not.toBeInTheDocument();
+    expect(screen.queryByText('竹林归隐')).not.toBeInTheDocument();
+    expect(screen.getByText('把剧本、风格或 Skill.md 发给我，我会先规划规格和故事板。')).toBeInTheDocument();
+    expect(MockEventSource.instances.map((source) => source.url)).toEqual([
+      '/api/aigc/sessions/s1/events/stream',
+      '/api/aigc/sessions/s2/events/stream'
+    ]);
+    expect(MockEventSource.instances[0].close).toHaveBeenCalled();
+    const sessionCreates = fetchMock.mock.calls.filter(
+      ([url, options]) => url === '/api/aigc/sessions' && options?.method === 'POST'
+    );
+    expect(sessionCreates).toHaveLength(2);
+  });
+
+  it('replaces a cached session automatically after local history is deleted', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const storage = mockLocalStorage();
+    storage.setItem('dora:aigc:demo_session_id', 'deleted-session');
+    vi.stubGlobal('localStorage', storage);
+    const baseFetch = mockAigcFetch({ sessionIDs: ['fresh-session'] });
+    const fetchMock = vi.fn((input, options) => {
+      const path = new URL(typeof input === 'string' ? input : input.url, 'http://localhost').pathname;
+      if (path === '/api/aigc/sessions/deleted-session/messages') {
+        return Promise.resolve(jsonResponse({ error: 'not found' }, 404));
+      }
+      return baseFetch(input, options);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText('Session fresh-session')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/aigc/sessions/deleted-session/messages', expect.anything());
+    expect(storage.removeItem).toHaveBeenCalledWith('dora:aigc:demo_session_id');
+    expect(storage.setItem).toHaveBeenLastCalledWith('dora:aigc:demo_session_id', 'fresh-session');
+  });
+
+  it('ignores a previous session hydration that completes after switching sessions', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const storage = mockLocalStorage();
+    vi.stubGlobal('localStorage', storage);
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+
+    let createdSessionCount = 0;
+    let resolveOldStoryboard;
+    const oldStoryboardResponse = new Promise((resolve) => {
+      resolveOldStoryboard = resolve;
+    });
+    const newStoryboard = {
+      ...defaultAigcStoryboard(),
+      session_id: 's2',
+      shots: [{ ...defaultAigcStoryboard().shots[0], scene_description: '新会话镜头' }]
+    };
+    const oldStoryboard = {
+      ...defaultAigcStoryboard(),
+      session_id: 's1',
+      shots: [{ ...defaultAigcStoryboard().shots[0], scene_description: '旧会话迟到镜头' }]
+    };
+    const fetchMock = vi.fn((input, options = {}) => {
+      const path = new URL(typeof input === 'string' ? input : input.url, 'http://localhost').pathname;
+      if (path === '/api/aigc/sessions' && options.method === 'POST') {
+        createdSessionCount += 1;
+        return Promise.resolve(
+          jsonResponse({ id: createdSessionCount === 1 ? 's1' : 's2', user_id: 'demo-user', status: 'active' }, 201)
+        );
+      }
+      if (path === '/api/aigc/sessions/s1/storyboard') {
+        return oldStoryboardResponse;
+      }
+      if (path === '/api/aigc/sessions/s2/storyboard') {
+        return Promise.resolve(jsonResponse(newStoryboard));
+      }
+      if (/\/api\/aigc\/sessions\/(s1|s2)\/assets$/.test(path)) {
+        return Promise.resolve(jsonResponse({ assets: [] }));
+      }
+      if (/\/api\/aigc\/sessions\/(s1|s2)\/jobs$/.test(path)) {
+        return Promise.resolve(jsonResponse({ jobs: [] }));
+      }
+      if (/\/api\/aigc\/sessions\/(s1|s2)\/messages$/.test(path)) {
+        return Promise.resolve(jsonResponse({ messages: [] }));
+      }
+      return Promise.resolve(jsonResponse({ error: 'not found' }, 404));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText('Session s1')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '新会话' }));
+    expect(await screen.findByText('Session s2')).toBeInTheDocument();
+    expect(await screen.findByText('新会话镜头')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveOldStoryboard(jsonResponse(oldStoryboard));
+      await oldStoryboardResponse;
+    });
+
+    expect(screen.getByText('新会话镜头')).toBeInTheDocument();
+    expect(screen.queryByText('旧会话迟到镜头')).not.toBeInTheDocument();
+  });
+
+  it('ignores stale SSE events and lifecycle callbacks from an older session generation', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal('localStorage', mockLocalStorage());
+    vi.stubGlobal('fetch', mockAigcFetch({ sessionIDs: ['s1', 's2'] }));
+
+    render(<App />);
+
+    expect(await screen.findByText('Session s1')).toBeInTheDocument();
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    const oldSource = DefaultMockEventSource.instances[0];
+    const staleOpen = oldSource.onopen;
+    const staleError = oldSource.onerror;
+    const staleInterrupt = oldSource.listeners['a2ui.interrupt_request'];
+
+    await user.click(screen.getByRole('button', { name: '新会话' }));
+    expect(await screen.findByText('Session s2')).toBeInTheDocument();
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(2));
+
+    act(() => {
+      staleError();
+      staleInterrupt({
+        data: JSON.stringify({
+          event: 'a2ui.interrupt_request',
+          payload: {
+            checkpoint_id: 'stale-checkpoint',
+            interrupt_id: 'stale-interrupt',
+            title: '旧会话确认',
+            message: '旧会话事件不应出现',
+            actions: []
+          }
+        })
+      });
+    });
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('旧会话事件不应出现')).not.toBeInTheDocument();
+
+    act(() => {
+      DefaultMockEventSource.instances[1].onerror();
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('事件流已断开，刷新页面可重新连接。');
+
+    act(() => {
+      staleOpen();
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('事件流已断开，刷新页面可重新连接。');
+  });
+
+  it('subscribes to the ready event and clears stale stream errors when reopened', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const fetchMock = mockAigcFetch({ sessionIDs: ['s1'] });
+    class MockEventSource {
+      static instances = [];
+
+      constructor(url) {
+        this.url = url;
+        this.listeners = {};
+        this.close = vi.fn();
+        MockEventSource.instances.push(this);
+      }
+
+      addEventListener(eventName, listener) {
+        this.listeners[eventName] = listener;
+      }
+
+      removeEventListener(eventName) {
+        delete this.listeners[eventName];
+      }
+    }
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('localStorage', mockLocalStorage());
+    vi.stubGlobal('EventSource', MockEventSource);
+
+    render(<App />);
+
+    expect(await screen.findByText('Session s1')).toBeInTheDocument();
+    const source = MockEventSource.instances[0];
+    expect(source.listeners).toHaveProperty('a2ui.ready');
+
+    await act(async () => {
+      source.onerror();
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('事件流已断开，刷新页面可重新连接。');
+
+    await act(async () => {
+      source.onopen();
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+  });
+
+  it('keeps application A2UI errors separate from EventSource transport errors', async () => {
+    window.history.pushState({}, '', '/workspace');
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal('localStorage', mockLocalStorage());
+    vi.stubGlobal('fetch', mockAigcFetch({ sessionIDs: ['s1'] }));
+
+    render(<App />);
+
+    expect(await screen.findByText('Session s1')).toBeInTheDocument();
+    const source = DefaultMockEventSource.instances[0];
+    expect(source.listeners).toHaveProperty('a2ui.error');
+
+    act(() => {
+      source.emit({
+        event: 'a2ui.error',
+        payload: { code: 'invalid_a2ui_action_envelope', message: 'Agent 输出协议错误' }
+      });
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Agent 输出协议错误');
+    expect(screen.queryByText('事件流已断开，刷新页面可重新连接。')).not.toBeInTheDocument();
+  });
+
+  it('resumes an agent interrupt through the unified message endpoint', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const fetchMock = mockAigcFetch({
+      messageEvents: [
         {
           event: 'a2ui.interrupt_request',
           payload: {
-            scope: 'media_graph',
-            checkpoint_id: 'media-cp-1',
+            scope: 'agent',
+            checkpoint_id: 'agent-cp-1',
             interrupt_id: 'interrupt-1',
             title: '确认参考图',
             message: '请确认参考图',
             actions: [{ key: 'confirm_reference_image', label: '确认参考图' }]
           }
         }
-      ],
-      mediaGraphResume: {
-        status: 'completed',
-        output: {
-          storyboard_id: 'storyboard-1',
-          storyboard_version: 3,
-          status: 'reference_confirmed',
-          job_ids: ['job-1']
-        }
-      }
+      ]
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -308,40 +602,58 @@ describe('DORAIGC static client pages', () => {
     await user.click(await screen.findByRole('button', { name: '确认参考图' }));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/aigc/sessions/s1/media-graph/resume',
+      '/api/aigc/sessions/s1/messages/resume',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
-          checkpoint_id: 'media-cp-1',
+          checkpoint_id: 'agent-cp-1',
           interrupt_id: 'interrupt-1',
-          approved: true,
-          note: '确认参考图'
+          content: '确认参考图',
+          data: { approved: true, action_key: 'confirm_reference_image', note: '确认参考图' }
         })
       })
     );
   });
 
-  it('applies streamed storyboard patches and job status updates in the workspace', async () => {
+  it('keeps a newer interrupt when an older interrupt resolves on the same checkpoint', async () => {
+    window.history.pushState({}, '', '/workspace');
+    ensureDefaultEventSource();
+    vi.stubGlobal('fetch', mockAigcFetch());
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    const source = DefaultMockEventSource.instances[0];
+    act(() => {
+      source.emit({ seq: 1, event: 'a2ui.interrupt_request', payload: { checkpoint_id: 'shared-cp', interrupt_id: 'old-interrupt', title: '旧确认', actions: [{ key: 'old', label: '旧操作' }] } });
+      source.emit({ seq: 2, event: 'a2ui.interrupt_request', payload: { checkpoint_id: 'shared-cp', interrupt_id: 'new-interrupt', title: '新确认', actions: [{ key: 'new', label: '新操作' }] } });
+      source.emit({ seq: 3, event: 'a2ui.interrupt_resolved', payload: { checkpoint_id: 'shared-cp', interrupt_id: 'old-interrupt', status: 'resumed' } });
+    });
+
+    expect(await screen.findByRole('button', { name: '新操作' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '旧操作' })).not.toBeInTheDocument();
+  });
+
+  it('applies A2UI storyboard patches and tool run updates in the workspace', async () => {
     window.history.pushState({}, '', '/workspace');
     const user = userEvent.setup();
     const fetchMock = mockAigcFetch({
-      messageStream: [
-        {
-          event: 'storyboard.patch',
-          payload: {
+      messageEvents: [
+        updateCardEvent('storyboard', 'storyboard:s1', {
+          patch: {
             next_version: 4,
             ops: [{ op: 'replace', path: '/shots/0/scene_description', value: '竹林夜雨' }]
           }
-        },
-        {
-          event: 'job.status',
-          payload: {
+        }),
+        updateCardEvent('tool_runs', 'tool_run:job-1', {
+          tool_run: {
             job_id: 'job-1',
             session_id: 's1',
             target_id: 'shot-1',
             status: 'running'
           }
-        }
+        })
       ],
       jobsAfterMessage: [{ job_id: 'job-1', session_id: 's1', target_id: 'shot-1', status: 'running' }],
       storyboardAfterMessage: {
@@ -388,7 +700,97 @@ describe('DORAIGC static client pages', () => {
 
     expect(await screen.findByText('竹林夜雨')).toBeInTheDocument();
     expect(screen.getByText('shot-1')).toBeInTheDocument();
-    expect(screen.getByText('生成中')).toBeInTheDocument();
+    expect(screen.getAllByText('生成中').length).toBeGreaterThan(0);
+  });
+
+  it('renders tool runs and storyboard patches from A2UI update actions', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const fetchMock = mockAigcFetch({
+      messageEvents: [
+        updateCardEvent('tool_runs', 'tool_run:call-1', {
+          tool_run: {
+            tool_call_id: 'call-1',
+            tool_key: 'media_generator',
+            display_name: 'Media Assets',
+            status: 'running',
+            summary: '正在为 Shot 01 生成关键帧',
+            nodes: [
+              { node_key: 'register_assets', display_name: '注册所有元素资产', status: 'succeeded' },
+              { node_key: 'generate_assets', display_name: '生成素材', status: 'running' }
+            ]
+          }
+        }),
+        updateCardEvent('storyboard', 'storyboard:s1', {
+          patch: {
+            next_version: 4,
+            ops: [{ op: 'replace', path: '/shots/0/scene_description', value: '竹林夜雨' }]
+          }
+        })
+      ],
+      storyboardAfterMessage: {
+        ...defaultAigcStoryboard(),
+        version: 4,
+        shots: [
+          {
+            ...defaultAigcStoryboard().shots[0],
+            scene_description: '竹林夜雨'
+          }
+        ]
+      }
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '生成关键帧');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(await screen.findByText('竹林夜雨')).toBeInTheDocument();
+    expect(screen.getByText('Media Assets')).toBeInTheDocument();
+    expect(screen.getByText('正在为 Shot 01 生成关键帧')).toBeInTheDocument();
+    expect(screen.getByText('注册所有元素资产')).toBeInTheDocument();
+    expect(screen.getByText('生成素材')).toBeInTheDocument();
+  });
+
+  it('merges media provider progress into one Media Assets tool run', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const fetchMock = mockAigcFetch({
+      messageEvents: [
+        updateCardEvent('tool_runs', 'tool_run:media_generator', {
+          tool_run: {
+            tool_key: 'media_generator',
+            display_name: 'Media Assets',
+            status: 'running',
+            summary: '正在生成素材',
+            nodes: [{ node_key: 'write_the_prompt:call-prompt', display_name: 'Write The Prompt', status: 'succeeded' }]
+          }
+        }),
+        updateCardEvent('tool_runs', 'tool_run:media_generator', {
+          tool_run: {
+            tool_key: 'media_generator',
+            display_name: 'Media Assets',
+            status: 'running',
+            summary: 'Image2 正在生成产品图',
+            nodes: [{ node_key: 'image2:job-1', display_name: 'Image2 生成图片', status: 'running' }]
+          }
+        })
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '生成素材');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(await screen.findByText('Image2 正在生成产品图')).toBeInTheDocument();
+    expect(screen.getAllByText('Media Assets')).toHaveLength(1);
+    expect(screen.getByText('Write The Prompt')).toBeInTheDocument();
+    expect(screen.getByText('Image2 生成图片')).toBeInTheDocument();
   });
 
   it('renders generated shot images after storyboard update hints and asset refresh', async () => {
@@ -397,10 +799,9 @@ describe('DORAIGC static client pages', () => {
     const imageURL = 'https://tos.doraigc.com/aigc/sessions/s1/assets/asset-1/keyframe.png';
     const fetchMock = mockAigcFetch({
       assetsAfterMessage: [{ id: 'asset-1', session_id: 's1', kind: 'image', url: imageURL }],
-      messageStream: [
-        {
-          event: 'job.status',
-          payload: {
+      messageEvents: [
+        updateCardEvent('tool_runs', 'tool_run:job-1', {
+          tool_run: {
             job_id: 'job-1',
             session_id: 's1',
             target_type: 'shot',
@@ -408,10 +809,9 @@ describe('DORAIGC static client pages', () => {
             status: 'succeeded',
             result_asset_ids: ['asset-1']
           }
-        },
-        {
-          event: 'storyboard.patch',
-          payload: {
+        }),
+        updateCardEvent('storyboard', 'storyboard:s1', {
+          patch: {
             updates: [
               {
                 target_type: 'shot',
@@ -423,7 +823,7 @@ describe('DORAIGC static client pages', () => {
               }
             ]
           }
-        }
+        })
       ]
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -439,13 +839,27 @@ describe('DORAIGC static client pages', () => {
     });
   });
 
-  it('shows A2UI rendering progress events in the chat timeline', async () => {
+  it('renders A2UI info request forms and submits answers through chat', async () => {
     window.history.pushState({}, '', '/workspace');
     const user = userEvent.setup();
     const fetchMock = mockAigcFetch({
-      messageStream: [
-        { event: 'a2ui.begin_rendering', payload: { surface: 'storyboard', message: '开始渲染故事板' } },
-        { event: 'a2ui.surface_update', payload: { surface: 'storyboard', message: '故事板卡片已更新' } }
+      messageEvents: [
+        {
+          ...appendCardEvent('brief-intake', {
+            title: '补充产品信息',
+            message: '请补充商品宣传短片的基础信息。',
+            submit_label: '提交信息',
+            root: 'root',
+            components: [
+              { id: 'root', component: { Card: { children: ['product', 'selling-points'] } } },
+              { id: 'product', component: { TextInput: { key: 'product_name', label: '产品名称/品类', required: true } } },
+              {
+                id: 'selling-points',
+                component: { TextInput: { key: 'core_selling_points', label: '核心卖点', multiline: true, required: true } }
+              }
+            ]
+          })
+        }
       ]
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -453,30 +867,63 @@ describe('DORAIGC static client pages', () => {
     render(<App />);
 
     await screen.findByText('竹林归隐');
-    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '规划故事板');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '开始吧');
     await user.click(screen.getByRole('button', { name: '发送' }));
 
-    expect(await screen.findByText('开始渲染故事板')).toBeInTheDocument();
-    expect(screen.getByText('故事板卡片已更新')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '补充产品信息' })).toBeInTheDocument();
+    await user.type(screen.getByLabelText('产品名称/品类'), '智能手表');
+    await user.type(screen.getByLabelText('核心卖点'), '长续航，健康监测');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/aigc/sessions/s1/messages',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('智能手表')
+        })
+      );
+    });
+    const submitCall = fetchMock.mock.calls.find(([path, options]) => {
+      if (path !== '/api/aigc/sessions/s1/messages' || options?.method !== 'POST') {
+        return false;
+      }
+      return JSON.parse(options.body).content === '智能手表\n长续航，健康监测';
+    });
+    expect(JSON.parse(submitCall[1].body)).toEqual({
+      content: '智能手表\n长续航，健康监测',
+      ui_source: {
+        type: 'a2ui_submit',
+        card_id: 'brief-intake:brief-intake-instance'
+      }
+    });
   });
 
-  it('renders A2UI info request forms and submits answers through chat', async () => {
+  it('renders append_card actions and submits text input as direct user text', async () => {
     window.history.pushState({}, '', '/workspace');
     const user = userEvent.setup();
     const fetchMock = mockAigcFetch({
-      messageStream: [
+      messageEvents: [
         {
-          event: 'a2ui.surface_update',
-          surface_id: 'brief-intake',
+          event: 'a2ui.action',
           payload: {
-            component: 'form',
-            kind: 'info_request',
-            title: '补充产品信息',
-            message: '请补充商品宣传短片的基础信息。',
-            submit_label: '提交信息',
-            fields: [
-              { key: 'product_name', label: '产品名称/品类', required: true },
-              { key: 'core_selling_points', label: '核心卖点', multiline: true, required: true }
+            a2ui_version: '1.0',
+            actions: [
+              {
+                type: 'append_card',
+                surface: 'chat',
+                card_id: 'brief-card:brief-card-instance',
+                card: {
+                  kind: 'form',
+                  title: '补充产品信息',
+                  submit_label: '提交信息',
+                  root: 'root',
+                  components: [
+                    { id: 'root', component: { Card: { children: ['product'] } } },
+                    { id: 'product', component: { TextInput: { key: 'product_name', label: '产品名称/品类', required: true } } }
+                  ]
+                }
+              }
             ]
           }
         }
@@ -492,36 +939,38 @@ describe('DORAIGC static client pages', () => {
 
     expect(await screen.findByRole('heading', { name: '补充产品信息' })).toBeInTheDocument();
     await user.type(screen.getByLabelText('产品名称/品类'), '智能手表');
-    await user.type(screen.getByLabelText('核心卖点'), '长续航，健康监测');
-    await user.click(screen.getByRole('button', { name: '提交信息' }));
+    await user.click(screen.getByRole('button', { name: '提交' }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/aigc/sessions/s1/messages/stream',
-        expect.objectContaining({
-          method: 'POST',
-          body: expect.stringContaining('智能手表')
-        })
-      );
+      const submitCall = fetchMock.mock.calls.find(([path, options]) => {
+        if (path !== '/api/aigc/sessions/s1/messages' || options?.method !== 'POST') {
+          return false;
+        }
+        try {
+          return JSON.parse(options.body).content === '智能手表';
+        } catch {
+          return false;
+        }
+      });
+      expect(submitCall).toBeTruthy();
+      expect(JSON.parse(submitCall[1].body)).toEqual({
+        content: '智能手表',
+        ui_source: {
+          type: 'a2ui_submit',
+          card_id: 'brief-card:brief-card-instance'
+        }
+      });
     });
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/aigc/sessions/s1/messages/stream',
-      expect.objectContaining({
-        method: 'POST',
-        body: expect.stringContaining('核心卖点：长续航，健康监测')
-      })
-    );
+    expect(screen.getByText('智能手表')).toBeInTheDocument();
   });
 
   it('renders core A2UI components for interactive creation review', async () => {
     window.history.pushState({}, '', '/workspace');
     const user = userEvent.setup();
     const fetchMock = mockAigcFetch({
-      messageStream: [
+      messageEvents: [
         {
-          event: 'a2ui.surface_update',
-          surface_id: 'brief-intake',
-          payload: {
+          ...appendCardEvent('brief-intake', {
             root: 'root',
             title: '商品信息采集',
             submit_label: '提交选择',
@@ -575,7 +1024,7 @@ describe('DORAIGC static client pages', () => {
                 }
               }
             ]
-          }
+          })
         }
       ]
     });
@@ -599,42 +1048,1478 @@ describe('DORAIGC static client pages', () => {
     await user.type(screen.getByLabelText('产品名称'), '智能手表');
     await user.click(screen.getByRole('radio', { name: '高级科技感' }));
     await user.click(screen.getByRole('checkbox', { name: '抖音' }));
-    await user.click(screen.getByRole('button', { name: '提交选择' }));
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => {
+      const submitCall = fetchMock.mock.calls.find(([path, options]) => {
+        if (path !== '/api/aigc/sessions/s1/messages' || options?.method !== 'POST') {
+          return false;
+        }
+        return JSON.parse(options.body).content === '高级科技感、抖音、智能手表';
+      });
+      expect(JSON.parse(submitCall[1].body)).toEqual({
+        content: '高级科技感、抖音、智能手表',
+        ui_source: {
+          type: 'a2ui_submit',
+          card_id: 'brief-intake:brief-intake-instance'
+        }
+      });
+    });
+  });
+
+  it('rejects unsupported live A2UI versions and mixed envelopes without partially applying cards', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const fetchMock = mockAigcFetch({
+      messageEvents: [
+        {
+          event: 'a2ui.action',
+          payload: {
+            a2ui_version: '2.0',
+            actions: [
+              {
+                type: 'append_card',
+                surface: 'chat',
+                card_id: 'future-card',
+                card: {
+                  title: '不支持版本的卡片',
+                  root: 'root',
+                  components: [{ id: 'root', component: { Card: { children: [] } } }]
+                }
+              }
+            ]
+          }
+        },
+        {
+          event: 'a2ui.action',
+          payload: {
+            a2ui_version: '1.0',
+            actions: [
+              {
+                type: 'append_card',
+                surface: 'chat',
+                card_id: 'mixed-card',
+                card: {
+                  title: '不能部分渲染的卡片',
+                  root: 'root',
+                  components: [{ id: 'root', component: { Card: { children: [] } } }]
+                }
+              },
+              { type: 'delete_card', card_id: 'mixed-card' }
+            ]
+          }
+        }
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '测试协议门禁');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/aigc/sessions/s1/messages', expect.anything()));
+
+    expect(screen.queryByRole('heading', { name: '不支持版本的卡片' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '不能部分渲染的卡片' })).not.toBeInTheDocument();
+  });
+
+  it('uses the same A2UI version and action gate while restoring history', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const unsupportedVersion = appendCardEvent('future-history', {
+      title: '历史中的未来版本卡片',
+      root: 'root',
+      components: [{ id: 'root', component: { Card: { children: [] } } }]
+    });
+    unsupportedVersion.payload.a2ui_version = '2.0';
+    const mixedEnvelope = appendCardEvent('mixed-history', {
+      title: '历史中的混合动作卡片',
+      root: 'root',
+      components: [{ id: 'root', component: { Card: { children: [] } } }]
+    });
+    mixedEnvelope.payload.actions.push({ type: 'delete_card', card_id: 'mixed-history' });
+    vi.stubGlobal(
+      'fetch',
+      mockAigcFetch({
+        messages: [
+          { id: 'future-history', role: 'assistant', content: JSON.stringify(unsupportedVersion.payload), seq: 1 },
+          { id: 'mixed-history', role: 'assistant', content: JSON.stringify(mixedEnvelope.payload), seq: 2 }
+        ]
+      })
+    );
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    expect(screen.queryByRole('heading', { name: '历史中的未来版本卡片' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '历史中的混合动作卡片' })).not.toBeInTheDocument();
+  });
+
+  it('does not partially submit generic A2UI forms with missing required choices or uploads', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const fetchMock = mockAigcFetch({
+      uploadedAsset: {
+        id: 'asset-required-1',
+        session_id: 's1',
+        kind: 'image',
+        filename: 'required.png',
+        url: 'https://example.com/required.png'
+      },
+      messageEvents: [
+        appendCardEvent('required-form', {
+          title: '完整填写创作信息',
+          root: 'root',
+          components: [
+            { id: 'root', component: { Card: { children: ['name', 'style', 'platforms', 'asset'] } } },
+            { id: 'name', component: { TextInput: { key: 'name', label: '产品名称', required: true } } },
+            {
+              id: 'style',
+              component: {
+                SingleChoice: {
+                  key: 'style',
+                  label: '视觉风格',
+                  required: true,
+                  options: [{ value: 'tech', label: '高级科技感' }]
+                }
+              }
+            },
+            {
+              id: 'platforms',
+              component: {
+                MultiChoice: {
+                  key: 'platforms',
+                  label: '投放平台',
+                  required: true,
+                  options: [{ value: 'douyin', label: '抖音' }]
+                }
+              }
+            },
+            {
+              id: 'asset',
+              component: {
+                FileUpload: { key: 'asset', label: '上传参考图', accept: 'image/*', required: true }
+              }
+            }
+          ]
+        })
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '开始收集信息');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    const card = await screen.findByRole('article', { name: '完整填写创作信息' });
+    await user.type(within(card).getByLabelText('产品名称'), '智能手表');
+    await user.click(within(card).getByRole('button', { name: '提交' }));
+
+    expect(await screen.findByText('请完成必填项：视觉风格、投放平台、上传参考图。')).toBeInTheDocument();
+    let messagePosts = fetchMock.mock.calls.filter(
+      ([path, options]) => path === '/api/aigc/sessions/s1/messages' && options?.method === 'POST'
+    );
+    expect(messagePosts).toHaveLength(1);
+
+    await user.click(within(card).getByRole('radio', { name: '高级科技感' }));
+    await user.click(within(card).getByRole('checkbox', { name: '抖音' }));
+    await user.click(within(card).getByRole('button', { name: '提交' }));
+    expect(await screen.findByText('请完成必填项：上传参考图。')).toBeInTheDocument();
+    messagePosts = fetchMock.mock.calls.filter(
+      ([path, options]) => path === '/api/aigc/sessions/s1/messages' && options?.method === 'POST'
+    );
+    expect(messagePosts).toHaveLength(1);
+
+    await user.upload(within(card).getByLabelText('上传参考图'), new File(['png'], 'required.png', { type: 'image/png' }));
+    expect(await within(card).findByRole('img', { name: 'required.png' })).toBeInTheDocument();
+    await user.click(within(card).getByRole('button', { name: '提交' }));
+
+    await waitFor(() => {
+      const submitCall = fetchMock.mock.calls.find(([path, options]) => {
+        if (path !== '/api/aigc/sessions/s1/messages' || options?.method !== 'POST') {
+          return false;
+        }
+        return JSON.parse(options.body).content === '高级科技感、抖音、asset-required-1、智能手表';
+      });
+      expect(submitCall).toBeTruthy();
+    });
+  });
+
+  it('keeps operation, job, and tool-run status projections monotonic by status_version', async () => {
+    window.history.pushState({}, '', '/workspace');
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal('fetch', mockAigcFetch());
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    const source = DefaultMockEventSource.instances[0];
+    act(() => {
+      source.emit({
+        ...updateCardEvent('tool_runs', 'operation:monotonic', {
+          status_version: 3,
+          operation: {
+            operation_id: 'op-monotonic',
+            job_id: 'job-monotonic',
+            session_id: 's1',
+            target_id: 'target-monotonic',
+            display_name: '单调状态任务',
+            status: 'succeeded',
+            summary: '最新终态'
+          }
+        }),
+        seq: 1
+      });
+      source.emit({
+        ...updateCardEvent('tool_runs', 'operation:monotonic', {
+          status_version: 2,
+          operation: {
+            operation_id: 'op-monotonic',
+            job_id: 'job-monotonic',
+            session_id: 's1',
+            target_id: 'target-monotonic',
+            display_name: '单调状态任务',
+            status: 'running',
+            summary: '过期运行状态'
+          }
+        }),
+        seq: 2
+      });
+      source.emit({
+        ...updateCardEvent('tool_runs', 'tool_run:call-monotonic', {
+          tool_run: {
+            tool_call_id: 'call-monotonic',
+            display_name: '节点单调任务',
+            status: 'waiting_jobs',
+            status_version: 1
+          }
+        }),
+        seq: 3
+      });
+      source.emit({
+        ...updateCardEvent('tool_runs', 'tool_run:call-monotonic', {
+          tool_run: {
+            tool_call_id: 'call-monotonic',
+            display_name: '节点单调任务',
+            nodes: [
+              {
+                node_key: 'job:node-monotonic',
+                display_name: '图片节点',
+                status: 'succeeded',
+                status_version: 3,
+                description: '节点最新终态'
+              }
+            ]
+          }
+        }),
+        seq: 4
+      });
+      source.emit({
+        ...updateCardEvent('tool_runs', 'tool_run:call-monotonic', {
+          tool_run: {
+            tool_call_id: 'call-monotonic',
+            display_name: '节点单调任务',
+            nodes: [
+              {
+                node_key: 'job:node-monotonic',
+                display_name: '图片节点',
+                status: 'running',
+                status_version: 2,
+                description: '过期节点状态'
+              }
+            ]
+          }
+        }),
+        seq: 5
+      });
+    });
+
+    const latestSummary = await screen.findByText('最新终态');
+    expect(within(latestSummary.closest('article')).getByText('完成')).toBeInTheDocument();
+    expect(screen.queryByText('过期运行状态')).not.toBeInTheDocument();
+    expect(within(screen.getByText('target-monotonic').closest('.aigc-job-chip')).getByText('完成')).toBeInTheDocument();
+    const latestNode = await screen.findByText('节点最新终态');
+    expect(latestNode.closest('li')).toHaveClass('aigc-a2ui-step--succeeded');
+    expect(screen.queryByText('过期节点状态')).not.toBeInTheDocument();
+  });
+
+  it('renders a completed local assembly manifest from the projected job result', async () => {
+    window.history.pushState({}, '', '/workspace');
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal(
+      'fetch',
+      mockAigcFetch({
+        assets: [
+          {
+            id: 'assembly-manifest-1',
+            session_id: 's1',
+            kind: 'text',
+            mime_type: 'application/json',
+            filename: 'local-preview-manifest.json',
+            url: '/api/aigc/local-assets/session/local-preview-manifest.json'
+          }
+        ]
+      })
+    );
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    act(() => {
+      DefaultMockEventSource.instances[0].emit({
+        ...updateCardEvent('tool_runs', 'job:assembly-1', {
+          tool_run: {
+            job_id: 'assembly-1',
+            session_id: 's1',
+            display_name: '本地成片清单',
+            status: 'succeeded',
+            status_version: 3,
+            result_asset_ids: ['assembly-manifest-1']
+          }
+        }),
+        seq: 1
+      });
+    });
+
+    const manifest = await screen.findByRole('link', { name: 'local-preview-manifest.json' });
+    expect(manifest).toHaveAttribute('href', '/api/aigc/local-assets/session/local-preview-manifest.json');
+  });
+
+  it('keeps a plain-text confirmation on the message API and leaves the pending Approval untouched', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const approvalCard = appendCardEvent(
+      'approval',
+      {
+        root: 'root',
+        title: '审核故事板',
+        status: 'pending',
+        data: { approval_id: 'approval-pending', decision_version: 0 },
+        components: [
+          { id: 'root', component: { Card: { children: ['decision'] } } },
+          {
+            id: 'decision',
+            component: {
+              SingleChoice: {
+                key: 'decision',
+                label: '审核决定',
+                required: true,
+                options: [
+                  { value: 'approved', label: '确认' },
+                  { value: 'rejected', label: '拒绝' }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      { card_id: 'approval:approval-pending' }
+    );
+    const fetchMock = mockAigcFetch({
+      messages: [
+        { id: 'm-markdown', role: 'assistant', content: '故事板已生成。\n\n请在系统审核卡中提交决定。', seq: 1 },
+        { id: 'm-approval', role: 'assistant', content: JSON.stringify(approvalCard.payload), seq: 2 }
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText(/请在系统审核卡中提交决定/)).toBeInTheDocument();
+    expect(await screen.findByRole('article', { name: '审核故事板' })).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '确认');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => {
+      const messageCall = fetchMock.mock.calls.find(([path, options]) => {
+        if (path !== '/api/aigc/sessions/s1/messages' || options?.method !== 'POST') {
+          return false;
+        }
+        return JSON.parse(options.body).content === '确认';
+      });
+      expect(messageCall).toBeTruthy();
+    });
+    expect(
+      fetchMock.mock.calls.filter(
+        ([path, options]) => /^\/api\/aigc\/sessions\/s1\/approvals\/[^/]+\/decision$/.test(path) && options?.method === 'POST'
+      )
+    ).toHaveLength(0);
+    expect(screen.getByRole('article', { name: '审核故事板' })).toBeInTheDocument();
+  });
+
+  it('renders canonical Approval controls and submits only through the Decision API', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const approvalCard = appendCardEvent(
+      'approval',
+      {
+        root: 'root',
+        title: '审核创作规范',
+        status: 'pending',
+        approval_id: 'approval-canonical',
+        decision_version: 4,
+        components: [
+          { id: 'root', component: { Card: { children: ['details'] } } },
+          { id: 'details', component: { Markdown: { value: '请审阅以上规范。' } } }
+        ]
+      },
+      { card_id: 'approval:approval-canonical' }
+    );
+    const fetchMock = mockAigcFetch({
+      messages: [{ id: 'm-approval', role: 'assistant', content: JSON.stringify(approvalCard.payload), seq: 1 }]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const card = await screen.findByRole('article', { name: '审核创作规范' });
+    expect(within(card).getByText('请审阅以上规范。')).toBeInTheDocument();
+    expect(within(card).getByRole('radio', { name: '确认' })).toBeInTheDocument();
+    expect(within(card).getByRole('radio', { name: '拒绝' })).toBeInTheDocument();
+    await user.click(within(card).getByRole('radio', { name: '确认' }));
+    await user.click(within(card).getByRole('button', { name: '提交' }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/aigc/sessions/s1/messages/stream',
+        '/api/aigc/sessions/s1/approvals/approval-canonical/decision',
         expect.objectContaining({
           method: 'POST',
-          body: expect.stringContaining('产品名称：智能手表')
+          body: JSON.stringify({
+            decision: 'approved',
+            expected_decision_version: 4,
+            idempotency_key: 'approval:approval-canonical:decision:5:approved'
+          })
         })
       );
     });
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/aigc/sessions/s1/messages/stream',
-      expect.objectContaining({
-        method: 'POST',
-        body: expect.stringContaining('视觉风格：高级科技感')
-      })
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/aigc/sessions/s1/messages/stream',
-      expect.objectContaining({
-        method: 'POST',
-        body: expect.stringContaining('投放平台：抖音')
-      })
-    );
+    expect(
+      fetchMock.mock.calls.filter(
+        ([path, options]) => path === '/api/aigc/sessions/s1/messages' && options?.method === 'POST'
+      )
+    ).toHaveLength(0);
   });
 
-  it('parses embedded A2UI envelopes from assistant text without showing raw protocol JSON', async () => {
+  it('blocks an approval-like A2UI form that has no approval_id', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const malformedCard = appendCardEvent('approval-missing-id', {
+      root: 'root',
+      title: '无效审核入口',
+      status: 'pending',
+      components: [
+        { id: 'root', component: { Card: { children: ['decision'] } } },
+        {
+          id: 'decision',
+          component: {
+            SingleChoice: {
+              key: 'decision',
+              label: '审核决定',
+              required: true,
+              options: [
+                { value: 'approved', label: '确认' },
+                { value: 'rejected', label: '拒绝' }
+              ]
+            }
+          }
+        }
+      ]
+    });
+    const fetchMock = mockAigcFetch({
+      messages: [{ id: 'm-malformed', role: 'assistant', content: JSON.stringify(malformedCard.payload), seq: 1 }]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const card = await screen.findByRole('article', { name: '无效审核入口' });
+    expect(within(card).getByRole('alert')).toHaveTextContent('审批卡缺少 approval_id，无法提交');
+    expect(within(card).queryByRole('radio', { name: '确认' })).not.toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: '提交' })).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([path, options]) =>
+          options?.method === 'POST' &&
+          (path === '/api/aigc/sessions/s1/messages' ||
+            /^\/api\/aigc\/sessions\/s1\/approvals\/[^/]+\/decision$/.test(path))
+      )
+    ).toHaveLength(0);
+  });
+
+  it('reuses the frozen approval version and idempotency key after a transport failure', async () => {
     window.history.pushState({}, '', '/workspace');
     const user = userEvent.setup();
-    const envelope = {
-      a2ui_events: [
+    const approvalCard = appendCardEvent(
+      'approval',
+      {
+        root: 'root',
+        title: '审核创作规范',
+        status: 'pending',
+        data: { approval_id: 'approval-1', decision_version: 0 },
+        components: [
+          { id: 'root', component: { Card: { children: ['decision'] } } },
+          {
+            id: 'decision',
+            component: {
+              SingleChoice: {
+                key: 'decision',
+                label: '审核决定',
+                required: true,
+                options: [
+                  { value: 'approved', label: '确认' },
+                  { value: 'rejected', label: '拒绝' }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      { card_id: 'approval:approval-1' }
+    );
+    const fetchMock = mockAigcFetch({ messageEvents: [approvalCard], approvalDecisionFailures: 1 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '生成创作规范');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    const card = await screen.findByRole('article', { name: '审核创作规范' });
+    await user.click(within(card).getByRole('radio', { name: '确认' }));
+    await user.click(within(card).getByRole('button', { name: '提交' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('temporary approval failure');
+
+    await user.click(within(card).getByRole('button', { name: '提交' }));
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter(
+        ([path, options]) => path === '/api/aigc/sessions/s1/approvals/approval-1/decision' && options?.method === 'POST'
+      );
+      expect(calls).toHaveLength(2);
+      const bodies = calls.map(([, options]) => JSON.parse(options.body));
+      expect(bodies[0]).toEqual({
+        decision: 'approved',
+        expected_decision_version: 0,
+        idempotency_key: 'approval:approval-1:decision:1:approved'
+      });
+      expect(bodies[1]).toEqual(bodies[0]);
+    });
+  });
+
+  it('does not reuse an approval request when the decision changes after a failure', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const approvalCard = appendCardEvent(
+      'approval',
+      {
+        root: 'root',
+        title: '审核分镜方案',
+        status: 'pending',
+        data: { approval_id: 'approval-change', decision_version: 2 },
+        components: [
+          { id: 'root', component: { Card: { children: ['decision'] } } },
+          {
+            id: 'decision',
+            component: {
+              SingleChoice: {
+                key: 'decision',
+                label: '审核决定',
+                required: true,
+                options: [
+                  { value: 'approved', label: '确认' },
+                  { value: 'rejected', label: '拒绝' }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      { card_id: 'approval:approval-change' }
+    );
+    const fetchMock = mockAigcFetch({ messageEvents: [approvalCard], approvalDecisionFailures: 1 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '生成分镜方案');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    const card = await screen.findByRole('article', { name: '审核分镜方案' });
+    await user.click(within(card).getByRole('radio', { name: '确认' }));
+    await user.click(within(card).getByRole('button', { name: '提交' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('temporary approval failure');
+
+    await user.click(within(card).getByRole('radio', { name: '拒绝' }));
+    await user.click(within(card).getByRole('button', { name: '提交' }));
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter(
+        ([path, options]) => path === '/api/aigc/sessions/s1/approvals/approval-change/decision' && options?.method === 'POST'
+      );
+      expect(calls).toHaveLength(2);
+      expect(calls.map(([, options]) => JSON.parse(options.body))).toEqual([
         {
-          event: 'a2ui.surface_update',
-          surface_id: 'brief-intake',
-          payload: {
+          decision: 'approved',
+          expected_decision_version: 2,
+          idempotency_key: 'approval:approval-change:decision:3:approved'
+        },
+        {
+          decision: 'rejected',
+          expected_decision_version: 2,
+          idempotency_key: 'approval:approval-change:decision:3:rejected'
+        }
+      ]);
+    });
+    expect(await screen.findByText('已拒绝审核结果，可继续提出修改要求。')).toBeInTheDocument();
+  });
+
+  it('keeps a terminal approval removed when slower message hydration replays its append', async () => {
+    window.history.pushState({}, '', '/workspace');
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal('localStorage', mockLocalStorage());
+
+    const historicApproval = appendCardEvent(
+      'approval',
+      {
+        root: 'root',
+        title: '不可复活的审核卡',
+        status: 'pending',
+        data: { approval_id: 'approval-terminal' },
+        components: [{ id: 'root', component: { Card: { children: [] } } }]
+      },
+      { card_id: 'approval:approval-terminal' }
+    );
+    let resolveMessages;
+    const messagesResponse = new Promise((resolve) => {
+      resolveMessages = resolve;
+    });
+    const fetchMock = vi.fn((input, options = {}) => {
+      const path = new URL(typeof input === 'string' ? input : input.url, 'http://localhost').pathname;
+      if (path === '/api/aigc/sessions' && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({ id: 's1', user_id: 'demo-user', status: 'active' }, 201));
+      }
+      if (path === '/api/aigc/sessions/s1/storyboard') {
+        return Promise.resolve(jsonResponse(defaultAigcStoryboard()));
+      }
+      if (path === '/api/aigc/sessions/s1/messages') {
+        return messagesResponse;
+      }
+      if (path === '/api/aigc/sessions/s1/assets') {
+        return Promise.resolve(jsonResponse({ assets: [] }));
+      }
+      if (path === '/api/aigc/sessions/s1/jobs') {
+        return Promise.resolve(jsonResponse({ jobs: [] }));
+      }
+      return Promise.resolve(jsonResponse({ error: 'not found' }, 404));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    act(() => {
+      DefaultMockEventSource.instances[0].emit(historicApproval);
+    });
+    expect(await screen.findByRole('heading', { name: '不可复活的审核卡' })).toBeInTheDocument();
+
+    act(() => {
+      DefaultMockEventSource.instances[0].emit(
+        updateCardEvent('chat', 'approval:approval-terminal', { status: 'approved' })
+      );
+    });
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '不可复活的审核卡' })).not.toBeInTheDocument());
+
+    await act(async () => {
+      resolveMessages(
+        jsonResponse({
+          messages: [{ id: 'old-approval', role: 'assistant', content: JSON.stringify(historicApproval.payload), seq: 1 }]
+        })
+      );
+      await messagesResponse;
+    });
+
+    expect(screen.queryByRole('heading', { name: '不可复活的审核卡' })).not.toBeInTheDocument();
+  });
+
+  it('keeps newer SSE and local resource state when slower hydration completes', async () => {
+    window.history.pushState({}, '', '/workspace');
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal('localStorage', mockLocalStorage());
+
+    let resolveBoard;
+    let resolveAssets;
+    let resolveJobs;
+    let resolveMessages;
+    const boardResponse = new Promise((resolve) => {
+      resolveBoard = resolve;
+    });
+    const messagesResponse = new Promise((resolve) => {
+      resolveMessages = resolve;
+    });
+    const assetsResponse = new Promise((resolve) => {
+      resolveAssets = resolve;
+    });
+    const jobsResponse = new Promise((resolve) => {
+      resolveJobs = resolve;
+    });
+    const fetchMock = vi.fn((input, options = {}) => {
+      const path = new URL(typeof input === 'string' ? input : input.url, 'http://localhost').pathname;
+      if (path === '/api/aigc/sessions' && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({ id: 's1', user_id: 'demo-user', status: 'active' }, 201));
+      }
+      if (path === '/api/aigc/sessions/s1/storyboard') {
+        return boardResponse;
+      }
+      if (path === '/api/aigc/sessions/s1/messages') {
+        return messagesResponse;
+      }
+      if (path === '/api/aigc/sessions/s1/assets') {
+        return assetsResponse;
+      }
+      if (path === '/api/aigc/sessions/s1/jobs') {
+        return jobsResponse;
+      }
+      return Promise.resolve(jsonResponse({ error: 'not found' }, 404));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { container } = render(<App />);
+
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    const liveStoryboard = {
+      ...defaultAigcStoryboard(),
+      version: 4,
+      shots: [
+        {
+          ...defaultAigcStoryboard().shots[0],
+          scene_description: '实时镜头版本',
+          keyframe_asset_id: 'asset-live'
+        }
+      ]
+    };
+    act(() => {
+      DefaultMockEventSource.instances[0].emit(
+        updateCardEvent('storyboard', 'storyboard:s1', {
+          storyboard: liveStoryboard,
+          assets: [{ id: 'asset-live', session_id: 's1', kind: 'image', url: 'https://example.com/live.png' }]
+        })
+      );
+      DefaultMockEventSource.instances[0].emit(
+        updateCardEvent('tool_runs', 'tool-run:live', {
+          tool_run: {
+            job_id: 'job-live',
+            session_id: 's1',
+            target_id: '实时任务目标',
+            display_name: '实时生成任务',
+            status: 'running'
+          }
+        })
+      );
+      DefaultMockEventSource.instances[0].emit(
+        appendCardEvent(
+          'approval',
+          {
+            root: 'root',
+            title: '实时审核卡',
+            data: { approval_id: 'approval-live' },
+            components: [{ id: 'root', component: { Card: { children: [] } } }]
+          },
+          { card_id: 'approval:approval-live' }
+        )
+      );
+      DefaultMockEventSource.instances[0].emit({
+        event: 'a2ui.interrupt_request',
+        payload: {
+          checkpoint_id: 'live-checkpoint',
+          interrupt_id: 'live-interrupt',
+          title: '实时确认',
+          message: '实时确认消息',
+          actions: []
+        }
+      });
+    });
+    expect(await screen.findByText('实时镜头版本')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '实时审核卡' })).toBeInTheDocument();
+    expect(screen.getAllByText('实时任务目标').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('实时确认消息').length).toBeGreaterThanOrEqual(1);
+    expect(container.querySelector('img[src="https://example.com/live.png"]')).not.toBeNull();
+
+    await act(async () => {
+      resolveBoard(jsonResponse(defaultAigcStoryboard()));
+      resolveAssets(
+        jsonResponse({
+          assets: [{ id: 'asset-stale', session_id: 's1', kind: 'image', url: 'https://example.com/stale.png' }]
+        })
+      );
+      resolveJobs(jsonResponse({ jobs: [{ job_id: 'job-stale', session_id: 's1', target_id: '过期任务目标', status: 'failed' }] }));
+      resolveMessages(jsonResponse({ messages: [{ id: 'history-1', role: 'user', content: '过期历史消息', seq: 1 }] }));
+      await Promise.all([boardResponse, assetsResponse, jobsResponse, messagesResponse]);
+    });
+
+    expect(screen.getByText('实时镜头版本')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '实时审核卡' })).toBeInTheDocument();
+    expect(screen.getAllByText('实时任务目标').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('过期任务目标')).not.toBeInTheDocument();
+    expect(screen.getAllByText('实时确认消息').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('过期历史消息')).not.toBeInTheDocument();
+    expect(container.querySelector('img[src="https://example.com/live.png"]')).not.toBeNull();
+    expect(container.querySelector('img[src="https://example.com/stale.png"]')).toBeNull();
+  });
+
+  it('keeps the newest same-session refresh when an older refresh finishes last', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    vi.stubGlobal('localStorage', mockLocalStorage());
+    ensureDefaultEventSource();
+
+    let jobsRequestCount = 0;
+    let resolveOlderJobs;
+    const olderJobsResponse = new Promise((resolve) => {
+      resolveOlderJobs = resolve;
+    });
+    const fetchMock = vi.fn((input, options = {}) => {
+      const path = new URL(typeof input === 'string' ? input : input.url, 'http://localhost').pathname;
+      if (path === '/api/aigc/sessions' && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({ id: 's1', user_id: 'demo-user', status: 'active' }, 201));
+      }
+      if (path === '/api/aigc/sessions/s1/storyboard') {
+        return Promise.resolve(jsonResponse(defaultAigcStoryboard()));
+      }
+      if (path === '/api/aigc/sessions/s1/assets') {
+        return Promise.resolve(jsonResponse({ assets: [] }));
+      }
+      if (path === '/api/aigc/sessions/s1/messages') {
+        return Promise.resolve(jsonResponse({ messages: [] }));
+      }
+      if (path === '/api/aigc/sessions/s1/jobs') {
+        jobsRequestCount += 1;
+        if (jobsRequestCount === 1) {
+          return Promise.resolve(jsonResponse({ jobs: [] }));
+        }
+        if (jobsRequestCount === 2) {
+          return olderJobsResponse;
+        }
+        return Promise.resolve(
+          jsonResponse({ jobs: [{ job_id: 'job-newer', session_id: 's1', target_id: '最新刷新任务', status: 'running' }] })
+        );
+      }
+      return Promise.resolve(jsonResponse({ error: 'not found' }, 404));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('竹林归隐');
+    const refresh = screen.getByRole('button', { name: '刷新' });
+    await user.click(refresh);
+    await user.click(refresh);
+    expect(await screen.findByText('最新刷新任务')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveOlderJobs(
+        jsonResponse({ jobs: [{ job_id: 'job-older', session_id: 's1', target_id: '过期刷新任务', status: 'failed' }] })
+      );
+      await olderJobsResponse;
+    });
+
+    expect(screen.getByText('最新刷新任务')).toBeInTheDocument();
+    expect(screen.queryByText('过期刷新任务')).not.toBeInTheDocument();
+  });
+
+  it('keeps prompt review enabled but disables media actions for a pending storyboard', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const fetchMock = mockAigcFetch({
+      storyboard: pendingDynamicStoryboard(),
+      assets: [
+        { id: 'candidate-image', session_id: 's1', kind: 'image', availability: 'available', filename: 'candidate.png' },
+        { id: 'existing-image', session_id: 's1', kind: 'image', availability: 'available', filename: 'existing.png' }
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText('故事板方案待审核，请先确认或拒绝后再生成、采用或填入素材。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'cinematic pending frame' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '采用候选' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '重新生成关键帧' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: '为关键帧选择已有素材' })).toBeDisabled();
+  });
+
+  it('keeps candidate approval cards out of chat while related generation jobs are still running', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const storyboard = candidateReviewStoryboard();
+    const fetchMock = mockAigcFetch({
+      storyboard,
+      assets: [{ id: 'candidate-image', session_id: 's1', kind: 'image', availability: 'available', filename: 'candidate.png' }],
+      jobs: [
+        {
+          id: 'job-candidate',
+          batch_id: 'batch-media',
+          operation_id: 'operation-media',
+          storyboard_id: storyboard.id,
+          target_id: 'scene-1',
+          asset_slot: 'keyframe',
+          status: 'succeeded',
+          result_asset_ids: ['candidate-image']
+        },
+        {
+          id: 'job-related',
+          batch_id: 'batch-media',
+          operation_id: 'operation-media',
+          storyboard_id: storyboard.id,
+          target_id: 'scene-2',
+          asset_slot: 'video',
+          status: 'running'
+        }
+      ],
+      messages: [candidateAssetApprovalMessage()]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText('待统一确认')).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '请选择生成候选' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '统一素材确认' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '确认并采用全部素材' })).not.toBeInTheDocument();
+  });
+
+  it('confirms all candidate assets once after their related jobs finish and refreshes workspace resources', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const storyboard = candidateReviewStoryboard();
+    const approvedStoryboard = JSON.parse(JSON.stringify(storyboard));
+    approvedStoryboard.version = storyboard.version + 1;
+    approvedStoryboard.bindings[0] = { ...approvedStoryboard.bindings[0], state: 'active', approval_id: '' };
+    approvedStoryboard.revisions[0].modules[0].elements[0].asset_slots[0] = {
+      ...approvedStoryboard.revisions[0].modules[0].elements[0].asset_slots[0],
+      status: 'active',
+      active_binding_id: 'binding-candidate',
+      candidate_ids: []
+    };
+    const fetchMock = mockAigcFetch({
+      storyboard,
+      assets: [{ id: 'candidate-image', session_id: 's1', kind: 'image', availability: 'available', filename: 'candidate.png' }],
+      jobs: [
+        {
+          id: 'job-candidate',
+          batch_id: 'batch-media',
+          operation_id: 'operation-media',
+          storyboard_id: storyboard.id,
+          target_id: 'scene-1',
+          asset_slot: 'keyframe',
+          status: 'succeeded',
+          result_asset_ids: ['candidate-image']
+        },
+        {
+          id: 'job-related',
+          batch_id: 'batch-media',
+          operation_id: 'operation-media',
+          storyboard_id: storyboard.id,
+          target_id: 'scene-2',
+          asset_slot: 'video',
+          status: 'failed'
+        }
+      ],
+      messages: [candidateAssetApprovalMessage()],
+      candidateApprovalDecision: {
+        batch: { id: 'candidate-batch-1', idempotency_key: 'candidate-approvals:storyboard-1:v2:approved' },
+        summary: { total: 1, approved: 1, complete: true, all_approved: true },
+        results: [{ approval_id: 'approval-candidate', binding_id: 'binding-candidate', status: 'approved', applied: true }],
+        storyboard: approvedStoryboard
+      }
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const review = await screen.findByRole('region', { name: '统一素材确认' });
+    expect(within(review).getByText('1 项待确认')).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '请选择生成候选' })).not.toBeInTheDocument();
+    await user.click(within(review).getByRole('button', { name: '确认并采用全部素材' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/aigc/sessions/s1/storyboards/storyboard-1/candidate-approvals/decision',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            decision: 'approved',
+            expected_storyboard_version: 2,
+            idempotency_key: 'candidate-approvals:storyboard-1:v2:approved'
+          })
+        })
+      );
+    });
+    await waitFor(() => expect(screen.queryByRole('region', { name: '统一素材确认' })).not.toBeInTheDocument());
+    for (const suffix of ['storyboard', 'assets', 'jobs']) {
+      const reads = fetchMock.mock.calls.filter(
+        ([path, options = {}]) => path === `/api/aigc/sessions/s1/${suffix}` && (options.method || 'GET') === 'GET'
+      );
+      expect(reads.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('renders dynamic timeline capabilities, revision dependencies, and zero-value content', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const storyboard = pendingDynamicStoryboard();
+    const revision = storyboard.revisions[0];
+    revision.modules[0].capabilities.has_timeline = true;
+    revision.modules[0].elements[0].content = { start_sec: 0, muted: false };
+    revision.dependencies = [{ from_target_id: 'source', from_slot: 'image', to_target_id: 'scene-1', to_slot: 'keyframe', relation: 'reference' }];
+    vi.stubGlobal('fetch', mockAigcFetch({ storyboard }));
+
+    render(<App />);
+
+    expect(await screen.findByText('时间线 · 1/1')).toBeInTheDocument();
+    expect(screen.getByText('start_sec: 0；muted: false')).toBeInTheDocument();
+    expect(screen.getByText('依赖：source:image → scene-1:keyframe（reference）')).toBeInTheDocument();
+  });
+
+  it('renders Markdown A2UI components as formatted content', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const fetchMock = mockAigcFetch({
+      messageEvents: [
+        appendCardEvent('spec-preview', {
+            root: 'root',
+            title: '规格预览',
+            components: [
+              { id: 'root', component: { Card: { children: ['summary'] } } },
+              {
+                id: 'summary',
+                component: {
+                  Markdown: {
+                    value:
+                      '# Final Video Spec\n\n- **标题**：竹林归隐\n- `比例`：9:16\n\n[查看资产](https://example.com/asset)\n\n<script>alert(1)</script>'
+                  }
+                }
+              }
+            ]
+          })
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { container } = render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '展示规格');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    const card = await screen.findByRole('article', { name: '规格预览' });
+    expect(within(card).getByRole('heading', { name: 'Final Video Spec' })).toBeInTheDocument();
+    expect(within(card).getByText('标题')).toHaveClass('aigc-a2ui-markdown__strong');
+    expect(within(card).getByText('比例')).toHaveClass('aigc-a2ui-markdown__code');
+    expect(within(card).getByRole('link', { name: '查看资产' })).toHaveAttribute('href', 'https://example.com/asset');
+    expect(within(card).queryByText(/\*\*标题\*\*/)).not.toBeInTheDocument();
+    expect(container.querySelector('.aigc-a2ui-markdown script')).toBeNull();
+  });
+
+  it('keeps an A2UI-rendered assistant response out of the plain message list after stream refresh', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const answer = '我的核心能力已整理。';
+    const cardEvent = appendCardEvent('chat-s1', {
+      root: 'root',
+      title: 'Agent',
+      components: [
+        { id: 'root', component: { Card: { children: ['answer'] } } },
+        { id: 'answer', component: { Markdown: { value: answer } } }
+      ]
+    });
+    const fetchMock = mockAigcFetch({
+      messageEvents: [cardEvent],
+      messagesAfterMessage: [
+        { id: 'm-user', role: 'user', content: '你有哪些能力' },
+        { id: 'm-assistant', role: 'assistant', content: JSON.stringify(cardEvent.payload) }
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { container } = render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '你有哪些能力');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(await screen.findByText(answer)).toBeInTheDocument();
+    const assistantBubbleText = Array.from(container.querySelectorAll('.aigc-message--assistant p')).map((node) => node.textContent || '');
+    expect(assistantBubbleText.some((text) => text.includes(answer))).toBe(false);
+  });
+
+  it('restores persisted A2UI assistant cards from message history after refresh', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const cardEvent = appendCardEvent('history-card', {
+      card_type: 'skill_select',
+      root: 'root',
+      title: '可用能力',
+      components: [
+        { id: 'root', component: { Card: { children: ['title', 'skill'] } } },
+        { id: 'title', component: { Text: { value: '请选择能力', usageHint: 'title' } } },
+        {
+          id: 'skill',
+          component: {
+            SingleChoice: {
+              key: 'skill_id',
+              label: '可用能力',
+              options: [{ value: 'product-video', label: '商品宣传短片' }]
+            }
+          }
+        }
+      ]
+    });
+    const fetchMock = mockAigcFetch({
+      messages: [
+        { id: 'm-user', role: 'user', content: '你有哪些能力', seq: 1 },
+        { id: 'm-a2ui', role: 'assistant', content: JSON.stringify(cardEvent.payload), seq: 2 }
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { container } = render(<App />);
+
+    expect(await screen.findByText('你有哪些能力')).toBeInTheDocument();
+    const card = await screen.findByRole('article', { name: '可用能力' });
+    expect(within(card).getByText('请选择能力')).toBeInTheDocument();
+    expect(within(card).getByLabelText('商品宣传短片')).toBeInTheDocument();
+    expect(container.textContent).not.toContain('a2ui_version');
+  });
+
+  it('replays update_card payload fields with the same semantics as live events', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const appended = appendCardEvent(
+      'history-progress',
+      {
+        root: 'root',
+        title: '历史任务进度',
+        status: 'running',
+        message: '旧进度',
+        components: [{ id: 'root', component: { Card: { children: [] } } }]
+      },
+      { card_id: 'history-progress:instance-1' }
+    );
+    const updated = updateCardEvent('chat', 'history-progress:instance-1', {
+      status: 'completed',
+      message: '历史回放已完成'
+    });
+    const fetchMock = mockAigcFetch({
+      messages: [
+        { id: 'history-append', role: 'assistant', content: JSON.stringify(appended.payload), seq: 1 },
+        { id: 'history-update', role: 'assistant', content: JSON.stringify(updated.payload), seq: 2 }
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const card = await screen.findByRole('article', { name: '历史任务进度' });
+    expect(within(card).getByText('历史回放已完成')).toBeInTheDocument();
+    expect(within(card).getByText('完成')).toBeInTheDocument();
+    expect(within(card).queryByText('旧进度')).not.toBeInTheDocument();
+  });
+
+  it('keeps A2UI responses in chronological order with later user messages', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const firstAnswer = '第一轮能力说明';
+    const secondPrompt = '做个商品宣传片吧';
+    const fetchMock = mockAigcFetch({
+      messageEvents: [
+        appendCardEvent('capability-answer', {
+            root: 'root',
+            title: 'Agent',
+            components: [
+              { id: 'root', component: { Card: { children: ['answer'] } } },
+              { id: 'answer', component: { Markdown: { value: firstAnswer } } }
+            ]
+          })
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '你有什么能力');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    const firstSurface = (await screen.findByText(firstAnswer)).closest('article');
+
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), secondPrompt);
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    const secondUserMessage = screen.getByText(secondPrompt).closest('.aigc-message');
+    expect(firstSurface.compareDocumentPosition(secondUserMessage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('renders skill-list A2UI choice surfaces without duplicating the persisted text prompt', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const fetchMock = mockAigcFetch({
+      messages: [
+        { id: 'm1', role: 'user', content: '你有哪些Skill' }
+      ],
+      messageEvents: [
+        {
+          ...appendCardEvent('skill-selection', {
+            root: 'root',
+            title: '选择 Skill',
+            submit_label: '选择 Skill',
+            components: [
+              { id: 'root', component: { Card: { children: ['title', 'skill'] } } },
+              { id: 'title', component: { Text: { value: '请选择要加载的 Skill', usageHint: 'title' } } },
+              {
+                id: 'skill',
+                component: {
+                  SingleChoice: {
+                    key: 'skill_name',
+                    label: 'Skill',
+                    required: true,
+                    options: [
+                      { value: '武侠短片', label: '武侠短片' },
+                      { value: '商品宣传短片_v2', label: '商品宣传短片_v2' }
+                    ]
+                  }
+                }
+              }
+            ]
+          })
+        }
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '你有哪些Skill');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(await screen.findByRole('radio', { name: '武侠短片' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '商品宣传短片_v2' })).toBeInTheDocument();
+    expect(screen.queryByText(/Skill 名称/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\*\*Skill\*\*/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: '商品宣传短片_v2' }));
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => {
+      const submitCall = fetchMock.mock.calls.find(([path, options]) => {
+        if (path !== '/api/aigc/sessions/s1/messages' || options?.method !== 'POST') {
+          return false;
+        }
+        return JSON.parse(options.body).content === '商品宣传短片_v2';
+      });
+      expect(submitCall).toBeTruthy();
+    });
+    expect(screen.getAllByText('商品宣传短片_v2').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('removes submitted A2UI choice cards and sends ui_source metadata', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const skillSelection = appendCardEvent('skill-selection', {
+      root: 'root',
+      title: '选择 Skill',
+      components: [
+        { id: 'root', component: { Card: { children: ['title', 'skill'] } } },
+        { id: 'title', component: { Text: { value: '请选择要加载的 Skill', usageHint: 'title' } } },
+        {
+          id: 'skill',
+          component: {
+            SingleChoice: {
+              key: 'skill_name',
+              label: 'Skill',
+              required: true,
+              options: [
+                { value: '商品宣传短片_v2', label: '商品宣传短片_v2' },
+                { value: '武侠短片', label: '武侠短片' }
+              ]
+            }
+          }
+        }
+      ]
+    });
+    const fetchMock = mockAigcFetch({
+      messages: [
+        { id: 'm1', role: 'user', content: '你有哪些能力', seq: 1 },
+        { id: 'm2', role: 'assistant', content: JSON.stringify(skillSelection.payload), seq: 2 }
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText('请选择要加载的 Skill')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: '商品宣传短片_v2' }));
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => {
+      const submitCall = fetchMock.mock.calls.find(([path, options]) => {
+        if (path !== '/api/aigc/sessions/s1/messages' || options?.method !== 'POST') {
+          return false;
+        }
+        return JSON.parse(options.body).content === '商品宣传短片_v2';
+      });
+      expect(submitCall).toBeTruthy();
+      expect(JSON.parse(submitCall[1].body)).toEqual({
+        content: '商品宣传短片_v2',
+        ui_source: {
+          type: 'a2ui_submit',
+          card_id: 'skill-selection:skill-selection-instance'
+        }
+      });
+    });
+    expect(screen.queryByText('请选择要加载的 Skill')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '提交' })).not.toBeInTheDocument();
+  });
+
+  it('does not restore A2UI cards that already have a submitted user message', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const firstSkillSelection = appendCardEvent('skill-selection', {
+      root: 'root',
+      title: '选择 Skill A',
+      components: [
+        { id: 'root', component: { Card: { children: ['title', 'skill'] } } },
+        { id: 'title', component: { Text: { value: '请选择要加载的 Skill A', usageHint: 'title' } } },
+        {
+          id: 'skill',
+          component: {
+            SingleChoice: {
+              key: 'skill_name',
+              label: 'Skill',
+              required: true,
+              options: [{ value: '商品宣传短片_v2', label: '商品宣传短片_v2' }]
+            }
+          }
+        }
+      ]
+    }, { instance_id: 'skill-selection-instance-1' });
+    const secondSkillSelection = appendCardEvent('skill-selection', {
+      root: 'root',
+      title: '选择 Skill B',
+      components: [
+        { id: 'root', component: { Card: { children: ['title', 'skill'] } } },
+        { id: 'title', component: { Text: { value: '请选择要加载的 Skill B', usageHint: 'title' } } },
+        {
+          id: 'skill',
+          component: {
+            SingleChoice: {
+              key: 'skill_name',
+              label: 'Skill',
+              required: true,
+              options: [{ value: '武侠短片', label: '武侠短片' }]
+            }
+          }
+        }
+      ]
+    }, { instance_id: 'skill-selection-instance-2' });
+    const fetchMock = mockAigcFetch({
+      messages: [
+        { id: 'm1', role: 'user', content: '你有哪些能力', seq: 1 },
+        { id: 'm2', role: 'assistant', content: JSON.stringify(firstSkillSelection.payload), seq: 2 },
+        {
+          id: 'm3',
+          role: 'user',
+          content: '商品宣传短片_v2',
+          seq: 3,
+          metadata: {
+            ui_source: {
+              type: 'a2ui_submit',
+              card_id: 'skill-selection:skill-selection-instance-1'
+            }
+          }
+        },
+        { id: 'm4', role: 'assistant', content: JSON.stringify(secondSkillSelection.payload), seq: 4 }
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText('商品宣传短片_v2')).toBeInTheDocument();
+    expect(screen.queryByText('请选择要加载的 Skill A')).not.toBeInTheDocument();
+    expect(screen.getByText('请选择要加载的 Skill B')).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '商品宣传短片_v2' })).not.toBeInTheDocument();
+  });
+
+  it('uploads A2UI files as file ids while rendering file previews instead of raw ids', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const fetchMock = mockAigcFetch({
+      uploadedAsset: {
+        id: 'asset-file-1',
+        session_id: 's1',
+        kind: 'image',
+        filename: 'watch.png',
+        url: 'https://example.com/watch.png'
+      },
+      messageEvents: [
+        appendCardEvent('asset-intake', {
+          root: 'root',
+          title: '上传参考素材',
+          submit_label: '发送素材',
+          components: [
+            { id: 'root', component: { Card: { children: ['file'] } } },
+            {
+              id: 'file',
+              component: {
+                FileUpload: {
+                  key: 'reference_file',
+                  label: '上传图片',
+                  accept: 'image/*',
+                  required: true
+                }
+              }
+            }
+          ]
+        })
+      ]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '上传参考图');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(await screen.findByRole('heading', { name: '上传参考素材' })).toBeInTheDocument();
+    const file = new File(['pngbytes'], 'watch.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText('上传图片'), file);
+
+    expect(await screen.findByRole('img', { name: 'watch.png' })).toHaveAttribute('src', 'https://example.com/watch.png');
+    expect(screen.queryByText('asset-file-1')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => {
+      const submitCall = fetchMock.mock.calls.find(([path, options]) => {
+        if (path !== '/api/aigc/sessions/s1/messages' || options?.method !== 'POST') {
+          return false;
+        }
+        return JSON.parse(options.body).content === 'asset-file-1';
+      });
+      expect(submitCall).toBeTruthy();
+    });
+    expect(screen.getAllByRole('img', { name: 'watch.png' }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('asset-file-1')).not.toBeInTheDocument();
+  });
+
+  it('renders action envelopes without showing raw protocol JSON', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const fetchMock = mockAigcFetch({
+      messageEvents: [
+        appendCardEvent('brief-intake', {
             root: 'root',
             title: '补充产品信息',
             submit_label: '提交信息',
@@ -644,18 +2529,7 @@ describe('DORAIGC static client pages', () => {
               { id: 'product', component: { TextInput: { key: 'product_name', label: '产品名称/品类', required: true } } },
               { id: 'steps', component: { VerticalSteps: { steps: [{ title: 'Agent 分析', status: 'running' }] } } }
             ]
-          }
-        }
-      ]
-    };
-    const fetchMock = mockAigcFetch({
-      messageStream: [
-        {
-          event: 'chat.delta',
-          payload: {
-            text: `好的！开始 Stage 1。请补充资料：${JSON.stringify(envelope)}请填写以上信息。`
-          }
-        }
+          })
       ]
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -669,7 +2543,7 @@ describe('DORAIGC static client pages', () => {
     expect(await screen.findByRole('heading', { name: '补充产品信息' })).toBeInTheDocument();
     expect(screen.getByLabelText('产品名称/品类')).toBeInTheDocument();
     expect(screen.getByText('Agent 分析')).toBeInTheDocument();
-    expect(screen.queryByText(/a2ui_events/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/a2ui_version/)).not.toBeInTheDocument();
   });
 
   it('saves inline storyboard edits as a user patch', async () => {
@@ -734,6 +2608,56 @@ describe('DORAIGC static client pages', () => {
     );
   });
 
+  it('does not apply an inline edit response after switching session generations', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    vi.stubGlobal('localStorage', mockLocalStorage());
+    const baseFetch = mockAigcFetch({ sessionIDs: ['s1', 's2'] });
+    let resolvePatch;
+    let patchSignal;
+    const patchResponse = new Promise((resolve) => {
+      resolvePatch = resolve;
+    });
+    const fetchMock = vi.fn((input, options = {}) => {
+      const path = new URL(typeof input === 'string' ? input : input.url, 'http://localhost').pathname;
+      if (path === '/api/aigc/sessions/s1/storyboards/storyboard-1' && options.method === 'PATCH') {
+        patchSignal = options.signal;
+        return patchResponse;
+      }
+      return baseFetch(input, options);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await user.click(await screen.findByText('竹林归隐'));
+    const editor = screen.getByDisplayValue('竹林归隐');
+    await user.clear(editor);
+    await user.type(editor, '旧会话保存结果');
+    await user.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(patchSignal).toBeDefined());
+
+    await user.click(screen.getByRole('button', { name: '新会话' }));
+    expect(await screen.findByText('Session s2')).toBeInTheDocument();
+    expect(patchSignal.aborted).toBe(true);
+
+    await act(async () => {
+      resolvePatch(
+        jsonResponse({
+          storyboard: {
+            ...defaultAigcStoryboard(),
+            shots: [{ ...defaultAigcStoryboard().shots[0], scene_description: '旧会话保存结果' }]
+          }
+        })
+      );
+      await patchResponse;
+    });
+
+    expect(screen.getByText('Session s2')).toBeInTheDocument();
+    expect(screen.queryByText('旧会话保存结果')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('restores persisted chat messages in the workspace', async () => {
     window.history.pushState({}, '', '/workspace');
     const fetchMock = mockAigcFetch({
@@ -790,6 +2714,56 @@ describe('DORAIGC static client pages', () => {
         body: JSON.stringify({ skill_id: 'skill-video' })
       })
     );
+  });
+
+  it('does not bind or report a Skill import after switching session generations', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    vi.stubGlobal('localStorage', mockLocalStorage());
+    const baseFetch = mockAigcFetch({ sessionIDs: ['s1', 's2'] });
+    let resolveSkill;
+    let skillSignal;
+    const skillResponse = new Promise((resolve) => {
+      resolveSkill = resolve;
+    });
+    const fetchMock = vi.fn((input, options = {}) => {
+      const path = new URL(typeof input === 'string' ? input : input.url, 'http://localhost').pathname;
+      if (path === '/api/aigc/skills' && options.method === 'POST') {
+        skillSignal = options.signal;
+        return skillResponse;
+      }
+      return baseFetch(input, options);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const input = await screen.findByLabelText('导入 Skill.md');
+    await user.upload(input, new File(['<name>迟到 Skill</name>'], 'Skill.md', { type: 'text/markdown' }));
+    await waitFor(() => expect(skillSignal).toBeDefined());
+
+    await user.click(screen.getByRole('button', { name: '新会话' }));
+    expect(await screen.findByText('Session s2')).toBeInTheDocument();
+    expect(skillSignal.aborted).toBe(true);
+
+    await act(async () => {
+      resolveSkill(
+        jsonResponse({
+          skill: { id: 'skill-late', name: '迟到 Skill', enabled: true },
+          plan: { skill_id: 'skill-late', name: '迟到 Skill', stages: [] }
+        }, 201)
+      );
+      await skillResponse;
+    });
+
+    const staleBindings = fetchMock.mock.calls.filter(
+      ([inputValue, options]) =>
+        new URL(typeof inputValue === 'string' ? inputValue : inputValue.url, 'http://localhost').pathname ===
+          '/api/aigc/sessions/s1/skill' && options?.method === 'POST'
+    );
+    expect(staleBindings).toHaveLength(0);
+    expect(screen.queryByText('已导入 Skill：迟到 Skill')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('navigates through skills, featured works, and credits mock pages', async () => {
@@ -881,17 +2855,75 @@ describe('DORAIGC static client pages', () => {
   });
 });
 
+function mockLocalStorage() {
+  const items = new Map();
+  return {
+    getItem: vi.fn((key) => (items.has(key) ? items.get(key) : null)),
+    setItem: vi.fn((key, value) => {
+      items.set(key, String(value));
+    }),
+    removeItem: vi.fn((key) => {
+      items.delete(key);
+    }),
+    clear: vi.fn(() => {
+      items.clear();
+    })
+  };
+}
+
+function appendCardEvent(cardID, card, options = {}) {
+  const finalCardID = options.card_id || `${cardID}:${options.instance_id || `${cardID}-instance`}`;
+  return {
+    event: 'a2ui.action',
+    payload: {
+      a2ui_version: '1.0',
+      actions: [
+        {
+          type: 'append_card',
+          surface: 'chat',
+          card_id: finalCardID,
+          card
+        }
+      ]
+    }
+  };
+}
+
+function updateCardEvent(surface, cardID, payload) {
+  return {
+    event: 'a2ui.action',
+    payload: {
+      a2ui_version: '1.0',
+      actions: [
+        {
+          type: 'update_card',
+          surface,
+          target: { surface, card_id: cardID },
+          payload
+        }
+      ]
+    }
+  };
+}
+
 function mockAigcFetch(overrides = {}) {
-  let storyboard = defaultAigcStoryboard();
+  ensureDefaultEventSource();
+  let storyboard = overrides.storyboard || defaultAigcStoryboard();
   let assets = overrides.assets || [];
   let jobs = overrides.jobs || [];
+  let messages = overrides.messages || [];
+  let createdSessionCount = 0;
+  let approvalDecisionCount = 0;
+  const sessionIDs = overrides.sessionIDs || ['s1'];
   return vi.fn(async (input, options = {}) => {
     const url = typeof input === 'string' ? input : input.url;
     const path = new URL(url, 'http://localhost').pathname;
     const method = options.method || 'GET';
 
     if (path === '/api/aigc/sessions' && method === 'POST') {
-      return jsonResponse({ id: 's1', user_id: 'demo-user', title: 'AIGC Demo', status: 'active' }, 201);
+      const id = sessionIDs[createdSessionCount] || `s${createdSessionCount + 1}`;
+      createdSessionCount += 1;
+      return jsonResponse({ id, user_id: 'demo-user', title: 'AIGC Demo', status: 'active' }, 201);
     }
     if (path === '/api/aigc/skills' && method === 'POST') {
       return jsonResponse(
@@ -901,6 +2933,34 @@ function mockAigcFetch(overrides = {}) {
         },
         201
       );
+    }
+    if (path === '/api/aigc/assets' && method === 'POST') {
+      const uploaded = overrides.uploadedAsset || {
+        id: `asset-upload-${assets.length + 1}`,
+        session_id: 's1',
+        kind: 'image',
+        filename: 'upload.png',
+        url: 'https://example.com/upload.png'
+      };
+      assets = [...assets, uploaded];
+      return jsonResponse(uploaded, 201);
+    }
+    const sessionMatch = path.match(/^\/api\/aigc\/sessions\/([^/]+)(\/.*)?$/);
+    const requestSessionID = sessionMatch?.[1];
+    const sessionPath = sessionMatch?.[2] || '';
+    if (requestSessionID && requestSessionID !== 's1') {
+      if (sessionPath === '/storyboard') {
+        return jsonResponse({ error: 'not found' }, 404);
+      }
+      if (sessionPath === '/assets') {
+        return jsonResponse({ assets: [] });
+      }
+      if (sessionPath === '/jobs') {
+        return jsonResponse({ jobs: [] });
+      }
+      if (sessionPath === '/messages') {
+        return jsonResponse({ messages: [] });
+      }
     }
     if (path === '/api/aigc/sessions/s1/skill' && method === 'POST') {
       return jsonResponse({ id: 's1', user_id: 'demo-user', skill_id: 'skill-video', title: 'AIGC Demo', status: 'active' });
@@ -918,13 +2978,16 @@ function mockAigcFetch(overrides = {}) {
     if (path === '/api/aigc/sessions/s1/jobs') {
       return jsonResponse({ jobs });
     }
-    if (path === '/api/aigc/sessions/s1/messages') {
-      return jsonResponse({ messages: overrides.messages || [] });
+    if (path === '/api/aigc/sessions/s1/messages' && method === 'GET') {
+      return jsonResponse({ messages });
     }
-    if (path === '/api/aigc/sessions/s1/messages/stream' && method === 'POST') {
-      (overrides.messageStream || []).forEach((event) => {
-        if (event.event === 'storyboard.patch') {
-          storyboard = applyMockStoryboardPatch(storyboard, event.payload);
+    if (path === '/api/aigc/sessions/s1/messages' && method === 'POST') {
+      const messageEvents = overrides.messageEvents || [];
+      messages = appendRequestMessages(messages, options.body, messageEvents);
+      messageEvents.forEach((event) => {
+        const patch = mockStoryboardPatchFromEvent(event);
+        if (patch) {
+          storyboard = applyMockStoryboardPatch(storyboard, patch);
         }
       });
       if (overrides.storyboardAfterMessage) {
@@ -936,16 +2999,89 @@ function mockAigcFetch(overrides = {}) {
       if (overrides.jobsAfterMessage) {
         jobs = overrides.jobsAfterMessage;
       }
-      return sseResponse(overrides.messageStream || []);
+      if (overrides.messagesAfterMessage) {
+        messages = overrides.messagesAfterMessage;
+      }
+      emitMockEvents(messageEvents);
+      return jsonResponse({ run_id: 'run-1', status: 'completed' });
     }
-    if (path === '/api/aigc/sessions/s1/media-graph/resume' && method === 'POST') {
-      return jsonResponse(overrides.mediaGraphResume || { status: 'completed' });
+    if (path === '/api/aigc/sessions/s1/messages/resume' && method === 'POST') {
+      const resumeEvents = overrides.resumeEvents || [];
+      messages = appendRequestMessages(messages, options.body, resumeEvents);
+      emitMockEvents(resumeEvents);
+      return jsonResponse({ run_id: 'run-resume-1', status: 'completed' });
     }
-    if (path === '/api/aigc/sessions/s1/messages/resume/stream' && method === 'POST') {
-      return sseResponse(overrides.resumeStream || []);
+    if (
+      path === '/api/aigc/sessions/s1/storyboards/storyboard-1/candidate-approvals/decision' &&
+      method === 'POST'
+    ) {
+      const result = overrides.candidateApprovalDecision || {
+        summary: { total: 0, approved: 0, complete: true, all_approved: true },
+        results: [],
+        storyboard
+      };
+      if (result.storyboard) {
+        storyboard = result.storyboard;
+      }
+      if (overrides.assetsAfterCandidateDecision) {
+        assets = overrides.assetsAfterCandidateDecision;
+      }
+      if (overrides.jobsAfterCandidateDecision) {
+        jobs = overrides.jobsAfterCandidateDecision;
+      }
+      return jsonResponse(result, overrides.candidateApprovalDecisionStatus || 200);
+    }
+    if (/^\/api\/aigc\/sessions\/s1\/approvals\/[^/]+\/decision$/.test(path) && method === 'POST') {
+      approvalDecisionCount += 1;
+      if (approvalDecisionCount <= (overrides.approvalDecisionFailures || 0)) {
+        return jsonResponse({ error: 'temporary approval failure' }, 503);
+      }
+      return jsonResponse(overrides.approvalDecision || { applied: true, decision: { approval: { status: 'approved' } } });
     }
     return jsonResponse({ error: 'not found' }, 404);
   });
+}
+
+function mockStoryboardPatchFromEvent(event) {
+  if (event.event !== 'a2ui.action') {
+    return null;
+  }
+  const actions = Array.isArray(event.payload?.actions) ? event.payload.actions : [];
+  const action = actions.find((item) => item?.type === 'update_card' && (item.target?.surface || item.surface) === 'storyboard');
+  if (action) {
+    return action.payload?.patch;
+  }
+  return null;
+}
+
+function appendRequestMessages(messages, body, events) {
+  const next = [...messages];
+  const request = parseJSONBody(body);
+  const content = request?.content || (request ? JSON.stringify(request) : '');
+  if (content) {
+    next.push({ id: `m-user-${next.length + 1}`, role: 'user', content });
+  }
+  events.forEach((event) => {
+    if (event.event !== 'a2ui.action') {
+      return;
+    }
+    const actions = Array.isArray(event.payload?.actions) ? event.payload.actions : [];
+    if (actions.some((action) => action?.type === 'append_card' && (action.surface || action.target?.surface || 'chat') === 'chat')) {
+      next.push({ id: `m-assistant-${next.length + 1}`, role: 'assistant', content: JSON.stringify(event.payload) });
+    }
+  });
+  return next;
+}
+
+function parseJSONBody(body) {
+  if (!body) {
+    return null;
+  }
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
 }
 
 function applyMockStoryboardPatch(storyboard, patch) {
@@ -1033,19 +3169,119 @@ function defaultAigcStoryboard() {
   };
 }
 
+function pendingDynamicStoryboard() {
+  return {
+    id: 'storyboard-1',
+    session_id: 's1',
+    version: 2,
+    status: 'reviewing',
+    pending_revision_id: 'revision-pending',
+    revisions: [
+      {
+        id: 'revision-pending',
+        storyboard_id: 'storyboard-1',
+        status: 'reviewing',
+        scenario: 'short_drama',
+        modules: [
+          {
+            id: 'module-scenes',
+            key: 'scenes',
+            semantic_type: 'scene',
+            title: '分镜',
+            order: 1,
+            planned_count: 1,
+            capabilities: { has_quantity: true, requires_prompt: true, requires_asset: true },
+            elements: [
+              {
+                id: 'scene-1',
+                key: 'scene-1',
+                semantic_type: 'scene',
+                title: '开场',
+                revision: 1,
+                content: { description: '待审核的开场镜头' },
+                prompt_slots: [
+                  { purpose: 'keyframe', prompt: 'cinematic pending frame', revision: 1, status: 'ready' }
+                ],
+                asset_slots: [
+                  {
+                    key: 'keyframe',
+                    role: '关键帧',
+                    media_kind: 'image',
+                    required: true,
+                    review_required: true,
+                    generation_epoch: 0,
+                    candidate_ids: ['binding-candidate'],
+                    status: 'candidate'
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    bindings: [
+      {
+        id: 'binding-candidate',
+        storyboard_id: 'storyboard-1',
+        target_id: 'scene-1',
+        asset_slot: 'keyframe',
+        asset_id: 'candidate-image',
+        state: 'candidate',
+        approval_id: 'approval-candidate'
+      }
+    ]
+  };
+}
+
+function candidateReviewStoryboard() {
+  const storyboard = pendingDynamicStoryboard();
+  storyboard.status = 'active';
+  storyboard.pending_revision_id = '';
+  storyboard.active_revision_id = 'revision-pending';
+  storyboard.revisions[0].status = 'active';
+  return storyboard;
+}
+
+function candidateAssetApprovalMessage() {
+  const event = appendCardEvent(
+    'candidate-approval',
+    {
+      root: 'root',
+      title: '请选择生成候选',
+      status: 'pending',
+      data: {
+        approval_id: 'approval-candidate',
+        artifact_type: 'candidate_asset',
+        asset_id: 'candidate-image'
+      },
+      components: [
+        { id: 'root', component: { Card: { children: ['preview', 'decision'] } } },
+        { id: 'preview', component: { ImagePreview: { url: 'https://example.com/candidate.png', title: 'candidate.png' } } },
+        {
+          id: 'decision',
+          component: {
+            SingleChoice: {
+              key: 'decision',
+              label: '审核决定',
+              required: true,
+              options: [
+                { value: 'approved', label: '采用候选' },
+                { value: 'rejected', label: '拒绝候选' }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    { card_id: 'approval:approval-candidate' }
+  );
+  return { id: 'candidate-approval-message', role: 'assistant', content: JSON.stringify(event.payload), seq: 1 };
+}
+
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { 'Content-Type': 'application/json' }
-  });
-}
-
-function sseResponse(events) {
-  const body = events
-    .map((event) => `event: ${event.event}\ndata: ${JSON.stringify(event)}\n\n`)
-    .join('');
-  return new Response(body, {
-    status: 200,
-    headers: { 'Content-Type': 'text/event-stream' }
   });
 }

@@ -46,7 +46,29 @@ func TestTextEditorToolSavesFinalVideoSpec(t *testing.T) {
 	}
 }
 
-func TestTextEditorToolDefaultsSpecIDForDirectInput(t *testing.T) {
+func TestTextEditorToolDefaultsSpecIDFromEnvelope(t *testing.T) {
+	store := &fakeSpecStore{}
+	tool := NewTextEditorTool(TextEditorToolConfig{Specs: store})
+
+	_, err := tool.InvokableRun(context.Background(), `{
+		"session_id":"s1",
+		"request_id":"req-1",
+		"idempotency_key":"idem-1",
+		"action":"write_final_video_spec",
+		"payload":{
+			"document_type":"final_video_spec",
+			"markdown":"# Final Video Spec"
+		}
+	}`)
+	if err != nil {
+		t.Fatalf("InvokableRun() error = %v", err)
+	}
+	if store.seen.ID != "final_video_spec:s1" {
+		t.Fatalf("spec id = %q", store.seen.ID)
+	}
+}
+
+func TestTextEditorToolRejectsDirectPayload(t *testing.T) {
 	store := &fakeSpecStore{}
 	tool := NewTextEditorTool(TextEditorToolConfig{Specs: store})
 
@@ -55,11 +77,8 @@ func TestTextEditorToolDefaultsSpecIDForDirectInput(t *testing.T) {
 		"session_id":"s1",
 		"markdown":"# Final Video Spec"
 	}`)
-	if err != nil {
-		t.Fatalf("InvokableRun() error = %v", err)
-	}
-	if store.seen.ID != "final_video_spec:s1" {
-		t.Fatalf("spec id = %q", store.seen.ID)
+	if err == nil {
+		t.Fatal("expected direct payload to be rejected")
 	}
 }
 

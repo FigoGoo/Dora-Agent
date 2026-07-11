@@ -17,7 +17,7 @@ func TestMemoryBrokerPublishesToSessionSubscribers(t *testing.T) {
 	event := SSEEvent{
 		ID:        "evt-1",
 		SessionID: "s1",
-		Event:     EventJobStatus,
+		Event:     EventAction,
 		Payload:   map[string]any{"job_id": "job-1", "status": "succeeded"},
 		CreatedAt: time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC),
 	}
@@ -27,7 +27,7 @@ func TestMemoryBrokerPublishesToSessionSubscribers(t *testing.T) {
 
 	select {
 	case got := <-ch:
-		if got.ID != "evt-1" || got.Event != EventJobStatus {
+		if got.ID != "evt-1" || got.Event != EventAction {
 			t.Fatalf("event = %#v", got)
 		}
 	case <-time.After(time.Second):
@@ -43,7 +43,7 @@ func TestMemoryBrokerDoesNotCrossSessions(t *testing.T) {
 	ch, unsubscribe := broker.Subscribe(ctx, "s1")
 	defer unsubscribe()
 
-	if err := broker.Publish(ctx, SSEEvent{ID: "evt-2", SessionID: "s2", Event: EventJobStatus}); err != nil {
+	if err := broker.Publish(ctx, SSEEvent{ID: "evt-2", SessionID: "s2", Event: EventAction}); err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
 

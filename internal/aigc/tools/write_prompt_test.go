@@ -99,8 +99,8 @@ func TestWritePromptToolUsesDeepSeekAndPatchesStoryboard(t *testing.T) {
 	if strings.Contains(out, "真人电影实拍风格，35mm 胶片，冷郁竹林中苏寂缓慢拔出旧剑，镜头克制，真实光影。") {
 		t.Fatalf("tool result should not return full prompt text: %s", out)
 	}
-	if len(got.Data.RenderEvents) != 1 || got.Data.RenderEvents[0].Event != "a2ui.surface_update" {
-		t.Fatalf("render events = %#v", got.Data.RenderEvents)
+	if strings.Contains(out, "render_events") || strings.Contains(out, "a2ui.surface_update") {
+		t.Fatalf("tool result should not include render events: %s", out)
 	}
 
 	if storyboards.patch.BaseVersion != 3 || storyboards.patch.Source != WritePromptToolKey {

@@ -20,14 +20,25 @@ type SpecSource interface {
 	GetLatestBySession(ctx context.Context, sessionID string) (spec.FinalVideoSpec, error)
 }
 
+type ConfirmedSpecSource interface {
+	GetConfirmedBySession(ctx context.Context, sessionID string) (spec.FinalVideoSpec, error)
+}
+
 type StoryboardSource interface {
 	GetLatestBySession(ctx context.Context, sessionID string) (storyboard.Storyboard, error)
+}
+
+type DynamicStoryboardSource interface {
+	GetAggregateBySession(ctx context.Context, sessionID string) (storyboard.StoryboardAggregate, error)
 }
 
 type Config struct {
 	Skills      SkillSource
 	Specs       SpecSource
 	Storyboards StoryboardSource
+	// DynamicStoryboards is the production source. Storyboards remains only as
+	// a compatibility projection for old sessions during migration.
+	DynamicStoryboards DynamicStoryboardSource
 }
 
 type Builder struct {
@@ -62,11 +73,31 @@ func (b *Builder) Build(ctx context.Context, record session.SessionRecord) (stri
 		if err != nil && !errors.Is(err, spec.ErrNotFound) {
 			return "", err
 		}
-		if err == nil {
+		if confirmedSource, ok := b.cfg.Specs.(ConfirmedSpecSource); ok {
+			confirmed, confirmedErr := confirmedSource.GetConfirmedBySession(ctx, record.ID)
+			if confirmedErr != nil && !errors.Is(confirmedErr, spec.ErrNotFound) {
+				return "", confirmedErr
+			}
+			if confirmedErr == nil {
+				appendSpec(&out, confirmed)
+			}
+			if err == nil && (confirmedErr != nil || currentSpec.Version != confirmed.Version) {
+				out.WriteString("LatestSpecCandidate: ")
+				appendSpec(&out, currentSpec)
+			}
+		} else if err == nil {
 			appendSpec(&out, currentSpec)
 		}
 	}
-	if b.cfg.Storyboards != nil {
+	if b.cfg.DynamicStoryboards != nil {
+		board, err := b.cfg.DynamicStoryboards.GetAggregateBySession(ctx, record.ID)
+		if err != nil && !errors.Is(err, storyboard.ErrAggregateNotFound) {
+			return "", err
+		}
+		if err == nil {
+			appendDynamicStoryboard(&out, board)
+		}
+	} else if b.cfg.Storyboards != nil {
 		board, err := b.cfg.Storyboards.GetLatestBySession(ctx, record.ID)
 		if err != nil && !errors.Is(err, storyboard.ErrNotFound) {
 			return "", err
@@ -76,6 +107,42 @@ func (b *Builder) Build(ctx context.Context, record session.SessionRecord) (stri
 		}
 	}
 	return strings.TrimSpace(out.String()), nil
+}
+
+func appendDynamicStoryboard(out *strings.Builder, board storyboard.StoryboardAggregate) {
+	out.WriteString(fmt.Sprintf(
+		"DynamicStoryboard: id=%s version=%d plan_revision=%d status=%s active_revision=%s pending_revision=%s\n",
+		board.ID,
+		board.Version,
+		board.PlanRevision,
+		board.Status,
+		board.ActiveRevisionID,
+		board.PendingRevisionID,
+	))
+	appendRevision := func(label string, revision *storyboard.StoryboardRevision) {
+		if revision == nil {
+			return
+		}
+		out.WriteString(fmt.Sprintf("%s: id=%s status=%s scenario=%s modules=%d\n", label, revision.ID, revision.Status, revision.Scenario, len(revision.Modules)))
+		for _, module := range revision.Modules {
+			out.WriteString(fmt.Sprintf("Module %s key=%s type=%s title=%s count=%d required=%t\n", module.ID, module.Key, module.SemanticType, module.Title, module.PlannedCount, module.Required))
+			for _, element := range module.Elements {
+				out.WriteString(fmt.Sprintf("Target %s key=%s type=%s title=%s revision=%d review=%s\n", element.ID, element.Key, element.SemanticType, element.Title, element.Revision, element.ReviewState))
+				for _, prompt := range element.PromptSlots {
+					out.WriteString(fmt.Sprintf("Prompt target=%s purpose=%s revision=%d status=%s locked=%t\n", element.ID, prompt.Purpose, prompt.Revision, prompt.Status, prompt.LockedByUser))
+				}
+				for _, slot := range element.AssetSlots {
+					out.WriteString(fmt.Sprintf("AssetSlot target=%s key=%s kind=%s status=%s required=%t epoch=%d active=%s candidates=%s\n", element.ID, slot.Key, slot.MediaKind, slot.Status, slot.Required, slot.GenerationEpoch, slot.ActiveBindingID, strings.Join(slot.CandidateIDs, ",")))
+				}
+			}
+		}
+	}
+	if active, err := board.ActiveRevision(); err == nil {
+		appendRevision("ActiveRevision", active)
+	}
+	if pending, err := board.PendingRevision(); err == nil {
+		appendRevision("PendingRevision", pending)
+	}
 }
 
 func appendSkill(out *strings.Builder, record skill.SkillRecord) {

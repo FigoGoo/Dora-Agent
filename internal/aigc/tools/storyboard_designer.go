@@ -51,7 +51,7 @@ func (StoryboardDesignerTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: StoryboardDesignerToolKey,
 		Desc: "Create or update the storyboard plan for AIGC video creation. It saves key elements, shot list, narration/music/audio layers, prompts, references, and per-item statuses as the left storyboard panel snapshot.",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+		ParamsOneOf: schema.NewParamsOneOfByParams(toolInvocationEnvelopeParams(map[string]*schema.ParameterInfo{
 			"storyboard_id": {
 				Type: schema.String,
 				Desc: "Optional storyboard ID. Defaults to storyboard:<session_id>.",
@@ -78,7 +78,7 @@ func (StoryboardDesignerTool) Info(context.Context) (*schema.ToolInfo, error) {
 				Type: schema.Array,
 				Desc: "Narration, music, ambience, and sound effect layers.",
 			},
-		}),
+		})),
 	}, nil
 }
 
@@ -147,22 +147,9 @@ func (t StoryboardDesignerTool) InvokableRun(ctx context.Context, argumentsInJSO
 }
 
 func decodeStoryboardDesignerInvocation(argumentsInJSON string) (ToolInvocationEnvelope[StoryboardDesignerPayload], error) {
-	var enveloped ToolInvocationEnvelope[StoryboardDesignerPayload]
-	if err := json.Unmarshal([]byte(argumentsInJSON), &enveloped); err == nil && len(enveloped.Payload.Shots) > 0 {
-		return enveloped, nil
-	}
-
-	var direct StoryboardDesignerPayload
-	if err := json.Unmarshal([]byte(argumentsInJSON), &direct); err != nil {
-		return ToolInvocationEnvelope[StoryboardDesignerPayload]{}, fmt.Errorf("decode storyboard designer input: %w", err)
-	}
-	return ToolInvocationEnvelope[StoryboardDesignerPayload]{
-		SessionID:      direct.SessionID,
-		RequestID:      "direct",
-		IdempotencyKey: direct.StoryboardID,
-		Action:         "design_storyboard",
-		Payload:        direct,
-	}, nil
+	return decodeToolInvocationEnvelope(StoryboardDesignerToolKey, argumentsInJSON, func(payload StoryboardDesignerPayload) bool {
+		return len(payload.Shots) > 0
+	})
 }
 
 func normalizeStoryboardIDs(board storyboard.Storyboard) storyboard.Storyboard {

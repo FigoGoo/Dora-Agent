@@ -96,7 +96,7 @@ func TestPostgresStoreAppliesPatchWithVersionEvent(t *testing.T) {
 		StoryboardID: board.ID,
 		BaseVersion:  1,
 		Source:       "user",
-		Ops:          []patch.JSONPatchOp{{Op: "replace", Path: "/status", Value: StatusConfirmed}},
+		Ops:          []patch.JSONPatchOp{{Op: "replace", Path: "/shots/0/status", Value: StatusConfirmed}},
 	})
 	if !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("ApplyPatch(conflict) error = %v, want ErrVersionConflict", err)

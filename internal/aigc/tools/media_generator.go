@@ -60,7 +60,7 @@ func (MediaGeneratorTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: MediaGeneratorToolKey,
 		Desc: "Run the media generation graph for storyboard assets. It plans/registers assets, writes prompts, dispatches generation work, syncs storyboard state, and returns an interrupt request when reference image confirmation is required.",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+		ParamsOneOf: schema.NewParamsOneOfByParams(toolInvocationEnvelopeParams(map[string]*schema.ParameterInfo{
 			"storyboard_id": {
 				Type:     schema.String,
 				Desc:     "Storyboard ID to generate media for.",
@@ -84,7 +84,7 @@ func (MediaGeneratorTool) Info(context.Context) (*schema.ToolInfo, error) {
 				Type: schema.String,
 				Desc: "Optional graph checkpoint ID. Defaults to idempotency key.",
 			},
-		}),
+		})),
 	}, nil
 }
 
@@ -205,24 +205,9 @@ func (t MediaGeneratorTool) resolveReferenceTargets(ctx context.Context, in medi
 }
 
 func decodeMediaGeneratorInvocation(argumentsInJSON string) (ToolInvocationEnvelope[MediaGeneratorPayload], error) {
-	var enveloped ToolInvocationEnvelope[MediaGeneratorPayload]
-	if err := json.Unmarshal([]byte(argumentsInJSON), &enveloped); err == nil && enveloped.Payload.StoryboardID != "" {
-		return enveloped, nil
-	}
-
-	var direct MediaGeneratorPayload
-	if err := json.Unmarshal([]byte(argumentsInJSON), &direct); err != nil {
-		return ToolInvocationEnvelope[MediaGeneratorPayload]{}, fmt.Errorf("decode media generator input: %w", err)
-	}
-	if direct.StoryboardID == "" {
-		return ToolInvocationEnvelope[MediaGeneratorPayload]{}, fmt.Errorf("storyboard_id is required")
-	}
-	return ToolInvocationEnvelope[MediaGeneratorPayload]{
-		RequestID:      "direct",
-		IdempotencyKey: direct.CheckpointID,
-		Action:         "generate_media",
-		Payload:        direct,
-	}, nil
+	return decodeToolInvocationEnvelope(MediaGeneratorToolKey, argumentsInJSON, func(payload MediaGeneratorPayload) bool {
+		return strings.TrimSpace(payload.StoryboardID) != ""
+	})
 }
 
 var _ einotool.InvokableTool = MediaGeneratorTool{}
