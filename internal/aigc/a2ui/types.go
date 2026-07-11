@@ -20,6 +20,7 @@ const (
 	ComponentFileUpload    = "FileUpload"
 	ComponentImagePreview  = "ImagePreview"
 	ComponentVideoPreview  = "VideoPreview"
+	ComponentAudioPreview  = "AudioPreview"
 	ComponentVerticalSteps = "VerticalSteps"
 
 	ActionAppendCard = "append_card"
@@ -175,7 +176,7 @@ type FileUploadComp struct {
 	Kind     string `json:"kind,omitempty"`
 }
 
-// MediaPreviewComp 表示图片或视频预览节点，用于展示生成资产或用户上传素材。
+// MediaPreviewComp 表示图片、视频或音频预览节点，用于展示生成资产或用户上传素材。
 type MediaPreviewComp struct {
 	URL     string `json:"url"`
 	Title   string `json:"title,omitempty"`
@@ -265,6 +266,11 @@ func ImagePreview(id string, value MediaPreviewComp) Component {
 // VideoPreview 创建视频预览组件。
 func VideoPreview(id string, value MediaPreviewComp) Component {
 	return NewComponent(id, ComponentVideoPreview, value)
+}
+
+// AudioPreview 创建音频试听组件。
+func AudioPreview(id string, value MediaPreviewComp) Component {
+	return NewComponent(id, ComponentAudioPreview, value)
 }
 
 // VerticalSteps 创建纵向步骤条组件。

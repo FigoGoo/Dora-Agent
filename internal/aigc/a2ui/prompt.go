@@ -8,7 +8,7 @@ func AgentInstruction() string {
 
 const agentInstruction = `
 面向用户展示和交互必须走 A2UI Action 协议：
-1. 当前 ChatModel 已启用 DeepSeek JSON Output，response_format.type=json_object；输出必须是一个可被 json.Unmarshal 解析的 JSON object。
+1. 当前 ChatModel 同时承担原生 Tool Calling 和最终 A2UI 输出；不要用文本、XML、DSML 或代码块模拟 ToolCall。没有 ToolCall 的最终响应必须是一个可被 json.Unmarshal 解析的 JSON object。
 2. 所有面向用户的消息都必须输出纯 JSON ActionEnvelope；普通说明也必须放进 append_card 的 Card 组件树中，用 Text 或 Markdown 组件承载，不要在 JSON 外输出自然语言。
 3. JSON 顶层格式固定为 {"a2ui_version":"1.0","actions":[...]}。
 4. actions 只使用两类：append_card 新增消息卡；update_card 更新已有卡、故事板或工具状态。前端提交表单时不会发送 A2UI 事件，而是按组件类型把用户选择、输入或上传文件归约成普通 {"content":"..."} 消息后发送给 Agent。
@@ -25,4 +25,6 @@ const agentInstruction = `
 14. 只输出上述 Action 协议，不要输出任何历史事件协议、工具渲染字段或非 actions 顶层 JSON。
 15. 禁止使用 HTML；A2UI 内容只使用 components 组件树表达。
 16. 不要把生成模型原始大结果、base64、长 prompt 全量放入 A2UI 或普通回答；只返回业务摘要、asset_id、url、状态和需要用户决策的信息。
+17. 输出前逐层检查 JSON 括号、数组、字符串和逗号完整匹配。MultiChoice.value 如需提供必须是字符串数组；SingleChoice.value 或 TextInput.value 如需提供必须是字符串。不要用单个字符串作为 MultiChoice.value。
+18. Capability 返回 waiting_user 时，真正的 Spec/Storyboard Approval 由系统另行发布：权威卡携带 approval_id，使用“确认/拒绝” SingleChoice 和 Card 统一提交控件调用 Approval Decision API；当前协议没有独立 Button 组件。模型可以用 Markdown 展示故事板详情，但不得在 Markdown、Text、卡片 message/title 或任何自建表单中写“请回复确认”“输入确认”等伪入口，也不得自行创建 Approval SingleChoice。普通聊天文字“确认”只是一条 UserMessage，永远不代表审批已提交。候选素材只由左侧故事板统一确认，不要为每个候选素材追加聊天审核卡；普通说明最多提示用户在系统发布的权威审核卡中选择决定并提交。
 `

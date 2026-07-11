@@ -53,6 +53,35 @@ func TestParseActionEnvelopeContentAcceptsInteractiveCardWithoutSubmitTemplate(t
 	}
 }
 
+func TestParseActionEnvelopeContentAcceptsUpdateCard(t *testing.T) {
+	content := `{"a2ui_version":"1.0","actions":[{"type":"update_card","surface":"tool_runs","target":{"card_id":"operation:op-1"},"payload":{"operation":{"status":"running"}}}]}`
+
+	envelope, ok := ParseActionEnvelopeContent(content)
+
+	if !ok {
+		t.Fatalf("ParseActionEnvelopeContent() should accept update_card")
+	}
+	if envelope.Actions[0].Type != ActionUpdateCard {
+		t.Fatalf("action = %#v", envelope.Actions[0])
+	}
+}
+
+func TestParseActionEnvelopeContentRejectsUnsupportedVersion(t *testing.T) {
+	content := `{"a2ui_version":"2.0","actions":[{"type":"update_card","surface":"tool_runs"}]}`
+
+	if _, ok := ParseActionEnvelopeContent(content); ok {
+		t.Fatalf("ParseActionEnvelopeContent() should reject unsupported a2ui_version")
+	}
+}
+
+func TestParseActionEnvelopeContentRejectsUnknownAction(t *testing.T) {
+	content := `{"a2ui_version":"1.0","actions":[{"type":"update_card","surface":"tool_runs"},{"type":"delete_card","card_id":"card-1"}]}`
+
+	if _, ok := ParseActionEnvelopeContent(content); ok {
+		t.Fatalf("ParseActionEnvelopeContent() should reject the whole envelope when one action is unknown")
+	}
+}
+
 func TestEnsureActionInstanceIDsAssignsDistinctCardIDsPerAppendCard(t *testing.T) {
 	envelope := ActionEnvelope{
 		Version: Version1,

@@ -146,6 +146,39 @@ func TestSeedanceGenerateToolRejectsDirectPayload(t *testing.T) {
 	}
 }
 
+func TestSeedanceCancelTaskDoesNotTreatAcceptedAsConfirmed(t *testing.T) {
+	statusCode := http.StatusAccepted
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(statusCode)
+	}))
+	defer server.Close()
+
+	tool := NewSeedanceGenerateTool(SeedanceToolConfig{APIKey: "test-key", Endpoint: server.URL + "/tasks"})
+	confirmed, err := tool.CancelTask(context.Background(), "task-1")
+	if err != nil || confirmed {
+		t.Fatalf("CancelTask(202) confirmed=%v err=%v", confirmed, err)
+	}
+	statusCode = http.StatusNoContent
+	confirmed, err = tool.CancelTask(context.Background(), "task-1")
+	if err != nil || !confirmed {
+		t.Fatalf("CancelTask(204) confirmed=%v err=%v", confirmed, err)
+	}
+}
+
+func TestSeedancePollTaskFailsClosedOnUnknownStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"task-unknown","status":"brand_new_provider_state"}`))
+	}))
+	defer server.Close()
+
+	tool := NewSeedanceGenerateTool(SeedanceToolConfig{APIKey: "test-key", Endpoint: server.URL + "/tasks", MaxPollAttempts: 5, PollInterval: time.Millisecond})
+	_, err := tool.pollTask(context.Background(), "task-unknown")
+	if err == nil || !strings.Contains(err.Error(), "unsupported status") {
+		t.Fatalf("pollTask() error = %v", err)
+	}
+}
+
 type fakeSeedanceAssetStore struct {
 	saved asset.Asset
 }

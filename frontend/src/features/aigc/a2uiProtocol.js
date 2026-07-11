@@ -3,7 +3,8 @@ export const A2UI_EVENTS = Object.freeze({
   READY: 'a2ui.ready',
   ACTION: 'a2ui.action',
   INTERRUPT_REQUEST: 'a2ui.interrupt_request',
-  ERROR: 'error'
+  INTERRUPT_RESOLVED: 'a2ui.interrupt_resolved',
+  ERROR: 'a2ui.error'
 });
 
 // A2UI_EVENT_NAMES 供 EventSource 批量注册监听器使用。
@@ -17,6 +18,22 @@ export const A2UI_ACTIONS = Object.freeze({
   APPEND_CARD: 'append_card',
   UPDATE_CARD: 'update_card'
 });
+
+const SUPPORTED_A2UI_ACTIONS = new Set(Object.values(A2UI_ACTIONS));
+
+// isSupportedA2UIActionEnvelope 是实时事件和历史回放共用的协议门禁。
+// 整个 envelope 必须使用当前版本，且每个 action 都是已知类型；不做部分执行。
+export function isSupportedA2UIActionEnvelope(envelope) {
+  if (String(envelope?.a2ui_version || '').trim() !== A2UI_VERSION) {
+    return false;
+  }
+  const actions = envelope?.actions;
+  return (
+    Array.isArray(actions) &&
+    actions.length > 0 &&
+    actions.every((action) => SUPPORTED_A2UI_ACTIONS.has(String(action?.type || '').trim()))
+  );
+}
 
 // A2UI_CARD_TYPES 统一业务消息卡类型，所有业务卡都扩展 A2UICard。
 export const A2UI_CARD_TYPES = Object.freeze({
@@ -40,6 +57,7 @@ export const A2UI_COMPONENTS = Object.freeze({
   FILE_UPLOAD: 'FileUpload',
   IMAGE_PREVIEW: 'ImagePreview',
   VIDEO_PREVIEW: 'VideoPreview',
+  AUDIO_PREVIEW: 'AudioPreview',
   VERTICAL_STEPS: 'VerticalSteps'
 });
 

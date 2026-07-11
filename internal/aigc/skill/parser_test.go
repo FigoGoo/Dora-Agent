@@ -1,6 +1,10 @@
 package skill
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestParseSkill(t *testing.T) {
 	doc := `
@@ -40,6 +44,57 @@ func TestParseSkill(t *testing.T) {
 	}
 	if got := plan.Stages[2].DependsOn; len(got) != 2 || got[0] != "1" || got[1] != "2" {
 		t.Fatalf("unexpected dependencies: %#v", got)
+	}
+}
+
+func TestProductVideoSkillUsesAuthoritativeApprovalContract(t *testing.T) {
+	content, err := os.ReadFile("../../../商品宣传短片_v2.Skill.md")
+	if err != nil {
+		t.Fatalf("read product video skill: %v", err)
+	}
+	plan, err := ParseSkill(string(content))
+	if err != nil {
+		t.Fatalf("ParseSkill(product video) error = %v", err)
+	}
+	allowedTools := map[string]bool{
+		"analyze_materials":  true,
+		"plan_creation_spec": true,
+		"plan_storyboard":    true,
+		"generate_media":     true,
+		"assemble_output":    true,
+	}
+	for _, stage := range plan.Stages {
+		for _, toolKey := range stage.ToolKeys {
+			if !allowedTools[toolKey] {
+				t.Fatalf("stage %s exposes non-capability tool %q", stage.Key, toolKey)
+			}
+		}
+	}
+	for _, required := range []string{
+		"携带 approval_id",
+		"“确认/拒绝”单选项和“提交”控件",
+		"普通聊天文字“确认”只是 UserMessage",
+		"左侧故事板统一确认",
+		"不要逐素材、逐元素或逐镜头发送 chat A2UI 审核卡",
+	} {
+		if !strings.Contains(string(content), required) {
+			t.Fatalf("product video skill lost approval rule %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"单镜头流水线",
+		"用户确认中断与恢复",
+		"询问用户确认当前镜头",
+		"<multimodal_analyze_tool>",
+		"resource_prepare_and_analyze",
+		"<storyboard_designer>",
+		"<media_generator>",
+		"<write_the_prompt>",
+		"<video_assembler>",
+	} {
+		if strings.Contains(string(content), forbidden) {
+			t.Fatalf("product video skill still contains legacy approval rule %q", forbidden)
+		}
 	}
 }
 

@@ -7,13 +7,14 @@ import (
 )
 
 const (
-	EventChatDelta        = "chat.delta"
-	EventChatMessage      = "chat.message"
-	EventReady            = "a2ui.ready"
-	EventAction           = "a2ui.action"
-	EventInterruptRequest = "a2ui.interrupt_request"
-	EventToolProgress     = "tool.progress"
-	EventError            = "error"
+	EventChatDelta         = "chat.delta"
+	EventChatMessage       = "chat.message"
+	EventReady             = "a2ui.ready"
+	EventAction            = "a2ui.action"
+	EventInterruptRequest  = "a2ui.interrupt_request"
+	EventInterruptResolved = "a2ui.interrupt_resolved"
+	EventToolProgress      = "tool.progress"
+	EventError             = "a2ui.error"
 )
 
 // SSEEvent 是前后端事件流的统一外层格式，Payload 承载具体协议内容。

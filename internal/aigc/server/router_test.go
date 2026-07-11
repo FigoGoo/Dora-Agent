@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -20,7 +23,6 @@ import (
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/asset"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/generation"
-	"github.com/FigoGoo/Dora-Agent/internal/aigc/mediagraph"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/session"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/skill"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/storyboard"
@@ -60,6 +62,15 @@ func requirePublishedEvent(t testing.TB, broker *fakeEventSubscriber, eventName 
 	}
 	t.Fatalf("missing published event %q, events = %#v", eventName, broker.published)
 	return a2ui.SSEEvent{}
+}
+
+func eventOfType(events []a2ui.SSEEvent, eventName string) *a2ui.SSEEvent {
+	for index := range events {
+		if events[index].Event == eventName {
+			return &events[index]
+		}
+	}
+	return nil
 }
 
 func publishedPayloadString(t testing.TB, event a2ui.SSEEvent) string {
@@ -110,6 +121,33 @@ func TestCreateSession(t *testing.T) {
 	}
 	if saved.UserID != "u1" || saved.SkillID != "skill-video" {
 		t.Fatalf("saved session = %#v", saved)
+	}
+}
+
+func TestManualCompensationRequiresAdminTokenAndReturnsPublicJob(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	finalizer := &fakeCompensationFinalizer{job: generation.GenerationJob{
+		ID: "job-1", UserID: "secret-user", Status: generation.StatusFailed,
+		BillingTransactionID: "charge-secret", ErrorCode: "compensation_failed", ErrorMessage: "provider secret body",
+	}}
+	router := NewRouter(Config{Compensation: finalizer, AdminToken: "admin-secret"})
+	body := `{"refunded_points":0}`
+	unauthorized := httptest.NewRecorder()
+	router.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/api/aigc/admin/generation/jobs/job-1/compensation/finalize", strings.NewReader(body)))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", unauthorized.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/aigc/admin/generation/jobs/job-1/compensation/finalize", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer admin-secret")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "secret-user") || strings.Contains(response.Body.String(), "charge-secret") || strings.Contains(response.Body.String(), "provider secret body") {
+		t.Fatalf("response leaked internal job fields: %s", response.Body.String())
 	}
 }
 
@@ -233,19 +271,22 @@ func TestGetAsset(t *testing.T) {
 
 	assets := newFakeAssetStore()
 	assets.records["asset-1"] = asset.Asset{
-		ID:        "asset-1",
-		SessionID: "s1",
-		Kind:      asset.KindImage,
-		Source:    asset.SourceGenerated,
-		URL:       "https://tos.doraigc.com/aigc/sessions/s1/assets/asset-1/keyframe.png",
+		ID:           "asset-1",
+		SessionID:    "s1",
+		Availability: asset.AvailabilityAvailable,
+		Kind:         asset.KindImage,
+		Source:       asset.SourceGenerated,
+		URL:          "https://tos.doraigc.com/aigc/sessions/s1/assets/asset-1/keyframe.png",
 	}
+	store := newFakeSessionStore()
+	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
 	router := NewRouter(Config{
-		Store:   newFakeSessionStore(),
+		Store:   store,
 		Assets:  assets,
 		Invoker: &fakeAgentInvoker{},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/aigc/assets/asset-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/aigc/assets/asset-1?session_id=s1", nil)
 	rec := httptest.NewRecorder()
 
 	router.ServeHTTP(rec, req)
@@ -260,6 +301,13 @@ func TestGetAsset(t *testing.T) {
 	if got.ID != "asset-1" || got.URL == "" {
 		t.Fatalf("asset response = %#v", got)
 	}
+	assets.records["asset-1"] = asset.Asset{ID: "asset-1", SessionID: "s1", Availability: asset.AvailabilityPendingBilling}
+	pendingReq := httptest.NewRequest(http.MethodGet, "/api/aigc/assets/asset-1?session_id=s1", nil)
+	pendingRec := httptest.NewRecorder()
+	router.ServeHTTP(pendingRec, pendingReq)
+	if pendingRec.Code != http.StatusNotFound {
+		t.Fatalf("pending asset status = %d, body = %s", pendingRec.Code, pendingRec.Body.String())
+	}
 }
 
 func TestListSessionAssets(t *testing.T) {
@@ -268,7 +316,7 @@ func TestListSessionAssets(t *testing.T) {
 	store := newFakeSessionStore()
 	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
 	assets := newFakeAssetStore()
-	assets.records["asset-1"] = asset.Asset{ID: "asset-1", SessionID: "s1", Kind: asset.KindImage}
+	assets.records["asset-1"] = asset.Asset{ID: "asset-1", SessionID: "s1", Kind: asset.KindImage, Availability: asset.AvailabilityAvailable}
 	assets.records["asset-2"] = asset.Asset{ID: "asset-2", SessionID: "s2", Kind: asset.KindVideo}
 	router := NewRouter(Config{
 		Store:   store,
@@ -312,6 +360,9 @@ func TestListSessionGenerationJobs(t *testing.T) {
 				TargetID:       "shot-1",
 				Status:         generation.StatusRunning,
 				StatusVersion:  2,
+				Payload:        map[string]any{"prompt": "private prompt"},
+				Result:         map[string]any{"temporary_url": "https://provider.invalid/result"},
+				ProviderTaskID: "provider-task-1",
 			}},
 		},
 	}
@@ -337,6 +388,9 @@ func TestListSessionGenerationJobs(t *testing.T) {
 	}
 	if len(got.Jobs) != 1 || got.Jobs[0].ID != "job-1" || got.Jobs[0].Status != generation.StatusRunning {
 		t.Fatalf("jobs response = %#v", got)
+	}
+	if got.Jobs[0].IdempotencyKey != "" || got.Jobs[0].Payload != nil || got.Jobs[0].Result != nil || got.Jobs[0].ProviderTaskID != "" {
+		t.Fatalf("jobs response leaked internal provider state = %#v", got.Jobs[0])
 	}
 	if jobs.seenSessionID != "s1" {
 		t.Fatalf("seen session id = %q", jobs.seenSessionID)
@@ -503,7 +557,7 @@ func TestBindAssetToStoryboardKeyElement(t *testing.T) {
 	store := newFakeSessionStore()
 	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
 	assets := newFakeAssetStore()
-	assets.records["asset-1"] = asset.Asset{ID: "asset-1", SessionID: "s1", Kind: asset.KindImage}
+	assets.records["asset-1"] = asset.Asset{ID: "asset-1", SessionID: "s1", Kind: asset.KindImage, Availability: asset.AvailabilityAvailable}
 	storyboards := &fakeStoryboardStore{
 		byID: map[string]storyboard.Storyboard{
 			"storyboard-1": {
@@ -1251,6 +1305,58 @@ func TestResumeAgentMarksCheckpointResumed(t *testing.T) {
 	}
 }
 
+func TestResumeAgentRecoversAfterCompletionReceiptFailureWithoutRunningTwice(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := newFakeSessionStore()
+	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
+	checkpoints := &fakeTransitionCheckpointStore{
+		fakeCheckpointStore: &fakeCheckpointStore{record: session.CheckpointMapping{
+			ID:                 "checkpoint-map-1",
+			SessionID:          "s1",
+			RunID:              "origin-run",
+			Scope:              session.CheckpointScopeRunner,
+			RunnerCheckpointID: "s1",
+			InterruptID:        "interrupt-1",
+			MappingEpoch:       1,
+			Status:             session.CheckpointStatusPending,
+		}},
+		failCompleteOnce: true,
+	}
+	invoker := &fakeAgentInvoker{}
+	broker := &fakeEventSubscriber{}
+	router := NewRouter(Config{Store: store, Events: broker, Checkpoints: checkpoints, Invoker: invoker, Now: fixedNow})
+	body := `{"checkpoint_id":"s1","interrupt_id":"interrupt-1","data":{"approved":true}}`
+
+	first := httptest.NewRecorder()
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/resume", bytes.NewBufferString(body))
+	firstReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(first, firstReq)
+	if first.Code != http.StatusInternalServerError {
+		t.Fatalf("first status = %d, body = %s", first.Code, first.Body.String())
+	}
+	if checkpoints.record.Status != session.CheckpointStatusResumeApplied || invoker.resumeCalls != 1 {
+		t.Fatalf("checkpoint=%#v resume_calls=%d", checkpoints.record, invoker.resumeCalls)
+	}
+	if eventOfType(broker.published, a2ui.EventInterruptResolved) != nil {
+		t.Fatalf("resolved was published before completion: %#v", broker.published)
+	}
+
+	second := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/messages/resume", bytes.NewBufferString(body))
+	secondReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(second, secondReq)
+	if second.Code != http.StatusOK {
+		t.Fatalf("second status = %d, body = %s", second.Code, second.Body.String())
+	}
+	if checkpoints.record.Status != session.CheckpointStatusResumed || invoker.resumeCalls != 1 {
+		t.Fatalf("checkpoint=%#v resume_calls=%d", checkpoints.record, invoker.resumeCalls)
+	}
+	if eventOfType(broker.published, a2ui.EventInterruptResolved) == nil {
+		t.Fatalf("resolved event was not published: %#v", broker.published)
+	}
+}
+
 func TestResumeAgentAlreadyResumedDoesNotInvokeRunner(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1258,11 +1364,12 @@ func TestResumeAgentAlreadyResumedDoesNotInvokeRunner(t *testing.T) {
 	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
 	checkpoints := &fakeCheckpointStore{
 		record: session.CheckpointMapping{
-			ID:          "checkpoint-map-1",
-			SessionID:   "s1",
-			Scope:       session.CheckpointScopeRunner,
-			InterruptID: "interrupt-1",
-			Status:      session.CheckpointStatusResumed,
+			ID:                 "checkpoint-map-1",
+			SessionID:          "s1",
+			Scope:              session.CheckpointScopeRunner,
+			RunnerCheckpointID: "s1",
+			InterruptID:        "interrupt-1",
+			Status:             session.CheckpointStatusResumed,
 		},
 	}
 	invoker := &fakeAgentInvoker{
@@ -1374,6 +1481,9 @@ func TestPatchStoryboardReturnsPatchEvent(t *testing.T) {
 	store := newFakeSessionStore()
 	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
 	storyboards := &fakeStoryboardStore{
+		byID: map[string]storyboard.Storyboard{
+			"storyboard-1": {ID: "storyboard-1", SessionID: "s1", Version: 3},
+		},
 		patched: storyboard.Storyboard{
 			ID:        "storyboard-1",
 			SessionID: "s1",
@@ -1387,7 +1497,7 @@ func TestPatchStoryboardReturnsPatchEvent(t *testing.T) {
 			BaseVersion:  3,
 			NextVersion:  4,
 			Source:       "user",
-			Ops:          []aigctools.JSONPatchOp{{Op: "replace", Path: "/status", Value: storyboard.StatusReviewing}},
+			Ops:          []aigctools.JSONPatchOp{{Op: "replace", Path: "/key_elements/0/status", Value: storyboard.StatusReviewing}},
 		},
 	}
 	router := NewRouter(Config{
@@ -1397,7 +1507,7 @@ func TestPatchStoryboardReturnsPatchEvent(t *testing.T) {
 		NewID:       sequentialIDs("patch-event-1"),
 	})
 
-	body := bytes.NewBufferString(`{"base_version":3,"source":"user","ops":[{"op":"replace","path":"/status","value":"reviewing"}]}`)
+	body := bytes.NewBufferString(`{"base_version":3,"source":"user","ops":[{"op":"replace","path":"/key_elements/0/status","value":"reviewing"}]}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/aigc/sessions/s1/storyboards/storyboard-1", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1419,110 +1529,32 @@ func TestPatchStoryboardReturnsPatchEvent(t *testing.T) {
 	}
 }
 
-func TestResumeMediaGraph(t *testing.T) {
+func TestMediaGraphCompatibilityRouteIsRemoved(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	store := newFakeSessionStore()
-	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
-	resumer := &fakeMediaGraphResumer{
-		result: mediagraph.RunResult{
-			Output: mediagraph.MediaGeneratorOutput{
-				StoryboardID:      "storyboard-1",
-				StoryboardVersion: 5,
-				Status:            mediagraph.StatusReferenceConfirmed,
-				JobIDs:            []string{"job:storyboard-1:6"},
-			},
-		},
-	}
-	router := NewRouter(Config{
-		Store:      store,
-		MediaGraph: resumer,
-		Invoker:    &fakeAgentInvoker{},
-	})
-
-	body := bytes.NewBufferString(`{"checkpoint_id":"media-cp-1","interrupt_id":"interrupt-1","approved":true,"note":"可以继续"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/media-graph/resume", body)
-	req.Header.Set("Content-Type", "application/json")
+	router := NewRouter(Config{})
+	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/media-graph/resume", bytes.NewBufferString(`{}`))
 	rec := httptest.NewRecorder()
-
 	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	var got resumeMediaGraphResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if got.Status != "completed" || got.Output.Status != mediagraph.StatusReferenceConfirmed {
-		t.Fatalf("resume response = %#v", got)
-	}
-	if resumer.checkpointID != "media-cp-1" || resumer.interruptID != "interrupt-1" {
-		t.Fatalf("resume ids = %q %q", resumer.checkpointID, resumer.interruptID)
-	}
-	if !resumer.decision.Approved || resumer.decision.Note != "可以继续" {
-		t.Fatalf("decision = %#v", resumer.decision)
 	}
 }
 
-func TestResumeMediaGraphPublishesInterruptToEventStream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	store := newFakeSessionStore()
-	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
-	resumer := &fakeMediaGraphResumer{
-		result: mediagraph.RunResult{
-			Interrupted: true,
-			Interrupt: &mediagraph.InterruptEvent{
-				Event: a2ui.EventInterruptRequest,
-				Payload: mediagraph.InterruptRequestPayload{
-					CheckpointID: "media-cp-2",
-					InterruptID:  "interrupt-2",
-					Message:      "再次确认参考图。",
-				},
-			},
-		},
+func TestLocalAssetRouteServesDemoArtifacts(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "aigc", "sessions", "s1", "assets", "a1")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	events := &fakeEventSubscriber{}
-	router := NewRouter(Config{
-		Store:      store,
-		MediaGraph: resumer,
-		Events:     events,
-		Invoker:    &fakeAgentInvoker{},
-		NewID:      sequentialIDs("media-event-1"),
-		Now:        fixedNow,
-	})
-
-	body := bytes.NewBufferString(`{"checkpoint_id":"media-cp-1","interrupt_id":"interrupt-1","approved":true,"note":"继续"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/aigc/sessions/s1/media-graph/resume", body)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	if err := os.WriteFile(filepath.Join(path, "demo.txt"), []byte("local-demo"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	var got map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if got["status"] != "interrupted" {
-		t.Fatalf("resume response = %#v", got)
-	}
-	if _, ok := got["event"]; ok {
-		t.Fatalf("resume response should not return an event payload: %#v", got)
-	}
-	if len(events.published) != 1 {
-		t.Fatalf("published events = %#v", events.published)
-	}
-	event := events.published[0]
-	if event.ID != "media-event-1" || event.SessionID != "s1" || event.Event != a2ui.EventInterruptRequest {
-		t.Fatalf("published event = %#v", event)
-	}
-	payload := payloadMap(event.Payload)
-	if payload["checkpoint_id"] != "media-cp-2" || payload["interrupt_id"] != "interrupt-2" || payload["scope"] != session.CheckpointScopeMediaGraph {
-		t.Fatalf("interrupt payload = %#v", payload)
+	router := NewRouter(Config{LocalAssetDir: root})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/aigc/local-assets/aigc/sessions/s1/assets/a1/demo.txt", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "local-demo" {
+		t.Fatalf("local asset response status=%d body=%q", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -1540,12 +1572,17 @@ func TestResumeAgentPublishesAndPersistsDecision(t *testing.T) {
 		}},
 	}
 	broker := &fakeEventSubscriber{}
+	checkpoints := &fakeCheckpointStore{record: session.CheckpointMapping{
+		ID: "runner-map-1", SessionID: "s1", Scope: session.CheckpointScopeRunner,
+		RunnerCheckpointID: "s1", InterruptID: "agent:A;tool:confirm", Status: session.CheckpointStatusPending,
+	}}
 	router := NewRouter(Config{
-		Store:   store,
-		Events:  broker,
-		Invoker: invoker,
-		NewID:   sequentialIDs("run-1", "msg-user-1", "evt-1", "msg-assistant-1"),
-		Now:     fixedNow,
+		Store:       store,
+		Events:      broker,
+		Invoker:     invoker,
+		Checkpoints: checkpoints,
+		NewID:       sequentialIDs("run-1", "msg-user-1", "evt-1", "msg-assistant-1"),
+		Now:         fixedNow,
 	})
 
 	body := bytes.NewBufferString(`{"checkpoint_id":"s1","interrupt_id":"agent:A;tool:confirm","content":"确认参考图，可以继续","data":{"approved":true}}`)
@@ -1672,22 +1709,26 @@ func (s *fakeSessionStore) AppendMessage(_ context.Context, record session.Messa
 
 func (s *fakeSessionStore) ListMessages(_ context.Context, sessionID string, window session.MessageWindow) ([]session.MessageRecord, error) {
 	records := append([]session.MessageRecord(nil), s.messages[sessionID]...)
-	if window.Limit > 0 && len(records) > window.Limit {
-		records = records[len(records)-window.Limit:]
-	}
-	return records, nil
+	return session.ApplyMessageWindow(records, window), nil
 }
 
 type fakeAgentInvoker struct {
 	events            []AgentEvent
+	invokeErr         error
+	invokeCalls       int
 	seenMessages      []*schema.Message
 	seenSessionValues map[string]any
 	seenResume        AgentResumeRequest
+	resumeCalls       int
 }
 
 func (i *fakeAgentInvoker) Invoke(_ context.Context, req AgentInvokeRequest) (<-chan AgentEvent, error) {
+	i.invokeCalls++
 	i.seenMessages = append([]*schema.Message(nil), req.Messages...)
 	i.seenSessionValues = req.SessionValues
+	if i.invokeErr != nil {
+		return nil, i.invokeErr
+	}
 	ch := make(chan AgentEvent, len(i.events))
 	for _, event := range i.events {
 		ch <- event
@@ -1698,6 +1739,7 @@ func (i *fakeAgentInvoker) Invoke(_ context.Context, req AgentInvokeRequest) (<-
 
 func (i *fakeAgentInvoker) Resume(_ context.Context, req AgentResumeRequest) (<-chan AgentEvent, error) {
 	i.seenResume = req
+	i.resumeCalls++
 	ch := make(chan AgentEvent, len(i.events))
 	for _, event := range i.events {
 		ch <- event
@@ -1819,6 +1861,27 @@ type fakeCheckpointStore struct {
 	err       error
 }
 
+type fakeTransitionCheckpointStore struct {
+	*fakeCheckpointStore
+	failCompleteOnce bool
+}
+
+func (s *fakeTransitionCheckpointStore) TransitionCheckpointMapping(_ context.Context, id string, expectedStatus string, expectedEpoch int64, nextStatus string, decisionVersion int) (session.CheckpointMapping, error) {
+	if s.err != nil {
+		return session.CheckpointMapping{}, s.err
+	}
+	if s.record.ID != id || s.record.Status != expectedStatus || s.record.MappingEpoch != expectedEpoch {
+		return session.CheckpointMapping{}, session.ErrCheckpointNotFound
+	}
+	if nextStatus == session.CheckpointStatusResumed && s.failCompleteOnce {
+		s.failCompleteOnce = false
+		return session.CheckpointMapping{}, errors.New("simulated completion receipt failure")
+	}
+	s.record.Status = nextStatus
+	s.record.DecisionVersion = decisionVersion
+	return s.record, nil
+}
+
 func (s *fakeCheckpointStore) SaveCheckpointMapping(_ context.Context, record session.CheckpointMapping) (session.CheckpointMapping, error) {
 	s.saved = record
 	if s.err != nil {
@@ -1835,6 +1898,16 @@ func (s *fakeCheckpointStore) GetCheckpointMapping(_ context.Context, sessionID 
 		return session.CheckpointMapping{}, s.err
 	}
 	if s.record.SessionID == sessionID && s.record.InterruptID == interruptID {
+		return s.record, nil
+	}
+	return session.CheckpointMapping{}, session.ErrCheckpointNotFound
+}
+
+func (s *fakeCheckpointStore) GetCheckpointMappingByApproval(_ context.Context, approvalID string) (session.CheckpointMapping, error) {
+	if s.err != nil {
+		return session.CheckpointMapping{}, s.err
+	}
+	if s.record.ApprovalID == approvalID {
 		return s.record, nil
 	}
 	return session.CheckpointMapping{}, session.ErrCheckpointNotFound
@@ -1865,20 +1938,11 @@ func (u *fakeAssetUploader) Upload(_ context.Context, input asset.UploadInput) (
 	return u.result, nil
 }
 
-type fakeMediaGraphResumer struct {
-	result       mediagraph.RunResult
-	err          error
-	checkpointID string
-	interruptID  string
-	decision     mediagraph.ReferenceConfirmDecision
+type fakeCompensationFinalizer struct {
+	job generation.GenerationJob
+	err error
 }
 
-func (r *fakeMediaGraphResumer) Resume(_ context.Context, checkpointID string, interruptID string, decision mediagraph.ReferenceConfirmDecision) (mediagraph.RunResult, error) {
-	r.checkpointID = checkpointID
-	r.interruptID = interruptID
-	r.decision = decision
-	if r.err != nil {
-		return mediagraph.RunResult{}, r.err
-	}
-	return r.result, nil
+func (f *fakeCompensationFinalizer) ManualFinalize(context.Context, string, int64, string) (generation.GenerationJob, error) {
+	return f.job, f.err
 }

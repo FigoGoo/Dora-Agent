@@ -18,18 +18,28 @@ const (
 	SourceUpload    = "upload"
 	SourceGenerated = "generated"
 
-	StorageProviderTOS = "tos"
+	AvailabilityPendingBilling = "pending_billing"
+	AvailabilityAvailable      = "available"
+	AvailabilityQuarantined    = "quarantined"
+	AvailabilityDeleted        = "deleted"
+
+	StorageProviderTOS   = "tos"
+	StorageProviderLocal = "local"
 )
 
 type Asset struct {
 	ID              string         `json:"id"`
 	SessionID       string         `json:"session_id,omitempty"`
 	UserID          string         `json:"user_id,omitempty"`
+	SourceJobID     string         `json:"source_job_id,omitempty"`
+	OutputIndex     int            `json:"output_index,omitempty"`
 	Kind            string         `json:"kind"`
 	Source          string         `json:"source"`
+	Availability    string         `json:"availability"`
 	MIMEType        string         `json:"mime_type,omitempty"`
 	Filename        string         `json:"filename,omitempty"`
 	SizeBytes       int64          `json:"size_bytes,omitempty"`
+	ContentHash     string         `json:"content_hash,omitempty"`
 	StorageProvider string         `json:"storage_provider,omitempty"`
 	Bucket          string         `json:"bucket,omitempty"`
 	ObjectKey       string         `json:"object_key,omitempty"`
@@ -37,6 +47,21 @@ type Asset struct {
 	Metadata        map[string]any `json:"metadata,omitempty"`
 	CreatedAt       time.Time      `json:"created_at,omitempty"`
 	UpdatedAt       time.Time      `json:"updated_at,omitempty"`
+}
+
+func NormalizeAvailability(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case AvailabilityPendingBilling:
+		return AvailabilityPendingBilling
+	case AvailabilityAvailable:
+		return AvailabilityAvailable
+	case AvailabilityQuarantined:
+		return AvailabilityQuarantined
+	case AvailabilityDeleted:
+		return AvailabilityDeleted
+	default:
+		return ""
+	}
 }
 
 func NormalizeKind(kind string) string {

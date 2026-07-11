@@ -19,8 +19,8 @@ import {
   A2UI_COMPONENTS,
   A2UI_EVENT_NAMES,
   A2UI_EVENTS,
-  A2UI_VERSION,
-  componentPayload
+  componentPayload,
+  isSupportedA2UIActionEnvelope
 } from './a2uiProtocol.js';
 
 const SESSION_STORAGE_KEY = 'dora:aigc:demo_session_id';
@@ -29,14 +29,27 @@ const WELCOME_MESSAGE = '把剧本、风格或 Skill.md 发给我，我会先规
 // statusLabels 是前端统一展示状态中文名的映射表。
 const statusLabels = {
   queued: '排队中',
+  accepted: '已受理',
+  waiting_jobs: '等待任务',
+  waiting_provider: '等待生成',
+  waiting_user: '等待用户确认',
+  finalizing: '处理中',
+  retry_wait: '等待重试',
   running: '生成中',
   succeeded: '完成',
+  partial_failed: '部分失败',
+  partial: '部分完成',
+  cancelling: '取消中',
   failed: '失败',
   cancelled: '已取消',
   done: '完成',
   completed: '完成',
   draft: '草稿',
   reviewing: '待确认',
+  candidate: '候选待审',
+  active: '已采用',
+  stale: '需更新',
+  missing: '缺失',
   confirmed: '已确认',
   generating: '生成中',
   ready: '就绪',
@@ -62,6 +75,64 @@ export function AigcWorkspacePage() {
   const skillInputRef = useRef(null);
   const streamingAssistantID = useRef('');
   const timelineOrderRef = useRef(1);
+  const approvalDecisionRequestsRef = useRef(new Map());
+  const candidateApprovalDecisionRequestsRef = useRef(new Map());
+  const terminalApprovalSurfaceIDsRef = useRef(new Set());
+  const lastEventSeqRef = useRef(0);
+  const activeSessionRef = useRef({ id: '', generation: 0 });
+  const sessionAbortControllerRef = useRef(null);
+  const resourceMutationVersionsRef = useRef({ storyboard: 0, assets: 0, jobs: 0, messages: 0 });
+  const latestResourceRequestsRef = useRef({ storyboard: 0, assets: 0, jobs: 0, messages: 0 });
+  const resourceRequestSequenceRef = useRef(0);
+
+  // activateSession 为会话切换建立新的请求代次，并取消上一会话仍在进行的读取。
+  const activateSession = useCallback((id) => {
+    sessionAbortControllerRef.current?.abort();
+    const generation = activeSessionRef.current.generation + 1;
+    activeSessionRef.current = { id, generation };
+    sessionAbortControllerRef.current = new AbortController();
+    return generation;
+  }, []);
+
+  // currentSessionRequest 返回只对当前会话有效的请求上下文。
+  const currentSessionRequest = useCallback((id) => {
+    const active = activeSessionRef.current;
+    if (!id || active.id !== id || !sessionAbortControllerRef.current) {
+      return null;
+    }
+    return { generation: active.generation, signal: sessionAbortControllerRef.current.signal };
+  }, []);
+
+  // isCurrentSessionRequest 防止已经切走的会话在异步响应后写回工作台。
+  const isCurrentSessionRequest = useCallback((id, generation) => {
+    const active = activeSessionRef.current;
+    return active.id === id && active.generation === generation && !sessionAbortControllerRef.current?.signal.aborted;
+  }, []);
+
+  // markResourceMutation 记录 SSE 或本地交互产生的新状态，阻止更早的 REST 快照覆盖它。
+  const markResourceMutation = useCallback((resource) => {
+    resourceMutationVersionsRef.current[resource] = (resourceMutationVersionsRef.current[resource] || 0) + 1;
+  }, []);
+
+  // beginResourceSnapshot 为一次 REST 快照读取冻结请求顺序和读取开始时的实时状态版本。
+  const beginResourceSnapshot = useCallback((resources) => {
+    const requestID = resourceRequestSequenceRef.current + 1;
+    resourceRequestSequenceRef.current = requestID;
+    const mutationVersions = {};
+    resources.forEach((resource) => {
+      latestResourceRequestsRef.current[resource] = requestID;
+      mutationVersions[resource] = resourceMutationVersionsRef.current[resource] || 0;
+    });
+    return { requestID, mutationVersions };
+  }, []);
+
+  // canApplyResourceSnapshot 仅允许最新请求且读取期间未发生实时/本地更新的快照写回。
+  const canApplyResourceSnapshot = useCallback((resource, snapshot) => {
+    return (
+      latestResourceRequestsRef.current[resource] === snapshot.requestID &&
+      resourceMutationVersionsRef.current[resource] === snapshot.mutationVersions[resource]
+    );
+  }, []);
 
   // nextTimelineOrder 为消息、工具进度和 A2UI 卡片分配稳定时间线顺序。
   const nextTimelineOrder = useCallback(() => {
@@ -83,44 +154,86 @@ export function AigcWorkspacePage() {
 
   // refreshAssets 刷新当前会话素材，通常在生成任务完成后调用。
   const refreshAssets = useCallback(async (id) => {
-    if (!id) {
+    const request = currentSessionRequest(id);
+    if (!request) {
       return;
     }
-    const result = await requestOptionalJSON(`/api/aigc/sessions/${id}/assets`);
-    if (result?.assets) {
-      setAssets(result.assets);
+    const snapshot = beginResourceSnapshot(['assets']);
+    try {
+      const result = await requestOptionalJSON(`/api/aigc/sessions/${id}/assets`, { signal: request.signal });
+      if (isCurrentSessionRequest(id, request.generation) && result?.assets) {
+        setAssets((current) => (canApplyResourceSnapshot('assets', snapshot) ? result.assets : current));
+      }
+    } catch (err) {
+      if (!isCurrentSessionRequest(id, request.generation) || err?.name === 'AbortError') {
+        return;
+      }
+      throw err;
     }
-  }, []);
+  }, [beginResourceSnapshot, canApplyResourceSnapshot, currentSessionRequest, isCurrentSessionRequest]);
 
   // refreshSessionData 拉取故事板、素材、任务和可选历史消息，作为页面冷启动/刷新入口。
   const refreshSessionData = useCallback(
     async (id, options = {}) => {
-      if (!id) {
+      const request = currentSessionRequest(id);
+      if (!request) {
         return;
       }
       const includeMessages = options.includeMessages !== false;
+      const resources = includeMessages
+        ? ['storyboard', 'assets', 'jobs', 'messages']
+        : ['storyboard', 'assets', 'jobs'];
+      const snapshot = beginResourceSnapshot(resources);
       const [boardResult, assetsResult, jobsResult, messagesResult] = await Promise.allSettled([
-        requestOptionalJSON(`/api/aigc/sessions/${id}/storyboard`),
-        requestOptionalJSON(`/api/aigc/sessions/${id}/assets`),
-        requestOptionalJSON(`/api/aigc/sessions/${id}/jobs`),
-        includeMessages ? requestOptionalJSON(`/api/aigc/sessions/${id}/messages`) : Promise.resolve(null)
+        requestOptionalJSON(`/api/aigc/sessions/${id}/storyboard`, { signal: request.signal }),
+        requestOptionalJSON(`/api/aigc/sessions/${id}/assets`, { signal: request.signal }),
+        requestOptionalJSON(`/api/aigc/sessions/${id}/jobs`, { signal: request.signal }),
+        includeMessages ? requestOptionalJSON(`/api/aigc/sessions/${id}/messages`, { signal: request.signal }) : Promise.resolve(null)
       ]);
-      if (boardResult.status === 'fulfilled' && boardResult.value) {
-        setStoryboard(boardResult.value);
-        setSelectedTarget(defaultSelectedTarget(boardResult.value));
+      if (!isCurrentSessionRequest(id, request.generation)) {
+        return;
       }
-      if (assetsResult.status === 'fulfilled' && assetsResult.value?.assets) {
+      if (
+        boardResult.status === 'fulfilled' &&
+        boardResult.value &&
+        canApplyResourceSnapshot('storyboard', snapshot)
+      ) {
+        setStoryboard((current) => mergeStoryboardSnapshot(current, boardResult.value));
+        setSelectedTarget((current) => current || defaultSelectedTarget(boardResult.value));
+      }
+      if (
+        assetsResult.status === 'fulfilled' &&
+        assetsResult.value?.assets &&
+        canApplyResourceSnapshot('assets', snapshot)
+      ) {
         setAssets(assetsResult.value.assets);
       }
-      if (jobsResult.status === 'fulfilled' && jobsResult.value?.jobs) {
+      if (
+        jobsResult.status === 'fulfilled' &&
+        jobsResult.value?.jobs &&
+        canApplyResourceSnapshot('jobs', snapshot)
+      ) {
         setJobs(jobsResult.value.jobs);
       }
-      if (includeMessages && messagesResult.status === 'fulfilled' && messagesResult.value?.messages?.length) {
+      if (
+        includeMessages &&
+        messagesResult.status === 'fulfilled' &&
+        messagesResult.value?.messages?.length &&
+        canApplyResourceSnapshot('messages', snapshot)
+      ) {
         const history = restoreHistoryFromMessageRecords(messagesResult.value.messages);
-        if (history.messages.length || history.surfaces.length) {
+        history.terminalApprovalSurfaceIDs.forEach((surfaceID) => terminalApprovalSurfaceIDsRef.current.add(surfaceID));
+        if (history.messages.length || history.surfaces.length || history.terminalApprovalSurfaceIDs.length) {
           timelineOrderRef.current = Math.max(timelineOrderRef.current, history.nextTimelineOrder);
           setMessages(history.messages);
-          setSurfaces(history.surfaces);
+          setSurfaces((current) =>
+            mergeHydratedSurfaces(
+              current,
+              history.surfaces,
+              history.submittedSurfaceIDs,
+              terminalApprovalSurfaceIDsRef.current
+            )
+          );
         }
       }
       const rejected = [boardResult, assetsResult, jobsResult, includeMessages ? messagesResult : null].find(
@@ -130,8 +243,17 @@ export function AigcWorkspacePage() {
         throw rejected.reason;
       }
     },
-    []
+    [beginResourceSnapshot, canApplyResourceSnapshot, currentSessionRequest, isCurrentSessionRequest]
   );
+
+  useEffect(() => {
+    if (!storyboard) {
+      return;
+    }
+    setSelectedTarget((current) =>
+      current && storyboardContainsTarget(storyboard, current) ? current : defaultSelectedTarget(storyboard)
+    );
+  }, [storyboard]);
 
   // finishAssistantMessage 结束正在流式显示的 assistant 消息。
   const finishAssistantMessage = useCallback(() => {
@@ -140,24 +262,35 @@ export function AigcWorkspacePage() {
     if (!messageID) {
       return;
     }
+    markResourceMutation('messages');
     setMessages((items) => items.map((message) => (message.id === messageID ? { ...message, streaming: false } : message)));
-  }, []);
+  }, [markResourceMutation]);
 
   // addSystemMessage 把错误、确认提示等系统信息插入聊天时间线。
   const addSystemMessage = useCallback((content) => {
     if (!content) {
       return;
     }
+    markResourceMutation('messages');
     setMessages((items) => [
       ...items,
       { id: `event-${Date.now()}-${items.length}`, role: 'system', content, timelineOrder: nextTimelineOrder() }
     ]);
-  }, [nextTimelineOrder]);
+  }, [markResourceMutation, nextTimelineOrder]);
 
   // resetWorkspaceState 清空当前工作台状态，用于开启新会话。
   const resetWorkspaceState = useCallback(() => {
+    sessionAbortControllerRef.current?.abort();
+    sessionAbortControllerRef.current = null;
+    activeSessionRef.current = { id: '', generation: activeSessionRef.current.generation + 1 };
     streamingAssistantID.current = '';
     timelineOrderRef.current = 1;
+    approvalDecisionRequestsRef.current.clear();
+    candidateApprovalDecisionRequestsRef.current.clear();
+    terminalApprovalSurfaceIDsRef.current.clear();
+    lastEventSeqRef.current = 0;
+    resourceMutationVersionsRef.current = { storyboard: 0, assets: 0, jobs: 0, messages: 0 };
+    latestResourceRequestsRef.current = { storyboard: 0, assets: 0, jobs: 0, messages: 0 };
     setStoryboard(null);
     setAssets([]);
     setJobs([]);
@@ -173,12 +306,22 @@ export function AigcWorkspacePage() {
 
   // handleA2UIEvent 是前端唯一 A2UI 事件入口，只执行 action、interrupt 和 error。
   const handleA2UIEvent = useCallback(
-    (event) => {
+    (event, generation) => {
       const eventName = event?.event;
       const payload = event?.payload || {};
+      if (!sessionID || !isCurrentSessionRequest(sessionID, generation)) {
+        return;
+      }
       if (eventName === A2UI_EVENTS.READY) {
         setError('');
         return;
+      }
+      const eventSeq = Number(event?.seq || 0);
+      if (Number.isFinite(eventSeq) && eventSeq > 0) {
+        if (eventSeq <= lastEventSeqRef.current) {
+          return;
+        }
+        lastEventSeqRef.current = eventSeq;
       }
       // 前端只执行新的 Action 协议；旧事件不会在这里兜底转换成 UI。
       if (eventName === A2UI_EVENTS.ACTION) {
@@ -189,8 +332,11 @@ export function AigcWorkspacePage() {
           setToolRuns,
           setJobs,
           refreshAssets,
+          refreshSessionData,
           sessionID,
-          nextTimelineOrder
+          nextTimelineOrder,
+          markResourceMutation,
+          terminalApprovalSurfaceIDs: terminalApprovalSurfaceIDsRef.current
         });
         return;
       }
@@ -199,13 +345,23 @@ export function AigcWorkspacePage() {
         addSystemMessage(payload.message || payload.title || '需要确认后继续。');
         return;
       }
+      if (eventName === A2UI_EVENTS.INTERRUPT_RESOLVED) {
+        setInterrupt((current) => {
+          if (!current) return null;
+          if (payload.interrupt_id) {
+            return payload.interrupt_id === current.interrupt_id ? null : current;
+          }
+          return payload.checkpoint_id && payload.checkpoint_id === current.checkpoint_id ? null : current;
+        });
+        return;
+      }
       if (eventName === A2UI_EVENTS.ERROR) {
         const message = payload.message || '请求失败';
         setError(message);
         addSystemMessage(message);
       }
     },
-    [addSystemMessage, nextTimelineOrder, refreshAssets, sessionID]
+    [addSystemMessage, isCurrentSessionRequest, markResourceMutation, nextTimelineOrder, refreshAssets, refreshSessionData, sessionID]
   );
 
   useEffect(() => {
@@ -219,6 +375,7 @@ export function AigcWorkspacePage() {
         if (cancelled) {
           return;
         }
+        activateSession(id);
         setSessionID(id);
         await refreshSessionData(id);
       } catch (err) {
@@ -232,26 +389,48 @@ export function AigcWorkspacePage() {
 
     return () => {
       cancelled = true;
+      sessionAbortControllerRef.current?.abort();
     };
-  }, [refreshSessionData]);
+  }, [activateSession, refreshSessionData]);
 
   useEffect(() => {
     if (!sessionID || typeof window === 'undefined' || typeof window.EventSource !== 'function') {
       return undefined;
     }
-    const source = new window.EventSource(`/api/aigc/sessions/${sessionID}/events/stream`);
+    const request = currentSessionRequest(sessionID);
+    if (!request) {
+      return undefined;
+    }
+    const isActiveStream = () => isCurrentSessionRequest(sessionID, request.generation);
+    const afterSeq = lastEventSeqRef.current;
+    const query = afterSeq > 0 ? `?after_seq=${afterSeq}` : '';
+    const source = new window.EventSource(`/api/aigc/sessions/${sessionID}/events/stream${query}`);
     const listeners = A2UI_EVENT_NAMES.map((eventName) => {
-      const listener = (event) => handleA2UIEvent(parseSSEEvent(event));
+      const listener = (event) => {
+        if (isActiveStream()) {
+          handleA2UIEvent(parseSSEEvent(event), request.generation);
+        }
+      };
       source.addEventListener(eventName, listener);
       return [eventName, listener];
     });
-    source.onopen = () => setError('');
-    source.onerror = () => setError('事件流已断开，刷新页面可重新连接。');
+    source.onopen = () => {
+      if (isActiveStream()) {
+        setError('');
+      }
+    };
+    source.onerror = () => {
+      if (isActiveStream()) {
+        setError('事件流已断开，刷新页面可重新连接。');
+      }
+    };
     return () => {
       listeners.forEach(([eventName, listener]) => source.removeEventListener(eventName, listener));
+      source.onopen = null;
+      source.onerror = null;
       source.close();
     };
-  }, [handleA2UIEvent, sessionID]);
+  }, [currentSessionRequest, handleA2UIEvent, isCurrentSessionRequest, sessionID]);
 
   // sendMessage 发送普通用户消息；A2UI 输出只从 /events/stream 接收。
   async function sendMessage(nextContent, options = {}) {
@@ -266,10 +445,12 @@ export function AigcWorkspacePage() {
     setBusy(true);
     setError('');
     setInterrupt(null);
+    const clientMessageID = `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    markResourceMutation('messages');
     setMessages((items) => [
       ...items,
       {
-        id: `user-${Date.now()}`,
+        id: clientMessageID,
         role: 'user',
         content,
         displayContent: options.displayContent,
@@ -285,6 +466,7 @@ export function AigcWorkspacePage() {
       }
       await requestJSON(`/api/aigc/sessions/${sessionID}/messages`, {
         method: 'POST',
+        headers: { 'Idempotency-Key': clientMessageID },
         body: JSON.stringify(requestBody)
       });
       finishAssistantMessage();
@@ -301,8 +483,55 @@ export function AigcWorkspacePage() {
     return sent;
   }
 
-  // submitSurface 把 A2UI 组件值归约为普通用户消息，再走标准消息发送链路。
+  // submitSurface 仅让携带 approval_id 的权威审核卡走 Decision API；其余合法表单才归约为普通用户消息。
   async function submitSurface(surface, values) {
+    const approvalID = approvalIDFromSurface(surface);
+    if (approvalID) {
+      if (isTerminalApprovalStatus(surface?.payload?.status)) {
+        return;
+      }
+      const decision = String(values?.decision || '').trim().toLowerCase();
+      if (!isApprovalDecision(decision)) {
+        addSystemMessage('请选择确认或拒绝。');
+        return;
+      }
+      setBusy(true);
+      setError('');
+      try {
+        const request = freezeApprovalDecisionRequest(
+          approvalDecisionRequestsRef.current,
+          approvalID,
+          decision,
+          approvalDecisionVersion(surface)
+        );
+        await requestJSON(`/api/aigc/sessions/${sessionID}/approvals/${approvalID}/decision`, {
+          method: 'POST',
+          body: JSON.stringify(request)
+        });
+        markApprovalTerminal(terminalApprovalSurfaceIDsRef.current, surface, approvalID);
+        setSurfaces((items) => items.filter((item) => !isSameApprovalSurface(item, surface, approvalID)));
+        addSystemMessage(
+          request.decision === 'approved' ? '已确认审核结果。' : '已拒绝审核结果，可继续提出修改要求。'
+        );
+        await refreshSessionData(sessionID, { includeMessages: false });
+      } catch (err) {
+        setError(errorMessage(err));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    if (isApprovalLikeSurface(surface)) {
+      addSystemMessage('审批卡缺少 approval_id，无法提交。请刷新页面或重新发起审核。');
+      return;
+    }
+    const missingRequiredFields = requiredSurfaceFieldsMissing(surface, values);
+    if (missingRequiredFields.length) {
+      addSystemMessage(
+        `请完成必填项：${missingRequiredFields.map((field) => field.label || fieldKey(field)).join('、')}。`
+      );
+      return;
+    }
     const submission = surfaceSubmission(surface, values);
     if (!submission.content) {
       addSystemMessage('请先完成输入、选择或文件上传。');
@@ -331,6 +560,7 @@ export function AigcWorkspacePage() {
     try {
       const id = await createSession();
       resetWorkspaceState();
+      activateSession(id);
       setSessionID(id);
       await refreshSessionData(id);
     } catch (err) {
@@ -340,7 +570,7 @@ export function AigcWorkspacePage() {
     }
   }
 
-  // resumeInterrupt 处理 Agent 或媒体图的人审确认，并继续对应运行。
+  // resumeInterrupt 通过统一消息恢复协议处理 Agent 人审确认。
   async function resumeInterrupt(action) {
     if (!interrupt || !sessionID || busy) {
       return;
@@ -350,22 +580,6 @@ export function AigcWorkspacePage() {
     setBusy(true);
     setError('');
     try {
-      if (interrupt.scope === 'media_graph') {
-        const result = await requestJSON(`/api/aigc/sessions/${sessionID}/media-graph/resume`, {
-          method: 'POST',
-          body: JSON.stringify({
-            checkpoint_id: interrupt.checkpoint_id,
-            interrupt_id: interrupt.interrupt_id,
-            approved,
-            note: label
-          })
-        });
-        setInterrupt(null);
-        addSystemMessage(result?.status === 'interrupted' ? '仍需继续确认。' : '已确认参考图。');
-        await refreshSessionData(sessionID, { includeMessages: false });
-        return;
-      }
-
       await requestJSON(`/api/aigc/sessions/${sessionID}/messages/resume`, {
         method: 'POST',
         body: JSON.stringify({
@@ -375,7 +589,6 @@ export function AigcWorkspacePage() {
           data: { approved, action_key: action?.key, note: label }
         })
       });
-      setInterrupt(null);
       finishAssistantMessage();
       await refreshSessionData(sessionID);
     } catch (err) {
@@ -393,20 +606,261 @@ export function AigcWorkspacePage() {
     if (!editing || !storyboard || !sessionID) {
       return;
     }
+    const id = sessionID;
+    const request = currentSessionRequest(id);
+    if (!request) {
+      return;
+    }
     setError('');
     try {
-      const result = await requestJSON(`/api/aigc/sessions/${sessionID}/storyboards/${storyboard.id}`, {
+      if (editing.kind === 'prompt') {
+        const result = await requestJSON(
+          `/api/aigc/sessions/${id}/storyboards/${storyboard.id}/targets/${editing.targetID}/prompt`,
+          {
+            method: 'PATCH',
+            signal: request.signal,
+            body: JSON.stringify({
+              expected_version: storyboard.version,
+              target_revision: editing.targetRevision,
+              prompt_revision: editing.promptRevision,
+              purpose: editing.purpose,
+              prompt: editing.value
+            })
+          }
+        );
+        if (!isCurrentSessionRequest(id, request.generation)) {
+          return;
+        }
+        markResourceMutation('storyboard');
+        setStoryboard(result.storyboard || result.aggregate || result);
+        setEditing(null);
+        return;
+      }
+      const result = await requestJSON(`/api/aigc/sessions/${id}/storyboards/${storyboard.id}`, {
         method: 'PATCH',
+        signal: request.signal,
         body: JSON.stringify({
           base_version: storyboard.version,
           source: 'user',
           ops: [{ op: 'replace', path: editing.path, value: editing.value }]
         })
       });
+      if (!isCurrentSessionRequest(id, request.generation)) {
+        return;
+      }
+      markResourceMutation('storyboard');
       setStoryboard(result.storyboard);
       setEditing(null);
     } catch (err) {
+      if (!isCurrentSessionRequest(id, request.generation) || err?.name === 'AbortError') {
+        return;
+      }
       setError(errorMessage(err));
+    }
+  }
+
+  // regenerateTarget 是左侧故事板的确定性 UI Command，不经过 Agent Tool 选择。
+  async function regenerateTarget(target) {
+    if (!storyboard || storyboard.pending_revision_id || !sessionID || busy || !target?.targetID || !target?.slot?.key) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const result = await requestJSON(
+        `/api/aigc/sessions/${sessionID}/storyboards/${storyboard.id}/targets/${target.targetID}/regenerate`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            expected_version: storyboard.version,
+            target_revision: target.targetRevision,
+            asset_slot: target.slot.key,
+            media_kind: target.slot.media_kind,
+            idempotency_key: `regenerate:${storyboard.id}:${target.targetID}:${target.slot.key}:v${storyboard.version}`
+          })
+        }
+      );
+      if (result.storyboard || result.aggregate) {
+        markResourceMutation('storyboard');
+        setStoryboard(result.storyboard || result.aggregate);
+      }
+      await refreshSessionData(sessionID, { includeMessages: false });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // activateCandidate 采用某一候选资产；存在 Approval 时走统一 Decision API。
+  async function activateCandidate({ targetID, targetRevision, slot, binding }) {
+    if (!storyboard || storyboard.pending_revision_id || !sessionID || busy || !targetID || !binding) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      let result;
+      if (binding.approval_id) {
+        const request = freezeApprovalDecisionRequest(
+          approvalDecisionRequestsRef.current,
+          binding.approval_id,
+          'approved',
+          0
+        );
+        result = await requestJSON(`/api/aigc/sessions/${sessionID}/approvals/${binding.approval_id}/decision`, {
+          method: 'POST',
+          body: JSON.stringify(request)
+        });
+        markApprovalTerminal(terminalApprovalSurfaceIDsRef.current, null, binding.approval_id);
+        setSurfaces((items) => items.filter((surface) => !isSameApprovalSurface(surface, null, binding.approval_id)));
+        setInterrupt((current) => (current?.approval_id === binding.approval_id ? null : current));
+      } else {
+        result = await requestJSON(
+          `/api/aigc/sessions/${sessionID}/storyboards/${storyboard.id}/targets/${targetID}/assets/${binding.asset_id}/bind`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              expected_version: storyboard.version,
+              target_revision: targetRevision,
+              asset_slot: slot.key,
+              binding_id: binding.id
+            })
+          }
+        );
+      }
+      if (result?.storyboard || result?.aggregate) {
+        markResourceMutation('storyboard');
+        setStoryboard(result.storyboard || result.aggregate);
+      }
+      await refreshSessionData(sessionID, { includeMessages: false });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // confirmCandidateAssets 以 storyboard 版本为围栏，一次确认当前故事板的全部候选素材。
+  async function confirmCandidateAssets() {
+    if (!sessionID || !storyboard?.id || busy || !candidateApprovalReview.ready) {
+      return;
+    }
+    const request = freezeCandidateApprovalDecisionRequest(
+      candidateApprovalDecisionRequestsRef.current,
+      storyboard.id,
+      storyboard.version
+    );
+    setBusy(true);
+    setError('');
+    try {
+      const result = await requestJSON(
+        `/api/aigc/sessions/${sessionID}/storyboards/${storyboard.id}/candidate-approvals/decision`,
+        {
+          method: 'POST',
+          body: JSON.stringify(request)
+        }
+      );
+      if (result?.storyboard) {
+        markResourceMutation('storyboard');
+        setStoryboard(result.storyboard);
+      }
+      const terminalApprovalIDs = candidateApprovalResultIDs(result, candidateApprovalReview.bindings);
+      if (terminalApprovalIDs.size > 0) {
+        setSurfaces((items) =>
+          items.filter((surface) => {
+            const approvalID = approvalIDFromSurface(surface);
+            if (!terminalApprovalIDs.has(approvalID)) {
+              return true;
+            }
+            markApprovalTerminal(terminalApprovalSurfaceIDsRef.current, surface, approvalID);
+            return false;
+          })
+        );
+      }
+      await refreshSessionData(sessionID, { includeMessages: false });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function bindExistingAsset({ targetID, targetRevision, slot, assetID }) {
+    if (!storyboard || storyboard.pending_revision_id || !sessionID || busy || !targetID || !slot?.key || !assetID) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const result = await requestJSON(
+        `/api/aigc/sessions/${sessionID}/storyboards/${storyboard.id}/targets/${targetID}/assets/${assetID}/bind`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            expected_version: storyboard.version,
+            target_revision: targetRevision,
+            asset_slot: slot.key,
+            generation_epoch: slot.generation_epoch || 0,
+            idempotency_key: `manual-bind:${storyboard.id}:${targetID}:${slot.key}:${assetID}:v${storyboard.version}:e${slot.generation_epoch || 0}`
+          })
+        }
+      );
+      markResourceMutation('storyboard');
+      setStoryboard(result.storyboard || result.aggregate || storyboard);
+      await refreshSessionData(sessionID, { includeMessages: false });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // uploadAndBindAsset 支持用户在动态故事板槽位内直接上传并填充素材。
+  async function uploadAndBindAsset({ targetID, targetRevision, slot, file }) {
+    if (!file || !sessionID || busy || storyboard?.pending_revision_id) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    let normalized;
+    try {
+      const form = new FormData();
+      form.append('session_id', sessionID);
+      form.append('file', file);
+      const kind = slotUploadKind(slot?.media_kind, file);
+      if (kind) {
+        form.append('kind', kind);
+      }
+      const created = await requestJSON('/api/aigc/assets', { method: 'POST', body: form });
+      normalized = normalizeUploadedAsset(created, file);
+      markResourceMutation('assets');
+      setAssets((items) => upsertByID(items, normalized, 'id'));
+    } catch (err) {
+      setError(errorMessage(err));
+      return;
+    } finally {
+      setBusy(false);
+    }
+    await bindExistingAsset({ targetID, targetRevision, slot, assetID: normalized.id });
+  }
+
+  async function controlGenerationOperation(operationID, action) {
+    if (!sessionID || !operationID || busy) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await requestJSON(`/api/aigc/sessions/${sessionID}/generation-operations/${operationID}/control`, {
+        method: 'POST',
+        body: JSON.stringify({ action, idempotency_key: `${action}:${operationID}` })
+      });
+      await refreshSessionData(sessionID, { includeMessages: false });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -417,28 +871,51 @@ export function AigcWorkspacePage() {
     if (!file || !sessionID) {
       return;
     }
+    const id = sessionID;
+    const request = currentSessionRequest(id);
+    if (!request) {
+      return;
+    }
     setError('');
     try {
       const content = await file.text();
+      if (!isCurrentSessionRequest(id, request.generation)) {
+        return;
+      }
       const created = await requestJSON('/api/aigc/skills', {
         method: 'POST',
+        signal: request.signal,
         body: JSON.stringify({ content })
       });
+      if (!isCurrentSessionRequest(id, request.generation)) {
+        return;
+      }
       const skillID = created?.skill?.id || created?.plan?.skill_id;
       if (!skillID) {
         throw new Error('Skill 创建失败');
       }
-      await requestJSON(`/api/aigc/sessions/${sessionID}/skill`, {
+      await requestJSON(`/api/aigc/sessions/${id}/skill`, {
         method: 'POST',
+        signal: request.signal,
         body: JSON.stringify({ skill_id: skillID })
       });
+      if (!isCurrentSessionRequest(id, request.generation)) {
+        return;
+      }
       const skillName = created?.skill?.name || created?.plan?.name || file.name;
       addSystemMessage(`已导入 Skill：${skillName}`);
     } catch (err) {
+      if (!isCurrentSessionRequest(id, request.generation) || err?.name === 'AbortError') {
+        return;
+      }
       setError(errorMessage(err));
     }
   }
 
+  const candidateApprovalReview = useMemo(
+    () => candidateApprovalReviewState(storyboard, jobs),
+    [jobs, storyboard]
+  );
   const title = storyboard?.spec_id ? storyboard.spec_id : 'AIGC 创作工作台';
   const chatTimeline = useMemo(() => chatTimelineItems(messages, toolRuns, surfaces), [messages, toolRuns, surfaces]);
 
@@ -496,6 +973,13 @@ export function AigcWorkspacePage() {
           onStartEdit={setEditing}
           onChangeEdit={setEditing}
           onSaveEdit={saveEdit}
+          onRegenerateTarget={regenerateTarget}
+          onActivateCandidate={activateCandidate}
+          candidateApprovalReview={candidateApprovalReview}
+          onConfirmCandidateAssets={confirmCandidateAssets}
+          candidateApprovalBusy={busy}
+          onBindAsset={bindExistingAsset}
+          onUploadAsset={uploadAndBindAsset}
           assetMap={assetMap}
           statusLabel={statusLabel}
         />
@@ -531,14 +1015,17 @@ export function AigcWorkspacePage() {
                 );
               }
               if (item.type === 'toolRun') {
-                return <ToolRunCard toolRun={item.toolRun} key={item.key} />;
+                return <ToolRunCard toolRun={item.toolRun} assetMap={assetMap} busy={busy} onControl={controlGenerationOperation} key={item.key} />;
               }
               return (
                 <A2UISurfaceCard
                   surface={item.surface}
                   busy={busy}
                   sessionID={sessionID}
-                  onAssetUploaded={(asset) => setAssets((items) => upsertByID(items, asset, 'id'))}
+                  onAssetUploaded={(asset) => {
+                    markResourceMutation('assets');
+                    setAssets((items) => upsertByID(items, asset, 'id'));
+                  }}
                   onSubmit={submitSurface}
                   key={item.key}
                 />
@@ -593,7 +1080,9 @@ export function AigcWorkspacePage() {
 // chatTimelineItems 合并消息、工具进度和 A2UI 卡片，生成统一时间线。
 function chatTimelineItems(messages, toolRuns, surfaces) {
   // 三类内容共用 timelineOrder，保证“用户消息 -> Agent 卡片 -> 后续用户消息”的顺序稳定。
-  const visibleSurfaces = surfaces.filter(isVisibleSurface);
+  const visibleSurfaces = surfaces.filter(
+    (surface) => isVisibleSurface(surface) && !isCandidateAssetApprovalSurface(surface)
+  );
   return [
     ...messages.map((message, index) => ({
       type: 'message',
@@ -651,9 +1140,11 @@ function MessageAttachmentList({ attachments }) {
 // JobChip 渲染顶部后台任务的紧凑状态块。
 function JobChip({ job }) {
   const status = job.status || job.Status;
+  const inProgress = isInProgressStatus(status);
+  const failed = ['failed', 'partial_failed', 'cancelled'].includes(String(status || '').toLowerCase());
   return (
     <span className={`aigc-job-chip aigc-job-chip--${status}`}>
-      {status === 'running' ? <LoaderCircle aria-hidden="true" size={13} /> : <CheckCircle2 aria-hidden="true" size={13} />}
+      {inProgress ? <LoaderCircle aria-hidden="true" size={13} /> : failed ? <AlertCircle aria-hidden="true" size={13} /> : <CheckCircle2 aria-hidden="true" size={13} />}
       <span>{job.target_id || job.TargetID || job.job_id || job.id}</span>
       <strong>{statusLabel(status) || status}</strong>
     </span>
@@ -661,14 +1152,20 @@ function JobChip({ job }) {
 }
 
 // ToolRunCard 渲染工具运行进度卡，通常由 update_card/tool_runs 更新。
-function ToolRunCard({ toolRun }) {
+function ToolRunCard({ toolRun, assetMap, busy, onControl }) {
   const status = toolRun.status || 'running';
+  const inProgress = isInProgressStatus(status);
+  const failed = ['failed', 'partial_failed', 'cancelled'].includes(String(status || '').toLowerCase());
   const nodes = Array.isArray(toolRun.nodes) ? toolRun.nodes : [];
+  const resultAssets = (toolRun.result_asset_ids || []).map((id) => assetMap?.get(id)).filter(Boolean);
+  const operationID = toolRun.operation_id;
+  const canCancel = operationID && !toolRun.job_id && ['accepted', 'queued', 'waiting_jobs', 'waiting_provider', 'running', 'finalizing', 'retry_wait'].includes(status);
+  const canRetry = operationID && !toolRun.job_id && ['failed', 'partial_failed'].includes(status);
   return (
     <article className={`aigc-tool-run aigc-tool-run--${status}`}>
       <header>
         <div>
-          {status === 'running' ? <LoaderCircle aria-hidden="true" size={15} /> : <CheckCircle2 aria-hidden="true" size={15} />}
+          {inProgress ? <LoaderCircle aria-hidden="true" size={15} /> : failed ? <AlertCircle aria-hidden="true" size={15} /> : <CheckCircle2 aria-hidden="true" size={15} />}
           <strong>{toolRun.display_name || toolRun.tool_key || 'Tool'}</strong>
         </div>
         <span>{statusLabel(status) || status}</span>
@@ -684,16 +1181,37 @@ function ToolRunCard({ toolRun }) {
           }))}
         />
       ) : null}
+      {resultAssets.length ? (
+        <div className="aigc-a2ui-upload-list aigc-tool-run__assets" aria-label="任务产物">
+          {resultAssets.map((asset) => (
+            <A2UIFilePreview asset={asset} key={fileAssetID(asset) || asset.url || asset.filename} />
+          ))}
+        </div>
+      ) : null}
       {toolRun.error_message ? <p className="aigc-tool-run__error">{toolRun.error_message}</p> : null}
+      {canCancel || canRetry ? (
+        <div className="aigc-tool-run__actions">
+          {canCancel ? <button type="button" disabled={busy} onClick={() => void onControl?.(operationID, 'cancel')}>取消任务</button> : null}
+          {canRetry ? <button type="button" disabled={busy} onClick={() => void onControl?.(operationID, 'retry_failed')}>重试失败项</button> : null}
+        </div>
+      ) : null}
     </article>
   );
+}
+
+function isInProgressStatus(status) {
+  return ['queued', 'accepted', 'waiting_jobs', 'waiting_provider', 'running', 'finalizing', 'retry_wait', 'cancelling'].includes(String(status || '').toLowerCase());
 }
 
 // A2UISurfaceCard 渲染 Agent append_card 生成的聊天交互卡。
 function A2UISurfaceCard({ surface, busy, sessionID, onAssetUploaded, onSubmit }) {
   const payload = surface?.payload || {};
   const data = payload.data || {};
-  const fields = surfaceFields(surface);
+  const approvalID = approvalIDFromSurface(surface);
+  const invalidApprovalSurface = !approvalID && isApprovalLikeSurface(surface);
+  const approvalTerminal = Boolean(approvalID) && isTerminalApprovalStatus(payload.status);
+  // Approval 的决定控件由前端固定生成，不能把模型输出的普通字段当成审批入口。
+  const fields = approvalID ? [approvalDecisionField()] : invalidApprovalSurface ? [] : surfaceFields(surface);
   const [values, setValues] = useState(() => initialSurfaceValues(fields));
   const title = payload.title || payload.label || '补充信息';
   const hasComponentTree = Array.isArray(payload.components);
@@ -718,10 +1236,16 @@ function A2UISurfaceCard({ surface, busy, sessionID, onAssetUploaded, onSubmit }
           surface={surface}
           data={data}
           values={values}
+          approvalMode={Boolean(approvalID) || invalidApprovalSurface}
           sessionID={sessionID}
           onAssetUploaded={onAssetUploaded}
           onValueChange={(key, value) => setValues((current) => ({ ...current, [key]: value }))}
         />
+      ) : null}
+      {invalidApprovalSurface ? (
+        <p className="aigc-a2ui-card__protocol-error" role="alert">
+          审批卡缺少 approval_id，无法提交。请刷新页面或重新发起审核。
+        </p>
       ) : null}
       <form
         className="aigc-a2ui-form"
@@ -730,7 +1254,7 @@ function A2UISurfaceCard({ surface, busy, sessionID, onAssetUploaded, onSubmit }
           void onSubmit(surface, values);
         }}
       >
-        {!hasComponentTree
+        {approvalID || !hasComponentTree
           ? fields.map((field) => (
               <A2UIField
                 field={field}
@@ -743,7 +1267,7 @@ function A2UISurfaceCard({ surface, busy, sessionID, onAssetUploaded, onSubmit }
             ))
           : null}
         {hasInteractiveFields ? (
-          <button type="submit" disabled={busy || !hasInteractiveFields}>
+          <button type="submit" disabled={busy || approvalTerminal || !hasInteractiveFields}>
             <CheckCircle2 aria-hidden="true" size={15} />
             <span>提交</span>
           </button>
@@ -754,9 +1278,13 @@ function A2UISurfaceCard({ surface, busy, sessionID, onAssetUploaded, onSubmit }
 }
 
 // A2UIComponentTree 从 components/root 构建 A2UI 组件树。
-function A2UIComponentTree({ surface, data, values, sessionID, onAssetUploaded, onValueChange }) {
+function A2UIComponentTree({ surface, data, values, approvalMode, sessionID, onAssetUploaded, onValueChange }) {
   const payload = surface?.payload || {};
-  const components = componentMap(payload.components);
+  // 审批卡仍展示 Markdown/预览等详情，但其交互字段必须由固定 Approval 表单提供。
+  const displayComponents = approvalMode
+    ? (payload.components || []).filter((component) => !componentField(component))
+    : payload.components;
+  const components = componentMap(displayComponents);
   const root = payload.root || surface.root || payload.root_id || a2uiRootID(components);
   if (!root) {
     return null;
@@ -793,6 +1321,7 @@ function A2UIComponent({ id, components, data, values, sessionID, onAssetUploade
   const fileUpload = componentPayload(component, A2UI_COMPONENTS.FILE_UPLOAD);
   const imagePreview = componentPayload(component, A2UI_COMPONENTS.IMAGE_PREVIEW);
   const videoPreview = componentPayload(component, A2UI_COMPONENTS.VIDEO_PREVIEW);
+  const audioPreview = componentPayload(component, A2UI_COMPONENTS.AUDIO_PREVIEW);
   const verticalSteps = componentPayload(component, A2UI_COMPONENTS.VERTICAL_STEPS);
   const markdown = componentPayload(component, A2UI_COMPONENTS.MARKDOWN);
 
@@ -886,6 +1415,9 @@ function A2UIComponent({ id, components, data, values, sessionID, onAssetUploade
   }
   if (videoPreview) {
     return <A2UIVideoPreview item={videoPreview} />;
+  }
+  if (audioPreview) {
+    return <A2UIAudioPreview item={audioPreview} />;
   }
   if (verticalSteps) {
     return <A2UIVerticalSteps steps={verticalSteps.steps || []} />;
@@ -1143,6 +1675,9 @@ function A2UIField({ field, value, sessionID, onAssetUploaded, onChange }) {
   if (type === 'video_preview') {
     return <A2UIVideoPreview item={field} />;
   }
+  if (type === 'audio_preview') {
+    return <A2UIAudioPreview item={field} />;
+  }
   if (type === 'vertical_steps') {
     return <A2UIVerticalSteps steps={field.steps || []} />;
   }
@@ -1263,11 +1798,26 @@ function A2UIFilePreview({ asset }) {
       </figure>
     );
   }
-  return (
-    <div className="aigc-a2ui-file-preview aigc-a2ui-file-preview--document">
+  if (isAudioAsset(asset) && asset.url) {
+    return (
+      <figure className="aigc-a2ui-file-preview aigc-a2ui-file-preview--audio">
+        <audio src={asset.url} controls preload="metadata" />
+        <figcaption>{label}</figcaption>
+      </figure>
+    );
+  }
+  const document = (
+    <>
       <FileText aria-hidden="true" size={18} />
       <span>{label}</span>
-    </div>
+    </>
+  );
+  return asset.url ? (
+    <a className="aigc-a2ui-file-preview aigc-a2ui-file-preview--document" href={asset.url} target="_blank" rel="noreferrer">
+      {document}
+    </a>
+  ) : (
+    <div className="aigc-a2ui-file-preview aigc-a2ui-file-preview--document">{document}</div>
   );
 }
 
@@ -1299,6 +1849,20 @@ function A2UIVideoPreview({ item }) {
   );
 }
 
+// A2UIAudioPreview 渲染 A2UI 音频试听组件。
+function A2UIAudioPreview({ item }) {
+  const url = item.url;
+  if (!url) {
+    return null;
+  }
+  return (
+    <figure className="aigc-a2ui-media">
+      <audio src={url} controls preload="metadata" />
+      {item.title || item.caption ? <figcaption>{item.title || item.caption}</figcaption> : null}
+    </figure>
+  );
+}
+
 // A2UIVerticalSteps 渲染纵向步骤条，用于工具进度或业务流程提示。
 function A2UIVerticalSteps({ steps }) {
   if (!steps.length) {
@@ -1319,13 +1883,19 @@ function A2UIVerticalSteps({ steps }) {
   );
 }
 
-// resolveSessionID 从 URL/localStorage 读取会话，缺失时创建新会话。
+// resolveSessionID 从 URL/localStorage 读取会话；本地数据卷被清空后，旧缓存会自动失效并创建新会话。
 async function resolveSessionID() {
   const params = new URLSearchParams(window.location.search);
   const explicit = params.get('session_id');
   const cached = readLocalSessionID();
-  if (explicit || cached) {
-    return explicit || cached;
+  const candidate = explicit || cached;
+  if (candidate) {
+    const existing = await requestOptionalJSON(`/api/aigc/sessions/${candidate}/messages`);
+    if (existing) {
+      writeLocalSessionID(candidate);
+      return candidate;
+    }
+    clearLocalSessionID();
   }
   return createSession();
 }
@@ -1381,6 +1951,17 @@ function writeLocalSessionID(sessionID) {
   }
 }
 
+// clearLocalSessionID 在后端已删除本地历史数据时移除失效会话指针。
+function clearLocalSessionID() {
+  try {
+    if (typeof window.localStorage?.removeItem === 'function') {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  } catch {
+    // Session recovery still continues when browser storage is unavailable.
+  }
+}
+
 // requestOptionalJSON 调用 JSON API，404 时返回 null 方便可选资源读取。
 async function requestOptionalJSON(path, options) {
   try {
@@ -1420,9 +2001,23 @@ function parseSSEEvent(event) {
 }
 
 // applyStoryboardPatch 应用故事板 JSON Patch 或生成素材更新 hint。
-function applyStoryboardPatch(current, patch) {
+function applyStoryboardPatch(current, patch, onGap) {
   if (!current) {
     return current;
+  }
+  const baseVersion = finiteVersion(patch?.base_version);
+  const currentVersion = finiteVersion(current.version);
+  if (baseVersion > 0 && baseVersion !== currentVersion) {
+    if (baseVersion > currentVersion && typeof onGap === 'function') {
+      onGap();
+    }
+    return current;
+  }
+  if (patch?.storyboard_id) {
+    const currentID = current.id || current.storyboard_id;
+    if (currentID && currentID !== patch.storyboard_id) {
+      return current;
+    }
   }
   const next = cloneJSON(current);
   if (patch?.ops?.length) {
@@ -1465,6 +2060,13 @@ function applyStoryboardUpdateHint(board, update) {
 
 // findStoryboardTarget 按目标类型和 ID 定位故事板对象。
 function findStoryboardTarget(board, targetType, targetID) {
+  const revision = activeRevisionFromBoard(board);
+  const dynamicTarget = (revision?.modules || board?.modules || [])
+    .flatMap((module) => module.elements || [])
+    .find((item) => item.id === targetID || item.key === targetID);
+  if (dynamicTarget) {
+    return dynamicTarget;
+  }
   if (targetType === 'key_element') {
     return (board.key_elements || []).find((item) => item.key === targetID);
   }
@@ -1547,6 +2149,16 @@ function upsertByID(items, item, key) {
   return [item, ...next];
 }
 
+// upsertVersionedByID 对带 status_version 的状态投影执行单调更新。
+function upsertVersionedByID(items, item, key) {
+  const id = item?.[key] || item?.id;
+  const previous = items.find((existing) => (existing?.[key] || existing?.id) === id);
+  if (previous && isOlderStatusProjection(previous, item)) {
+    return items;
+  }
+  return upsertByID(items, item, key);
+}
+
 // toolRunKey 生成工具运行卡的稳定 key，避免同一任务重复渲染。
 function toolRunKey(toolRun) {
   return toolRun?.data_model_key || toolRun?.run_key || toolRun?.tool_call_id || toolRun?.job_id || toolRun?.id || toolRun?.tool_key || 'tool_run';
@@ -1560,7 +2172,36 @@ function upsertToolRun(items, toolRun) {
   }
   const next = items.filter((existing) => toolRunKey(existing) !== id);
   const previous = items.find((existing) => toolRunKey(existing) === id);
+  // Job lifecycle patches only carry versioned nodes. Their version belongs to
+  // each Job, not to the enclosing Operation/Stage, so the top-level gate must
+  // not discard the whole patch after operation.accepted established a version.
+  if (previous && !isNodeOnlyToolRunPatch(toolRun) && isOlderStatusProjection(previous, toolRun)) {
+    return items;
+  }
   return [mergeToolRun(previous, toolRun), ...next];
+}
+
+function isNodeOnlyToolRunPatch(toolRun) {
+  return (
+    statusProjectionVersion(toolRun?.status_version) == null &&
+    toolRun?.status == null &&
+    Array.isArray(toolRun?.nodes) &&
+    toolRun.nodes.length > 0
+  );
+}
+
+function isOlderStatusProjection(previous, incoming) {
+  const previousVersion = statusProjectionVersion(previous?.status_version);
+  if (previousVersion == null) {
+    return false;
+  }
+  const incomingVersion = statusProjectionVersion(incoming?.status_version);
+  return incomingVersion == null || incomingVersion < previousVersion;
+}
+
+function statusProjectionVersion(value) {
+  const version = Number(value);
+  return Number.isInteger(version) && version >= 0 ? version : null;
 }
 
 // mergeToolRun 合并工具运行卡，保留首次出现的时间线顺序。
@@ -1586,6 +2227,9 @@ function mergeToolRunNodes(previousNodes = [], incomingNodes = []) {
     const key = toolRunNodeKey(node);
     const index = merged.findIndex((existing) => toolRunNodeKey(existing) === key);
     if (index >= 0) {
+      if (isOlderStatusProjection(merged[index], node)) {
+        return;
+      }
       merged[index] = { ...merged[index], ...node };
       return;
     }
@@ -1607,6 +2251,7 @@ function toolRunToJob(toolRun) {
     target_type: toolRun.target_type,
     target_id: toolRun.target_id,
     status: toolRun.status,
+    status_version: toolRun.status_version,
     result_asset_ids: toolRun.result_asset_ids || []
   };
 }
@@ -1622,8 +2267,256 @@ function upsertSurface(items, surface) {
   return [...next, merged];
 }
 
+// mergeHydratedSurfaces 把 REST 历史视图并入已经由 SSE 更新的实时视图。
+// 已提交的普通 A2UI 表单仍以消息历史为准，不会被历史 SSE append 重新带回。
+function mergeHydratedSurfaces(current, hydrated, submittedSurfaceIDs = [], terminalApprovalSurfaceIDs = new Set()) {
+  const submitted = new Set(submittedSurfaceIDs || []);
+  let merged = (hydrated || []).filter((surface) => !isTerminalApprovalSurface(surface, terminalApprovalSurfaceIDs));
+  (current || []).forEach((surface) => {
+    const id = surface?.id || surface?.card_id || surface?.ref;
+    if (!id || submitted.has(id) || isTerminalApprovalSurface(surface, terminalApprovalSurfaceIDs)) {
+      return;
+    }
+    merged = upsertSurface(merged, surface);
+  });
+  return merged;
+}
+
+// mergeStoryboardSnapshot 防止较慢的 REST 快照覆盖已经由 SSE 投影出的更高版本。
+function mergeStoryboardSnapshot(current, incoming) {
+  if (!incoming) {
+    return current;
+  }
+  if (!current) {
+    return incoming;
+  }
+  const currentVersion = finiteVersion(current.version);
+  const incomingVersion = finiteVersion(incoming.version);
+  if (incomingVersion > currentVersion) {
+    return incoming;
+  }
+  if (incomingVersion < currentVersion) {
+    return current;
+  }
+  const currentID = current.id || current.storyboard_id;
+  const incomingID = incoming.id || incoming.storyboard_id;
+  if (currentID && incomingID && currentID !== incomingID) {
+    return current;
+  }
+  // 同版本时实时对象优先；REST 只补充 SSE 投影未携带的顶层字段。
+  return { ...incoming, ...current };
+}
+
+function finiteVersion(value) {
+  const version = Number(value);
+  return Number.isFinite(version) && version >= 0 ? version : 0;
+}
+
+// freezeApprovalDecisionRequest 为一次 Approval 冻结同一 version/key；网络重试不得漂移为下一次决定。
+function freezeApprovalDecisionRequest(cache, approvalID, decision, expectedDecisionVersion) {
+  const id = String(approvalID || '').trim();
+  const normalizedDecision = String(decision || '').trim().toLowerCase();
+  const expectedVersion = finiteVersion(expectedDecisionVersion);
+  const cacheKey = JSON.stringify([id, normalizedDecision, expectedVersion]);
+  const existing = cache.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+  const request = {
+    decision: normalizedDecision,
+    expected_decision_version: expectedVersion,
+    idempotency_key: `approval:${id}:decision:${expectedVersion + 1}:${normalizedDecision}`
+  };
+  cache.set(cacheKey, request);
+  return request;
+}
+
+// freezeCandidateApprovalDecisionRequest 为故事板级候选确认冻结同一版本和幂等键。
+function freezeCandidateApprovalDecisionRequest(cache, storyboardID, expectedStoryboardVersion) {
+  const id = String(storyboardID || '').trim();
+  const expectedVersion = finiteVersion(expectedStoryboardVersion);
+  const cacheKey = JSON.stringify([id, expectedVersion, 'approved']);
+  const existing = cache.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+  const request = {
+    decision: 'approved',
+    expected_storyboard_version: expectedVersion,
+    idempotency_key: `candidate-approvals:${id}:v${expectedVersion}:approved`
+  };
+  cache.set(cacheKey, request);
+  return request;
+}
+
+// candidateApprovalResultIDs 返回批量响应中已经到达终态、可从 UI 移除的 Approval。
+function candidateApprovalResultIDs(result, bindings) {
+  const allApprovalIDs = (bindings || []).map((binding) => String(binding?.approval_id || '').trim()).filter(Boolean);
+  if (result?.summary?.complete || result?.summary?.all_approved) {
+    return new Set(allApprovalIDs);
+  }
+  return new Set(
+    (result?.results || [])
+      .filter((item) => item?.applied || ['approved', 'stale', 'rejected', 'cancelled'].includes(String(item?.status || '').toLowerCase()))
+      .map((item) => String(item?.approval_id || '').trim())
+      .filter(Boolean)
+  );
+}
+
+function approvalDecisionVersion(surface) {
+  return surface?.payload?.data?.decision_version ?? surface?.payload?.decision_version ?? 0;
+}
+
+// approvalDecisionField 固定 Approval 的唯一交互协议，避免模型用普通表单伪造审批入口。
+function approvalDecisionField() {
+  return {
+    key: 'decision',
+    label: '审核决定',
+    type: 'single_choice',
+    required: true,
+    options: [
+      { value: 'approved', label: '确认' },
+      { value: 'rejected', label: '拒绝' }
+    ]
+  };
+}
+
+function isApprovalDecision(decision) {
+  return decision === 'approved' || decision === 'rejected';
+}
+
+function isTerminalApprovalStatus(status) {
+  return ['approved', 'rejected', 'stale', 'expired', 'cancelled', 'canceled'].includes(String(status || '').trim().toLowerCase());
+}
+
+function approvalIDFromSurface(surface) {
+  return String(surface?.payload?.data?.approval_id || surface?.payload?.approval_id || '').trim();
+}
+
+// isApprovalLikeSurface 识别缺少 approval_id 的伪审批表单，禁止降级成普通聊天消息提交。
+function isApprovalLikeSurface(surface) {
+  return surfaceFields(surface).some((field) => String(fieldKey(field)).trim().toLowerCase() === 'decision');
+}
+
+function approvalIDFromAction(action) {
+  return String(action?.payload?.data?.approval_id || action?.payload?.approval_id || action?.card?.data?.approval_id || '').trim();
+}
+
+function isCandidateAssetApprovalSurface(surface) {
+  const payload = surface?.payload || {};
+  const artifactType = payload?.data?.artifact_type || payload?.artifact_type;
+  return String(artifactType || '').trim().toLowerCase() === 'candidate_asset';
+}
+
+// candidateApprovalReviewState 只在本轮候选所属任务全部终态后开放统一确认。
+function candidateApprovalReviewState(storyboard, jobs) {
+  const bindings = (storyboard?.bindings || []).filter(
+    (binding) => String(binding?.state || '').toLowerCase() === 'candidate' && String(binding?.approval_id || '').trim()
+  );
+  if (!storyboard || storyboard.pending_revision_id || bindings.length === 0) {
+    return { ready: false, bindings: storyboard?.pending_revision_id ? [] : bindings, jobs: [] };
+  }
+  const jobList = Array.isArray(jobs) ? jobs : [];
+  const candidateJobs = jobList.filter((job) => bindings.some((binding) => jobMatchesCandidateBinding(job, binding)));
+  if (candidateJobs.length === 0) {
+    return { ready: false, bindings, jobs: [] };
+  }
+
+  const batchIDs = new Set(candidateJobs.map((job) => String(job?.batch_id || '')).filter(Boolean));
+  const operationIDs = new Set(candidateJobs.map((job) => String(job?.operation_id || '')).filter(Boolean));
+  let relatedJobs;
+  if (batchIDs.size > 0 || operationIDs.size > 0) {
+    relatedJobs = jobList.filter(
+      (job) => batchIDs.has(String(job?.batch_id || '')) || operationIDs.has(String(job?.operation_id || ''))
+    );
+  } else {
+    const storyboardID = String(storyboard.id || storyboard.storyboard_id || '');
+    const targetIDs = new Set(bindings.map((binding) => String(binding?.target_id || '')).filter(Boolean));
+    relatedJobs = jobList.filter((job) => {
+      if (String(job?.provider || '').toLowerCase() === 'assembly') {
+        return false;
+      }
+      return (
+        (storyboardID && String(job?.storyboard_id || '') === storyboardID) ||
+        targetIDs.has(String(job?.target_id || job?.TargetID || ''))
+      );
+    });
+    if (relatedJobs.length === 0) {
+      relatedJobs = candidateJobs;
+    }
+  }
+  const ready = relatedJobs.length > 0 && relatedJobs.every((job) => isTerminalGenerationJob(job?.status || job?.Status));
+  return { ready, bindings, jobs: relatedJobs };
+}
+
+function jobMatchesCandidateBinding(job, binding) {
+  const assetID = String(binding?.asset_id || '').trim();
+  const resultAssetIDs = Array.isArray(job?.result_asset_ids) ? job.result_asset_ids.map(String) : [];
+  if (assetID && resultAssetIDs.includes(assetID)) {
+    return true;
+  }
+  const targetID = String(job?.target_id || job?.TargetID || '').trim();
+  const assetSlot = String(job?.asset_slot || '').trim();
+  return (
+    targetID &&
+    targetID === String(binding?.target_id || '').trim() &&
+    (!assetSlot || !binding?.asset_slot || assetSlot === String(binding.asset_slot))
+  );
+}
+
+function isTerminalGenerationJob(status) {
+  return ['succeeded', 'failed', 'cancelled', 'completed', 'done', 'partial_failed'].includes(
+    String(status || '').trim().toLowerCase()
+  );
+}
+
+function approvalSurfaceKeys(surface, approvalID) {
+  const keys = new Set();
+  [surface?.id, surface?.surface_id, surface?.card_id, surface?.ref].forEach((value) => {
+    const key = String(value || '').trim();
+    if (key) {
+      keys.add(key);
+    }
+  });
+  const id = String(approvalID || approvalIDFromSurface(surface) || '').trim();
+  if (id) {
+    keys.add(id);
+    keys.add(`approval:${id}`);
+  }
+  return keys;
+}
+
+function markApprovalTerminal(tombstones, surface, approvalID) {
+  if (!tombstones) {
+    return;
+  }
+  approvalSurfaceKeys(surface, approvalID).forEach((key) => tombstones.add(key));
+}
+
+function isTerminalApprovalSurface(surface, tombstones) {
+  if (!tombstones?.size) {
+    return false;
+  }
+  return [...approvalSurfaceKeys(surface)].some((key) => tombstones.has(key));
+}
+
+function isSameApprovalSurface(candidate, source, approvalID) {
+  const sourceKeys = approvalSurfaceKeys(source, approvalID);
+  return [...approvalSurfaceKeys(candidate)].some((key) => sourceKeys.has(key));
+}
+
+function isTerminalApprovalAction(action, targetID, approvalID) {
+  return (
+    isTerminalApprovalStatus(action?.payload?.status ?? action?.card?.status) &&
+    (String(targetID || '').startsWith('approval:') || Boolean(approvalID))
+  );
+}
+
 // applyA2UIActionEnvelope 按顺序执行 Agent 直出的 A2UI actions。
 function applyA2UIActionEnvelope(envelope, context) {
+  if (!isSupportedA2UIActionEnvelope(envelope)) {
+    return;
+  }
   // Agent 可以一次返回多个 action，前端按数组顺序同步应用。
   const actions = Array.isArray(envelope?.actions) ? envelope.actions : [];
   actions.forEach((action) => applyA2UIAction(action, context));
@@ -1642,22 +2535,11 @@ function applyA2UIAction(action, context) {
 }
 
 // appendA2UICard 新增 A2UI 卡片；后端下发的 card_id 已经是实例级唯一值。
-function appendA2UICard(action, { setSurfaces, nextTimelineOrder }) {
-  const card = normalizeActionCard(action);
-  const cardID = action.card_id || card.card_id || action.ref || '';
-  if (!cardID) {
-    return;
-  }
+function appendA2UICard(action, { setSurfaces, nextTimelineOrder, terminalApprovalSurfaceIDs }) {
   setSurfaces((items) =>
-    upsertSurface(items, {
-      id: cardID,
-      surface_id: cardID,
-      card_id: cardID,
-      message_id: action.message_id,
-      ref: action.ref,
-      surface: action.surface || 'chat',
-      payload: card,
-      timelineOrder: nextTimelineOrder()
+    reduceChatSurfaceAction(items, action, {
+      timelineOrder: nextTimelineOrder(),
+      terminalApprovalSurfaceIDs
     })
   );
 }
@@ -1670,27 +2552,41 @@ function updateA2UICard(action, context) {
   // storyboard/tool_runs 是工作区状态更新，其余 surface 按卡片 patch 更新。
   if (targetSurface === 'storyboard') {
     if (action.payload?.storyboard) {
-      context.setStoryboard(action.payload.storyboard);
+      context.markResourceMutation?.('storyboard');
+      context.setStoryboard((current) => mergeStoryboardSnapshot(current, action.payload.storyboard));
     }
     if (action.payload?.assets) {
+      context.markResourceMutation?.('assets');
       context.setAssets(action.payload.assets);
     }
     if (payloadPatch) {
-      context.setStoryboard((current) => applyStoryboardPatch(current, payloadPatch));
+      context.markResourceMutation?.('storyboard');
+      context.setStoryboard((current) =>
+        applyStoryboardPatch(current, payloadPatch, () => {
+          void context.refreshSessionData?.(context.sessionID, { includeMessages: false });
+        })
+      );
     } else if (Array.isArray(action.patch)) {
+      context.markResourceMutation?.('storyboard');
       context.setStoryboard((current) => applyStoryboardPatch(current, { ops: action.patch }));
     }
     return;
   }
-  if (targetSurface === 'tool_runs' && action.payload?.tool_run) {
+  if (targetSurface === 'tool_runs' && (action.payload?.tool_run || action.payload?.operation)) {
+    const projectedRun = action.payload.tool_run || action.payload.operation;
+    const projectedStatusVersion = statusProjectionVersion(
+      projectedRun.status_version ?? action.payload?.status_version
+    );
     const toolRun = {
-      ...action.payload.tool_run,
-      data_model_key: target.card_id || action.card_id || target.ref || action.ref || action.payload.tool_run.data_model_key,
+      ...projectedRun,
+      data_model_key: target.card_id || action.card_id || target.ref || action.ref || projectedRun.data_model_key,
+      ...(projectedStatusVersion == null ? {} : { status_version: projectedStatusVersion }),
       timelineOrder: context.nextTimelineOrder()
     };
     context.setToolRuns((items) => upsertToolRun(items, toolRun));
     if (toolRun.job_id) {
-      context.setJobs((items) => upsertByID(items, toolRunToJob(toolRun), 'job_id'));
+      context.markResourceMutation?.('jobs');
+      context.setJobs((items) => upsertVersionedByID(items, toolRunToJob(toolRun), 'job_id'));
       if (toolRun.status === 'succeeded' && toolRun.result_asset_ids?.length) {
         void context.refreshAssets(toolRun.session_id || context.sessionID);
       }
@@ -1698,20 +2594,67 @@ function updateA2UICard(action, context) {
     return;
   }
 
-  const card = normalizeActionCard(action);
-  const targetID = target.card_id || action.card_id || target.ref || action.ref;
-  if (!targetID) {
-    return;
-  }
   context.setSurfaces((items) =>
-    items.map((surface) => {
-      if (surface.id !== targetID && surface.card_id !== targetID && surface.ref !== targetID) {
-        return surface;
-      }
-      const payload = applyCardPatch({ ...(surface.payload || {}), ...card }, action.patch || []);
-      return mergeSurface(surface, { ...surface, payload });
+    reduceChatSurfaceAction(items, action, {
+      terminalApprovalSurfaceIDs: context.terminalApprovalSurfaceIDs
     })
   );
+}
+
+// reduceChatSurfaceAction 是聊天卡实时投影和历史回放共用的纯 reducer。
+function reduceChatSurfaceAction(items, action, options = {}) {
+  const type = String(action?.type || '').trim();
+  const terminalApprovalSurfaceIDs = options.terminalApprovalSurfaceIDs || new Set();
+  if (type === A2UI_ACTIONS.APPEND_CARD) {
+    const card = normalizeActionCard(action);
+    const cardID = action.card_id || card.card_id || action.ref || '';
+    if (!cardID) {
+      return items;
+    }
+    const surface = {
+      id: cardID,
+      surface_id: cardID,
+      card_id: cardID,
+      message_id: action.message_id || options.messageID,
+      ref: action.ref,
+      surface: action.surface || 'chat',
+      payload: card,
+      timelineOrder: options.timelineOrder
+    };
+    if (isTerminalApprovalStatus(card.status) && approvalIDFromSurface(surface)) {
+      markApprovalTerminal(terminalApprovalSurfaceIDs, surface, approvalIDFromSurface(surface));
+      return items.filter((item) => !isSameApprovalSurface(item, surface, approvalIDFromSurface(surface)));
+    }
+    if (isTerminalApprovalSurface(surface, terminalApprovalSurfaceIDs)) {
+      return items;
+    }
+    return upsertSurface(items, surface);
+  }
+  if (type !== A2UI_ACTIONS.UPDATE_CARD) {
+    return items;
+  }
+
+  const target = action.target || {};
+  const targetID = target.card_id || action.card_id || target.ref || action.ref;
+  if (!targetID) {
+    return items;
+  }
+  const approvalID = approvalIDFromAction(action);
+  if (isTerminalApprovalAction(action, targetID, approvalID)) {
+    markApprovalTerminal(terminalApprovalSurfaceIDs, { id: targetID }, approvalID);
+    return items.filter((surface) => !isSameApprovalSurface(surface, { id: targetID }, approvalID));
+  }
+  return items.map((surface) => {
+    if (surface.id !== targetID && surface.card_id !== targetID && surface.ref !== targetID) {
+      return surface;
+    }
+    const actionPayload = action.payload && typeof action.payload === 'object' ? action.payload : {};
+    const payload = applyCardPatch(
+      { ...(surface.payload || {}), ...normalizeActionCard(action), ...actionPayload },
+      action.patch || []
+    );
+    return mergeSurface(surface, { ...surface, payload });
+  });
 }
 
 // normalizeActionCard 从 action 中提取 card，并补齐 card_id/ref/surface。
@@ -1816,6 +2759,25 @@ function initialSurfaceValues(fields) {
     }
     return values;
   }, {});
+}
+
+// requiredSurfaceFieldsMissing 在提交前统一校验所有必填输入组件。
+// 组件树通常不在原生 form 节点内，因此不能只依赖浏览器 required 属性。
+function requiredSurfaceFieldsMissing(surface, values) {
+  return surfaceFields(surface)
+    .filter((field) => isInputField(field) && Boolean(field.required))
+    .filter((field) => !hasRequiredFieldValue(field, values?.[fieldKey(field)]));
+}
+
+function hasRequiredFieldValue(field, value) {
+  const type = fieldType(field);
+  if (type === 'multi_choice') {
+    return Array.isArray(value) && value.some((item) => String(item ?? '').trim() !== '');
+  }
+  if (type === 'file_upload') {
+    return fileUploadValueList(value).some((asset) => Boolean(fileAssetID(asset)));
+  }
+  return String(value ?? '').trim() !== '';
 }
 
 // surfaceSubmission 按组件类型把 A2UI 表单值归约为普通用户消息。
@@ -1926,6 +2888,9 @@ function uploadKind(field, file) {
   if (type.startsWith('video/')) {
     return 'video';
   }
+  if (type.startsWith('audio/')) {
+    return 'audio';
+  }
   if (type === 'application/pdf') {
     return 'pdf';
   }
@@ -1933,6 +2898,20 @@ function uploadKind(field, file) {
     return 'text';
   }
   return '';
+}
+
+function slotUploadKind(mediaKind, file) {
+  const kind = String(mediaKind || '').toLowerCase();
+  if (['image', 'illustration', 'keyframe'].includes(kind)) {
+    return 'image';
+  }
+  if (['video', 'audio', 'music', 'voice', 'text', 'script', 'lyrics'].includes(kind)) {
+    if (['text', 'script', 'lyrics'].includes(kind)) {
+      return String(file?.type || '').toLowerCase() === 'application/pdf' ? 'pdf' : 'text';
+    }
+    return ['music', 'voice'].includes(kind) ? 'audio' : kind;
+  }
+  return uploadKind({}, file);
 }
 
 // fileAssetID 返回提交给 Agent 的 file_id。
@@ -1974,6 +2953,13 @@ function isImageAsset(asset) {
 // isVideoAsset 判断文件是否可用视频预览展示。
 function isVideoAsset(asset) {
   return String(asset?.kind || '').toLowerCase() === 'video' || String(asset?.mime_type || '').toLowerCase().startsWith('video/');
+}
+
+// isAudioAsset 识别可在本地 Demo 中直接播放的音频产物。
+function isAudioAsset(asset) {
+  const kind = String(asset?.kind || '').toLowerCase();
+  const mimeType = String(asset?.mime_type || asset?.mimeType || '').toLowerCase();
+  return ['audio', 'music', 'voice'].includes(kind) || mimeType.startsWith('audio/');
 }
 
 // componentMap 把组件数组索引成 id -> component 的 Map。
@@ -2021,6 +3007,9 @@ function fieldType(field) {
   if (type === 'video_preview') {
     return 'video_preview';
   }
+  if (type === 'audio_preview') {
+    return 'audio_preview';
+  }
   if (type === 'vertical_steps') {
     return 'vertical_steps';
   }
@@ -2047,6 +3036,18 @@ function isInputField(field) {
 
 // defaultSelectedTarget 选择故事板中的首个可绑定目标。
 function defaultSelectedTarget(board) {
+  const revision = activeRevisionFromBoard(board);
+  const module = (revision?.modules || board?.modules || []).find((item) => item?.elements?.length);
+  if (module?.elements?.[0]) {
+    const element = module.elements[0];
+    return {
+      type: element.semantic_type || module.semantic_type || 'element',
+      id: element.id || element.key,
+      label: element.title || element.key || element.id,
+      moduleID: module.id,
+      targetRevision: element.revision
+    };
+  }
   if (board?.key_elements?.[0]) {
     const element = board.key_elements[0];
     return { type: 'key_element', id: element.key, label: element.name || element.key };
@@ -2056,6 +3057,43 @@ function defaultSelectedTarget(board) {
     return { type: 'shot', id: shot.shot_id, field: 'keyframe_asset_id', label: `镜头 ${shot.index || 1}` };
   }
   return null;
+}
+
+function storyboardContainsTarget(board, selected) {
+  const selectedID = selected?.id || selected?.targetID;
+  if (!selectedID) {
+    return false;
+  }
+  const revision = activeRevisionFromBoard(board);
+  if ((revision?.modules || board?.modules || []).some((module) =>
+    (module.elements || []).some((element) => (element.id || element.key) === selectedID)
+  )) {
+    return true;
+  }
+  if ((board?.key_elements || []).some((element) => element.key === selectedID)) {
+    return true;
+  }
+  if ((board?.shots || []).some((shot) => shot.shot_id === selectedID)) {
+    return true;
+  }
+  return (board?.audio_layers || []).some((layer) => layer.layer_id === selectedID);
+}
+
+function activeRevisionFromBoard(board) {
+  if (!board) {
+    return null;
+  }
+  if (board.active_revision) {
+    return board.active_revision;
+  }
+  const revisions = Array.isArray(board.revisions) ? board.revisions : Object.values(board.revisions || {});
+  return (
+    revisions.find((revision) => revision.id === board.pending_revision_id) ||
+    revisions.find((revision) => revision.status === 'reviewing') ||
+    revisions.find((revision) => revision.id === board.active_revision_id) ||
+    revisions.find((revision) => revision.status === 'active') ||
+    null
+  );
 }
 
 // messageRecordToChatMessage 把后端消息记录转换成前端聊天消息。
@@ -2079,15 +3117,18 @@ function messageRecordToChatMessage(record) {
 function restoreHistoryFromMessageRecords(records) {
   const messages = [];
   let surfaces = [];
+  const submittedSurfaceIDs = new Set();
+  const terminalApprovalSurfaceIDs = new Set();
   records.forEach((record, index) => {
     const timelineOrder = historyTimelineOrder(record, index);
     const submittedCardID = submittedA2UICardID(record);
     if (submittedCardID) {
+      submittedSurfaceIDs.add(submittedCardID);
       surfaces = removeSurfaceByID(surfaces, submittedCardID);
     }
     const envelope = parseA2UIActionEnvelopeContent(record?.content);
     if (envelope) {
-      surfaces = restoreSurfacesFromEnvelope(surfaces, envelope, record, timelineOrder);
+      surfaces = restoreSurfacesFromEnvelope(surfaces, envelope, record, timelineOrder, terminalApprovalSurfaceIDs);
       return;
     }
     const message = messageRecordToChatMessage(record);
@@ -2099,6 +3140,8 @@ function restoreHistoryFromMessageRecords(records) {
   return {
     messages,
     surfaces,
+    submittedSurfaceIDs: [...submittedSurfaceIDs],
+    terminalApprovalSurfaceIDs: [...terminalApprovalSurfaceIDs],
     nextTimelineOrder: Math.max(lastOrder + 1, messages.length + surfaces.length)
   };
 }
@@ -2111,7 +3154,7 @@ function parseA2UIActionEnvelopeContent(content) {
   }
   try {
     const envelope = JSON.parse(value);
-    if (envelope?.a2ui_version !== A2UI_VERSION || !Array.isArray(envelope.actions) || envelope.actions.length === 0) {
+    if (!isSupportedA2UIActionEnvelope(envelope)) {
       return null;
     }
     return envelope;
@@ -2121,38 +3164,14 @@ function parseA2UIActionEnvelopeContent(content) {
 }
 
 // restoreSurfacesFromEnvelope 回放历史 ActionEnvelope 中的聊天卡新增和更新。
-function restoreSurfacesFromEnvelope(surfaces, envelope, record, timelineOrder) {
+function restoreSurfacesFromEnvelope(surfaces, envelope, record, timelineOrder, terminalApprovalSurfaceIDs = new Set()) {
   return envelope.actions.reduce((items, action, actionIndex) => {
     const type = String(action?.type || '').trim();
-    if (type === A2UI_ACTIONS.APPEND_CARD) {
-      const card = normalizeActionCard(action);
-      const cardID = action.card_id || card.card_id || action.ref || '';
-      if (!cardID) {
-        return items;
-      }
-      return upsertSurface(items, {
-        id: cardID,
-        surface_id: cardID,
-        card_id: cardID,
-        message_id: action.message_id || record?.id,
-        ref: action.ref,
-        surface: action.surface || 'chat',
-        payload: card,
-        timelineOrder: timelineOrder + actionIndex / 100
-      });
-    }
-    if (type === A2UI_ACTIONS.UPDATE_CARD) {
-      const target = action.target || {};
-      const targetID = target.card_id || action.card_id || target.ref || action.ref;
-      if (!targetID) {
-        return items;
-      }
-      return items.map((surface) => {
-        if (surface.id !== targetID && surface.card_id !== targetID && surface.ref !== targetID) {
-          return surface;
-        }
-        const payload = applyCardPatch({ ...(surface.payload || {}), ...normalizeActionCard(action) }, action.patch || []);
-        return mergeSurface(surface, { ...surface, payload });
+    if (type === A2UI_ACTIONS.APPEND_CARD || type === A2UI_ACTIONS.UPDATE_CARD) {
+      return reduceChatSurfaceAction(items, action, {
+        messageID: record?.id,
+        timelineOrder: timelineOrder + actionIndex / 100,
+        terminalApprovalSurfaceIDs
       });
     }
     return items;

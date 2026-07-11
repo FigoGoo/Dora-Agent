@@ -151,7 +151,7 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	if job.Status == StatusCancelled {
+	if IsTerminalJobStatus(job.Status) {
 		return true, nil
 	}
 	running, err := w.cfg.Store.UpdateStatus(ctx, job.ID, StatusRunning, StatusUpdate{})
@@ -178,6 +178,20 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 		w.publishJobStatus(ctx, failed)
 		return true, err
 	}
+	finalizing := running
+	finalizing.ResultAssetIDs = append([]string(nil), result.AssetIDs...)
+	finalizing.Result = result.Result
+	if err := w.syncStoryboardAssets(ctx, finalizing); err != nil {
+		failed, _ := w.cfg.Store.UpdateStatus(ctx, running.ID, StatusFailed, StatusUpdate{
+			ResultAssetIDs: append([]string(nil), result.AssetIDs...),
+			Result:         result.Result,
+			ErrorStage:     ErrorStageBinding,
+			ErrorCode:      ErrorFinalizeFailed,
+			ErrorMessage:   err.Error(),
+		})
+		w.publishJobStatus(ctx, failed)
+		return true, err
+	}
 	succeeded, err := w.cfg.Store.UpdateStatus(ctx, running.ID, StatusSucceeded, StatusUpdate{
 		ResultAssetIDs: append([]string(nil), result.AssetIDs...),
 		Result:         result.Result,
@@ -186,9 +200,6 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 		return true, err
 	}
 	w.publishJobStatus(ctx, succeeded)
-	if err := w.syncStoryboardAssets(ctx, succeeded); err != nil {
-		return true, err
-	}
 	return true, nil
 }
 
@@ -280,36 +291,52 @@ func jobPayloadString(payload map[string]any, key string) string {
 }
 
 type JobStatusPayload struct {
-	JobID          string   `json:"job_id"`
-	SessionID      string   `json:"session_id"`
-	StoryboardID   string   `json:"storyboard_id,omitempty"`
-	ToolCallID     string   `json:"tool_call_id,omitempty"`
-	StageKey       string   `json:"stage_key,omitempty"`
-	Provider       string   `json:"provider,omitempty"`
-	TargetType     string   `json:"target_type,omitempty"`
-	TargetID       string   `json:"target_id,omitempty"`
-	Status         string   `json:"status"`
-	StatusVersion  int      `json:"status_version"`
-	ResultAssetIDs []string `json:"result_asset_ids,omitempty"`
-	ErrorCode      string   `json:"error_code,omitempty"`
-	ErrorMessage   string   `json:"error_message,omitempty"`
+	JobID              string   `json:"job_id"`
+	BatchID            string   `json:"batch_id,omitempty"`
+	OperationID        string   `json:"operation_id,omitempty"`
+	SessionID          string   `json:"session_id"`
+	StoryboardID       string   `json:"storyboard_id,omitempty"`
+	ToolCallID         string   `json:"tool_call_id,omitempty"`
+	StageKey           string   `json:"stage_key,omitempty"`
+	Provider           string   `json:"provider,omitempty"`
+	TargetType         string   `json:"target_type,omitempty"`
+	TargetID           string   `json:"target_id,omitempty"`
+	AssetSlot          string   `json:"asset_slot,omitempty"`
+	Status             string   `json:"status"`
+	Phase              string   `json:"phase,omitempty"`
+	StatusVersion      int      `json:"status_version"`
+	ResultAssetIDs     []string `json:"result_asset_ids,omitempty"`
+	ResultDisposition  string   `json:"result_disposition,omitempty"`
+	GrossChargedPoints int64    `json:"gross_charged_points,omitempty"`
+	RefundedPoints     int64    `json:"refunded_points,omitempty"`
+	NetChargedPoints   int64    `json:"net_charged_points,omitempty"`
+	ErrorCode          string   `json:"error_code,omitempty"`
+	ErrorMessage       string   `json:"error_message,omitempty"`
 }
 
 func NewJobStatusPayload(job GenerationJob) JobStatusPayload {
 	return JobStatusPayload{
-		JobID:          job.ID,
-		SessionID:      job.SessionID,
-		StoryboardID:   job.StoryboardID,
-		ToolCallID:     job.ToolCallID,
-		StageKey:       jobPayloadString(job.Payload, "stage_key"),
-		Provider:       job.Provider,
-		TargetType:     job.TargetType,
-		TargetID:       job.TargetID,
-		Status:         job.Status,
-		StatusVersion:  job.StatusVersion,
-		ResultAssetIDs: append([]string(nil), job.ResultAssetIDs...),
-		ErrorCode:      job.ErrorCode,
-		ErrorMessage:   job.ErrorMessage,
+		JobID:              job.ID,
+		BatchID:            job.BatchID,
+		OperationID:        job.OperationID,
+		SessionID:          job.SessionID,
+		StoryboardID:       job.StoryboardID,
+		ToolCallID:         job.ToolCallID,
+		StageKey:           jobPayloadString(job.Payload, "stage_key"),
+		Provider:           job.Provider,
+		TargetType:         job.TargetType,
+		TargetID:           job.TargetID,
+		AssetSlot:          job.AssetSlot,
+		Status:             job.Status,
+		Phase:              job.Phase,
+		StatusVersion:      job.StatusVersion,
+		ResultAssetIDs:     append([]string(nil), job.ResultAssetIDs...),
+		ResultDisposition:  job.ResultDisposition,
+		GrossChargedPoints: job.ChargedPoints,
+		RefundedPoints:     job.CompensatedPoints,
+		NetChargedPoints:   job.NetChargedPoints,
+		ErrorCode:          job.ErrorCode,
+		ErrorMessage:       job.ErrorMessage,
 	}
 }
 

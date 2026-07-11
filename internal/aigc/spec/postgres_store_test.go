@@ -68,3 +68,47 @@ func TestPostgresStoreSavesFinalVideoSpecVersions(t *testing.T) {
 		t.Fatalf("latest spec = %#v", latest)
 	}
 }
+
+func TestPostgresStoreFencesCreationSpecReviewingRevisions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	db, err := aigcstorage.OpenAgentPostgres(ctx, aigcconfig.LoadFromEnv())
+	if err != nil {
+		t.Skipf("local postgres is not available: %v", err)
+	}
+	store := NewPostgresStore(db)
+	if err := store.AutoMigrate(ctx); err != nil {
+		t.Fatalf("AutoMigrate() error = %v", err)
+	}
+
+	suffix := time.Now().UnixNano()
+	sessionID := fmt.Sprintf("session-fence-%d", suffix)
+	specID := fmt.Sprintf("spec-fence-%d", suffix)
+	v2, err := store.Save(ctx, FinalVideoSpec{ID: specID, SessionID: sessionID, Status: StatusReviewing, IdempotencyKey: fmt.Sprintf("fence-v2-%d", suffix), Title: "v2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v3, err := store.Save(ctx, FinalVideoSpec{ID: specID, SessionID: sessionID, Status: StatusReviewing, IdempotencyKey: fmt.Sprintf("fence-v3-%d", suffix), Title: "v3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := store.GetRevision(ctx, specID, v2.Version)
+	if err != nil || old.Status != StatusSuperseded {
+		t.Fatalf("old=%+v err=%v", old, err)
+	}
+	latest, err := store.GetLatestReviewingBySession(ctx, sessionID)
+	if err != nil || latest.Version != v3.Version {
+		t.Fatalf("latest=%+v err=%v", latest, err)
+	}
+	if _, err := store.DecideRevision(ctx, specID, v2.Version, true); err == nil {
+		t.Fatal("superseded v2 must not be approved")
+	}
+	if _, err := store.DecideRevision(ctx, specID, v3.Version, true); err != nil {
+		t.Fatal(err)
+	}
+	confirmed, err := store.GetConfirmedBySession(ctx, sessionID)
+	if err != nil || confirmed.Version != v3.Version {
+		t.Fatalf("confirmed=%+v err=%v", confirmed, err)
+	}
+}

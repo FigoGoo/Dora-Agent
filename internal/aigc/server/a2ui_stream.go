@@ -20,16 +20,86 @@ func (s *chatA2UISurface) eventsFromAgentEvent(event AgentEvent) []a2ui.RenderEv
 	switch event.Event {
 	case a2ui.EventChatDelta, a2ui.EventChatMessage:
 		return s.assistantEvents(event)
-	case a2ui.EventAction, a2ui.EventInterruptRequest, a2ui.EventError:
+	case a2ui.EventAction, a2ui.EventInterruptRequest, a2ui.EventInterruptResolved, a2ui.EventError:
 		return []a2ui.RenderEventHint{{
 			Event:        event.Event,
 			SurfaceID:    event.SurfaceID,
 			DataModelKey: event.DataModelKey,
 			Payload:      event.Payload,
 		}}
+	case a2ui.EventToolProgress:
+		return s.toolProgressEvents(event)
 	default:
 		return nil
 	}
+}
+
+func (s *chatA2UISurface) toolProgressEvents(event AgentEvent) []a2ui.RenderEventHint {
+	values := payloadMap(event.Payload)
+	role := payloadString(values, "role")
+	actions := make([]a2ui.Action, 0)
+	if role == "assistant" {
+		raw, _ := json.Marshal(values["tool_calls"])
+		var calls []struct {
+			ID       string `json:"id"`
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		}
+		_ = json.Unmarshal(raw, &calls)
+		for _, call := range calls {
+			if strings.TrimSpace(call.ID) == "" || isInternalToolProgress(call.Function.Name) {
+				continue
+			}
+			actions = append(actions, toolRunAction(call.ID, call.Function.Name, "running", nil))
+		}
+	} else if role == "tool" {
+		toolCallID, toolName := payloadString(values, "tool_call_id"), payloadString(values, "tool_name")
+		if isInternalToolProgress(toolName) {
+			return nil
+		}
+		status := "completed"
+		var result map[string]any
+		if content := payloadString(values, "content"); content != "" && json.Unmarshal([]byte(content), &result) == nil {
+			if value, ok := result["status"].(string); ok && strings.TrimSpace(value) != "" {
+				status = value
+			}
+		}
+		if toolCallID != "" {
+			actions = append(actions, toolRunAction(toolCallID, toolName, status, result))
+		}
+	}
+	if len(actions) == 0 {
+		return nil
+	}
+	return []a2ui.RenderEventHint{{Event: a2ui.EventAction, Payload: a2ui.ActionEnvelope{Version: a2ui.Version1, Actions: actions}}}
+}
+
+// isInternalToolProgress 标识只供 Agent ReAct 内部使用、不能投影为用户 Tool Run 的工具。
+func isInternalToolProgress(toolName string) bool {
+	return strings.TrimSpace(toolName) == "skill"
+}
+
+func toolRunAction(toolCallID, toolName, status string, result map[string]any) a2ui.Action {
+	toolName = strings.TrimSpace(toolName)
+	displayNames := map[string]string{
+		"analyze_materials": "素材分析中", "plan_creation_spec": "创作规范生成中",
+		"plan_storyboard": "故事板规划中", "generate_media": "素材生成中", "assemble_output": "素材合成中",
+	}
+	displayName := displayNames[toolName]
+	if displayName == "" {
+		displayName = toolName
+	}
+	view := map[string]any{"tool_call_id": toolCallID, "stage_run_id": toolCallID, "tool_key": toolName, "display_name": displayName, "status": status}
+	if result != nil {
+		view["result"] = result
+		for _, key := range []string{"operation_id", "batch_id", "storyboard_id", "storyboard_version"} {
+			if value, ok := result[key]; ok {
+				view[key] = value
+			}
+		}
+	}
+	return a2ui.Action{Type: a2ui.ActionUpdateCard, Surface: "tool_runs", Target: &a2ui.ActionTarget{Surface: "tool_runs", CardID: "tool_run:" + toolCallID}, Payload: map[string]any{"tool_run": view}}
 }
 
 // assistantEvents 只接受 Agent 直出的纯 A2UI ActionEnvelope。
@@ -47,6 +117,9 @@ func (s *chatA2UISurface) assistantEvents(event AgentEvent) []a2ui.RenderEventHi
 	}
 
 	if envelope, ok := a2ui.ParseActionEnvelopeContent(content); ok {
+		if err := a2ui.ValidateModelAuthoredActionEnvelope(envelope); err != nil {
+			return protocolErrorEvent("Agent 输出包含非权威审批入口")
+		}
 		return []a2ui.RenderEventHint{actionEnvelopeEvent(envelope)}
 	}
 	return protocolErrorEvent("Agent 输出不是合法 A2UI ActionEnvelope")
@@ -89,7 +162,7 @@ func payloadText(payload any) string {
 // 非协议 assistant 文本不进入历史，避免刷新后被当作普通消息兜底渲染。
 func displayTextWithoutA2UIEnvelope(content string) string {
 	content = strings.TrimSpace(content)
-	if _, ok := a2ui.ParseActionEnvelopeContent(content); ok {
+	if _, ok := a2ui.ParseModelAuthoredActionEnvelopeContent(content); ok {
 		return content
 	}
 	return ""
@@ -119,7 +192,7 @@ func assistantEventWithA2UIInstanceCardIDs(event AgentEvent, newID func() string
 
 // contentWithA2UIInstanceCardIDs 把纯 ActionEnvelope JSON 改写成实例级 card_id 的可恢复内容。
 func contentWithA2UIInstanceCardIDs(content string, newID func() string) (string, bool) {
-	envelope, ok := a2ui.ParseActionEnvelopeContent(content)
+	envelope, ok := a2ui.ParseModelAuthoredActionEnvelopeContent(content)
 	if !ok {
 		return "", false
 	}

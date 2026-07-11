@@ -17,9 +17,10 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/capability"
 	aigcconfig "github.com/FigoGoo/Dora-Agent/internal/aigc/config"
-	aigcmediagraph "github.com/FigoGoo/Dora-Agent/internal/aigc/mediagraph"
 	aigcmw "github.com/FigoGoo/Dora-Agent/internal/aigc/middleware"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/modelreceipt"
 	aigctools "github.com/FigoGoo/Dora-Agent/internal/aigc/tools"
 )
 
@@ -29,18 +30,15 @@ type DeepSeekRunnerConfig struct {
 	Description       string
 	Instruction       string
 	Runtime           aigcconfig.Config
+	ChatModel         einomodel.ToolCallingChatModel
 	Registry          *aigctools.Registry
-	ToolKeys          []string
 	SkillBackend      adkskill.Backend
 	RunnerCheckpoints compose.CheckPointStore
-	MediaCheckpoints  compose.CheckPointStore
-	MediaDispatcher   aigcmediagraph.JobDispatcher
-	SpecStore         aigctools.FinalVideoSpecStore
-	StoryboardStore   aigctools.StoryboardSnapshotStore
-	AssetStore        aigctools.Image2AssetStore
-	AssetUploader     aigctools.Image2AssetUploader
+	ModelReceiptStore modelreceipt.Store
 	ExtraHandlers     []adk.ChatModelAgentMiddleware
 }
+
+const a2uiRetryInstruction = `上一轮最终 assistant 输出未通过 A2UI 1.0 协议或模型输出安全策略校验。请重新生成完整响应，不要解释、引用或复述上一轮内容；只输出一个 JSON object，顶层必须是 {"a2ui_version":"1.0","actions":[...]}。输出前检查所有括号、数组、字符串和逗号都完整匹配，并确保 append_card 包含以 Card 组件为 root 的 components。MultiChoice.value 如需提供必须是 JSON 字符串数组，SingleChoice.value 如需提供必须是字符串。禁止自行生成 Approval 卡或 decision/approved/rejected 审核单选项，禁止携带 approval_id，也禁止在 Card.message、Text 或 Markdown 中提示用户回复、发送或输入“确认/同意/拒绝”；真正的审批只能通过系统发布的权威审核卡提交。`
 
 // NewDeepSeekChatModel 根据运行时配置创建 DeepSeek ToolCallingChatModel。
 func NewDeepSeekChatModel(ctx context.Context, cfg aigcconfig.Config) (einomodel.ToolCallingChatModel, error) {
@@ -50,34 +48,37 @@ func NewDeepSeekChatModel(ctx context.Context, cfg aigcconfig.Config) (einomodel
 	}
 
 	return deepseekmodel.NewChatModel(ctx, &deepseekmodel.ChatModelConfig{
-		APIKey:             cfg.DeepSeek.APIKey,
-		Model:              cfg.DeepSeek.Model,
-		BaseURL:            cfg.DeepSeek.BaseURL,
-		MaxTokens:          8192,
-		Temperature:        0.2,
-		ResponseFormatType: deepseekmodel.ResponseFormatTypeJSONObject,
+		APIKey:      cfg.DeepSeek.APIKey,
+		Model:       cfg.DeepSeek.Model,
+		BaseURL:     cfg.DeepSeek.BaseURL,
+		MaxTokens:   8192,
+		Temperature: 0.2,
 	})
 }
 
 // NewDeepSeekRunner 组装 ChatModelAgent、工具注册表、中间件和 checkpoint runner。
 func NewDeepSeekRunner(ctx context.Context, cfg DeepSeekRunnerConfig) (*adk.Runner, error) {
-	chatModel, err := NewDeepSeekChatModel(ctx, cfg.Runtime)
-	if err != nil {
-		return nil, fmt.Errorf("create deepseek chat model: %w", err)
+	chatModel := cfg.ChatModel
+	var err error
+	if chatModel == nil {
+		chatModel, err = NewDeepSeekChatModel(ctx, cfg.Runtime)
+		if err != nil {
+			return nil, fmt.Errorf("create deepseek chat model: %w", err)
+		}
 	}
 
 	registry := cfg.Registry
 	if registry == nil {
-		registry, err = newRuntimeRegistry(cfg.Runtime, cfg.MediaCheckpoints, cfg.MediaDispatcher, cfg.SpecStore, cfg.StoryboardStore, cfg.AssetStore, cfg.AssetUploader, chatModel)
-		if err != nil {
-			return nil, err
-		}
+		return nil, fmt.Errorf("five-capability Agent registry is required")
+	}
+	if registry.Len() != len(capability.AgentToolKeys) {
+		return nil, fmt.Errorf("Agent registry must contain exactly the five capability tools; got %d entries", registry.Len())
 	}
 
-	toolKeys := cfg.ToolKeys
-	if len(toolKeys) == 0 {
-		toolKeys = defaultAgentToolKeys(cfg.Runtime, cfg.SpecStore != nil, cfg.StoryboardStore != nil)
-	}
+	// This is a production invariant, not a caller preference: Provider,
+	// prompt-preparation and business CRUD tools can never be injected into the
+	// Agent's ReAct tool set through configuration.
+	toolKeys := defaultAgentToolKeys()
 
 	name := cfg.Name
 	if name == "" {
@@ -89,7 +90,10 @@ func NewDeepSeekRunner(ctx context.Context, cfg DeepSeekRunnerConfig) (*adk.Runn
 	}
 	instruction := cfg.Instruction
 	if instruction == "" {
-		instruction = "你是一个 AIGC 内容创作智能体。根据用户需求规划内容、调用合适工具，并在关键阶段请求用户确认。"
+		instruction = `你是一个 AIGC 内容创作智能体。你只能使用 analyze_materials、plan_creation_spec、plan_storyboard、generate_media、assemble_output 五个用户可感知能力。
+	先根据需要分析素材，再生成或修订创作规范；规范确认后才能创建或整体重规划故事板；故事板确认后才能生成素材；依赖齐备后才能合成。Tool 返回 waiting_user 时必须停止继续调用下游 Tool，等待用户通过系统发布的权威审核入口提交决定。不得创建重复的确认表单，不得提示用户在聊天中回复“确认”来代替 Approval Decision，也不得把普通聊天文本当成已完成审批。生成的候选素材统一在左侧故事板确认，不要为每个候选素材生成聊天审批卡或逐项确认提示。
+故事板模块、元素类型与数量必须按用户场景动态推理，不套用固定短剧模板。提示词生成是 Graph 内部 ChatModel 节点，不存在 prepare_prompts Tool。用户在前端进行单元素提示词编辑、素材上传/填充、候选采用或局部重生成时，不要再调用 plan_storyboard；只有用户改变整体背景、目标或结构时才整体 replan。
+用户明确说明没有参考素材、且当前会话也没有 asset_id 时，不要调用 analyze_materials，直接从 plan_creation_spec 开始。不要尝试调用积分、权限、资产 CRUD 或 Provider Tool；这些业务能力只允许在 Graph/Worker 内部执行。异步生成返回 accepted 后，只说明已受理和可见进度，不虚构尚未完成的素材地址、费用或结果。`
 	}
 	instruction = strings.TrimSpace(instruction + "\n\n" + a2ui.AgentInstruction())
 
@@ -97,7 +101,27 @@ func NewDeepSeekRunner(ctx context.Context, cfg DeepSeekRunnerConfig) (*adk.Runn
 	if err != nil {
 		return nil, fmt.Errorf("create patch tool calls middleware: %w", err)
 	}
-	handlers := []adk.ChatModelAgentMiddleware{patchToolCalls}
+	handlers := make([]adk.ChatModelAgentMiddleware, 0, 9+len(cfg.ExtraHandlers))
+	// The normalizer sits outside the receipt wrapper: durable receipts retain
+	// the exact provider output, while retry/projection sees one clean envelope.
+	handlers = append(handlers, newA2UIOutputNormalizerMiddleware())
+	// Freeze a provider's attempted duplicate ToolCall before replacing it with
+	// a deterministic stop card for the Agent loop.
+	handlers = append(handlers, newNextCapabilityRepeatGuardMiddleware())
+	if cfg.ModelReceiptStore != nil {
+		receiptMiddleware, err := NewModelReceiptMiddleware(ModelReceiptMiddlewareConfig{Store: cfg.ModelReceiptStore})
+		if err != nil {
+			return nil, fmt.Errorf("create model receipt middleware: %w", err)
+		}
+		// The inner receipt freezes raw output and ToolCall IDs before the outer
+		// A2UI normalizer removes harmless final-response formatting noise.
+		handlers = append(handlers, receiptMiddleware)
+	}
+	// Approved durable continuations carry a trusted machine directive. This
+	// inner wrapper emits the one deterministic next ToolCall; an outer receipt
+	// freezes it before execution, while later calls still reach DeepSeek.
+	handlers = append(handlers, newNextCapabilityDirectiveMiddleware())
+	handlers = append(handlers, patchToolCalls)
 	contextHandlers, err := newContextControlMiddlewares(ctx, chatModel)
 	if err != nil {
 		return nil, err
@@ -105,10 +129,7 @@ func NewDeepSeekRunner(ctx context.Context, cfg DeepSeekRunnerConfig) (*adk.Runn
 	handlers = append(handlers, contextHandlers...)
 	handlers = append(handlers, cfg.ExtraHandlers...)
 	if cfg.SkillBackend != nil {
-		handler, err := adkskill.NewMiddleware(ctx, &adkskill.Config{
-			Backend:    cfg.SkillBackend,
-			UseChinese: true,
-		})
+		handler, err := newDynamicSkillMiddleware(ctx, cfg.SkillBackend)
 		if err != nil {
 			return nil, fmt.Errorf("create skill middleware: %w", err)
 		}
@@ -116,15 +137,29 @@ func NewDeepSeekRunner(ctx context.Context, cfg DeepSeekRunnerConfig) (*adk.Runn
 	}
 	handlers = append(handlers, aigcmw.NewToolExceptionMiddleware[*schema.Message]())
 
+	agentTools := registry.ListByKeys(toolKeys)
+	if len(agentTools) != len(toolKeys) {
+		return nil, fmt.Errorf("Agent registry resolved %d tools for %d requested capability keys", len(agentTools), len(toolKeys))
+	}
+	for index, agentTool := range agentTools {
+		info, err := agentTool.Info(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("load Agent capability %s: %w", toolKeys[index], err)
+		}
+		if info == nil || info.Name != toolKeys[index] {
+			return nil, fmt.Errorf("Agent capability key/name mismatch: key=%s", toolKeys[index])
+		}
+	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:          name,
-		Description:   description,
-		Instruction:   instruction,
-		Model:         chatModel,
-		GenModelInput: aigcGenModelInput,
+		Name:             name,
+		Description:      description,
+		Instruction:      instruction,
+		Model:            chatModel,
+		GenModelInput:    aigcGenModelInput,
+		ModelRetryConfig: newA2UIModelRetryConfig(),
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: registry.ListByKeys(toolKeys),
+				Tools: agentTools,
 			},
 		},
 		Handlers: handlers,
@@ -140,48 +175,75 @@ func NewDeepSeekRunner(ctx context.Context, cfg DeepSeekRunnerConfig) (*adk.Runn
 	}), nil
 }
 
-// defaultAgentToolKeys 根据当前存储和运行配置选择 Agent 可调用的默认工具集。
-func defaultAgentToolKeys(runtime aigcconfig.Config, hasSpecStore bool, hasStoryboardStore bool) []string {
-	_ = runtime.Normalize()
-	toolKeys := []string{
-		"echo_tool",
-		aigctools.ResourcePrepareAnalyzeToolKey,
-		aigctools.MultimodalAnalyzeToolKey,
-		aigctools.WritePromptToolKey,
-		aigctools.MediaGeneratorToolKey,
-		aigctools.VideoAssemblerToolKey,
+// newA2UIModelRetryConfig rejects malformed final responses and model-authored
+// Approval imitations. ToolCall messages pass through for the ReAct loop.
+func newA2UIModelRetryConfig() *adk.ModelRetryConfig {
+	return &adk.ModelRetryConfig{
+		MaxRetries: 1,
+		ShouldRetry: func(_ context.Context, retryCtx *adk.RetryContext) *adk.RetryDecision {
+			if retryCtx == nil || retryCtx.Err != nil {
+				return &adk.RetryDecision{Retry: false}
+			}
+			output := retryCtx.OutputMessage
+			if output != nil && len(output.ToolCalls) > 0 {
+				return &adk.RetryDecision{Retry: false}
+			}
+			rejectReason := "invalid_a2ui_action_envelope"
+			if output != nil {
+				if envelope, ok := a2ui.ParseActionEnvelopeContent(output.Content); ok {
+					if a2ui.ValidateModelAuthoredActionEnvelope(envelope) == nil {
+						return &adk.RetryDecision{Retry: false}
+					}
+					rejectReason = "forbidden_model_authored_approval"
+				}
+			}
+			messages := append([]*schema.Message(nil), retryCtx.InputMessages...)
+			messages = append(messages, schema.SystemMessage(a2uiRetryInstruction))
+			return &adk.RetryDecision{
+				Retry:                        true,
+				ModifiedInputMessages:        messages,
+				PersistModifiedInputMessages: false,
+				RejectReason:                 rejectReason,
+			}
+		},
 	}
-	if hasSpecStore {
-		toolKeys = append(toolKeys, aigctools.TextEditorToolKey)
-	}
-	if hasStoryboardStore {
-		toolKeys = append(toolKeys, aigctools.StoryboardDesignerToolKey)
-	}
-	return toolKeys
 }
 
-// aigcGenModelInput 把系统指令放到消息窗口最前面，并保留原始会话消息顺序。
+// defaultAgentToolKeys 返回生产 Agent 唯一允许调用的五个高层能力。
+func defaultAgentToolKeys() []string {
+	return append([]string(nil), capability.AgentToolKeys...)
+}
+
+// aigcGenModelInput 把基础指令和可信内部 System 事件合并到消息窗口最前面。
+// 部分 OpenAI-compatible Provider 对历史尾部的 System 消息服从性较弱；
+// hoist 后仍保留所有非 System 会话消息的原始顺序，也不会把内部事件伪装成用户消息。
 func aigcGenModelInput(_ context.Context, instruction string, input *adk.AgentInput) ([]*schema.Message, error) {
-	msgs := make([]*schema.Message, 0, len(input.Messages)+1)
-	if instruction != "" {
-		msgs = append(msgs, schema.SystemMessage(instruction))
+	if input == nil {
+		input = &adk.AgentInput{}
 	}
-	msgs = append(msgs, input.Messages...)
+	systemParts := make([]string, 0, 2)
+	if instruction = strings.TrimSpace(instruction); instruction != "" {
+		systemParts = append(systemParts, instruction)
+	}
+	conversation := make([]*schema.Message, 0, len(input.Messages))
+	for _, message := range input.Messages {
+		if message == nil {
+			continue
+		}
+		if message.Role == schema.System {
+			if content := strings.TrimSpace(message.Content); content != "" {
+				systemParts = append(systemParts, content)
+			}
+			continue
+		}
+		conversation = append(conversation, message)
+	}
+	msgs := make([]*schema.Message, 0, len(conversation)+1)
+	if len(systemParts) > 0 {
+		msgs = append(msgs, schema.SystemMessage(strings.Join(systemParts, "\n\n")))
+	}
+	msgs = append(msgs, conversation...)
 	return msgs, nil
-}
-
-// newDefaultRegistry 注册不依赖外部服务的基础 demo 工具。
-func newDefaultRegistry() (*aigctools.Registry, error) {
-	registry := aigctools.NewRegistry()
-	if err := registry.Register("echo_tool", aigctools.EchoTool{}, aigctools.ToolMeta{
-		Category:    "demo",
-		StageHints:  []string{"phase_0"},
-		OutputKinds: []string{"text"},
-		Provider:    "local",
-	}); err != nil {
-		return nil, err
-	}
-	return registry, nil
 }
 
 // newContextControlMiddlewares 创建上下文裁剪和摘要中间件，防止长会话撑爆模型窗口。
@@ -193,8 +255,8 @@ func newContextControlMiddlewares(ctx context.Context, model einomodel.BaseChatM
 		ClearRetentionSuffixLimit: 8,
 		ClearAtLeastTokens:        12000,
 		TokenCounter:              reductionTokenCounter,
-		TruncExcludeTools:         []string{aigctools.MediaGeneratorToolKey},
-		ClearExcludeTools:         []string{aigctools.MediaGeneratorToolKey},
+		TruncExcludeTools:         []string{capability.GenerateMediaToolKey},
+		ClearExcludeTools:         []string{capability.GenerateMediaToolKey},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create reduction middleware: %w", err)
@@ -256,125 +318,4 @@ func estimatedContextTokens(messages []*schema.Message, tools []*schema.ToolInfo
 		return 0
 	}
 	return chars/4 + 1
-}
-
-// newRuntimeRegistry 注册生产运行时工具；工具只返回业务数据，UI 由 Agent A2UI action 决定。
-func newRuntimeRegistry(runtime aigcconfig.Config, mediaCheckpoints compose.CheckPointStore, mediaDispatcher aigcmediagraph.JobDispatcher, specStore aigctools.FinalVideoSpecStore, storyboardStore aigctools.StoryboardSnapshotStore, assetStore aigctools.Image2AssetStore, assetUploader aigctools.Image2AssetUploader, promptModel einomodel.BaseChatModel) (*aigctools.Registry, error) {
-	registry, err := newDefaultRegistry()
-	if err != nil {
-		return nil, err
-	}
-
-	if specStore != nil {
-		if err := registry.Register(aigctools.TextEditorToolKey, aigctools.NewTextEditorTool(aigctools.TextEditorToolConfig{
-			Specs: specStore,
-		}), aigctools.ToolMeta{
-			Category:    "text_editor",
-			StageHints:  []string{"final_video_spec", "spec_review", "revision"},
-			OutputKinds: []string{"final_video_spec", "markdown", "versioned_document"},
-			Provider:    "local_postgres",
-		}); err != nil {
-			return nil, err
-		}
-	}
-
-	if storyboardStore != nil {
-		if err := registry.Register(aigctools.StoryboardDesignerToolKey, aigctools.NewStoryboardDesignerTool(aigctools.StoryboardDesignerToolConfig{
-			Storyboards: storyboardStore,
-		}), aigctools.ToolMeta{
-			Category:    "storyboard_designer",
-			StageHints:  []string{"storyboard", "key_elements", "shots", "audio_layers", "revision"},
-			OutputKinds: []string{"storyboard_snapshot", "key_elements", "shot_list", "audio_layers"},
-			Provider:    "local_postgres",
-		}); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := registry.Register(aigctools.MediaGeneratorToolKey, aigctools.NewMediaGeneratorTool(aigctools.MediaGeneratorToolConfig{
-		Checkpoints: mediaCheckpoints,
-		Dispatcher:  mediaDispatcher,
-	}), aigctools.ToolMeta{
-		Category:    "media_generator",
-		StageHints:  []string{"key_elements", "shot_assets", "storyboard_assets", "reference_confirm"},
-		OutputKinds: []string{"interrupt_request", "job_plan", "storyboard_patch"},
-		Provider:    "eino_graph",
-	}); err != nil {
-		return nil, err
-	}
-	if err := registry.Register(aigctools.ResourcePrepareAnalyzeToolKey, aigctools.ResourcePrepareAnalyzeTool{}, aigctools.ToolMeta{
-		Category:    "resource_prepare",
-		StageHints:  []string{"resource_prepare", "multimodal_analyze", "script_upload"},
-		OutputKinds: []string{"resource_analysis", "asset_requirements"},
-		Provider:    "local_demo",
-	}); err != nil {
-		return nil, err
-	}
-	if err := registry.Register(aigctools.MultimodalAnalyzeToolKey, aigctools.MultimodalAnalyzeTool{}, aigctools.ToolMeta{
-		Category:    "multimodal_analyze",
-		StageHints:  []string{"multimodal_analyze", "reference_assets", "material_analysis"},
-		OutputKinds: []string{"resource_analysis", "reference_summary"},
-		Provider:    "local_demo",
-	}); err != nil {
-		return nil, err
-	}
-	var promptSpecs aigctools.PromptSpecStore
-	if typed, ok := specStore.(aigctools.PromptSpecStore); ok {
-		promptSpecs = typed
-	}
-	var promptStoryboards aigctools.PromptStoryboardStore
-	if typed, ok := storyboardStore.(aigctools.PromptStoryboardStore); ok {
-		promptStoryboards = typed
-	}
-	if err := registry.Register(aigctools.WritePromptToolKey, aigctools.NewWritePromptTool(aigctools.WritePromptToolConfig{
-		Model:       promptModel,
-		Specs:       promptSpecs,
-		Storyboards: promptStoryboards,
-	}), aigctools.ToolMeta{
-		Category:    "prompt_generation",
-		StageHints:  []string{"write_the_prompt", "shot_prompt", "asset_prompt"},
-		OutputKinds: []string{"prompt_reference", "storyboard_patch", "prompt_ready"},
-		Provider:    "deepseek",
-	}); err != nil {
-		return nil, err
-	}
-	if err := registry.Register(aigctools.VideoAssemblerToolKey, aigctools.VideoAssemblerTool{}, aigctools.ToolMeta{
-		Category:    "video_assembler",
-		StageHints:  []string{"final_assembly", "export"},
-		OutputKinds: []string{"assembly_plan", "export_status"},
-		Provider:    "local_demo",
-	}); err != nil {
-		return nil, err
-	}
-
-	runtime = runtime.Normalize()
-	if runtime.Image2.APIKey != "" {
-		if err := registry.Register(aigctools.Image2GenerateToolKey, aigctools.NewImage2GenerateTool(aigctools.Image2ToolConfig{
-			APIKey:        runtime.Image2.APIKey,
-			Assets:        assetStore,
-			AssetUploader: assetUploader,
-		}), aigctools.ToolMeta{
-			Category:    "media_generator",
-			StageHints:  []string{"key_elements", "shot_assets", "storyboard_assets"},
-			OutputKinds: []string{"image", "asset_id", "url", "data_url", "b64_json"},
-			Provider:    "image2",
-		}); err != nil {
-			return nil, err
-		}
-	}
-	if runtime.Seedance.APIKey != "" {
-		if err := registry.Register(aigctools.SeedanceGenerateVideoToolKey, aigctools.NewSeedanceGenerateTool(aigctools.SeedanceToolConfig{
-			APIKey:        runtime.Seedance.APIKey,
-			Assets:        assetStore,
-			AssetUploader: assetUploader,
-		}), aigctools.ToolMeta{
-			Category:    "media_generator",
-			StageHints:  []string{"shot_video", "storyboard_assets", "video_generation"},
-			OutputKinds: []string{"video", "asset_id", "url", "provider_task_id"},
-			Provider:    "seedance",
-		}); err != nil {
-			return nil, err
-		}
-	}
-	return registry, nil
 }

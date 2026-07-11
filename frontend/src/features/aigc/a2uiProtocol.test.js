@@ -12,6 +12,7 @@ import {
   createInfoCollectionCard,
   fileUpload,
   imagePreview,
+  isSupportedA2UIActionEnvelope,
   markdown,
   multiChoice,
   row,
@@ -41,6 +42,7 @@ describe('A2UI protocol helpers', () => {
       'FileUpload',
       'ImagePreview',
       'VideoPreview',
+      'AudioPreview',
       'VerticalSteps'
     ]);
   });
@@ -95,6 +97,28 @@ describe('A2UI protocol helpers', () => {
     expect(componentPayload({ id: 'x', component: { Radio: { key: 'legacy' } } }, A2UI_COMPONENTS.SINGLE_CHOICE)).toBeNull();
     expect(componentPayload({ id: 'x', component: { checkbox_group: { key: 'legacy' } } }, A2UI_COMPONENTS.MULTI_CHOICE)).toBeNull();
     expect(componentPayload({ id: 'x', component: { rich_text: { value: 'legacy' } } }, A2UI_COMPONENTS.MARKDOWN)).toBeNull();
+  });
+
+  it('accepts only version 1.0 envelopes whose actions are all known', () => {
+    expect(
+      isSupportedA2UIActionEnvelope({
+        a2ui_version: '1.0',
+        actions: [{ type: 'append_card' }, { type: 'update_card' }]
+      })
+    ).toBe(true);
+    expect(
+      isSupportedA2UIActionEnvelope({
+        a2ui_version: '2.0',
+        actions: [{ type: 'append_card' }]
+      })
+    ).toBe(false);
+    expect(
+      isSupportedA2UIActionEnvelope({
+        a2ui_version: '1.0',
+        actions: [{ type: 'append_card' }, { type: 'delete_card' }]
+      })
+    ).toBe(false);
+    expect(isSupportedA2UIActionEnvelope({ a2ui_version: '1.0', actions: [] })).toBe(false);
   });
 
   it('builds business message cards by extending the base card protocol class', () => {

@@ -20,7 +20,7 @@ func ParseActionEnvelopeContent(content string) (ActionEnvelope, bool) {
 		return ActionEnvelope{}, false
 	}
 	envelope = NormalizeActionEnvelope(envelope)
-	if !validateActionEnvelope(envelope) {
+	if envelope.Version != Version1 || !validateActionEnvelope(envelope) {
 		return ActionEnvelope{}, false
 	}
 	return envelope, true
@@ -96,10 +96,15 @@ func cardIDHasInstanceSuffix(cardID string) bool {
 // validateActionEnvelope 校验消息卡是否真的继承 Card 协议结构。
 func validateActionEnvelope(envelope ActionEnvelope) bool {
 	for _, action := range envelope.Actions {
-		if action.Type == "" {
-			return false
-		}
-		if action.Type == ActionAppendCard && !validCard(action.Card) {
+		switch action.Type {
+		case ActionAppendCard:
+			if !validCard(action.Card) {
+				return false
+			}
+		case ActionUpdateCard:
+			// update_card 可以更新聊天卡，也可以把 payload 投影到 storyboard/tool_runs。
+			// 具体 target/payload 结构由对应 surface 消费方继续校验。
+		default:
 			return false
 		}
 	}

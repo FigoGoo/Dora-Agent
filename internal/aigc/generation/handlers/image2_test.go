@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,18 @@ import (
 
 func TestImage2JobHandlerGeneratesAndPersistsAsset(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-image2-key" {
+			t.Fatalf("authorization header = %q", got)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("content-type = %q", got)
+		}
+		if got := r.Header.Get("Idempotency-Key"); got != "job-1" {
+			t.Fatalf("idempotency key = %q, want job-1", got)
+		}
+		if got := r.Header.Get("X-Client-Request-Id"); got != "job-1" {
+			t.Fatalf("client request id = %q, want job-1", got)
+		}
 		var req struct {
 			Prompt string `json:"prompt"`
 			Model  string `json:"model"`
@@ -76,16 +89,17 @@ func TestImage2JobHandlerGeneratesAndPersistsAsset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
-	if len(result.AssetIDs) != 1 || result.AssetIDs[0] != "asset-1" {
+	if len(result.AssetIDs) != 1 || !strings.HasPrefix(result.AssetIDs[0], "image_") {
 		t.Fatalf("asset ids = %#v", result.AssetIDs)
 	}
-	if result.Result["asset_ids"].([]string)[0] != "asset-1" {
+	assetID := result.AssetIDs[0]
+	if result.Result["asset_ids"].([]string)[0] != assetID {
 		t.Fatalf("handler result = %#v", result.Result)
 	}
 	if _, ok := result.Result["images"]; ok {
 		t.Fatalf("handler result should not include raw image list: %#v", result.Result)
 	}
-	if updates, ok := result.Result["storyboard_updates"].([]tools.StoryboardUpdateHint); !ok || len(updates) != 1 || updates[0].AssetIDs[0] != "asset-1" {
+	if updates, ok := result.Result["storyboard_updates"].([]tools.StoryboardUpdateHint); !ok || len(updates) != 1 || updates[0].AssetIDs[0] != assetID {
 		t.Fatalf("storyboard updates = %#v", result.Result["storyboard_updates"])
 	}
 	if _, ok := result.Result["render_events"]; ok {
@@ -94,7 +108,7 @@ func TestImage2JobHandlerGeneratesAndPersistsAsset(t *testing.T) {
 	if string(uploader.body) != "\x89PNG\r\n\x1a\n" {
 		t.Fatalf("uploaded body = %q", string(uploader.body))
 	}
-	if assets.saved.ID != "asset-1" || assets.saved.SessionID != "s1" || assets.saved.UserID != "u1" {
+	if assets.saved.ID != assetID || assets.saved.SessionID != "s1" || assets.saved.UserID != "u1" {
 		t.Fatalf("saved asset = %#v", assets.saved)
 	}
 }

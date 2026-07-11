@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -25,6 +26,8 @@ const (
 	DefaultSeedanceModel         = "doubao-seedance-2-0-fast-260128"
 	DefaultSeedancePollInterval  = 5 * time.Second
 	DefaultSeedancePollAttempts  = 120
+	MaxSeedanceDurationSeconds   = 30
+	MaxSeedanceFPS               = 60
 )
 
 // SeedanceToolConfig 汇总 Seedance 视频生成工具的 provider、存储和轮询配置。
@@ -71,6 +74,16 @@ type SeedanceGenerateInput struct {
 	ReferenceImageURLs []string `json:"reference_image_urls,omitempty"`
 	ReferenceVideoURLs []string `json:"reference_video_urls,omitempty"`
 	ReferenceAudioURLs []string `json:"reference_audio_urls,omitempty"`
+	SourceJobID        string   `json:"source_job_id,omitempty"`
+	OutputIndex        int      `json:"output_index,omitempty"`
+}
+
+type SeedanceTaskSnapshot struct {
+	ID           string `json:"id"`
+	Status       string `json:"status"`
+	VideoURL     string `json:"video_url,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
 }
 
 // SeedanceGenerateResult 是视频生成工具返回给 Agent 的紧凑业务结果。
@@ -154,6 +167,81 @@ func NewSeedanceGenerateTool(cfg SeedanceToolConfig) SeedanceGenerateTool {
 		cfg.MaxPollAttempts = DefaultSeedancePollAttempts
 	}
 	return SeedanceGenerateTool{cfg: cfg}
+}
+
+// SubmitTask performs only the provider create call. The caller must persist
+// the returned task id before polling so a process restart never resubmits an
+// already accepted paid generation.
+func (t SeedanceGenerateTool) SubmitTask(ctx context.Context, input SeedanceGenerateInput) (string, error) {
+	normalized, err := normalizeSeedanceInput(input)
+	if err != nil {
+		return "", err
+	}
+	if t.cfg.APIKey == "" {
+		return "", fmt.Errorf("seedance api key is required")
+	}
+	return t.createTask(ctx, normalized)
+}
+
+func (t SeedanceGenerateTool) QueryTask(ctx context.Context, taskID string) (SeedanceTaskSnapshot, error) {
+	task, err := t.getTask(ctx, taskID)
+	if err != nil {
+		return SeedanceTaskSnapshot{}, err
+	}
+	videoURL := strings.TrimSpace(task.Output.VideoURL)
+	if videoURL == "" {
+		videoURL = strings.TrimSpace(task.Output.URL)
+	}
+	out := SeedanceTaskSnapshot{ID: strings.TrimSpace(task.ID), Status: strings.TrimSpace(task.Status), VideoURL: videoURL}
+	if task.Error != nil {
+		out.ErrorCode, out.ErrorMessage = strings.TrimSpace(task.Error.Code), strings.TrimSpace(task.Error.Message)
+	}
+	return out, nil
+}
+
+func (t SeedanceGenerateTool) PersistCompletedTask(ctx context.Context, input SeedanceGenerateInput, task SeedanceTaskSnapshot) (SeedanceGenerateResult, error) {
+	normalized, err := normalizeSeedanceInput(input)
+	if err != nil {
+		return SeedanceGenerateResult{}, err
+	}
+	if strings.TrimSpace(task.VideoURL) == "" {
+		return SeedanceGenerateResult{}, fmt.Errorf("seedance task %s completed without video url", task.ID)
+	}
+	result := SeedanceGenerateResult{Model: normalized.Model, ProviderTaskID: task.ID, ProviderStatus: task.Status, MediaType: "video/mp4"}
+	if t.shouldPersistAsset(normalized) {
+		result, err = t.persistVideo(ctx, normalized, result, task.VideoURL)
+		if err != nil {
+			return SeedanceGenerateResult{}, err
+		}
+	} else {
+		result.Assets = seedanceGeneratedAssets(normalized, result)
+	}
+	result.StoryboardUpdates = generativeStoryboardUpdates(result.Assets)
+	return result, nil
+}
+
+func (t SeedanceGenerateTool) CancelTask(ctx context.Context, taskID string) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, t.cfg.Endpoint+"/"+url.PathEscape(strings.TrimSpace(taskID)), nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+t.cfg.APIKey)
+	resp, err := t.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if (resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.StatusCode != http.StatusAccepted) || resp.StatusCode == http.StatusNotFound {
+		return true, nil
+	}
+	if resp.StatusCode == http.StatusAccepted {
+		return false, nil
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return false, nil
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	return false, fmt.Errorf("seedance cancel task returned %s: %s", resp.Status, strings.TrimSpace(string(raw)))
 }
 
 // Info 返回 Eino 工具元信息和参数 schema，供 Agent 正确构造调用参数。
@@ -282,6 +370,10 @@ func (t SeedanceGenerateTool) createTask(ctx context.Context, input SeedanceGene
 	}
 	req.Header.Set("Authorization", "Bearer "+t.cfg.APIKey)
 	req.Header.Set("Content-Type", "application/json")
+	if input.SourceJobID != "" {
+		req.Header.Set("Idempotency-Key", input.SourceJobID)
+		req.Header.Set("X-Client-Request-Id", input.SourceJobID)
+	}
 
 	resp, err := t.cfg.HTTPClient.Do(req)
 	if err != nil {
@@ -293,7 +385,7 @@ func (t SeedanceGenerateTool) createTask(ctx context.Context, input SeedanceGene
 		return "", fmt.Errorf("seedance create task returned %s: %s", resp.Status, strings.TrimSpace(string(raw)))
 	}
 	var out seedanceCreateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeLimitedProviderJSON(resp.Body, 2<<20, &out); err != nil {
 		return "", fmt.Errorf("decode seedance create task response: %w", err)
 	}
 	out.ID = strings.TrimSpace(out.ID)
@@ -320,6 +412,10 @@ func (t SeedanceGenerateTool) pollTask(ctx context.Context, taskID string) (seed
 				return seedanceTaskResponse{}, fmt.Errorf("seedance task %s failed: %s", taskID, strings.TrimSpace(task.Error.Message))
 			}
 			return seedanceTaskResponse{}, fmt.Errorf("seedance task %s reached terminal status %q", taskID, task.Status)
+		case "queued", "pending", "running", "processing", "submitted", "in_progress":
+			// Continue with the configured durable polling budget.
+		default:
+			return seedanceTaskResponse{}, fmt.Errorf("seedance task %s returned unsupported status %q", taskID, task.Status)
 		}
 		if attempt+1 >= t.cfg.MaxPollAttempts {
 			break
@@ -354,7 +450,7 @@ func (t SeedanceGenerateTool) getTask(ctx context.Context, taskID string) (seeda
 		return seedanceTaskResponse{}, fmt.Errorf("seedance query task returned %s: %s", resp.Status, strings.TrimSpace(string(raw)))
 	}
 	var out seedanceTaskResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeLimitedProviderJSON(resp.Body, 2<<20, &out); err != nil {
 		return seedanceTaskResponse{}, fmt.Errorf("decode seedance query task response: %w", err)
 	}
 	return out, nil
@@ -387,11 +483,31 @@ func normalizeSeedanceInput(input SeedanceGenerateInput) (SeedanceGenerateInput,
 	if input.Model == "" {
 		input.Model = DefaultSeedanceModel
 	}
-	if input.DurationSeconds < 0 {
-		return input, fmt.Errorf("duration_seconds must be greater than zero")
+	switch input.Model {
+	case DefaultSeedanceModel, "doubao-seedance-2-0-260128":
+	default:
+		return input, fmt.Errorf("unsupported seedance model %q", input.Model)
 	}
-	if input.FPS < 0 {
-		return input, fmt.Errorf("fps must be greater than zero")
+	if input.Ratio != "" {
+		switch input.Ratio {
+		case "16:9", "9:16", "1:1", "4:3", "3:4", "21:9":
+		default:
+			return input, fmt.Errorf("unsupported seedance ratio %q", input.Ratio)
+		}
+	}
+	input.Resolution = strings.ToLower(input.Resolution)
+	if input.Resolution != "" {
+		switch input.Resolution {
+		case "480p", "720p", "1080p":
+		default:
+			return input, fmt.Errorf("unsupported seedance resolution %q", input.Resolution)
+		}
+	}
+	if input.DurationSeconds < 0 || input.DurationSeconds > MaxSeedanceDurationSeconds {
+		return input, fmt.Errorf("duration_seconds must be between 0 and %d", MaxSeedanceDurationSeconds)
+	}
+	if input.FPS < 0 || input.FPS > MaxSeedanceFPS {
+		return input, fmt.Errorf("fps must be between 0 and %d", MaxSeedanceFPS)
 	}
 	return input, nil
 }
@@ -459,13 +575,16 @@ func (t SeedanceGenerateTool) persistVideo(ctx context.Context, input SeedanceGe
 		mediaType = "video/mp4"
 	}
 	assetID := t.cfg.NewID()
+	if input.SourceJobID != "" {
+		sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d", input.SourceJobID, input.OutputIndex)))
+		assetID = "video_" + hex.EncodeToString(sum[:12])
+	}
 	filename := seedanceAssetFilename(input.FilenamePrefix, mediaType)
 	objectKey := asset.NewObjectKey(input.SessionID, assetID, filename)
 	metadata := map[string]any{
-		"provider":           "seedance",
-		"provider_task_id":   result.ProviderTaskID,
-		"provider_video_url": providerVideoURL,
-		"model":              input.Model,
+		"provider":         "seedance",
+		"provider_task_id": result.ProviderTaskID,
+		"model":            input.Model,
 	}
 	uploadMetadata := map[string]string{
 		"provider":         "seedance",
@@ -502,6 +621,8 @@ func (t SeedanceGenerateTool) persistVideo(ctx context.Context, input SeedanceGe
 		ID:              assetID,
 		SessionID:       input.SessionID,
 		UserID:          input.UserID,
+		SourceJobID:     input.SourceJobID,
+		OutputIndex:     input.OutputIndex,
 		Kind:            asset.KindVideo,
 		Source:          asset.SourceGenerated,
 		MIMEType:        mediaType,
@@ -559,24 +680,11 @@ func safeSeedanceAssetURL(result SeedanceGenerateResult) string {
 
 // downloadVideo 从 provider URL 下载生成视频并返回媒体类型。
 func (t SeedanceGenerateTool) downloadVideo(ctx context.Context, rawURL string) ([]byte, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(rawURL), nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("create seedance video download request: %w", err)
-	}
-	resp, err := t.cfg.HTTPClient.Do(req)
+	raw, mediaType, err := downloadProviderObject(ctx, t.cfg.HTTPClient, rawURL, t.cfg.Endpoint, maxVideoAssetBytes)
 	if err != nil {
 		return nil, "", fmt.Errorf("download seedance video: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, "", fmt.Errorf("download seedance video returned %s: %s", resp.Status, strings.TrimSpace(string(raw)))
-	}
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, "", fmt.Errorf("read seedance video: %w", err)
-	}
-	return raw, strings.TrimSpace(resp.Header.Get("Content-Type")), nil
+	return raw, mediaType, nil
 }
 
 // seedanceAssetFilename 根据前缀和媒体类型生成视频文件名。

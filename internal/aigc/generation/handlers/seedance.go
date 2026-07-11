@@ -29,8 +29,9 @@ type SeedanceJobHandlerConfig struct {
 
 // SeedanceJobHandler 把队列中的视频生成任务委托给 Seedance tool 执行。
 type SeedanceJobHandler struct {
-	tool   tools.SeedanceGenerateTool
-	assets SeedanceJobAssetStore
+	tool         tools.SeedanceGenerateTool
+	assets       SeedanceJobAssetStore
+	pollInterval time.Duration
 }
 
 // SeedanceJobAssetStore 扩展 Seedance tool 的素材存储能力，用于读取已绑定素材详情。
@@ -41,10 +42,71 @@ type SeedanceJobAssetStore interface {
 
 // NewSeedanceJobHandler 创建 Seedance 后台任务处理器。
 func NewSeedanceJobHandler(cfg SeedanceJobHandlerConfig) SeedanceJobHandler {
-	return SeedanceJobHandler{
-		tool:   tools.NewSeedanceGenerateTool(toSeedanceToolConfig(cfg)),
-		assets: cfg.Assets,
+	pollInterval := cfg.PollInterval
+	if pollInterval <= 0 {
+		pollInterval = tools.DefaultSeedancePollInterval
 	}
+	return SeedanceJobHandler{
+		tool: tools.NewSeedanceGenerateTool(toSeedanceToolConfig(cfg)), assets: cfg.Assets,
+		pollInterval: pollInterval,
+	}
+}
+
+// Submit implements the durable provider boundary: it returns immediately
+// after task creation so LifecycleWorker persists ProviderTaskID before any
+// polling occurs.
+func (h SeedanceJobHandler) Submit(ctx context.Context, job generation.GenerationJob) (generation.ProviderResponse, error) {
+	input, err := h.seedanceInputFromJob(ctx, job)
+	if err != nil {
+		return generation.ProviderResponse{}, err
+	}
+	taskID, err := h.tool.SubmitTask(ctx, input)
+	if err != nil {
+		return generation.ProviderResponse{}, generation.NewExecutionError(generation.ErrorStageProvider, "seedance_submit_failed", generation.ProviderErrorRetryable(err), err)
+	}
+	return generation.ProviderResponse{State: generation.ProviderStateAccepted, TaskID: taskID, RequestID: job.ID, Status: generation.ProviderStateAccepted, RetryAfter: h.pollInterval}, nil
+}
+
+func (h SeedanceJobHandler) Poll(ctx context.Context, job generation.GenerationJob) (generation.ProviderResponse, error) {
+	task, err := h.tool.QueryTask(ctx, job.ProviderTaskID)
+	if err != nil {
+		return generation.ProviderResponse{}, generation.NewExecutionError(generation.ErrorStageProvider, "seedance_poll_failed", generation.ProviderErrorRetryable(err), err)
+	}
+	if strings.TrimSpace(task.ID) == "" {
+		task.ID = job.ProviderTaskID
+	}
+	status := strings.ToLower(strings.TrimSpace(task.Status))
+	switch status {
+	case "succeeded", "success", "completed":
+		input, err := h.seedanceInputFromJob(ctx, job)
+		if err != nil {
+			return generation.ProviderResponse{}, err
+		}
+		result, err := h.tool.PersistCompletedTask(ctx, input, task)
+		if err != nil {
+			return generation.ProviderResponse{}, generation.NewExecutionError(generation.ErrorStageArtifact, "seedance_asset_persist_failed", generation.ProviderErrorRetryable(err), err)
+		}
+		payload := map[string]any{}
+		raw, _ := json.Marshal(result)
+		_ = json.Unmarshal(raw, &payload)
+		return generation.ProviderResponse{State: generation.ProviderStateCompleted, TaskID: task.ID, RequestID: job.ID, Status: task.Status, Result: generation.ProviderResult{TaskID: task.ID, RequestID: job.ID, Status: task.Status, AssetIDs: []string{result.AssetID}, Payload: payload}}, nil
+	case "cancelled", "canceled":
+		return generation.ProviderResponse{State: generation.ProviderStateCancelled, TaskID: task.ID, RequestID: job.ID, Status: task.Status}, nil
+	case "failed", "expired":
+		return generation.ProviderResponse{State: generation.ProviderStateFailed, TaskID: task.ID, RequestID: job.ID, Status: task.Status, Result: generation.ProviderResult{Payload: map[string]any{"error_code": task.ErrorCode, "error_message": task.ErrorMessage}}}, nil
+	case "queued", "pending", "running", "processing", "submitted", "in_progress":
+		return generation.ProviderResponse{State: generation.ProviderStatePending, TaskID: job.ProviderTaskID, RequestID: job.ID, Status: task.Status, RetryAfter: h.pollInterval}, nil
+	default:
+		return generation.ProviderResponse{}, generation.NewExecutionError(generation.ErrorStageProvider, "seedance_unknown_status", false, fmt.Errorf("seedance task %s returned unsupported status %q", task.ID, task.Status))
+	}
+}
+
+func (h SeedanceJobHandler) Cancel(ctx context.Context, job generation.GenerationJob) (generation.ProviderCancelResult, error) {
+	confirmed, err := h.tool.CancelTask(ctx, job.ProviderTaskID)
+	if err != nil {
+		return generation.ProviderCancelResult{}, generation.NewExecutionError(generation.ErrorStageProvider, "seedance_cancel_failed", generation.ProviderErrorRetryable(err), err)
+	}
+	return generation.ProviderCancelResult{Confirmed: confirmed, Status: "cancel_requested"}, nil
 }
 
 // Handle 执行单个 Seedance 任务，并返回已持久化视频资产和业务结果。
@@ -113,6 +175,9 @@ func toSeedanceToolConfig(cfg SeedanceJobHandlerConfig) tools.SeedanceToolConfig
 // seedanceInputFromJob 从任务 payload 中解析视频生成输入，并补齐引用素材。
 func (h SeedanceJobHandler) seedanceInputFromJob(ctx context.Context, job generation.GenerationJob) (tools.SeedanceGenerateInput, error) {
 	var input tools.SeedanceGenerateInput
+	if err := generation.ValidateProviderJob(job); err != nil {
+		return input, generation.NewExecutionError(generation.ErrorStageProvider, "invalid_provider_input", false, err)
+	}
 	raw, err := json.Marshal(job.Payload)
 	if err != nil {
 		return input, fmt.Errorf("marshal seedance job payload: %w", err)
@@ -123,6 +188,8 @@ func (h SeedanceJobHandler) seedanceInputFromJob(ctx context.Context, job genera
 	input.SessionID = valueOrDefault(input.SessionID, job.SessionID)
 	input.TargetType = valueOrDefault(input.TargetType, job.TargetType)
 	input.TargetID = valueOrDefault(input.TargetID, job.TargetID)
+	input.SourceJobID = job.ID
+	input.OutputIndex = 0
 	if input.FilenamePrefix == "" {
 		input.FilenamePrefix = seedanceFilenamePrefix(job)
 	}
@@ -214,4 +281,5 @@ func seedanceFilenamePrefix(job generation.GenerationJob) string {
 }
 
 var _ generation.JobHandler = SeedanceJobHandler{}
+var _ generation.ProviderAdapter = SeedanceJobHandler{}
 var _ tools.SeedanceAssetStore = (*asset.PostgresStore)(nil)

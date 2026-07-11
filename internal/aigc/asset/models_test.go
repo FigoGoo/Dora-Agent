@@ -32,3 +32,12 @@ func TestKindFromMIME(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeAvailability(t *testing.T) {
+	if got := NormalizeAvailability(" AVAILABLE "); got != AvailabilityAvailable {
+		t.Fatalf("NormalizeAvailability() = %q", got)
+	}
+	if got := NormalizeAvailability("unknown"); got != "" {
+		t.Fatalf("NormalizeAvailability(unknown) = %q", got)
+	}
+}

@@ -103,6 +103,9 @@ func toImage2ToolConfig(cfg Image2JobHandlerConfig) tools.Image2ToolConfig {
 // image2InputFromJob 从任务 payload 中解析图片生成输入，并补齐会话/目标信息。
 func image2InputFromJob(job generation.GenerationJob) (tools.Image2GenerateInput, error) {
 	var input tools.Image2GenerateInput
+	if err := generation.ValidateProviderJob(job); err != nil {
+		return input, generation.NewExecutionError(generation.ErrorStageProvider, "invalid_provider_input", false, err)
+	}
 	raw, err := json.Marshal(job.Payload)
 	if err != nil {
 		return input, fmt.Errorf("marshal image2 job payload: %w", err)
@@ -113,6 +116,8 @@ func image2InputFromJob(job generation.GenerationJob) (tools.Image2GenerateInput
 	input.SessionID = valueOrDefault(input.SessionID, job.SessionID)
 	input.TargetType = valueOrDefault(input.TargetType, job.TargetType)
 	input.TargetID = valueOrDefault(input.TargetID, job.TargetID)
+	input.SourceJobID = job.ID
+	input.OutputIndexBase = 0
 	if input.FilenamePrefix == "" {
 		input.FilenamePrefix = image2FilenamePrefix(job)
 	}

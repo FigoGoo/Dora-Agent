@@ -16,6 +16,7 @@ dist/
 build/
 tmp/
 coverage/
+.local/
 
 # Go
 bin/

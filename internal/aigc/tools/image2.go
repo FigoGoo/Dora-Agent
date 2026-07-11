@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -24,6 +25,7 @@ const (
 	DefaultImage2Endpoint = "https://api.change2pro.com/images/generations"
 	DefaultImage2Model    = "gpt-image-2"
 	DefaultImage2Size     = "1024x1024"
+	MaxImage2Outputs      = 4
 )
 
 // Image2ToolConfig 汇总 Image2 图片生成工具的外部服务、存储和时间/ID 依赖。
@@ -54,15 +56,17 @@ type Image2AssetUploader interface {
 
 // Image2GenerateInput 是 Agent 调用图片生成工具时传入的业务参数。
 type Image2GenerateInput struct {
-	SessionID      string `json:"session_id,omitempty"`
-	UserID         string `json:"user_id,omitempty"`
-	TargetType     string `json:"target_type,omitempty"`
-	TargetID       string `json:"target_id,omitempty"`
-	FilenamePrefix string `json:"filename_prefix,omitempty"`
-	Prompt         string `json:"prompt"`
-	Model          string `json:"model,omitempty"`
-	N              int    `json:"n,omitempty"`
-	Size           string `json:"size,omitempty"`
+	SessionID       string `json:"session_id,omitempty"`
+	UserID          string `json:"user_id,omitempty"`
+	TargetType      string `json:"target_type,omitempty"`
+	TargetID        string `json:"target_id,omitempty"`
+	FilenamePrefix  string `json:"filename_prefix,omitempty"`
+	Prompt          string `json:"prompt"`
+	Model           string `json:"model,omitempty"`
+	N               int    `json:"n,omitempty"`
+	Size            string `json:"size,omitempty"`
+	SourceJobID     string `json:"source_job_id,omitempty"`
+	OutputIndexBase int    `json:"output_index_base,omitempty"`
 }
 
 // Image2GenerateResult 是图片生成工具返回给 Agent 的紧凑业务结果。
@@ -252,6 +256,10 @@ func (t Image2GenerateTool) generate(ctx context.Context, input Image2GenerateIn
 	}
 	req.Header.Set("Authorization", "Bearer "+t.cfg.APIKey)
 	req.Header.Set("Content-Type", "application/json")
+	if input.SourceJobID != "" {
+		req.Header.Set("Idempotency-Key", input.SourceJobID)
+		req.Header.Set("X-Client-Request-Id", input.SourceJobID)
+	}
 
 	resp, err := t.cfg.HTTPClient.Do(req)
 	if err != nil {
@@ -265,10 +273,26 @@ func (t Image2GenerateTool) generate(ctx context.Context, input Image2GenerateIn
 	}
 
 	var apiResp image2APIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+	if err := decodeLimitedProviderJSON(resp.Body, maxProviderJSONBytes, &apiResp); err != nil {
 		return nil, fmt.Errorf("decode image2 response: %w", err)
 	}
+	if err := validateImage2Response(apiResp); err != nil {
+		return nil, err
+	}
 	return &apiResp, nil
+}
+
+// validateImage2Response 确保 provider 成功响应里至少有一项可消费的图片内容。
+func validateImage2Response(apiResp image2APIResponse) error {
+	if len(apiResp.Data) == 0 {
+		return fmt.Errorf("image2 provider response did not include images")
+	}
+	for i, item := range apiResp.Data {
+		if strings.TrimSpace(item.B64JSON) == "" && strings.TrimSpace(item.URL) == "" {
+			return fmt.Errorf("image2 provider image %d did not include b64_json or URL", i)
+		}
+	}
+	return nil
 }
 
 // decodeImage2Invocation 只接受标准工具 envelope，图片生成参数必须放入 payload。
@@ -294,14 +318,22 @@ func normalizeImage2Input(input Image2GenerateInput) (Image2GenerateInput, error
 	if input.Model == "" {
 		input.Model = DefaultImage2Model
 	}
+	if input.Model != DefaultImage2Model {
+		return input, fmt.Errorf("unsupported image2 model %q", input.Model)
+	}
 	if input.N == 0 {
 		input.N = 1
 	}
-	if input.N < 0 {
-		return input, fmt.Errorf("n must be greater than zero")
+	if input.N < 1 || input.N > MaxImage2Outputs {
+		return input, fmt.Errorf("n must be between 1 and %d", MaxImage2Outputs)
 	}
 	if input.Size == "" {
 		input.Size = DefaultImage2Size
+	}
+	switch input.Size {
+	case "1024x1024", "1024x1536", "1536x1024":
+	default:
+		return input, fmt.Errorf("unsupported image2 size %q", input.Size)
 	}
 	return input, nil
 }
@@ -320,11 +352,15 @@ func (t Image2GenerateTool) persistImages(ctx context.Context, input Image2Gener
 			return nil, err
 		}
 		assetID := t.cfg.NewID()
+		outputIndex := input.OutputIndexBase + i
+		if input.SourceJobID != "" {
+			sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d", input.SourceJobID, outputIndex)))
+			assetID = "image_" + hex.EncodeToString(sum[:12])
+		}
 		filename := imageAssetFilename(input.FilenamePrefix, i, mediaType)
 		objectKey := asset.NewObjectKey(input.SessionID, assetID, filename)
 		metadata := map[string]any{
 			"provider":       "image2",
-			"provider_url":   image.URL,
 			"revised_prompt": image.RevisedPrompt,
 		}
 		uploadMetadata := map[string]string{
@@ -360,6 +396,8 @@ func (t Image2GenerateTool) persistImages(ctx context.Context, input Image2Gener
 			ID:              assetID,
 			SessionID:       input.SessionID,
 			UserID:          input.UserID,
+			SourceJobID:     input.SourceJobID,
+			OutputIndex:     outputIndex,
 			Kind:            asset.KindImage,
 			Source:          asset.SourceGenerated,
 			MIMEType:        mediaType,
@@ -402,27 +440,14 @@ func (t Image2GenerateTool) imageContent(ctx context.Context, image Image2Image)
 	if strings.TrimSpace(image.URL) == "" {
 		return nil, "", fmt.Errorf("image2 response did not include image bytes or URL")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(image.URL), nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("create image2 image download request: %w", err)
-	}
-	resp, err := t.cfg.HTTPClient.Do(req)
+	raw, contentType, err := downloadProviderObject(ctx, t.cfg.HTTPClient, image.URL, t.cfg.Endpoint, maxImageAssetBytes)
 	if err != nil {
 		return nil, "", fmt.Errorf("download image2 provider image: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, "", fmt.Errorf("image2 provider image returned %s: %s", resp.Status, strings.TrimSpace(string(raw)))
-	}
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, "", fmt.Errorf("read image2 provider image: %w", err)
 	}
 	if len(raw) == 0 {
 		return nil, "", fmt.Errorf("image2 provider returned empty image")
 	}
-	return raw, imageMediaType(resp.Header.Get("Content-Type"), image.MediaType), nil
+	return raw, imageMediaType(contentType, image.MediaType), nil
 }
 
 // convertImage2Images 把 provider 响应转换成内部图片列表。
@@ -507,6 +532,9 @@ func decodeImageB64(b64 string) ([]byte, error) {
 	b64 = strings.TrimSpace(b64)
 	if comma := strings.Index(b64, ","); comma >= 0 {
 		b64 = b64[comma+1:]
+	}
+	if int64(base64.StdEncoding.DecodedLen(len(b64))) > maxImageAssetBytes {
+		return nil, fmt.Errorf("image2 b64_json exceeds %d bytes", maxImageAssetBytes)
 	}
 	raw, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {

@@ -3,9 +3,11 @@ package spec
 import "time"
 
 const (
-	StatusDraft     = "draft"
-	StatusReviewing = "reviewing"
-	StatusConfirmed = "confirmed"
+	StatusDraft      = "draft"
+	StatusReviewing  = "reviewing"
+	StatusConfirmed  = "confirmed"
+	StatusRejected   = "rejected"
+	StatusSuperseded = "superseded"
 )
 
 type FinalVideoSpec struct {
@@ -13,6 +15,7 @@ type FinalVideoSpec struct {
 	SessionID       string         `json:"session_id"`
 	Version         int            `json:"version"`
 	Status          string         `json:"status"`
+	IdempotencyKey  string         `json:"idempotency_key,omitempty"`
 	Title           string         `json:"title,omitempty"`
 	VideoType       string         `json:"video_type,omitempty"`
 	TargetAudience  string         `json:"target_audience,omitempty"`

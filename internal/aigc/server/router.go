@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,11 +20,16 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/approval"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/approvalruntime"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/asset"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/billing"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/events"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/generation"
-	"github.com/FigoGoo/Dora-Agent/internal/aigc/mediagraph"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/session"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/sessionruntime"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/skill"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/spec"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/storyboard"
 	aigctools "github.com/FigoGoo/Dora-Agent/internal/aigc/tools"
 )
@@ -41,6 +48,10 @@ type SessionStore interface {
 type AgentInvoker interface {
 	Invoke(ctx context.Context, req AgentInvokeRequest) (<-chan AgentEvent, error)
 	Resume(ctx context.Context, req AgentResumeRequest) (<-chan AgentEvent, error)
+}
+
+type ConfirmedSpecStore interface {
+	GetConfirmedBySession(context.Context, string) (spec.FinalVideoSpec, error)
 }
 
 // AgentInvokeRequest 是一次新用户消息触发 Agent 运行的输入。
@@ -83,6 +94,12 @@ type GenerationJobStore interface {
 	ListBySession(ctx context.Context, sessionID string) ([]generation.GenerationJob, error)
 }
 
+type SessionRuntime interface {
+	Enqueue(context.Context, string, sessionruntime.SessionInput) (sessionruntime.EnqueueResult, error)
+	EnsureSession(context.Context, string) (bool, error)
+	Wake(string)
+}
+
 // CheckpointStore 定义 interrupt checkpoint 的映射和恢复状态更新能力。
 type CheckpointStore interface {
 	SaveCheckpointMapping(ctx context.Context, record session.CheckpointMapping) (session.CheckpointMapping, error)
@@ -90,43 +107,65 @@ type CheckpointStore interface {
 	MarkCheckpointResumed(ctx context.Context, id string) (session.CheckpointMapping, error)
 }
 
+type CheckpointTransitionStore interface {
+	TransitionCheckpointMapping(ctx context.Context, id string, expectedStatus string, expectedEpoch int64, nextStatus string, decisionVersion int) (session.CheckpointMapping, error)
+}
+
 // AssetUploader 定义上传二进制素材到对象存储的能力。
 type AssetUploader interface {
 	Upload(ctx context.Context, input asset.UploadInput) (asset.UploadResult, error)
 }
 
-// MediaGraphResumer 定义媒体生成图在人审确认后继续运行的能力。
-type MediaGraphResumer interface {
-	Resume(ctx context.Context, checkpointID string, interruptID string, decision mediagraph.ReferenceConfirmDecision) (mediagraph.RunResult, error)
+type GenerationPreflight func(context.Context, string, []generation.GenerationJob) (int64, error)
+
+type CompensationFinalizer interface {
+	ManualFinalize(context.Context, string, int64, string) (generation.GenerationJob, error)
 }
 
 // AgentEvent 是后端 Agent runner 推给 HTTP/SSE 层的统一事件。
 type AgentEvent struct {
-	Event         string
-	SurfaceID     string
-	DataModelKey  string
-	Payload       any
-	AssistantText string
-	Message       *schema.Message
-	Err           error
+	Event             string
+	SurfaceID         string
+	DataModelKey      string
+	Payload           any
+	AssistantText     string
+	Message           *schema.Message
+	Err               error
+	ProgressPublished bool
 }
 
 // Config 汇总 AIGC HTTP 路由依赖，方便测试替换存储、Agent 和事件 broker。
 type Config struct {
-	Store          SessionStore
-	Skills         SkillStore
-	Storyboards    StoryboardStore
-	Assets         AssetStore
-	GenerationJobs GenerationJobStore
-	AssetUploader  AssetUploader
-	Events         a2ui.EventBroker
-	Checkpoints    CheckpointStore
-	Invoker        AgentInvoker
-	MediaGraph     MediaGraphResumer
-	SessionValues  func(session.SessionRecord) map[string]any
-	MessageWindow  session.MessageWindow
-	NewID          func() string
-	Now            func() time.Time
+	Store               SessionStore
+	Skills              SkillStore
+	Storyboards         StoryboardStore
+	Assets              AssetStore
+	GenerationJobs      GenerationJobStore
+	GenerationWorkflow  generation.WorkflowStore
+	GenerationCommands  *generation.CommandService
+	GenerationPreflight GenerationPreflight
+	Compensation        CompensationFinalizer
+	AdminToken          string
+	AssetUploader       AssetUploader
+	LocalAssetDir       string
+	Events              a2ui.EventBroker
+	EventLog            events.Store
+	EventRelay          *events.TailRelay
+	Checkpoints         CheckpointStore
+	Invoker             AgentInvoker
+	DynamicStoryboards  storyboard.AggregateRepository
+	StoryboardCommands  *storyboard.CommandService
+	Approvals           approval.Store
+	ApprovalRuntime     *approvalruntime.Service
+	Runtime             SessionRuntime
+	RuntimeStore        *sessionruntime.PostgresStore
+	Billing             billing.Store
+	Specs               ConfirmedSpecStore
+	InitialPoints       int64
+	SessionValues       func(session.SessionRecord) map[string]any
+	MessageWindow       session.MessageWindow
+	NewID               func() string
+	Now                 func() time.Time
 }
 
 // NewRouter 构建 AIGC HTTP API，并为运行时依赖补齐默认 ID、时间和历史窗口。
@@ -140,6 +179,16 @@ func NewRouter(cfg Config) *gin.Engine {
 	if cfg.MessageWindow.Limit == 0 {
 		cfg.MessageWindow.Limit = 40
 	}
+	if cfg.InitialPoints <= 0 {
+		cfg.InitialPoints = 10000
+	}
+	if cfg.EventLog != nil && cfg.EventRelay == nil {
+		var notifications events.NotificationSource
+		if durable, ok := cfg.Events.(*DurableEventBroker); ok {
+			notifications = durable.Notifications
+		}
+		cfg.EventRelay, _ = events.NewTailRelay(events.TailRelayConfig{Store: cfg.EventLog, Notifications: notifications, PollInterval: time.Second, BatchSize: 100})
+	}
 
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -147,6 +196,9 @@ func NewRouter(cfg Config) *gin.Engine {
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	if localAssetDir := strings.TrimSpace(cfg.LocalAssetDir); localAssetDir != "" {
+		router.StaticFS("/api/aigc/local-assets", gin.Dir(localAssetDir, false))
+	}
 	router.POST("/api/aigc/skills", cfg.createSkill)
 	router.GET("/api/aigc/skills", cfg.listSkills)
 	router.GET("/api/aigc/skills/:skill_id/plan", cfg.getSkillPlan)
@@ -158,10 +210,18 @@ func NewRouter(cfg Config) *gin.Engine {
 	router.GET("/api/aigc/sessions/:session_id/assets", cfg.listSessionAssets)
 	router.GET("/api/aigc/sessions/:session_id/jobs", cfg.listSessionGenerationJobs)
 	router.GET("/api/aigc/sessions/:session_id/events/stream", cfg.streamSessionEvents)
+	router.GET("/api/aigc/sessions/:session_id/events", cfg.replaySessionEvents)
 	router.GET("/api/aigc/sessions/:session_id/storyboard", cfg.getSessionStoryboard)
 	router.PATCH("/api/aigc/sessions/:session_id/storyboards/:storyboard_id", cfg.patchStoryboard)
 	router.POST("/api/aigc/sessions/:session_id/storyboards/:storyboard_id/assets/:asset_id/bind", cfg.bindAssetToStoryboard)
-	router.POST("/api/aigc/sessions/:session_id/media-graph/resume", cfg.resumeMediaGraph)
+	router.PATCH("/api/aigc/sessions/:session_id/storyboards/:storyboard_id/targets/:target_id/prompt", cfg.updateTargetPrompt)
+	router.POST("/api/aigc/sessions/:session_id/storyboards/:storyboard_id/targets/:target_id/regenerate", cfg.regenerateTarget)
+	router.POST("/api/aigc/sessions/:session_id/storyboards/:storyboard_id/targets/:target_id/assets/:asset_id/bind", cfg.bindTargetAsset)
+	router.POST("/api/aigc/sessions/:session_id/storyboards/:storyboard_id/candidate-approvals/decision", cfg.decideCandidateApprovalBatch)
+	router.POST("/api/aigc/sessions/:session_id/approvals/:approval_id/decision", cfg.decideApproval)
+	router.GET("/api/aigc/sessions/:session_id/generation-operations/:operation_id", cfg.getGenerationOperation)
+	router.POST("/api/aigc/sessions/:session_id/generation-operations/:operation_id/control", cfg.controlGenerationOperation)
+	router.POST("/api/aigc/admin/generation/jobs/:job_id/compensation/finalize", cfg.manualFinalizeCompensation)
 	router.POST("/api/aigc/sessions/:session_id/messages", cfg.createMessage)
 	router.POST("/api/aigc/sessions/:session_id/messages/resume", cfg.resumeAgent)
 
@@ -313,9 +373,16 @@ func (cfg Config) createSession(c *gin.Context) {
 	}
 
 	now := cfg.Now()
+	userID := strings.TrimSpace(req.UserID)
+	if cfg.Billing != nil && userID != "" {
+		if _, err := cfg.Billing.EnsureAccount(c.Request.Context(), userID, cfg.InitialPoints); err != nil {
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	record := session.SessionRecord{
 		ID:        cfg.NewID(),
-		UserID:    strings.TrimSpace(req.UserID),
+		UserID:    userID,
 		SkillID:   strings.TrimSpace(req.SkillID),
 		Title:     strings.TrimSpace(req.Title),
 		Status:    "active",
@@ -441,9 +508,10 @@ func (cfg Config) uploadAsset(c *gin.Context) {
 	if source == "" {
 		source = asset.SourceUpload
 	}
-	userID := strings.TrimSpace(c.PostForm("user_id"))
-	if userID == "" {
-		userID = sessionRecord.UserID
+	userID := strings.TrimSpace(sessionRecord.UserID)
+	if supplied := strings.TrimSpace(c.PostForm("user_id")); supplied != "" && supplied != userID {
+		writeJSONError(c, http.StatusForbidden, "asset user does not own the session")
+		return
 	}
 
 	assetID := cfg.NewID()
@@ -498,8 +566,12 @@ func (cfg Config) getAsset(c *gin.Context) {
 		return
 	}
 	assetID := strings.TrimSpace(c.Param("asset_id"))
-	if assetID == "" {
-		writeJSONError(c, http.StatusBadRequest, "asset id is required")
+	sessionID := strings.TrimSpace(c.Query("session_id"))
+	if assetID == "" || sessionID == "" {
+		writeJSONError(c, http.StatusBadRequest, "asset id and session_id are required")
+		return
+	}
+	if !cfg.ensureSession(c, sessionID) {
 		return
 	}
 	record, err := cfg.Assets.Get(c.Request.Context(), assetID)
@@ -509,6 +581,10 @@ func (cfg Config) getAsset(c *gin.Context) {
 			return
 		}
 		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if record.SessionID != sessionID || (record.Availability != "" && record.Availability != asset.AvailabilityAvailable) {
+		writeJSONError(c, http.StatusNotFound, "asset not found")
 		return
 	}
 	c.JSON(http.StatusOK, record)
@@ -538,8 +614,9 @@ func assetMetadataFromForm(c *gin.Context) (map[string]any, map[string]string) {
 
 // messageRequest 承载用户普通提示词；A2UI 表单提交前端会先渲染成 content。
 type messageRequest struct {
-	Content  string           `json:"content,omitempty"`
-	UISource *messageUISource `json:"ui_source,omitempty"`
+	Content        string           `json:"content,omitempty"`
+	IdempotencyKey string           `json:"idempotency_key,omitempty"`
+	UISource       *messageUISource `json:"ui_source,omitempty"`
 }
 
 // messageUISource 标记普通用户消息来自哪个临时 UI，用于刷新历史时关闭已提交 A2UI 表单。
@@ -566,18 +643,62 @@ type bindAssetRequest struct {
 	ToolCallID  string `json:"tool_call_id,omitempty"`
 }
 
+type updateTargetPromptRequest struct {
+	ExpectedVersion int    `json:"expected_version"`
+	TargetRevision  int    `json:"target_revision"`
+	PromptRevision  int    `json:"prompt_revision"`
+	Purpose         string `json:"purpose"`
+	Prompt          string `json:"prompt"`
+	PromptRef       string `json:"prompt_ref,omitempty"`
+	IdempotencyKey  string `json:"idempotency_key,omitempty"`
+}
+
+type regenerateTargetRequest struct {
+	ExpectedVersion int    `json:"expected_version"`
+	TargetRevision  int    `json:"target_revision"`
+	AssetSlot       string `json:"asset_slot"`
+	MediaKind       string `json:"media_kind,omitempty"`
+	IdempotencyKey  string `json:"idempotency_key"`
+}
+
+type bindTargetAssetRequest struct {
+	ExpectedVersion int    `json:"expected_version"`
+	TargetRevision  int    `json:"target_revision"`
+	PromptRevision  int    `json:"prompt_revision,omitempty"`
+	GenerationEpoch int    `json:"generation_epoch,omitempty"`
+	AssetSlot       string `json:"asset_slot"`
+	BindingID       string `json:"binding_id,omitempty"`
+	IdempotencyKey  string `json:"idempotency_key,omitempty"`
+}
+
+type approvalDecisionRequest struct {
+	ExpectedDecisionVersion *int   `json:"expected_decision_version,omitempty"`
+	IdempotencyKey          string `json:"idempotency_key,omitempty"`
+	Decision                string `json:"decision"`
+	Reason                  string `json:"reason,omitempty"`
+}
+
+type candidateApprovalBatchDecisionRequest struct {
+	ExpectedStoryboardVersion int    `json:"expected_storyboard_version"`
+	IdempotencyKey            string `json:"idempotency_key"`
+	Decision                  string `json:"decision"`
+	Reason                    string `json:"reason,omitempty"`
+}
+
+type generationControlRequest struct {
+	Action         string `json:"action"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+
+type manualCompensationRequest struct {
+	RefundedPoints      int64  `json:"refunded_points"`
+	RefundTransactionID string `json:"refund_transaction_id,omitempty"`
+}
+
 // patchStoryboardResponse 返回 patch 后的故事板和可广播的 A2UI patch payload。
 type patchStoryboardResponse struct {
 	Storyboard storyboard.Storyboard       `json:"storyboard"`
 	Patch      a2ui.StoryboardPatchPayload `json:"patch"`
-}
-
-// resumeMediaGraphRequest 是媒体生成图等待人审确认后的恢复请求。
-type resumeMediaGraphRequest struct {
-	CheckpointID string `json:"checkpoint_id"`
-	InterruptID  string `json:"interrupt_id"`
-	Approved     *bool  `json:"approved"`
-	Note         string `json:"note"`
 }
 
 // resumeAgentRequest 是 Agent interrupt 被用户输入恢复时的请求体。
@@ -588,21 +709,105 @@ type resumeAgentRequest struct {
 	Data         any    `json:"data"`
 }
 
-// resumeMediaGraphResponse 只返回媒体图恢复状态；后续 A2UI 事件统一从 /events/stream 下发。
-type resumeMediaGraphResponse struct {
-	Status string                          `json:"status"`
-	Output mediagraph.MediaGeneratorOutput `json:"output,omitempty"`
-}
-
 // messageResponse 是提交用户输入后的同步确认；实际 A2UI 输出只从 /events/stream 下发。
 type messageResponse struct {
-	RunID  string `json:"run_id"`
-	Status string `json:"status"`
+	RunID     string `json:"run_id"`
+	MessageID string `json:"message_id,omitempty"`
+	InputID   string `json:"input_id,omitempty"`
+	Status    string `json:"status"`
 }
 
 // listSessionGenerationJobsResponse 返回会话内生成任务列表。
 type listSessionGenerationJobsResponse struct {
 	Jobs []generation.GenerationJob `json:"jobs"`
+}
+
+// publicGenerationJobs removes provider transport, semantic fencing and
+// billing internals from user-facing recovery APIs. Generated assets become
+// discoverable through the availability-filtered asset API after finalization.
+func publicGenerationJobs(jobs []generation.GenerationJob) []generation.GenerationJob {
+	visible := make([]generation.GenerationJob, 0, len(jobs))
+	for _, job := range jobs {
+		job.UserID = ""
+		job.WorkflowRunID = ""
+		job.StageRunID = ""
+		job.ToolCallID = ""
+		job.IdempotencyKey = ""
+		job.BindingToken = generation.BindingToken{}
+		job.DeliveryPolicy = generation.DeliveryPolicy{}
+		job.StoryboardVersionAtDispatch = 0
+		job.Payload = nil
+		job.Result = nil
+		job.ProviderTaskID = ""
+		job.ProviderRequestID = ""
+		job.ProviderUsageRecorded = false
+		job.ProviderUsageReported = false
+		job.ProviderActualPoints = 0
+		job.ProviderCostBreakdown = nil
+		job.SettlementQuoteRecorded = false
+		job.SettlementPoints = 0
+		job.SettlementBreakdown = nil
+		job.LeaseOwner = ""
+		job.LeaseUntil = nil
+		job.BillingTransactionID = ""
+		job.BillingIdempotencyKey = ""
+		job.CompensationEventID = ""
+		job.RefundTransactionID = ""
+		job.BalanceAfter = nil
+		job.ErrorMessage = ""
+		if job.Status != generation.StatusSucceeded {
+			job.ResultAssetIDs = nil
+		}
+		visible = append(visible, job)
+	}
+	return visible
+}
+
+func publicGenerationOperation(operation generation.GenerationOperation) generation.GenerationOperation {
+	operation.UserID = ""
+	operation.WorkflowRunID = ""
+	operation.StageRunID = ""
+	operation.ToolCallID = ""
+	operation.IdempotencyKey = ""
+	operation.RequestFingerprint = ""
+	operation.ErrorMessage = ""
+	operation.Result = publicGenerationOperationResult(operation.Result)
+	return operation
+}
+
+func publicGenerationOperationResult(result map[string]any) map[string]any {
+	if len(result) == 0 {
+		return nil
+	}
+	visible := map[string]any{}
+	for _, key := range []string{"status", "estimated_points", "cost", "assembly_revision_id", "recovery_of_operation_id"} {
+		if value, exists := result[key]; exists {
+			visible[key] = value
+		}
+	}
+	if len(visible) == 0 {
+		return nil
+	}
+	return visible
+}
+
+func publicGenerationBatch(batch generation.GenerationBatch) generation.GenerationBatch {
+	batch.UserID = ""
+	batch.WorkflowRunID = ""
+	batch.StageRunID = ""
+	batch.ToolCallID = ""
+	batch.DeliveryPolicy = generation.DeliveryPolicy{}
+	batch.ExpectedSpecVersion = 0
+	batch.ExpectedStoryboardVersion = 0
+	batch.ErrorMessage = ""
+	return batch
+}
+
+func publicWorkflowAggregate(workflow generation.WorkflowAggregate) generation.WorkflowAggregate {
+	workflow.Operation = publicGenerationOperation(workflow.Operation)
+	workflow.Batch = publicGenerationBatch(workflow.Batch)
+	workflow.Jobs = publicGenerationJobs(workflow.Jobs)
+	return workflow
 }
 
 // listSessionMessagesResponse 返回会话历史消息列表。
@@ -660,7 +865,15 @@ func (cfg Config) listSessionAssets(c *gin.Context) {
 		writeJSONError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, listSessionAssetsResponse{Assets: records})
+	visible := make([]asset.Asset, 0, len(records))
+	for _, record := range records {
+		// Provider output is created as pending_billing. It becomes user-visible
+		// only after finalization, charge and binding have all committed.
+		if record.Availability == "" || record.Availability == asset.AvailabilityAvailable {
+			visible = append(visible, record)
+		}
+	}
+	c.JSON(http.StatusOK, listSessionAssetsResponse{Assets: visible})
 }
 
 // listSessionGenerationJobs 返回会话后台生成任务，前端用于恢复工具进度状态。
@@ -684,12 +897,12 @@ func (cfg Config) listSessionGenerationJobs(c *gin.Context) {
 		writeJSONError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, listSessionGenerationJobsResponse{Jobs: jobs})
+	c.JSON(http.StatusOK, listSessionGenerationJobsResponse{Jobs: publicGenerationJobs(jobs)})
 }
 
 // streamSessionEvents 订阅会话级 broker，把后台事件持续写成 SSE。
 func (cfg Config) streamSessionEvents(c *gin.Context) {
-	if cfg.Events == nil {
+	if cfg.Events == nil && cfg.EventRelay == nil {
 		writeJSONError(c, http.StatusInternalServerError, "event broker is not configured")
 		return
 	}
@@ -700,6 +913,10 @@ func (cfg Config) streamSessionEvents(c *gin.Context) {
 		return
 	}
 	if !cfg.ensureSession(c, sessionID) {
+		return
+	}
+	if cfg.EventRelay != nil && cfg.EventLog != nil {
+		cfg.streamDurableSessionEvents(c, sessionID)
 		return
 	}
 
@@ -748,9 +965,110 @@ func (cfg Config) streamSessionEvents(c *gin.Context) {
 	}
 }
 
+var errSSEOnceComplete = errors.New("sse once complete")
+
+func (cfg Config) streamDurableSessionEvents(c *gin.Context, sessionID string) {
+	afterSeq := int64(0)
+	if raw := strings.TrimSpace(c.Query("after_seq")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value < 0 {
+			writeJSONError(c, http.StatusBadRequest, "after_seq must be a non-negative integer")
+			return
+		}
+		afterSeq = value
+	}
+	if lastID := strings.TrimSpace(c.GetHeader("Last-Event-ID")); lastID != "" {
+		if value, err := strconv.ParseInt(lastID, 10, 64); err == nil {
+			afterSeq = max(afterSeq, value)
+		} else if event, err := cfg.EventLog.GetByEventID(c.Request.Context(), lastID); err == nil && event.SessionID == sessionID {
+			afterSeq = max(afterSeq, event.Seq)
+		}
+	}
+	prepareSSE(c)
+	current, _ := cfg.EventLog.CurrentSeq(c.Request.Context(), sessionID)
+	// ready is connection metadata, not a consumed log row. Giving it an SSE
+	// id equal to current_seq would advance EventSource's Last-Event-ID before
+	// older rows were replayed and could create a permanent replay gap.
+	if err := writeSSE(c, a2ui.SSEEvent{SessionID: sessionID, Seq: current, Event: a2ui.EventReady, Payload: gin.H{"status": "connected", "after_seq": afterSeq, "current_seq": current}, CreatedAt: cfg.Now()}); err != nil {
+		return
+	}
+	if c.Query("once") == "1" {
+		rows, err := cfg.EventLog.Tail(c.Request.Context(), sessionID, events.TailOptions{AfterSeq: afterSeq, Limit: 100})
+		if err != nil {
+			return
+		}
+		for _, row := range rows {
+			event := sessionEventAsSSE(row)
+			if !isClientA2UIEvent(event.Event) {
+				continue
+			}
+			_ = writeSSE(c, event)
+			return
+		}
+		return
+	}
+	err := cfg.EventRelay.Relay(c.Request.Context(), sessionID, afterSeq, func(row events.SessionEvent) error {
+		event := sessionEventAsSSE(row)
+		if !isClientA2UIEvent(event.Event) {
+			return nil
+		}
+		return writeSSE(c, event)
+	})
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, errSSEOnceComplete) {
+		_ = writeSSE(c, a2ui.SSEEvent{ID: cfg.NewID(), SessionID: sessionID, Event: a2ui.EventError, Payload: gin.H{"message": err.Error()}, CreatedAt: cfg.Now()})
+	}
+}
+
+func (cfg Config) replaySessionEvents(c *gin.Context) {
+	if cfg.EventLog == nil {
+		writeJSONError(c, http.StatusInternalServerError, "session event log is not configured")
+		return
+	}
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	if sessionID == "" || !cfg.ensureSession(c, sessionID) {
+		return
+	}
+	afterSeq := int64(0)
+	if raw := strings.TrimSpace(c.Query("after_seq")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value < 0 {
+			writeJSONError(c, http.StatusBadRequest, "after_seq must be a non-negative integer")
+			return
+		}
+		afterSeq = value
+	}
+	limit := 100
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value <= 0 || value > 1000 {
+			writeJSONError(c, http.StatusBadRequest, "limit must be between 1 and 1000")
+			return
+		}
+		limit = value
+	}
+	rows, err := cfg.EventLog.Tail(c.Request.Context(), sessionID, events.TailOptions{AfterSeq: afterSeq, Limit: limit})
+	if err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	result := make([]a2ui.SSEEvent, 0, len(rows))
+	next := afterSeq
+	for _, row := range rows {
+		if row.Seq > next {
+			next = row.Seq
+		}
+		event := sessionEventAsSSE(row)
+		if isClientA2UIEvent(event.Event) {
+			result = append(result, event)
+		}
+	}
+	current, _ := cfg.EventLog.CurrentSeq(c.Request.Context(), sessionID)
+	c.JSON(http.StatusOK, gin.H{"events": result, "after_seq": afterSeq, "next_seq": next, "current_seq": current})
+}
+
 // getSessionStoryboard 返回会话最新故事板，未创建时返回 204。
 func (cfg Config) getSessionStoryboard(c *gin.Context) {
-	if cfg.Storyboards == nil {
+	if cfg.Storyboards == nil && cfg.DynamicStoryboards == nil {
 		writeJSONError(c, http.StatusInternalServerError, "storyboard store is not configured")
 		return
 	}
@@ -764,6 +1082,21 @@ func (cfg Config) getSessionStoryboard(c *gin.Context) {
 		return
 	}
 
+	if cfg.DynamicStoryboards != nil {
+		aggregate, err := cfg.DynamicStoryboards.GetAggregateBySession(c.Request.Context(), sessionID)
+		if err == nil {
+			c.JSON(http.StatusOK, aggregate.PublicView())
+			return
+		}
+		if !errors.Is(err, storyboard.ErrAggregateNotFound) {
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if cfg.Storyboards == nil {
+		c.Status(http.StatusNoContent)
+		return
+	}
 	board, err := cfg.Storyboards.GetLatestBySession(c.Request.Context(), sessionID)
 	if err != nil {
 		if errors.Is(err, storyboard.ErrNotFound) {
@@ -794,6 +1127,11 @@ func (cfg Config) patchStoryboard(c *gin.Context) {
 		return
 	}
 	if !cfg.ensureSession(c, sessionID) {
+		return
+	}
+	board, err := cfg.Storyboards.Get(c.Request.Context(), storyboardID)
+	if err != nil || board.SessionID != sessionID {
+		writeJSONError(c, http.StatusNotFound, "storyboard not found")
 		return
 	}
 
@@ -904,6 +1242,10 @@ func (cfg Config) bindAssetToStoryboard(c *gin.Context) {
 		writeJSONError(c, http.StatusBadRequest, "asset does not belong to session")
 		return
 	}
+	if assetRecord.Availability != asset.AvailabilityAvailable {
+		writeJSONError(c, http.StatusConflict, "asset is not available for binding")
+		return
+	}
 	board, err := cfg.Storyboards.Get(c.Request.Context(), storyboardID)
 	if err != nil {
 		if errors.Is(err, storyboard.ErrNotFound) {
@@ -969,91 +1311,863 @@ func (cfg Config) bindAssetToStoryboard(c *gin.Context) {
 	})
 }
 
-// resumeMediaGraph 恢复媒体生成图的人审节点，并处理可能出现的后续 interrupt。
-func (cfg Config) resumeMediaGraph(c *gin.Context) {
-	if cfg.MediaGraph == nil {
-		writeJSONError(c, http.StatusInternalServerError, "media graph is not configured")
+func (cfg Config) updateTargetPrompt(c *gin.Context) {
+	if cfg.DynamicStoryboards == nil || cfg.StoryboardCommands == nil {
+		writeJSONError(c, http.StatusInternalServerError, "dynamic storyboard command service is not configured")
 		return
 	}
-
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		writeJSONError(c, http.StatusBadRequest, "session id is required")
+	sessionID, storyboardID, targetID := strings.TrimSpace(c.Param("session_id")), strings.TrimSpace(c.Param("storyboard_id")), strings.TrimSpace(c.Param("target_id"))
+	if sessionID == "" || storyboardID == "" || targetID == "" || !cfg.ensureSession(c, sessionID) {
 		return
 	}
-	if !cfg.ensureSession(c, sessionID) {
+	var req updateTargetPromptRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.ExpectedVersion <= 0 || req.PromptRevision <= 0 || strings.TrimSpace(req.Purpose) == "" {
+		writeJSONError(c, http.StatusBadRequest, "expected_version, prompt_revision and purpose are required")
 		return
 	}
-
-	var req resumeMediaGraphRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		writeJSONError(c, http.StatusBadRequest, "invalid media graph resume request")
+	if strings.TrimSpace(req.Prompt) == "" {
+		writeJSONError(c, http.StatusBadRequest, "prompt content is required")
 		return
 	}
-	req.CheckpointID = strings.TrimSpace(req.CheckpointID)
-	req.InterruptID = strings.TrimSpace(req.InterruptID)
-	if req.CheckpointID == "" {
-		writeJSONError(c, http.StatusBadRequest, "checkpoint id is required")
-		return
+	commandID := strings.TrimSpace(req.IdempotencyKey)
+	if commandID == "" {
+		commandID = stableRequestID("prompt", strings.Join([]string{sessionID, storyboardID, targetID, req.Purpose, strconv.Itoa(req.PromptRevision), req.Prompt, req.PromptRef}, "\x00"))
 	}
-	if req.InterruptID == "" {
-		writeJSONError(c, http.StatusBadRequest, "interrupt id is required")
-		return
-	}
-	alreadyResumed, err := cfg.checkpointAlreadyResumed(c.Request.Context(), sessionID, req.InterruptID)
+	aggregate, err := cfg.DynamicStoryboards.GetAggregate(c.Request.Context(), storyboardID)
 	if err != nil {
-		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		writeStoryboardCommandError(c, err)
 		return
 	}
-	if alreadyResumed {
-		c.JSON(http.StatusOK, resumeMediaGraphResponse{Status: session.CheckpointStatusResumed})
+	if aggregate.SessionID != sessionID {
+		writeJSONError(c, http.StatusNotFound, "storyboard not found")
 		return
 	}
-	if req.Approved == nil {
-		writeJSONError(c, http.StatusBadRequest, "approved is required")
-		return
-	}
-
-	result, err := cfg.MediaGraph.Resume(c.Request.Context(), req.CheckpointID, req.InterruptID, mediagraph.ReferenceConfirmDecision{
-		Approved: *req.Approved,
-		Note:     strings.TrimSpace(req.Note),
+	updated, stale, err := cfg.StoryboardCommands.UpdatePrompt(c.Request.Context(), storyboard.UpdatePromptCommand{
+		CommandID: commandID, StoryboardID: storyboardID, BaseVersion: req.ExpectedVersion,
+		TargetID: targetID, ExpectedTargetRevision: req.TargetRevision, Purpose: req.Purpose, ExpectedRevision: req.PromptRevision,
+		Prompt: req.Prompt, PromptRef: req.PromptRef, LockedByUser: true,
 	})
 	if err != nil {
+		writeStoryboardCommandError(c, err)
+		return
+	}
+	view := updated.PublicView()
+	c.JSON(http.StatusOK, gin.H{"aggregate": view, "storyboard": view, "stale_targets": stale})
+}
+
+func (cfg Config) regenerateTarget(c *gin.Context) {
+	if cfg.DynamicStoryboards == nil || cfg.StoryboardCommands == nil || cfg.GenerationCommands == nil {
+		writeJSONError(c, http.StatusInternalServerError, "storyboard and generation command services are not configured")
+		return
+	}
+	sessionID, storyboardID, targetID := strings.TrimSpace(c.Param("session_id")), strings.TrimSpace(c.Param("storyboard_id")), strings.TrimSpace(c.Param("target_id"))
+	if sessionID == "" || storyboardID == "" || targetID == "" || !cfg.ensureSession(c, sessionID) {
+		return
+	}
+	sessionRecord, err := cfg.Store.GetSession(c.Request.Context(), sessionID)
+	if err != nil {
+		writeJSONError(c, http.StatusNotFound, "session not found")
+		return
+	}
+	var req regenerateTargetRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.ExpectedVersion <= 0 || strings.TrimSpace(req.AssetSlot) == "" {
+		writeJSONError(c, http.StatusBadRequest, "expected_version and asset_slot are required")
+		return
+	}
+	req.AssetSlot = strings.TrimSpace(req.AssetSlot)
+	req.MediaKind = strings.ToLower(strings.TrimSpace(req.MediaKind))
+	if req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey); req.IdempotencyKey == "" {
+		req.IdempotencyKey = stableRequestID("regenerate", strings.Join([]string{sessionID, storyboardID, targetID, req.AssetSlot, strconv.Itoa(req.ExpectedVersion)}, ":"))
+	}
+	if cfg.GenerationWorkflow != nil {
+		if existing, lookupErr := cfg.GenerationWorkflow.GetOperationByIdempotencyKey(c.Request.Context(), req.IdempotencyKey); lookupErr == nil {
+			if existing.SessionID != sessionID || existing.Kind != "target_regeneration" {
+				writeJSONError(c, http.StatusConflict, "idempotency key is already bound to a different generation request")
+				return
+			}
+			batch, batchErr := cfg.GenerationWorkflow.GetBatch(c.Request.Context(), existing.BatchID)
+			jobs, jobsErr := cfg.GenerationWorkflow.ListJobsByBatch(c.Request.Context(), existing.BatchID)
+			if batchErr != nil || jobsErr != nil {
+				writeJSONError(c, http.StatusInternalServerError, "load existing regeneration workflow failed")
+				return
+			}
+			if len(jobs) != 1 || jobs[0].TargetID != targetID || jobs[0].AssetSlot != strings.TrimSpace(req.AssetSlot) || jobs[0].StoryboardVersionAtDispatch != req.ExpectedVersion+1 ||
+				(req.TargetRevision > 0 && jobs[0].BindingToken.TargetRevision != req.TargetRevision) ||
+				(req.MediaKind != "" && strings.ToLower(strings.TrimSpace(jobs[0].MediaKind)) != req.MediaKind) {
+				writeJSONError(c, http.StatusConflict, "idempotency key is already bound to a different regeneration target")
+				return
+			}
+			public := publicWorkflowAggregate(generation.WorkflowAggregate{Operation: existing, Batch: batch, Jobs: jobs})
+			c.JSON(http.StatusAccepted, gin.H{"status": public.Operation.Status, "operation": public.Operation, "batch": public.Batch, "jobs": public.Jobs})
+			return
+		} else if !errors.Is(lookupErr, generation.ErrNotFound) {
+			writeJSONError(c, http.StatusInternalServerError, lookupErr.Error())
+			return
+		}
+	}
+	aggregate, err := cfg.DynamicStoryboards.GetAggregate(c.Request.Context(), storyboardID)
+	if err != nil {
+		writeStoryboardCommandError(c, err)
+		return
+	}
+	if aggregate.SessionID != sessionID {
+		writeJSONError(c, http.StatusNotFound, "storyboard not found")
+		return
+	}
+	if snapshot, found, snapshotErr := loadRegenerationDispatchSnapshot(c.Request.Context(), cfg.DynamicStoryboards, storyboardID, req.IdempotencyKey+":epoch"); snapshotErr != nil {
+		writeJSONError(c, http.StatusInternalServerError, snapshotErr.Error())
+		return
+	} else if found {
+		if snapshot.Input.TargetID != targetID || snapshot.Input.AssetSlot != strings.TrimSpace(req.AssetSlot) || snapshot.UserID != sessionRecord.UserID || snapshot.StoryboardVersion != req.ExpectedVersion+1 ||
+			(req.TargetRevision > 0 && snapshot.Input.TargetRevision != req.TargetRevision) ||
+			(req.MediaKind != "" && strings.ToLower(strings.TrimSpace(snapshot.MediaKind)) != req.MediaKind) {
+			writeJSONError(c, http.StatusConflict, "idempotency key is already bound to a different regeneration target")
+			return
+		}
+		workflow, createErr := cfg.createTargetRegenerationWorkflow(c.Request.Context(), sessionID, storyboardID, req.IdempotencyKey, snapshot)
+		if createErr != nil {
+			writeJSONError(c, http.StatusInternalServerError, createErr.Error())
+			return
+		}
+		public := publicWorkflowAggregate(workflow)
+		view := aggregate.PublicView()
+		c.JSON(http.StatusAccepted, gin.H{"status": public.Operation.Status, "aggregate": view, "storyboard": view, "operation": public.Operation, "batch": public.Batch, "jobs": public.Jobs})
+		return
+	}
+	if aggregate.PendingRevisionID != "" {
+		writeJSONError(c, http.StatusConflict, "approve or reject the pending storyboard revision before regenerating assets")
+		return
+	}
+	element, slot, ok := dynamicTarget(aggregate, targetID, req.AssetSlot)
+	if !ok {
+		writeJSONError(c, http.StatusNotFound, "storyboard target or asset slot not found")
+		return
+	}
+	if req.MediaKind != "" && strings.ToLower(strings.TrimSpace(slot.MediaKind)) != req.MediaKind {
+		writeJSONError(c, http.StatusConflict, "media_kind does not match the asset slot")
+		return
+	}
+	if req.TargetRevision > 0 && element.Revision != req.TargetRevision {
+		writeJSONError(c, http.StatusConflict, "storyboard target revision conflict")
+		return
+	}
+	provider := providerForMediaKind(slot.MediaKind)
+	if provider == "" {
+		writeJSONError(c, http.StatusConflict, "asset slot media kind is not supported by a generation provider")
+		return
+	}
+	activeRevision, err := aggregate.ActiveRevision()
+	if err != nil {
+		writeStoryboardCommandError(c, err)
+		return
+	}
+	if cfg.Specs != nil {
+		confirmed, specErr := cfg.Specs.GetConfirmedBySession(c.Request.Context(), sessionID)
+		if specErr != nil {
+			writeJSONError(c, http.StatusConflict, "confirmed creation spec is not available")
+			return
+		}
+		if activeRevision.DerivedFromSpecVersion > 0 && activeRevision.DerivedFromSpecVersion != confirmed.Version {
+			writeJSONError(c, http.StatusConflict, "storyboard must be replanned for the latest confirmed creation spec")
+			return
+		}
+	}
+	// Preview the post-command semantic input so provider validation and billing
+	// preflight run before the epoch advances, then persist that exact accepted
+	// input in the regeneration domain event for crash recovery.
+	preview := aggregate.Clone()
+	_, err = preview.RegenerateAsset(storyboard.RegenerateAssetCommand{CommandID: "preview:" + req.IdempotencyKey, StoryboardID: storyboardID, BaseVersion: aggregate.Version, TargetID: targetID, AssetSlot: req.AssetSlot})
+	if err != nil {
+		writeStoryboardCommandError(c, err)
+		return
+	}
+	predictedInput, err := preview.ResolveGenerationInput(targetID, req.AssetSlot)
+	if err != nil {
+		writeStoryboardCommandError(c, err)
+		return
+	}
+	if strings.TrimSpace(predictedInput.Prompt) == "" {
+		writeJSONError(c, http.StatusConflict, "target prompt is not ready")
+		return
+	}
+	payload := localGenerationPayload(predictedInput, element, slot, sessionRecord.UserID)
+	preflightJob := generation.GenerationJob{
+		Provider: provider, MediaKind: slot.MediaKind,
+		Payload: payload,
+	}
+	if err := generation.ValidateProviderJob(preflightJob); err != nil {
+		writeJSONError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	estimatedPoints := int64(0)
+	if cfg.GenerationPreflight != nil {
+		estimatedPoints, err = cfg.GenerationPreflight(c.Request.Context(), sessionRecord.UserID, []generation.GenerationJob{preflightJob})
+		if err != nil {
+			writeJSONError(c, http.StatusConflict, err.Error())
+			return
+		}
+	}
+	snapshot := storyboard.RegenerationDispatchSnapshot{
+		Provider: provider, MediaKind: slot.MediaKind, UserID: sessionRecord.UserID,
+		SpecVersion: activeRevision.DerivedFromSpecVersion, StoryboardVersion: aggregate.Version + 1,
+		EstimatedPoints: estimatedPoints, Input: predictedInput, Payload: payload,
+	}
+	updated, _, err := cfg.StoryboardCommands.Regenerate(c.Request.Context(), storyboard.RegenerateAssetCommand{CommandID: req.IdempotencyKey + ":epoch", StoryboardID: storyboardID, BaseVersion: req.ExpectedVersion, TargetID: targetID, AssetSlot: req.AssetSlot, DispatchSnapshot: snapshot})
+	if err != nil {
+		writeStoryboardCommandError(c, err)
+		return
+	}
+	workflow, err := cfg.createTargetRegenerationWorkflow(c.Request.Context(), sessionID, storyboardID, req.IdempotencyKey, snapshot)
+	if err != nil {
 		writeJSONError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if result.Interrupted && result.Interrupt != nil {
-		if cfg.Events == nil {
-			writeJSONError(c, http.StatusInternalServerError, "event broker is not configured")
+	public := publicWorkflowAggregate(workflow)
+	view := updated.PublicView()
+	c.JSON(http.StatusAccepted, gin.H{"status": public.Operation.Status, "aggregate": view, "storyboard": view, "operation": public.Operation, "batch": public.Batch, "jobs": public.Jobs})
+}
+
+func loadRegenerationDispatchSnapshot(ctx context.Context, repository storyboard.AggregateRepository, storyboardID, commandID string) (storyboard.RegenerationDispatchSnapshot, bool, error) {
+	events, err := repository.ListDomainEvents(ctx, storyboardID, -1)
+	if err != nil {
+		return storyboard.RegenerationDispatchSnapshot{}, false, err
+	}
+	for _, event := range events {
+		if event.CommandID != commandID || event.Type != "storyboard.regeneration_requested" {
+			continue
+		}
+		raw, marshalErr := json.Marshal(event.Payload["dispatch_snapshot"])
+		if marshalErr != nil {
+			return storyboard.RegenerationDispatchSnapshot{}, false, marshalErr
+		}
+		var snapshot storyboard.RegenerationDispatchSnapshot
+		if unmarshalErr := json.Unmarshal(raw, &snapshot); unmarshalErr != nil {
+			return storyboard.RegenerationDispatchSnapshot{}, false, unmarshalErr
+		}
+		if strings.TrimSpace(snapshot.Provider) == "" || strings.TrimSpace(snapshot.Input.Fingerprint) == "" {
+			return storyboard.RegenerationDispatchSnapshot{}, false, fmt.Errorf("persisted regeneration command has no dispatch snapshot")
+		}
+		return snapshot, true, nil
+	}
+	return storyboard.RegenerationDispatchSnapshot{}, false, nil
+}
+
+func (cfg Config) createTargetRegenerationWorkflow(ctx context.Context, sessionID, storyboardID, idempotencyKey string, snapshot storyboard.RegenerationDispatchSnapshot) (generation.WorkflowAggregate, error) {
+	operationID, batchID, jobID := cfg.NewID(), cfg.NewID(), cfg.NewID()
+	policy := generation.DeliveryPolicy{BindingMode: generation.BindingModeCandidate, ApprovalPolicy: generation.ApprovalReviewRequired, ChargePolicy: generation.ChargePostpaidNoReservation}
+	workflow, _, err := cfg.GenerationCommands.Create(ctx, generation.CreateWorkflowCommand{
+		Operation: generation.GenerationOperation{ID: operationID, SessionID: sessionID, UserID: snapshot.UserID, IdempotencyKey: idempotencyKey, Kind: "target_regeneration", BatchID: batchID, Result: map[string]any{"estimated_points": snapshot.EstimatedPoints}},
+		Batch:     generation.GenerationBatch{ID: batchID, SessionID: sessionID, UserID: snapshot.UserID, OperationID: operationID, Kind: "target_regeneration", CompletionPolicy: generation.CompletionAllRequired, WakePolicy: generation.WakeOnTerminal, DeliveryPolicy: policy, ExpectedSpecVersion: snapshot.SpecVersion, ExpectedStoryboardVersion: snapshot.StoryboardVersion},
+		Jobs: []generation.GenerationJob{{
+			ID: jobID, SessionID: sessionID, UserID: snapshot.UserID, StoryboardID: storyboardID,
+			IdempotencyKey: idempotencyKey + ":job", Provider: snapshot.Provider, MediaKind: snapshot.MediaKind,
+			TargetID: snapshot.Input.TargetID, AssetSlot: snapshot.Input.AssetSlot, Required: true,
+			StoryboardVersionAtDispatch: snapshot.StoryboardVersion,
+			BindingToken:                generation.BindingToken{StoryboardID: storyboardID, TargetID: snapshot.Input.TargetID, AssetSlot: snapshot.Input.AssetSlot, TargetRevision: snapshot.Input.TargetRevision, PromptRevision: snapshot.Input.PromptRevision, GenerationEpoch: snapshot.Input.GenerationEpoch, SpecVersion: snapshot.SpecVersion, InputFingerprint: snapshot.Input.Fingerprint},
+			DeliveryPolicy:              policy, MaxAttempts: 4, Payload: snapshot.Payload,
+		}},
+	})
+	return workflow, err
+}
+
+func (cfg Config) bindTargetAsset(c *gin.Context) {
+	if cfg.DynamicStoryboards == nil || cfg.StoryboardCommands == nil || cfg.Assets == nil {
+		writeJSONError(c, http.StatusInternalServerError, "dynamic storyboard and asset stores are not configured")
+		return
+	}
+	sessionID, storyboardID, targetID, assetID := strings.TrimSpace(c.Param("session_id")), strings.TrimSpace(c.Param("storyboard_id")), strings.TrimSpace(c.Param("target_id")), strings.TrimSpace(c.Param("asset_id"))
+	if sessionID == "" || storyboardID == "" || targetID == "" || assetID == "" || !cfg.ensureSession(c, sessionID) {
+		return
+	}
+	var req bindTargetAssetRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.ExpectedVersion <= 0 || strings.TrimSpace(req.AssetSlot) == "" {
+		writeJSONError(c, http.StatusBadRequest, "expected_version and asset_slot are required")
+		return
+	}
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
+	req.BindingID = strings.TrimSpace(req.BindingID)
+	if req.IdempotencyKey == "" {
+		req.IdempotencyKey = stableRequestID("bind", strings.Join([]string{sessionID, storyboardID, targetID, assetID, req.AssetSlot, strconv.Itoa(req.ExpectedVersion)}, ":"))
+	}
+	aggregate, err := cfg.DynamicStoryboards.GetAggregate(c.Request.Context(), storyboardID)
+	if err != nil {
+		writeStoryboardCommandError(c, err)
+		return
+	}
+	if aggregate.SessionID != sessionID {
+		writeJSONError(c, http.StatusNotFound, "storyboard not found")
+		return
+	}
+	replayBindingID := req.BindingID
+	if replayBindingID == "" {
+		replayBindingID = stableRequestID("binding", strings.Join([]string{req.IdempotencyKey, targetID, strings.TrimSpace(req.AssetSlot), assetID}, ":"))
+	}
+	for _, existing := range aggregate.Bindings {
+		if existing.ID != replayBindingID {
+			continue
+		}
+		if existing.AssetID != assetID || existing.TargetID != targetID || existing.AssetSlot != strings.TrimSpace(req.AssetSlot) {
+			writeJSONError(c, http.StatusConflict, "binding id is already bound to a different target or asset")
 			return
 		}
-		event := result.Interrupt.Event
-		if event == "" {
-			event = a2ui.EventInterruptRequest
+		if existing.State == storyboard.BindingStateActive {
+			view := aggregate.PublicView()
+			c.JSON(http.StatusOK, gin.H{"aggregate": view, "storyboard": view, "binding_id": existing.ID})
+			return
 		}
-		payload := payloadMap(result.Interrupt.Payload)
-		payload["scope"] = session.CheckpointScopeMediaGraph
-		if err := cfg.Events.Publish(c.Request.Context(), a2ui.SSEEvent{
-			ID:        cfg.NewID(),
-			SessionID: sessionID,
-			Event:     event,
-			Payload:   payload,
-			CreatedAt: cfg.Now(),
-		}); err != nil {
+		break
+	}
+	storedAsset, err := cfg.Assets.Get(c.Request.Context(), assetID)
+	if err != nil || (storedAsset.SessionID != "" && storedAsset.SessionID != sessionID) {
+		writeJSONError(c, http.StatusNotFound, "asset not found")
+		return
+	}
+	if storedAsset.Availability != "" && storedAsset.Availability != asset.AvailabilityAvailable {
+		writeJSONError(c, http.StatusConflict, "asset is not available for binding")
+		return
+	}
+	if aggregate.PendingRevisionID != "" {
+		writeJSONError(c, http.StatusConflict, "approve or reject the pending storyboard revision before binding assets")
+		return
+	}
+	if cfg.Specs != nil {
+		active, activeErr := aggregate.ActiveRevision()
+		confirmed, specErr := cfg.Specs.GetConfirmedBySession(c.Request.Context(), sessionID)
+		if activeErr != nil || specErr != nil || (active.DerivedFromSpecVersion > 0 && active.DerivedFromSpecVersion != confirmed.Version) {
+			writeJSONError(c, http.StatusConflict, "storyboard must be replanned for the latest confirmed creation spec")
+			return
+		}
+	}
+	if req.BindingID != "" {
+		for _, binding := range aggregate.Bindings {
+			if binding.ID != req.BindingID {
+				continue
+			}
+			if binding.AssetID != assetID || binding.TargetID != targetID || binding.AssetSlot != strings.TrimSpace(req.AssetSlot) {
+				writeJSONError(c, http.StatusConflict, "binding id is already bound to a different target or asset")
+				return
+			}
+			switch binding.State {
+			case storyboard.BindingStateActive:
+				view := aggregate.PublicView()
+				c.JSON(http.StatusOK, gin.H{"aggregate": view, "storyboard": view, "binding_id": binding.ID})
+				return
+			case storyboard.BindingStateCandidate:
+				if strings.TrimSpace(binding.ApprovalID) != "" {
+					writeJSONError(c, http.StatusConflict, "candidate asset must be adopted through its approval decision")
+					return
+				}
+				updated, stale, err := cfg.StoryboardCommands.Activate(c.Request.Context(), storyboard.ActivateBindingCommand{CommandID: req.IdempotencyKey, StoryboardID: storyboardID, BaseVersion: aggregate.Version, BindingID: req.BindingID})
+				if err != nil {
+					writeStoryboardCommandError(c, err)
+					return
+				}
+				view := updated.PublicView()
+				c.JSON(http.StatusOK, gin.H{"aggregate": view, "storyboard": view, "binding_id": binding.ID, "stale_targets": stale})
+				return
+			default:
+				writeJSONError(c, http.StatusConflict, "binding is no longer eligible for activation")
+				return
+			}
+		}
+	}
+	element, slot, ok := dynamicTarget(aggregate, targetID, req.AssetSlot)
+	if !ok {
+		writeJSONError(c, http.StatusNotFound, "storyboard target or asset slot not found")
+		return
+	}
+	if !assetKindMatchesSlot(storedAsset.Kind, slot.MediaKind) {
+		writeJSONError(c, http.StatusConflict, fmt.Sprintf("asset kind %s is incompatible with slot media kind %s", storedAsset.Kind, slot.MediaKind))
+		return
+	}
+	if req.TargetRevision > 0 && req.TargetRevision != element.Revision {
+		writeJSONError(c, http.StatusConflict, "storyboard target revision conflict")
+		return
+	}
+	input, err := aggregate.ResolveGenerationInput(targetID, slot.Key)
+	if err != nil && !errors.Is(err, storyboard.ErrDependencyNotReady) {
+		writeStoryboardCommandError(c, err)
+		return
+	}
+	currentPromptRevision := input.PromptRevision
+	if req.PromptRevision > 0 && req.PromptRevision != currentPromptRevision {
+		writeJSONError(c, http.StatusConflict, "storyboard prompt revision conflict")
+		return
+	}
+	if req.GenerationEpoch > 0 && req.GenerationEpoch != slot.GenerationEpoch {
+		writeJSONError(c, http.StatusConflict, "storyboard generation epoch conflict")
+		return
+	}
+	commandID := req.IdempotencyKey
+	bindingID := strings.TrimSpace(req.BindingID)
+	if bindingID == "" {
+		bindingID = stableRequestID("binding", strings.Join([]string{commandID, targetID, slot.Key, assetID}, ":"))
+	}
+	for _, existing := range aggregate.Bindings {
+		if existing.ID != bindingID {
+			continue
+		}
+		if existing.AssetID != assetID || existing.TargetID != targetID || existing.AssetSlot != slot.Key {
+			writeJSONError(c, http.StatusConflict, "binding id is already bound to a different target or asset")
+			return
+		}
+		switch existing.State {
+		case storyboard.BindingStateActive:
+			view := aggregate.PublicView()
+			c.JSON(http.StatusOK, gin.H{"aggregate": view, "storyboard": view, "binding_id": bindingID})
+			return
+		case storyboard.BindingStateCandidate:
+			if strings.TrimSpace(existing.ApprovalID) != "" {
+				writeJSONError(c, http.StatusConflict, "candidate asset must be adopted through its approval decision")
+				return
+			}
+			activated, stale, activateErr := cfg.StoryboardCommands.Activate(c.Request.Context(), storyboard.ActivateBindingCommand{CommandID: commandID + ":activate", StoryboardID: storyboardID, BaseVersion: aggregate.Version, BindingID: bindingID})
+			if activateErr != nil {
+				writeStoryboardCommandError(c, activateErr)
+				return
+			}
+			view := activated.PublicView()
+			c.JSON(http.StatusOK, gin.H{"aggregate": view, "storyboard": view, "binding_id": bindingID, "stale_targets": stale})
+			return
+		default:
+			writeJSONError(c, http.StatusConflict, "binding is no longer eligible for activation")
+			return
+		}
+	}
+	bound, disposition, err := cfg.StoryboardCommands.Bind(c.Request.Context(), storyboard.BindAssetCommand{CommandID: commandID + ":bind", StoryboardID: storyboardID, BaseVersion: req.ExpectedVersion, BindingID: bindingID, TargetID: targetID, AssetSlot: slot.Key, AssetID: assetID, TargetRevision: input.TargetRevision, PromptRevision: currentPromptRevision, GenerationEpoch: input.GenerationEpoch, InputFingerprint: input.Fingerprint})
+	if err != nil {
+		writeStoryboardCommandError(c, err)
+		return
+	}
+	if disposition == storyboard.BindingDispositionCandidate {
+		bound, _, err = cfg.StoryboardCommands.Activate(c.Request.Context(), storyboard.ActivateBindingCommand{CommandID: commandID + ":activate", StoryboardID: storyboardID, BaseVersion: bound.Version, BindingID: bindingID})
+		if err != nil {
+			writeStoryboardCommandError(c, err)
+			return
+		}
+	} else {
+		writeJSONError(c, http.StatusConflict, "asset binding became stale before activation")
+		return
+	}
+	view := bound.PublicView()
+	c.JSON(http.StatusOK, gin.H{"aggregate": view, "storyboard": view, "binding_id": bindingID})
+}
+
+func assetKindMatchesSlot(assetKind, mediaKind string) bool {
+	switch strings.ToLower(strings.TrimSpace(mediaKind)) {
+	case "image", "illustration", "keyframe":
+		return assetKind == asset.KindImage || assetKind == asset.KindReference
+	case "video":
+		return assetKind == asset.KindVideo
+	case "audio", "music", "voice":
+		return assetKind == asset.KindAudio
+	case "text", "script", "lyrics":
+		return assetKind == asset.KindText || assetKind == asset.KindPDF
+	default:
+		return false
+	}
+}
+
+func (cfg Config) decideApproval(c *gin.Context) {
+	if cfg.Approvals == nil || cfg.ApprovalRuntime == nil {
+		writeJSONError(c, http.StatusInternalServerError, "approval runtime is not configured")
+		return
+	}
+	sessionID, approvalID := strings.TrimSpace(c.Param("session_id")), strings.TrimSpace(c.Param("approval_id"))
+	if sessionID == "" || approvalID == "" || !cfg.ensureSession(c, sessionID) {
+		return
+	}
+	record, err := cfg.Approvals.Get(c.Request.Context(), approvalID)
+	if err != nil || record.SessionID != sessionID {
+		writeJSONError(c, http.StatusNotFound, "approval not found")
+		return
+	}
+	var req approvalDecisionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeJSONError(c, http.StatusBadRequest, "invalid approval decision request")
+		return
+	}
+	requestedDecision := strings.ToLower(strings.TrimSpace(req.Decision))
+	if requestedDecision != approval.DecisionApprove && requestedDecision != approval.DecisionReject {
+		writeJSONError(c, http.StatusBadRequest, "decision must be approved or rejected")
+		return
+	}
+	expectedDecisionVersion := record.DecisionVersion
+	if req.ExpectedDecisionVersion != nil {
+		expectedDecisionVersion = *req.ExpectedDecisionVersion
+	} else if record.DecisionVersion > 0 {
+		// A client that omitted explicit concurrency fields may be retrying after
+		// the first 200 response was lost. Reuse the recorded decision's original
+		// fence/key when the requested decision is identical.
+		if decided, decisionErr := cfg.Approvals.GetDecision(c.Request.Context(), approvalID, record.DecisionVersion); decisionErr == nil && decided.RequestedDecision == requestedDecision {
+			expectedDecisionVersion = record.DecisionVersion - 1
+			if strings.TrimSpace(req.IdempotencyKey) == "" {
+				req.IdempotencyKey = decided.IdempotencyKey
+			}
+		}
+	}
+	if expectedDecisionVersion < 0 {
+		writeJSONError(c, http.StatusBadRequest, "expected_decision_version cannot be negative")
+		return
+	}
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		req.IdempotencyKey = fmt.Sprintf("approval:%s:decision:%s", approvalID, requestedDecision)
+	}
+	result, err := cfg.ApprovalRuntime.Decide(c.Request.Context(), approvalruntime.DecideRequest{ApprovalID: approvalID, ExpectedDecisionVersion: expectedDecisionVersion, IdempotencyKey: req.IdempotencyKey, Decision: req.Decision, ActorID: record.UserID, Reason: req.Reason})
+	if err != nil {
+		switch {
+		case errors.Is(err, approval.ErrVersionConflict), errors.Is(err, approval.ErrAlreadyDecided):
+			writeJSONError(c, http.StatusConflict, err.Error())
+		case errors.Is(err, approval.ErrNotFound):
+			writeJSONError(c, http.StatusNotFound, err.Error())
+		default:
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	if err := cfg.publishApprovalDecision(c.Request.Context(), result.Decision.Approval); err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"applied": result.Applied,
+		"approval": gin.H{
+			"id": result.Decision.Approval.ID, "status": result.Decision.Approval.Status,
+			"decision_version": result.Decision.Approval.DecisionVersion,
+		},
+		"decision": gin.H{
+			"requested_decision": result.Decision.Decision.RequestedDecision,
+			"effective_status":   result.Decision.Decision.EffectiveStatus,
+			"decision_version":   result.Decision.Decision.DecisionVersion,
+		},
+	})
+}
+
+func (cfg Config) decideCandidateApprovalBatch(c *gin.Context) {
+	if cfg.Approvals == nil || cfg.ApprovalRuntime == nil || cfg.DynamicStoryboards == nil {
+		writeJSONError(c, http.StatusInternalServerError, "candidate approval batch runtime is not configured")
+		return
+	}
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	storyboardID := strings.TrimSpace(c.Param("storyboard_id"))
+	if sessionID == "" || storyboardID == "" || !cfg.ensureSession(c, sessionID) {
+		return
+	}
+	var req candidateApprovalBatchDecisionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeJSONError(c, http.StatusBadRequest, "invalid candidate approval batch decision request")
+		return
+	}
+	req.Decision = strings.ToLower(strings.TrimSpace(req.Decision))
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
+	if req.Decision != approval.DecisionApprove {
+		writeJSONError(c, http.StatusBadRequest, "candidate approval batch only supports approved")
+		return
+	}
+	if req.ExpectedStoryboardVersion <= 0 {
+		writeJSONError(c, http.StatusBadRequest, "expected_storyboard_version must be positive")
+		return
+	}
+	if req.IdempotencyKey == "" {
+		writeJSONError(c, http.StatusBadRequest, "idempotency_key is required")
+		return
+	}
+	sessionRecord, err := cfg.Store.GetSession(c.Request.Context(), sessionID)
+	if err != nil {
+		writeJSONError(c, http.StatusNotFound, "session not found")
+		return
+	}
+	result, err := cfg.ApprovalRuntime.ApproveCandidateBatch(c.Request.Context(), approvalruntime.CandidateBatchApproveRequest{
+		SessionID: sessionID, StoryboardID: storyboardID,
+		ExpectedStoryboardVersion: req.ExpectedStoryboardVersion,
+		IdempotencyKey:            req.IdempotencyKey, Decision: req.Decision,
+		ActorID: sessionRecord.UserID, Reason: req.Reason,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, approvalruntime.ErrCandidateBatchStoryboardVersion),
+			errors.Is(err, approvalruntime.ErrCandidateBatchGenerationRunning),
+			errors.Is(err, approvalruntime.ErrNoPendingCandidateApprovals),
+			errors.Is(err, approval.ErrIdempotencyConflict):
+			writeJSONError(c, http.StatusConflict, err.Error())
+		case errors.Is(err, storyboard.ErrAggregateNotFound):
+			writeJSONError(c, http.StatusNotFound, "storyboard not found")
+		default:
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	if err := cfg.publishCandidateApprovalBatch(c.Request.Context(), result); err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	status := http.StatusOK
+	if !result.Summary.Complete {
+		status = http.StatusMultiStatus
+	}
+	c.JSON(status, result)
+}
+
+func (cfg Config) publishCandidateApprovalBatch(ctx context.Context, result approvalruntime.CandidateBatchApproveResult) error {
+	if cfg.Events == nil {
+		return nil
+	}
+	aggregate := result.Storyboard.PublicView()
+	actions := []a2ui.Action{{
+		Type: a2ui.ActionUpdateCard, Surface: "storyboard",
+		Target: &a2ui.ActionTarget{Surface: "storyboard", CardID: "storyboard"},
+		// Keep this version-keyed projection independent of transient batch
+		// continuation failures. A retry may change the HTTP summary without
+		// changing the storyboard version; reusing the event ID must therefore
+		// reuse byte-equivalent business payload.
+		Payload: map[string]any{"storyboard": aggregate, "source": "candidate_approval_batch"},
+	}}
+	return cfg.Events.Publish(ctx, a2ui.SSEEvent{
+		ID:        candidateApprovalBatchStoryboardEventID(result.Batch.ID, aggregate.ID, aggregate.Version),
+		SessionID: result.Batch.SessionID, Event: a2ui.EventAction,
+		Payload: a2ui.ActionEnvelope{Version: a2ui.Version1, Actions: actions}, CreatedAt: cfg.Now(),
+	})
+}
+
+func (cfg Config) publishApprovalDecision(ctx context.Context, record approval.Approval) error {
+	if cfg.Events == nil {
+		return nil
+	}
+	if record.ArtifactType != "candidate_asset" {
+		actions := []a2ui.Action{{Type: a2ui.ActionUpdateCard, Surface: "chat", Target: &a2ui.ActionTarget{Surface: "chat", CardID: "approval:" + record.ID}, Payload: map[string]any{"status": record.Status, "decision_version": record.DecisionVersion}}}
+		// Candidate approvals deliberately have no chat card. Other decision
+		// events contain only data frozen by that approval; the mutable
+		// storyboard snapshot is projected separately below.
+		if err := cfg.Events.Publish(ctx, a2ui.SSEEvent{ID: fmt.Sprintf("approval:%s:decided:%d", record.ID, record.DecisionVersion), SessionID: record.SessionID, Event: a2ui.EventAction, Payload: a2ui.ActionEnvelope{Version: a2ui.Version1, Actions: actions}, CreatedAt: cfg.Now()}); err != nil {
+			return err
+		}
+	}
+	if cfg.DynamicStoryboards != nil && record.Binding.StoryboardID != "" {
+		if aggregate, err := cfg.DynamicStoryboards.GetAggregate(ctx, record.Binding.StoryboardID); err == nil {
+			storyboardActions := []a2ui.Action{{Type: a2ui.ActionUpdateCard, Surface: "storyboard", Target: &a2ui.ActionTarget{Surface: "storyboard", CardID: "storyboard"}, Payload: map[string]any{"storyboard": aggregate.PublicView()}}}
+			return cfg.Events.Publish(ctx, a2ui.SSEEvent{ID: fmt.Sprintf("approval:%s:storyboard:%s:v%d", record.ID, aggregate.ID, aggregate.Version), SessionID: record.SessionID, Event: a2ui.EventAction, Payload: a2ui.ActionEnvelope{Version: a2ui.Version1, Actions: storyboardActions}, CreatedAt: cfg.Now()})
+		}
+	}
+	return nil
+}
+
+func (cfg Config) getGenerationOperation(c *gin.Context) {
+	if cfg.GenerationWorkflow == nil {
+		writeJSONError(c, http.StatusInternalServerError, "generation workflow store is not configured")
+		return
+	}
+	sessionID, operationID := strings.TrimSpace(c.Param("session_id")), strings.TrimSpace(c.Param("operation_id"))
+	if sessionID == "" || operationID == "" || !cfg.ensureSession(c, sessionID) {
+		return
+	}
+	operation, err := cfg.GenerationWorkflow.GetOperation(c.Request.Context(), operationID)
+	if err != nil || operation.SessionID != sessionID {
+		writeJSONError(c, http.StatusNotFound, "generation operation not found")
+		return
+	}
+	batch, err := cfg.GenerationWorkflow.GetBatch(c.Request.Context(), operation.BatchID)
+	if err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jobs, err := cfg.GenerationWorkflow.ListJobsByBatch(c.Request.Context(), batch.ID)
+	if err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, publicWorkflowAggregate(generation.WorkflowAggregate{Operation: operation, Batch: batch, Jobs: jobs}))
+}
+
+func (cfg Config) controlGenerationOperation(c *gin.Context) {
+	if cfg.GenerationWorkflow == nil || cfg.GenerationCommands == nil {
+		writeJSONError(c, http.StatusInternalServerError, "generation workflow command service is not configured")
+		return
+	}
+	sessionID, operationID := strings.TrimSpace(c.Param("session_id")), strings.TrimSpace(c.Param("operation_id"))
+	if sessionID == "" || operationID == "" || !cfg.ensureSession(c, sessionID) {
+		return
+	}
+	operation, err := cfg.GenerationWorkflow.GetOperation(c.Request.Context(), operationID)
+	if err != nil || operation.SessionID != sessionID {
+		writeJSONError(c, http.StatusNotFound, "generation operation not found")
+		return
+	}
+	var req generationControlRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeJSONError(c, http.StatusBadRequest, "invalid generation control request")
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(req.Action)) {
+	case "cancel":
+		workflow, err := cfg.GenerationCommands.CancelBatch(c.Request.Context(), operation.BatchID)
+		if err != nil {
+			writeJSONError(c, http.StatusConflict, err.Error())
+			return
+		}
+		c.JSON(http.StatusAccepted, publicWorkflowAggregate(workflow))
+	case "retry_failed":
+		retryKey := strings.TrimSpace(req.IdempotencyKey)
+		if retryKey == "" {
+			retryKey = "recovery:" + operation.ID
+		}
+		// Replay is resolved before consulting mutable provider, balance or
+		// storyboard state. Once a recovery workflow has been accepted, a lost
+		// HTTP response must return that workflow rather than reinterpret it.
+		if existing, lookupErr := cfg.GenerationWorkflow.GetOperationByIdempotencyKey(c.Request.Context(), retryKey); lookupErr == nil {
+			recoveryOf := strings.TrimSpace(fmt.Sprint(existing.Result["recovery_of_operation_id"]))
+			if existing.SessionID != sessionID || existing.Kind != operation.Kind+"_recovery" || recoveryOf != operation.ID {
+				writeJSONError(c, http.StatusConflict, "idempotency key is already bound to a different recovery request")
+				return
+			}
+			existingBatch, batchErr := cfg.GenerationWorkflow.GetBatch(c.Request.Context(), existing.BatchID)
+			if batchErr != nil {
+				writeJSONError(c, http.StatusInternalServerError, batchErr.Error())
+				return
+			}
+			existingJobs, jobsErr := cfg.GenerationWorkflow.ListJobsByBatch(c.Request.Context(), existingBatch.ID)
+			if jobsErr != nil {
+				writeJSONError(c, http.StatusInternalServerError, jobsErr.Error())
+				return
+			}
+			c.JSON(http.StatusAccepted, publicWorkflowAggregate(generation.WorkflowAggregate{Operation: existing, Batch: existingBatch, Jobs: existingJobs}))
+			return
+		} else if !errors.Is(lookupErr, generation.ErrNotFound) {
+			writeJSONError(c, http.StatusInternalServerError, lookupErr.Error())
+			return
+		}
+		batch, err := cfg.GenerationWorkflow.GetBatch(c.Request.Context(), operation.BatchID)
+		if err != nil {
 			writeJSONError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
-		c.JSON(http.StatusOK, resumeMediaGraphResponse{
-			Status: "interrupted",
+		previousJobs, err := cfg.GenerationWorkflow.ListJobsByBatch(c.Request.Context(), batch.ID)
+		if err != nil {
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		operationID, batchID := cfg.NewID(), cfg.NewID()
+		retryJobs := make([]generation.GenerationJob, 0)
+		for _, previous := range previousJobs {
+			if previous.Status != generation.StatusFailed {
+				continue
+			}
+			if previous.ErrorStage != generation.ErrorStageProvider || !generation.ProviderErrorRetryable(errors.New(previous.ErrorMessage)) {
+				continue
+			}
+			// Semantic supersession/orphaning is not a transient provider failure;
+			// the user must issue a new targeted generation against current state.
+			if previous.ResultDisposition == generation.DispositionSuperseded || previous.ResultDisposition == generation.DispositionOrphaned {
+				continue
+			}
+			if cfg.DynamicStoryboards != nil {
+				aggregate, loadErr := cfg.DynamicStoryboards.GetAggregate(c.Request.Context(), previous.BindingToken.StoryboardID)
+				if loadErr != nil {
+					continue
+				}
+				active, activeErr := aggregate.ActiveRevision()
+				if activeErr != nil {
+					continue
+				}
+				if cfg.Specs != nil {
+					confirmed, specErr := cfg.Specs.GetConfirmedBySession(c.Request.Context(), aggregate.SessionID)
+					if specErr != nil || (active.DerivedFromSpecVersion > 0 && active.DerivedFromSpecVersion != confirmed.Version) {
+						continue
+					}
+				}
+				if strings.HasPrefix(previous.BindingToken.TargetID, "assembly:") {
+					if previous.BindingToken.AggregateVersion != aggregate.Version || previous.BindingToken.SpecVersion != active.DerivedFromSpecVersion {
+						continue
+					}
+				} else {
+					input, resolveErr := aggregate.ResolveGenerationInput(previous.BindingToken.TargetID, previous.BindingToken.AssetSlot)
+					current := generation.BindingToken{StoryboardID: aggregate.ID, TargetID: input.TargetID, AssetSlot: input.AssetSlot, TargetRevision: input.TargetRevision, PromptRevision: input.PromptRevision, GenerationEpoch: input.GenerationEpoch, SpecVersion: active.DerivedFromSpecVersion, InputFingerprint: input.Fingerprint}
+					if resolveErr != nil || !previous.BindingToken.Equal(current) {
+						continue
+					}
+				}
+			}
+			retryJobs = append(retryJobs, generation.GenerationJob{
+				ID: cfg.NewID(), SessionID: previous.SessionID, UserID: previous.UserID,
+				WorkflowRunID: previous.WorkflowRunID, StageRunID: previous.StageRunID,
+				StoryboardID: previous.StoryboardID, ToolCallID: previous.ToolCallID,
+				IdempotencyKey: retryKey + ":job:" + previous.ID,
+				Provider:       previous.Provider, MediaKind: previous.MediaKind, TargetType: previous.TargetType,
+				TargetID: previous.TargetID, AssetSlot: previous.AssetSlot, VariantKey: previous.VariantKey,
+				Required: previous.Required, StoryboardVersionAtDispatch: previous.StoryboardVersionAtDispatch,
+				BindingToken: previous.BindingToken, DeliveryPolicy: previous.DeliveryPolicy,
+				MaxAttempts: previous.MaxAttempts, Payload: previous.Payload,
+			})
+		}
+		if len(retryJobs) == 0 {
+			writeJSONError(c, http.StatusConflict, "operation has no retryable failed jobs")
+			return
+		}
+		var estimatedPoints int64
+		for _, job := range retryJobs {
+			if err := generation.ValidateProviderJob(job); err != nil {
+				writeJSONError(c, http.StatusConflict, err.Error())
+				return
+			}
+		}
+		if cfg.GenerationPreflight != nil {
+			estimatedPoints, err = cfg.GenerationPreflight(c.Request.Context(), operation.UserID, retryJobs)
+			if err != nil {
+				writeJSONError(c, http.StatusConflict, err.Error())
+				return
+			}
+		}
+		workflow, _, err := cfg.GenerationCommands.Create(c.Request.Context(), generation.CreateWorkflowCommand{
+			Operation: generation.GenerationOperation{ID: operationID, SessionID: operation.SessionID, UserID: operation.UserID, WorkflowRunID: operation.WorkflowRunID, StageRunID: operation.StageRunID, ToolCallID: operation.ToolCallID, IdempotencyKey: retryKey, Kind: operation.Kind + "_recovery", Result: map[string]any{"recovery_of_operation_id": operation.ID, "estimated_points": estimatedPoints}, BatchID: batchID},
+			Batch:     generation.GenerationBatch{ID: batchID, SessionID: batch.SessionID, UserID: batch.UserID, WorkflowRunID: batch.WorkflowRunID, StageRunID: batch.StageRunID, ToolCallID: batch.ToolCallID, Kind: batch.Kind + "_recovery", CompletionPolicy: batch.CompletionPolicy, MinSuccess: batch.MinSuccess, WakePolicy: batch.WakePolicy, DeliveryPolicy: batch.DeliveryPolicy, ExpectedSpecVersion: batch.ExpectedSpecVersion, ExpectedStoryboardVersion: batch.ExpectedStoryboardVersion},
+			Jobs:      retryJobs,
 		})
+		if err != nil {
+			writeJSONError(c, http.StatusConflict, err.Error())
+			return
+		}
+		c.JSON(http.StatusAccepted, publicWorkflowAggregate(workflow))
+	default:
+		writeJSONError(c, http.StatusBadRequest, "action must be cancel or retry_failed")
+	}
+}
+
+func (cfg Config) manualFinalizeCompensation(c *gin.Context) {
+	if cfg.Compensation == nil || strings.TrimSpace(cfg.AdminToken) == "" {
+		writeJSONError(c, http.StatusNotFound, "admin endpoint is not configured")
 		return
 	}
-
-	cfg.markCheckpointResumed(c.Request.Context(), sessionID, req.InterruptID)
-	c.JSON(http.StatusOK, resumeMediaGraphResponse{
-		Status: "completed",
-		Output: result.Output,
-	})
+	provided := strings.TrimSpace(c.GetHeader("Authorization"))
+	if !strings.HasPrefix(provided, "Bearer ") {
+		writeJSONError(c, http.StatusUnauthorized, "admin authorization is required")
+		return
+	}
+	provided = strings.TrimSpace(strings.TrimPrefix(provided, "Bearer "))
+	expected := strings.TrimSpace(cfg.AdminToken)
+	if len(provided) != len(expected) || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+		writeJSONError(c, http.StatusUnauthorized, "admin authorization is invalid")
+		return
+	}
+	jobID := strings.TrimSpace(c.Param("job_id"))
+	if jobID == "" {
+		writeJSONError(c, http.StatusBadRequest, "job id is required")
+		return
+	}
+	var req manualCompensationRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.RefundedPoints < 0 {
+		writeJSONError(c, http.StatusBadRequest, "refunded_points must be zero or greater")
+		return
+	}
+	job, err := cfg.Compensation.ManualFinalize(c.Request.Context(), jobID, req.RefundedPoints, strings.TrimSpace(req.RefundTransactionID))
+	if err != nil {
+		if errors.Is(err, generation.ErrNotFound) {
+			writeJSONError(c, http.StatusNotFound, "generation job not found")
+			return
+		}
+		writeJSONError(c, http.StatusConflict, err.Error())
+		return
+	}
+	visible := publicGenerationJobs([]generation.GenerationJob{job})
+	c.JSON(http.StatusOK, gin.H{"job": visible[0]})
 }
 
 // createMessage 写入用户消息并触发 Agent；A2UI 输出统一发布到 /events/stream。
@@ -1062,11 +2176,11 @@ func (cfg Config) createMessage(c *gin.Context) {
 		writeJSONError(c, http.StatusInternalServerError, "session store is not configured")
 		return
 	}
-	if cfg.Invoker == nil {
+	if cfg.Runtime == nil && cfg.Invoker == nil {
 		writeJSONError(c, http.StatusInternalServerError, "agent invoker is not configured")
 		return
 	}
-	if cfg.Events == nil {
+	if cfg.Runtime == nil && cfg.Events == nil {
 		writeJSONError(c, http.StatusInternalServerError, "event broker is not configured")
 		return
 	}
@@ -1093,8 +2207,54 @@ func (cfg Config) createMessage(c *gin.Context) {
 		return
 	}
 
-	runID := cfg.NewID()
 	userMessage := schema.UserMessage(content)
+	if cfg.Runtime != nil {
+		messageID := cfg.NewID()
+		idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+		if idempotencyKey == "" {
+			idempotencyKey = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+		}
+		if idempotencyKey != "" {
+			messageID = stableMessageID(sessionID, idempotencyKey)
+		}
+		input := sessionruntime.NewUserMessage(messageID, "message:"+messageID)
+		runID := sessionruntime.StableRunnerRunID(sessionID, input.InputID)
+		record, err := schemaMessageRecord(messageID, sessionID, runID, userMessage, cfg.Now())
+		if err != nil {
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		record.Metadata = messageMetadataFromRequest(req)
+		if postgresSession, ok := cfg.Store.(*session.PostgresStore); ok && cfg.RuntimeStore != nil {
+			if _, _, err := postgresSession.AppendMessageAndEnqueue(c.Request.Context(), cfg.RuntimeStore, record, input); err != nil {
+				writeJSONError(c, http.StatusInternalServerError, err.Error())
+				return
+			}
+			cfg.Runtime.Wake(sessionID)
+		} else {
+			savedMessage, err := cfg.Store.AppendMessage(c.Request.Context(), record)
+			if err != nil {
+				writeJSONError(c, http.StatusInternalServerError, err.Error())
+				return
+			}
+			boundedInput, err := sessionruntime.WithContextMessageSeq(input, savedMessage.Seq)
+			if err != nil {
+				writeJSONError(c, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if _, err := cfg.Runtime.Enqueue(c.Request.Context(), sessionID, boundedInput); err != nil {
+				writeJSONError(c, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		if _, err := cfg.Runtime.EnsureSession(context.Background(), sessionID); err != nil {
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.JSON(http.StatusAccepted, messageResponse{RunID: runID, MessageID: messageID, InputID: input.InputID, Status: "accepted"})
+		return
+	}
+	runID := cfg.NewID()
 	userRecord, err := cfg.appendSchemaMessageWithMetadata(c.Request.Context(), sessionID, runID, userMessage, messageMetadataFromRequest(req))
 	if err != nil {
 		writeJSONError(c, http.StatusInternalServerError, err.Error())
@@ -1171,12 +2331,20 @@ func (cfg Config) resumeAgent(c *gin.Context) {
 		writeJSONError(c, http.StatusBadRequest, "interrupt id is required")
 		return
 	}
-	alreadyResumed, err := cfg.checkpointAlreadyResumed(c.Request.Context(), sessionID, req.InterruptID)
-	if err != nil {
-		writeJSONError(c, http.StatusInternalServerError, err.Error())
+	mapping, err := cfg.checkpointForResume(c.Request.Context(), sessionID, req.InterruptID, req.CheckpointID, session.CheckpointScopeRunner)
+	if errors.Is(err, session.ErrCheckpointNotFound) {
+		writeJSONError(c, http.StatusNotFound, "checkpoint mapping not found")
 		return
 	}
-	if alreadyResumed {
+	if err != nil {
+		writeJSONError(c, http.StatusConflict, err.Error())
+		return
+	}
+	if strings.TrimSpace(mapping.ApprovalID) != "" {
+		writeJSONError(c, http.StatusConflict, "approval-bound checkpoint must be resumed through the approval decision endpoint")
+		return
+	}
+	if mapping.Status == session.CheckpointStatusResumed {
 		runID := cfg.NewID()
 		if err := cfg.Events.Publish(c.Request.Context(), a2ui.SSEEvent{
 			ID:        cfg.NewID(),
@@ -1212,13 +2380,47 @@ func (cfg Config) resumeAgent(c *gin.Context) {
 			writeJSONError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
+		if err := cfg.publishInterruptResolved(c.Request.Context(), sessionID, req.CheckpointID, req.InterruptID); err != nil {
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
 		c.JSON(http.StatusOK, messageResponse{RunID: runID, Status: "already_resumed"})
+		return
+	}
+	// In durable mode resume_applied means the Runner output and any frozen
+	// domain continuation are committed, but the authoritative Agent output may
+	// still be awaiting projection. Re-enqueue/wake the same stable input; only
+	// the durable processor may advance it to resumed after projection succeeds.
+	if cfg.Runtime != nil {
+		cfg.enqueueDurableAgentResume(c, sessionRecord, mapping, req)
+		return
+	}
+	if mapping.Status == session.CheckpointStatusResumeApplied {
+		if err := cfg.completeCheckpoint(c.Request.Context(), mapping); err != nil {
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := cfg.publishInterruptResolved(c.Request.Context(), sessionID, req.CheckpointID, req.InterruptID); err != nil {
+			writeJSONError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, messageResponse{RunID: mapping.RunID, Status: "already_resumed"})
+		return
+	}
+	if mapping.Status != session.CheckpointStatusPending {
+		writeJSONError(c, http.StatusConflict, "checkpoint is already being resumed")
+		return
+	}
+	mapping, err = cfg.claimCheckpoint(c.Request.Context(), mapping)
+	if err != nil {
+		writeJSONError(c, http.StatusConflict, "checkpoint is already being resumed")
 		return
 	}
 
 	runID := cfg.NewID()
 	if content := resumeContent(req); content != "" {
 		if _, err := cfg.appendSchemaMessage(c.Request.Context(), sessionID, runID, schema.UserMessage(content)); err != nil {
+			cfg.releaseCheckpoint(c.Request.Context(), mapping)
 			writeJSONError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -1237,16 +2439,98 @@ func (cfg Config) resumeAgent(c *gin.Context) {
 	}
 	events, err := cfg.Invoker.Resume(c.Request.Context(), resumeReq)
 	if err != nil {
+		cfg.releaseCheckpoint(c.Request.Context(), mapping)
 		writeJSONError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	if err := cfg.publishAgentEvents(c.Request.Context(), sessionID, runID, events); err != nil {
+		cfg.releaseCheckpoint(c.Request.Context(), mapping)
 		writeJSONError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	cfg.markCheckpointResumed(c.Request.Context(), sessionID, req.InterruptID)
+	mapping, err = cfg.markCheckpointResumeApplied(c.Request.Context(), mapping)
+	if err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := cfg.completeCheckpoint(c.Request.Context(), mapping); err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := cfg.publishInterruptResolved(c.Request.Context(), sessionID, req.CheckpointID, req.InterruptID); err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	c.JSON(http.StatusOK, messageResponse{RunID: runID, Status: "completed"})
+}
+
+func (cfg Config) enqueueDurableAgentResume(c *gin.Context, sessionRecord session.SessionRecord, mapping session.CheckpointMapping, req resumeAgentRequest) {
+	if strings.TrimSpace(mapping.ApprovalID) != "" {
+		writeJSONError(c, http.StatusConflict, "approval-bound checkpoint must be resumed through the approval decision endpoint")
+		return
+	}
+	content := resumeContent(req)
+	if strings.TrimSpace(content) == "" && req.Data == nil {
+		writeJSONError(c, http.StatusBadRequest, "resume content or data is required")
+		return
+	}
+	target := req.Data
+	if target == nil {
+		target = strings.TrimSpace(req.Content)
+	}
+	raw, err := json.Marshal(target)
+	if err != nil {
+		writeJSONError(c, http.StatusBadRequest, "resume data must be JSON serializable")
+		return
+	}
+	epoch := mapping.MappingEpoch
+	if epoch <= 0 {
+		epoch = 1
+	}
+	input := sessionruntime.NewInterruptResumeRequested(mapping.ID, epoch, req.CheckpointID, req.InterruptID, content, raw, "")
+	messageID := stableRequestID("resume-message", input.InputID)
+	runID := sessionruntime.StableRunnerRunID(sessionRecord.ID, input.InputID)
+	record, err := schemaMessageRecord(messageID, sessionRecord.ID, runID, schema.UserMessage(content), cfg.Now())
+	if err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if postgresSession, ok := cfg.Store.(*session.PostgresStore); ok && cfg.RuntimeStore != nil {
+		if _, _, err = postgresSession.AppendMessageAndEnqueue(c.Request.Context(), cfg.RuntimeStore, record, input); err == nil {
+			cfg.Runtime.Wake(sessionRecord.ID)
+		}
+	} else {
+		if _, err = cfg.Store.AppendMessage(c.Request.Context(), record); err == nil {
+			_, err = cfg.Runtime.Enqueue(c.Request.Context(), sessionRecord.ID, input)
+		}
+	}
+	if err != nil {
+		if errors.Is(err, sessionruntime.ErrIdempotencyConflict) || errors.Is(err, session.ErrMessageIdempotencyConflict) {
+			writeJSONError(c, http.StatusConflict, err.Error())
+			return
+		}
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, err := cfg.Runtime.EnsureSession(context.Background(), sessionRecord.ID); err != nil {
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusAccepted, messageResponse{RunID: runID, MessageID: messageID, InputID: input.InputID, Status: "accepted"})
+}
+
+func (cfg Config) publishInterruptResolved(ctx context.Context, sessionID, checkpointID, interruptID string) error {
+	if cfg.Events == nil {
+		return nil
+	}
+	identity := strings.Join([]string{sessionID, checkpointID, interruptID}, "\x00")
+	return cfg.Events.Publish(ctx, a2ui.SSEEvent{
+		ID: stableRequestID("interrupt-resolved", identity), SessionID: sessionID,
+		Event:     a2ui.EventInterruptResolved,
+		Payload:   map[string]any{"checkpoint_id": checkpointID, "interrupt_id": interruptID, "status": session.CheckpointStatusResumed},
+		CreatedAt: cfg.Now(),
+	})
 }
 
 // publishAgentEvents 消费 AgentEvent，只发布最新完整 assistant 消息并顺序写入事件 broker。
@@ -1287,8 +2571,10 @@ func (cfg Config) publishAgentEvents(ctx context.Context, sessionID string, runI
 			}
 			continue
 		}
-		if err := cfg.publishRenderEvents(ctx, sessionID, runID, &seq, chatSurface.eventsFromAgentEvent(event)); err != nil {
-			return err
+		if !event.ProgressPublished {
+			if err := cfg.publishRenderEvents(ctx, sessionID, runID, &seq, chatSurface.eventsFromAgentEvent(event)); err != nil {
+				return err
+			}
 		}
 		if event.Message != nil {
 			if shouldPersistImmediately(event.Message) {
@@ -1457,12 +2743,7 @@ func (cfg Config) saveInterruptCheckpoint(ctx context.Context, sessionID string,
 		SpecVersion:       payloadInt(values, "spec_version"),
 		StoryboardVersion: payloadInt(values, "storyboard_version"),
 	}
-	if scope == session.CheckpointScopeMediaGraph {
-		record.GraphCheckpointID = checkpointID
-		record.GraphName = "media_generator"
-	} else {
-		record.RunnerCheckpointID = checkpointID
-	}
+	record.RunnerCheckpointID = checkpointID
 	_, err := cfg.Checkpoints.SaveCheckpointMapping(ctx, record)
 	return err
 }
@@ -1480,6 +2761,89 @@ func (cfg Config) markCheckpointResumed(ctx context.Context, sessionID string, i
 		return
 	}
 	_, _ = cfg.Checkpoints.MarkCheckpointResumed(ctx, record.ID)
+}
+
+func (cfg Config) checkpointForResume(ctx context.Context, sessionID, interruptID, checkpointID, expectedScope string) (session.CheckpointMapping, error) {
+	if cfg.Checkpoints == nil {
+		return session.CheckpointMapping{}, session.ErrCheckpointNotFound
+	}
+	record, err := cfg.Checkpoints.GetCheckpointMapping(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(interruptID))
+	if err != nil {
+		return session.CheckpointMapping{}, err
+	}
+	if record.SessionID != strings.TrimSpace(sessionID) || record.InterruptID != strings.TrimSpace(interruptID) || record.Scope != expectedScope {
+		return session.CheckpointMapping{}, session.ErrCheckpointNotFound
+	}
+	expectedCheckpointID := record.RunnerCheckpointID
+	if strings.TrimSpace(expectedCheckpointID) == "" || strings.TrimSpace(expectedCheckpointID) != strings.TrimSpace(checkpointID) {
+		return session.CheckpointMapping{}, session.ErrCheckpointNotFound
+	}
+	if record.Status != session.CheckpointStatusPending && record.Status != session.CheckpointStatusResumeQueued && record.Status != session.CheckpointStatusResuming && record.Status != session.CheckpointStatusResumeApplied && record.Status != session.CheckpointStatusResumed {
+		return session.CheckpointMapping{}, fmt.Errorf("checkpoint status %q cannot be resumed", record.Status)
+	}
+	return record, nil
+}
+
+func (cfg Config) claimCheckpoint(ctx context.Context, record session.CheckpointMapping) (session.CheckpointMapping, error) {
+	transition, ok := cfg.Checkpoints.(CheckpointTransitionStore)
+	if !ok {
+		return record, nil
+	}
+	epoch := record.MappingEpoch
+	if epoch <= 0 {
+		epoch = 1
+	}
+	return transition.TransitionCheckpointMapping(ctx, record.ID, session.CheckpointStatusPending, epoch, session.CheckpointStatusResuming, record.DecisionVersion)
+}
+
+func (cfg Config) releaseCheckpoint(ctx context.Context, record session.CheckpointMapping) {
+	transition, ok := cfg.Checkpoints.(CheckpointTransitionStore)
+	if !ok {
+		return
+	}
+	epoch := record.MappingEpoch
+	if epoch <= 0 {
+		epoch = 1
+	}
+	_, _ = transition.TransitionCheckpointMapping(ctx, record.ID, session.CheckpointStatusResuming, epoch, session.CheckpointStatusPending, record.DecisionVersion)
+}
+
+func (cfg Config) markCheckpointResumeApplied(ctx context.Context, record session.CheckpointMapping) (session.CheckpointMapping, error) {
+	transition, ok := cfg.Checkpoints.(CheckpointTransitionStore)
+	if !ok {
+		return record, nil
+	}
+	epoch := record.MappingEpoch
+	if epoch <= 0 {
+		epoch = 1
+	}
+	updated, err := transition.TransitionCheckpointMapping(ctx, record.ID, session.CheckpointStatusResuming, epoch, session.CheckpointStatusResumeApplied, record.DecisionVersion)
+	if err != nil {
+		return session.CheckpointMapping{}, fmt.Errorf("record checkpoint resume receipt: %w", err)
+	}
+	return updated, nil
+}
+
+func (cfg Config) completeCheckpoint(ctx context.Context, record session.CheckpointMapping) error {
+	transition, ok := cfg.Checkpoints.(CheckpointTransitionStore)
+	if ok {
+		epoch := record.MappingEpoch
+		if epoch <= 0 {
+			epoch = 1
+		}
+		expectedStatus := record.Status
+		if expectedStatus == "" {
+			expectedStatus = session.CheckpointStatusResuming
+		}
+		if _, err := transition.TransitionCheckpointMapping(ctx, record.ID, expectedStatus, epoch, session.CheckpointStatusResumed, record.DecisionVersion); err != nil {
+			return fmt.Errorf("complete checkpoint resume: %w", err)
+		}
+		return nil
+	}
+	if _, err := cfg.Checkpoints.MarkCheckpointResumed(ctx, record.ID); err != nil {
+		return fmt.Errorf("complete checkpoint resume: %w", err)
+	}
+	return nil
 }
 
 // checkpointAlreadyResumed 查询 interrupt 是否已经被恢复过。
@@ -1692,6 +3056,11 @@ func writeSSE(c *gin.Context, event a2ui.SSEEvent) error {
 	if _, err := fmt.Fprintf(c.Writer, "event: %s\n", event.Event); err != nil {
 		return err
 	}
+	if strings.TrimSpace(event.ID) != "" {
+		if _, err := fmt.Fprintf(c.Writer, "id: %s\n", event.ID); err != nil {
+			return err
+		}
+	}
 	if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", data); err != nil {
 		return err
 	}
@@ -1704,10 +3073,100 @@ func writeSSE(c *gin.Context, event a2ui.SSEEvent) error {
 // isClientA2UIEvent 限制 HTTP SSE 只输出新 A2UI 协议事件，旧 worker 事件必须在发布前显式转换。
 func isClientA2UIEvent(event string) bool {
 	switch strings.TrimSpace(event) {
-	case a2ui.EventReady, a2ui.EventAction, a2ui.EventInterruptRequest, a2ui.EventError:
+	case a2ui.EventReady, a2ui.EventAction, a2ui.EventInterruptRequest, a2ui.EventInterruptResolved, a2ui.EventError:
 		return true
 	default:
 		return false
+	}
+}
+
+func dynamicTarget(aggregate storyboard.StoryboardAggregate, targetID, slotKey string) (storyboard.StoryboardElement, storyboard.AssetSlot, bool) {
+	var revision *storyboard.StoryboardRevision
+	var err error
+	if aggregate.PendingRevisionID != "" {
+		revision, err = aggregate.PendingRevision()
+	} else {
+		revision, err = aggregate.ActiveRevision()
+	}
+	if err != nil {
+		return storyboard.StoryboardElement{}, storyboard.AssetSlot{}, false
+	}
+	for _, module := range revision.Modules {
+		for _, element := range module.Elements {
+			if element.ID != strings.TrimSpace(targetID) {
+				continue
+			}
+			if strings.TrimSpace(slotKey) == "" {
+				return element, storyboard.AssetSlot{}, true
+			}
+			for _, slot := range element.AssetSlots {
+				if slot.Key == strings.TrimSpace(slotKey) {
+					return element, slot, true
+				}
+			}
+			return storyboard.StoryboardElement{}, storyboard.AssetSlot{}, false
+		}
+	}
+	return storyboard.StoryboardElement{}, storyboard.AssetSlot{}, false
+}
+
+func promptForDynamicSlot(element storyboard.StoryboardElement, slot storyboard.AssetSlot) (string, int) {
+	for _, prompt := range element.PromptSlots {
+		if prompt.Purpose == slot.Key || prompt.Purpose == slot.Role || prompt.Purpose == slot.MediaKind || strings.Contains(slot.Key, prompt.Purpose) {
+			return prompt.Prompt, prompt.Revision
+		}
+	}
+	if len(element.PromptSlots) == 1 {
+		return element.PromptSlots[0].Prompt, element.PromptSlots[0].Revision
+	}
+	return "", 0
+}
+
+func providerForMediaKind(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "video":
+		return generation.ProviderSeedance
+	case "audio", "music", "voice":
+		return generation.ProviderAudio
+	case "image", "illustration", "keyframe":
+		return generation.ProviderImage2
+	default:
+		return ""
+	}
+}
+
+func localGenerationPayload(input storyboard.GenerationInput, element storyboard.StoryboardElement, slot storyboard.AssetSlot, userID string) map[string]any {
+	payload := map[string]any{
+		"prompt": input.Prompt, "target": element.Content, "media_kind": slot.MediaKind,
+		"bind_asset_ids": input.InputAssetIDs, "user_id": userID,
+	}
+	for _, source := range []map[string]any{element.Content, element.Metadata} {
+		for _, key := range []string{"model", "size", "n", "ratio", "resolution", "duration_seconds", "fps", "filename_prefix"} {
+			if value, exists := source[key]; exists && strings.TrimSpace(fmt.Sprint(value)) != "" {
+				payload[key] = value
+			}
+		}
+	}
+	return payload
+}
+
+func valueOr(value, fallback string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func writeStoryboardCommandError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, storyboard.ErrAggregateNotFound), errors.Is(err, storyboard.ErrTargetNotFound), errors.Is(err, storyboard.ErrSlotNotFound), errors.Is(err, storyboard.ErrRevisionNotFound):
+		writeJSONError(c, http.StatusNotFound, err.Error())
+	case errors.Is(err, storyboard.ErrVersionConflict), errors.Is(err, storyboard.ErrRevisionMismatch), errors.Is(err, storyboard.ErrPendingRevision), errors.Is(err, storyboard.ErrNoPendingRevision), errors.Is(err, storyboard.ErrDependencyNotReady), errors.Is(err, storyboard.ErrIdempotencyConflict), errors.Is(err, storyboard.ErrDuplicateCommand):
+		writeJSONError(c, http.StatusConflict, err.Error())
+	case errors.Is(err, storyboard.ErrInvalidMutation):
+		writeJSONError(c, http.StatusBadRequest, err.Error())
+	default:
+		writeJSONError(c, http.StatusInternalServerError, err.Error())
 	}
 }
 
@@ -1723,4 +3182,21 @@ func randomID() string {
 		return hex.EncodeToString(b[:])
 	}
 	return strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+func stableMessageID(sessionID, idempotencyKey string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(sessionID) + "\x00" + strings.TrimSpace(idempotencyKey)))
+	return "msg_" + hex.EncodeToString(sum[:16])
+}
+
+func stableRequestID(kind, identity string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(kind) + "\x00" + strings.TrimSpace(identity)))
+	return strings.TrimSpace(kind) + ":" + hex.EncodeToString(sum[:16])
+}
+
+// candidateApprovalBatchStoryboardEventID hashes unbounded domain identifiers
+// into a stable ASCII key that fits aigc_session_event_log.event_id VARCHAR(128).
+func candidateApprovalBatchStoryboardEventID(batchID, storyboardID string, version int) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(batchID) + "\x00" + strings.TrimSpace(storyboardID) + "\x00" + strconv.Itoa(version)))
+	return "candidate-batch-storyboard:" + hex.EncodeToString(sum[:])
 }
