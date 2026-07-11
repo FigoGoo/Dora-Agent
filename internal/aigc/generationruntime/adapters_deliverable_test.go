@@ -80,3 +80,70 @@ func TestCommitSessionDeliverableOnlyPublishesAssets(t *testing.T) {
 		t.Fatalf("PublishFinalized must skip storyboard projection for deliverable: %v", err)
 	}
 }
+
+func TestFinalizeSessionDeliverableEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	store := generation.NewMemoryStore()
+	assets := &memoryAssets{values: map[string]asset.Asset{
+		"asset-1": {ID: "asset-1", SessionID: "session-1", Availability: asset.AvailabilityPendingBilling},
+	}}
+	// Repository/Approvals/Specs 全部为 nil：Finalize 全链任何一步触碰
+	// storyboard/审批即 panic 或报错——物理隔离证明。
+	adapter := StoryboardBindingAdapter{Assets: assets, Events: failingEventPublisher{}}
+	policy := generation.DeliveryPolicy{
+		BindingMode:    generation.BindingModeActive,
+		ApprovalPolicy: generation.ApprovalAutoApprove,
+		ChargePolicy:   generation.ChargePostpaidNoReservation,
+	}
+	token := generation.BindingToken{
+		TargetKind:       generation.TargetKindSessionDeliverable,
+		TargetID:         "deliverable:img-1",
+		AssetSlot:        "primary",
+		InputFingerprint: "fp",
+	}
+	_, _, err := store.CreateWorkflow(ctx, generation.CreateWorkflowCommand{
+		Operation: generation.GenerationOperation{ID: "op-1", SessionID: "session-1", UserID: "user-1", StageRunID: "stage-1", ToolCallID: "tool-1", IdempotencyKey: "op-key-1"},
+		Batch: generation.GenerationBatch{ID: "batch-1", CompletionPolicy: generation.CompletionAllRequired, WakePolicy: generation.WakeOnTerminal, DeliveryPolicy: policy},
+		Jobs: []generation.GenerationJob{{
+			ID: "job-1", IdempotencyKey: "job-key-1", Provider: "mock", Required: true,
+			BindingToken: token, DeliveryPolicy: policy,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkflow() error = %v", err)
+	}
+	queued, err := store.GetJob(ctx, "job-1")
+	if err != nil {
+		t.Fatalf("GetJob() error = %v", err)
+	}
+	if _, err := store.MutateJob(ctx, "job-1", queued.StatusVersion, func(current *generation.GenerationJob) ([]generation.OutboxEvent, error) {
+		current.Status = generation.StatusRunning
+		return nil, nil
+	}); err != nil {
+		t.Fatalf("advance to running: %v", err)
+	}
+
+	engine := generation.NewFinalizationEngine(generation.FinalizationEngineConfig{
+		Store:     store,
+		Bindings:  BindingGuard{adapter},
+		Committer: adapter,
+		Inspector: adapter,
+	})
+	job, err := engine.Finalize(ctx, "job-1", generation.ProviderResult{AssetIDs: []string{"asset-1"}, Status: "done"})
+	if err != nil {
+		t.Fatalf("Finalize() error = %v", err)
+	}
+	if job.Status != generation.StatusSucceeded {
+		t.Fatalf("job status = %s, want %s (job=%#v)", job.Status, generation.StatusSucceeded, job)
+	}
+	if job.ResultDisposition != generation.DispositionBoundActive {
+		t.Fatalf("disposition = %s, want %s", job.ResultDisposition, generation.DispositionBoundActive)
+	}
+	stored, err := assets.Get(ctx, "asset-1")
+	if err != nil {
+		t.Fatalf("get asset: %v", err)
+	}
+	if stored.Availability != asset.AvailabilityAvailable {
+		t.Fatalf("asset availability = %s, want available", stored.Availability)
+	}
+}
