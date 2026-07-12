@@ -1914,6 +1914,248 @@ func TestSchedulerFailsClosedOnMultipleSuspensions(t *testing.T) {
 	}
 }
 
+func TestSchedulerFailsClosedOnDurableCrossInstanceSuspensions(t *testing.T) {
+	runCrossInstanceSuspensionConflict(t, NewMemoryRunStore(), "cross-instance-suspensions")
+}
+
+func TestActiveSuspensionsIgnoreResumedAndTerminalReceipts(t *testing.T) {
+	run := PlanRun{
+		Plan: ExecutionPlan{Steps: []PlanStep{{ID: "active"}, {ID: "resumed"}, {ID: "failed"}, {ID: "plain"}}},
+		Nodes: map[string]*NodeRun{
+			"active":  {StepID: "active", Status: NodeStatusSucceeded, Suspension: &vocabulary.Suspension{Reason: SuspendWaitingAgent}},
+			"resumed": {StepID: "resumed", Status: NodeStatusSucceeded, Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}, Resumed: true},
+			"failed":  {StepID: "failed", Status: NodeStatusFailed, Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs}},
+			"plain":   {StepID: "plain", Status: NodeStatusRunning},
+		},
+	}
+	if got := activeSuspensionNodeIDs(run); !reflect.DeepEqual(got, []string{"active"}) {
+		t.Fatalf("activeSuspensionNodeIDs() = %v", got)
+	}
+}
+
+func TestSchedulerCancellationPendingPrecedesDurableSuspensionConflict(t *testing.T) {
+	store := NewMemoryRunStore()
+	registry := schedulerRegistry(t, schedulerTool{key: "pause"})
+	scheduler := schedulerForTest(t, store, registry, 1)
+	lease := time.Now().Add(time.Minute)
+	claim := executionClaim{StepID: "pause-b", Attempt: 1, Epoch: 1, Owner: scheduler.ownerID, Token: scheduler.ownerID + ":token"}
+	created, err := store.CreateRun(context.Background(), PlanRun{
+		ID: "cancel-beats-suspensions", SessionID: "session-1", UserID: "user-1",
+		Plan: ExecutionPlan{PlanID: "cancel", Source: "dynamic", Summary: "cancel", Direction: "image", Steps: []PlanStep{
+			{ID: "pause-a", Tool: "pause", Required: true}, {ID: "pause-b", Tool: "pause", Required: true},
+		}},
+		Status: RunStatusSuspended, SuspendReason: SuspendWaitingUser, SuspendedNodeID: "pause-a", CancelRequested: true,
+		Nodes: map[string]*NodeRun{
+			"pause-a": {StepID: "pause-a", Status: NodeStatusRunning, Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}, ResumeKey: "resume-a"},
+			"pause-b": {StepID: "pause-b", Status: NodeStatusRunning, Attempt: 1, ExecutionEpoch: 1, ExecutionOwner: claim.Owner, ExecutionToken: claim.Token, LeaseUntil: &lease},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := scheduler.mergeOutcomes(context.Background(), created, []nodeOutcome{{
+		step: PlanStep{ID: "pause-b", Tool: "pause", Required: true}, claim: claim, invoked: true,
+		result: vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs}},
+	}})
+	if !errors.Is(err, ErrCancellationPending) {
+		t.Fatalf("mergeOutcomes() error = %v", err)
+	}
+	if merged.Status != RunStatusSuspended || !merged.CancelRequested || merged.Nodes["pause-a"].Suspension == nil || merged.Nodes["pause-a"].Fail != nil {
+		t.Fatalf("merged run = %+v", merged)
+	}
+	if node := merged.Nodes["pause-b"]; node.Status != NodeStatusPending || node.Suspension != nil || node.ExecutionToken != "" {
+		t.Fatalf("released incoming node = %+v", node)
+	}
+}
+
+func TestSchedulerResumeRaceWithSecondSuspensionNeverLeavesAmbiguousPointer(t *testing.T) {
+	const iterations = 50
+	for iteration := range iterations {
+		store := NewMemoryRunStore()
+		registry := schedulerRegistry(t, schedulerTool{key: "pause"})
+		resumeScheduler := schedulerForTest(t, store, registry, 1)
+		mergeScheduler := schedulerForTest(t, store, registry, 1)
+		runID := fmt.Sprintf("resume-suspension-race-%d", iteration)
+		lease := time.Now().Add(time.Minute)
+		claim := executionClaim{StepID: "pause-b", Attempt: 1, Epoch: 1, Owner: mergeScheduler.ownerID, Token: mergeScheduler.ownerID + ":token"}
+		created, err := store.CreateRun(context.Background(), PlanRun{
+			ID: runID, SessionID: "session-1", UserID: "user-1",
+			Plan: ExecutionPlan{PlanID: "race", Source: "dynamic", Summary: "race", Direction: "image", Steps: []PlanStep{
+				{ID: "pause-a", Tool: "pause", Required: true}, {ID: "pause-b", Tool: "pause", Required: true},
+			}},
+			Status: RunStatusSuspended, SuspendReason: SuspendWaitingUser, SuspendedNodeID: "pause-a",
+			Nodes: map[string]*NodeRun{
+				"pause-a": {StepID: "pause-a", Status: NodeStatusRunning, Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}, ResumeKey: "resume-a"},
+				"pause-b": {StepID: "pause-b", Status: NodeStatusRunning, Attempt: 1, ExecutionEpoch: 1, ExecutionOwner: claim.Owner, ExecutionToken: claim.Token, LeaseUntil: &lease},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		var wait sync.WaitGroup
+		wait.Add(2)
+		go func() {
+			defer wait.Done()
+			<-start
+			_, _ = resumeScheduler.Resume(context.Background(), runID, "resume-a", map[string]any{})
+		}()
+		go func() {
+			defer wait.Done()
+			<-start
+			_, _ = mergeScheduler.mergeOutcomes(context.Background(), created, []nodeOutcome{{
+				step: PlanStep{ID: "pause-b", Tool: "pause", Required: true}, claim: claim, invoked: true,
+				result: vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs}},
+			}})
+		}()
+		close(start)
+		wait.Wait()
+		final, err := store.GetRun(context.Background(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		active := activeSuspensionNodeIDs(final)
+		switch final.Status {
+		case RunStatusFailed:
+			if len(active) != 0 || final.SuspendedNodeID != "" {
+				t.Fatalf("iteration %d failed run has active=%v pointer=%q", iteration, active, final.SuspendedNodeID)
+			}
+		case RunStatusSuspended:
+			if len(active) != 1 || final.SuspendedNodeID != active[0] {
+				t.Fatalf("iteration %d suspended run has active=%v pointer=%q", iteration, active, final.SuspendedNodeID)
+			}
+		default:
+			t.Fatalf("iteration %d status=%s active=%v pointer=%q", iteration, final.Status, active, final.SuspendedNodeID)
+		}
+	}
+}
+
+func runCrossInstanceSuspensionConflict(t *testing.T, store RunStore, runID string) {
+	t.Helper()
+	started := make(chan string, 2)
+	releaseA := make(chan struct{})
+	releaseB := make(chan struct{})
+	var releaseAOnce sync.Once
+	var releaseBOnce sync.Once
+	t.Cleanup(func() {
+		releaseAOnce.Do(func() { close(releaseA) })
+		releaseBOnce.Do(func() { close(releaseB) })
+	})
+	var downstream atomic.Int32
+	registry := schedulerRegistry(t,
+		schedulerTool{key: "pause", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			started <- call.NodeID
+			switch call.NodeID {
+			case "pause-a":
+				<-releaseA
+				return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}}, nil
+			case "pause-b":
+				<-releaseB
+				return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs}}, nil
+			default:
+				return vocabulary.Result{}, fmt.Errorf("unexpected pause node %q", call.NodeID)
+			}
+		}},
+		schedulerTool{key: "next", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			downstream.Add(1)
+			return vocabulary.Result{}, nil
+		}},
+	)
+	plan := ExecutionPlan{
+		PlanID: "durable-ambiguous-pause", Source: "dynamic", Summary: "durable ambiguous pause", Direction: "image",
+		Steps: []PlanStep{
+			{ID: "pause-a", Tool: "pause", Required: true},
+			{ID: "pause-b", Tool: "pause", Required: true},
+			{ID: "next", Tool: "next", DependsOn: []string{"pause-a", "pause-b"}, Required: true},
+		},
+	}
+	nodes := map[string]*NodeRun{
+		"pause-a": {StepID: "pause-a", Status: NodeStatusPending},
+		"pause-b": {StepID: "pause-b", Status: NodeStatusPending},
+		"next":    {StepID: "next", Status: NodeStatusPending},
+	}
+	if _, err := store.CreateRun(context.Background(), PlanRun{
+		ID: runID, SessionID: "session-1", UserID: "user-1", Plan: plan,
+		Status: RunStatusRunning, Nodes: nodes,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	newScheduler := func(owner string) *Scheduler {
+		cfg := schedulerConfigForTest(store, registry, func() string { return "unused" })
+		cfg.OwnerID = owner
+		cfg.MaxParallel = 1
+		scheduler, err := NewScheduler(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return scheduler
+	}
+	type advanceResult struct {
+		run PlanRun
+		err error
+	}
+	advance := func(scheduler *Scheduler) <-chan advanceResult {
+		result := make(chan advanceResult, 1)
+		go func() {
+			run, err := scheduler.Advance(context.Background(), runID)
+			result <- advanceResult{run: run, err: err}
+		}()
+		return result
+	}
+	waitStarted := func(want string) {
+		t.Helper()
+		select {
+		case got := <-started:
+			if got != want {
+				t.Fatalf("started node = %q, want %q", got, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("node %q did not start", want)
+		}
+	}
+	waitAdvanced := func(result <-chan advanceResult) {
+		t.Helper()
+		select {
+		case got := <-result:
+			if got.err != nil {
+				t.Fatalf("Advance() error = %v", got.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Advance() did not return")
+		}
+	}
+
+	first := advance(newScheduler("cross-instance-owner-a"))
+	waitStarted("pause-a")
+	second := advance(newScheduler("cross-instance-owner-b"))
+	waitStarted("pause-b")
+	releaseAOnce.Do(func() { close(releaseA) })
+	waitAdvanced(first)
+	releaseBOnce.Do(func() { close(releaseB) })
+	waitAdvanced(second)
+
+	run, err := store.GetRun(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != RunStatusFailed || run.SuspendReason != "" || run.SuspendedNodeID != "" || downstream.Load() != 0 {
+		t.Fatalf("status=%s reason=%q pointer=%q downstream=%d", run.Status, run.SuspendReason, run.SuspendedNodeID, downstream.Load())
+	}
+	for _, id := range []string{"pause-a", "pause-b"} {
+		node := run.Nodes[id]
+		if node.Status != NodeStatusFailed || node.Fail == nil || node.Fail.Code != "multiple_suspensions" ||
+			node.Suspension != nil || node.ResumeKey != "" || node.ExecutionToken != "" || node.ExecutionOwner != "" || node.LeaseUntil != nil {
+			t.Fatalf("conflicting node %s = %+v", id, node)
+		}
+	}
+	for id, node := range run.Nodes {
+		if node.Status == NodeStatusPending || node.Status == NodeStatusRunning {
+			t.Fatalf("terminal run left node %s in status %s: %+v", id, node.Status, node)
+		}
+	}
+}
+
 type conflictOnceStore struct {
 	RunStore
 	mutation atomic.Int32

@@ -124,6 +124,7 @@ func ValidateRunTransition(from, to string) error {
 		},
 		RunStatusSuspended: {
 			RunStatusRunning:   true,
+			RunStatusFailed:    true,
 			RunStatusCancelled: true,
 		},
 	}

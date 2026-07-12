@@ -223,6 +223,9 @@ func (s *Scheduler) advance(ctx context.Context, runID string) (PlanRun, error) 
 		if claimErr != nil {
 			return claimedRun, claimErr
 		}
+		if isTerminalRun(claimedRun.Status) || claimedRun.Status == RunStatusSuspended {
+			return claimedRun, nil
+		}
 		if len(claims) == 0 {
 			if hasActiveExecutionClaim(claimedRun) {
 				return claimedRun, nil
@@ -572,31 +575,9 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 			if applied == 0 {
 				return errNoOutcomeApplied
 			}
-			suspendedNodeIDs := make([]string, 0, 1)
-			for _, outcome := range outcomes {
-				node := next.Nodes[outcome.step.ID]
-				if node != nil && node.Suspension != nil {
-					suspendedNodeIDs = append(suspendedNodeIDs, outcome.step.ID)
-				}
-			}
+			suspendedNodeIDs := activeSuspensionNodeIDs(*next)
 			if len(suspendedNodeIDs) > 1 {
-				for _, nodeID := range suspendedNodeIDs {
-					node := next.Nodes[nodeID]
-					node.Status = NodeStatusFailed
-					node.Suspension = nil
-					node.ResumeKey = ""
-					node.Fail = &vocabulary.Failure{
-						Code: "multiple_suspensions", Message: "a ready wave produced multiple suspension points",
-					}
-				}
-				for _, node := range next.Nodes {
-					if node != nil && node.Status == NodeStatusPending {
-						node.Status = NodeStatusSkipped
-					}
-				}
-				next.Status = RunStatusFailed
-				next.SuspendReason = ""
-				next.SuspendedNodeID = ""
+				failMultipleSuspensions(next, suspendedNodeIDs)
 			} else if len(suspendedNodeIDs) == 1 {
 				nodeID := suspendedNodeIDs[0]
 				next.Status = RunStatusSuspended
@@ -632,11 +613,73 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 		if err != nil {
 			return PlanRun{}, err
 		}
-		if isTerminalRun(current.Status) || current.Status == RunStatusSuspended {
+		if isTerminalRun(current.Status) || (current.Status == RunStatusSuspended && !hasMatchingOutcomeClaim(current, outcomes)) {
 			return current, nil
 		}
 	}
 	return current, fmt.Errorf("%w: merge outcomes exceeded retry limit", ErrRunVersionConflict)
+}
+
+func activeSuspensionNodeIDs(run PlanRun) []string {
+	nodeIDs := make([]string, 0, 1)
+	for _, step := range run.Plan.Steps {
+		node := run.Nodes[step.ID]
+		if node == nil || node.Suspension == nil || node.Resumed {
+			continue
+		}
+		if node.Status == NodeStatusRunning || node.Status == NodeStatusSucceeded {
+			nodeIDs = append(nodeIDs, step.ID)
+		}
+	}
+	return nodeIDs
+}
+
+func hasMatchingOutcomeClaim(run PlanRun, outcomes []nodeOutcome) bool {
+	for _, outcome := range outcomes {
+		if claimMatches(run.Nodes[outcome.step.ID], outcome.claim) {
+			return true
+		}
+	}
+	return false
+}
+
+func failMultipleSuspensions(run *PlanRun, suspendedNodeIDs []string) {
+	conflicting := make(map[string]struct{}, len(suspendedNodeIDs))
+	for _, nodeID := range suspendedNodeIDs {
+		conflicting[nodeID] = struct{}{}
+		node := run.Nodes[nodeID]
+		node.Status = NodeStatusFailed
+		node.SkipReason = ""
+		node.Suspension = nil
+		node.ResumeKey = ""
+		node.Resumed = false
+		node.ResumeDecision = nil
+		node.SuspensionOrigin = ""
+		node.ResumeDecisionSchema = ""
+		node.GuardApproval = nil
+		node.Fail = &vocabulary.Failure{
+			Code: "multiple_suspensions", Message: "plan run produced multiple active suspension points",
+		}
+		clearExecutionClaim(node)
+	}
+	for nodeID, node := range run.Nodes {
+		if node == nil {
+			continue
+		}
+		if _, isConflict := conflicting[nodeID]; isConflict {
+			continue
+		}
+		if node.Status == NodeStatusPending || node.Status == NodeStatusRunning {
+			node.Status = NodeStatusSkipped
+			node.SkipReason = ""
+			node.Suspension = nil
+			node.ResumeKey = ""
+			clearExecutionClaim(node)
+		}
+	}
+	run.Status = RunStatusFailed
+	run.SuspendReason = ""
+	run.SuspendedNodeID = ""
 }
 
 func outcomeClaims(outcomes []nodeOutcome) []executionClaim {

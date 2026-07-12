@@ -205,6 +205,17 @@ func TestPostgresRunStoreMutationRollbackAndConcurrentCAS(t *testing.T) {
 	}
 }
 
+func TestPostgresSchedulerFailsClosedOnDurableCrossInstanceSuspensions(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	id := postgresRunID(t)
+	t.Cleanup(func() {
+		if err := db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}).Error; err != nil {
+			t.Errorf("clean up plan run %q: %v", id, err)
+		}
+	})
+	runCrossInstanceSuspensionConflict(t, store, id)
+}
+
 func TestPostgresRunStoreRejectsMetadataPayloadDrift(t *testing.T) {
 	store, db := openPostgresRunStore(t)
 	ctx := context.Background()
