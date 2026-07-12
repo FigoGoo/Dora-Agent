@@ -24,7 +24,7 @@ func newDeliverableTestRuntime(t *testing.T, store *generation.MemoryStore) *Run
 	idCounter := 0
 	runtime, err := New(Config{
 		Model: scriptedModel{}, Artifacts: artifact.NewMemoryStore(),
-		Specs:      &memorySpecs{},
+		Specs:       &memorySpecs{},
 		Storyboards: repository, StoryboardCommands: commands,
 		GenerationCommands: generation.NewCommandService(generation.CommandServiceConfig{Store: store}),
 		GenerationWorkflow: store,

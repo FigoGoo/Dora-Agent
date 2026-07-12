@@ -156,7 +156,7 @@ func TestFinalizeSessionDeliverableEndToEnd(t *testing.T) {
 	}
 	_, _, err := store.CreateWorkflow(ctx, generation.CreateWorkflowCommand{
 		Operation: generation.GenerationOperation{ID: "op-1", SessionID: "session-1", UserID: "user-1", StageRunID: "stage-1", ToolCallID: "tool-1", IdempotencyKey: "op-key-1"},
-		Batch: generation.GenerationBatch{ID: "batch-1", CompletionPolicy: generation.CompletionAllRequired, WakePolicy: generation.WakeOnTerminal, DeliveryPolicy: policy},
+		Batch:     generation.GenerationBatch{ID: "batch-1", CompletionPolicy: generation.CompletionAllRequired, WakePolicy: generation.WakeOnTerminal, DeliveryPolicy: policy},
 		Jobs: []generation.GenerationJob{{
 			ID: "job-1", IdempotencyKey: "job-key-1", Provider: "mock", Required: true,
 			BindingToken: token, DeliveryPolicy: policy,
