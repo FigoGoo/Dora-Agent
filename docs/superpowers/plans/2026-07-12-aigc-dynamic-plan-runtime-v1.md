@@ -30,7 +30,7 @@
 2. **后续 Plan 2：Agent 动态编排。** M1 需求矩阵、M2 模板命中、M3 计划生成/两次修复、14 词汇注册面、五 Capability 降级。
 3. **后续 Plan 3：模板与产品投影。** 六个初始模板数据化、计划/节点 A2UI 投影、孤立产物区、actor 审计、旧 mediagraph 清理。
 
-Plan 2 的入口条件：本计划 Task 8 的新实例恢复测试和 Task 9 的端到端测试全部通过。若 Task 4 或 Task 8 证明“挂起即释放”“活计划修订”或“仅依赖持久化 Store 恢复”无法在当前模型下可靠实现，停止并回到 07-11 规格 §6.3 重议技术路径。
+Plan 2 的入口条件：本计划 Task 4A/4B 的 execution fencing 与活计划修订 Gate、Task 8 的新实例恢复测试、Task 9 的端到端测试全部通过。若 execution claim 不能同时满足“执行前可见、过期可接管、迟到结果不可提交”，或 Task 4B 仍不能保证“已执行不回滚”，停止并回到 07-11 规格 §6.3 重议技术路径。
 
 ## 1. 文件结构
 
@@ -38,6 +38,7 @@ Plan 2 的入口条件：本计划 Task 8 的新实例恢复测试和 Task 9 的
 | --- | --- |
 | `internal/aigc/orchestration/plan_run.go` | `PlanRun/NodeRun`、状态转移、RunStore 接口、内存 Store |
 | `internal/aigc/orchestration/scheduler.go` | DAG 就绪集、并发执行、参数引用解析、终态归纳 |
+| `internal/aigc/orchestration/execution_claim.go` | Node execution claim、lease/heartbeat、token fencing 与过期接管 |
 | `internal/aigc/orchestration/resume.go` | waiting_user/waiting_agent/waiting_jobs 的一次性恢复 |
 | `internal/aigc/orchestration/revision.go` | 活计划裁剪和追加，只允许修改未执行节点 |
 | `internal/aigc/orchestration/postgres_run_store.go` | 单行 JSONB 聚合、Version CAS、跨实例恢复 |
@@ -408,11 +409,134 @@ git commit -m "feat(orchestration): add unified plan suspension and resume"
 
 ---
 
-### Task 4: 活计划修订
+### Task 4A: Durable Node Execution Claim / Lease / Fencing
+
+**Why this Gate exists:** Task 4 初次质量审查证明“结果提交式”Scheduler 无法与跨实例活计划修订共存：Tool 已开始执行时 durable Node 仍是 pending，另一个实例可以把它裁掉。实例内 gate 不能解决跨进程竞态。本任务先让“已开始执行”成为 Store 中可判定、可恢复、带 fencing token 的事实，再允许活计划修订通过 Gate。
 
 **Files:**
-- Create: `internal/aigc/orchestration/revision.go`
-- Create: `internal/aigc/orchestration/revision_test.go`
+- Create: `internal/aigc/orchestration/execution_claim.go`
+- Create: `internal/aigc/orchestration/execution_claim_test.go`
+- Modify: `internal/aigc/orchestration/plan_run.go`
+- Modify: `internal/aigc/orchestration/scheduler.go`
+- Modify: `internal/aigc/orchestration/scheduler_test.go`
+
+- [ ] **Step 1: 写跨实例 claim 失败测试**
+
+```go
+func TestExecutionClaimPreventsConcurrentSchedulersFromRunningSameNode(t *testing.T) {
+	store := NewMemoryRunStore()
+	clock := newFakeClock(time.Unix(1_700_000_000, 0))
+	tool := newBlockingIdempotentTool()
+	first := newClaimingScheduler(t, store, "owner-a", clock.Now, tool)
+	second := newClaimingScheduler(t, store, "owner-b", clock.Now, tool)
+	run := createPendingRun(t, store, oneStepPlan("effect"))
+
+	firstDone := runAdvanceAsync(first, run.ID)
+	tool.WaitStarted(t)
+	current, err := store.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := current.Nodes["effect"]
+	if node.Status != NodeStatusRunning || node.ExecutionOwner != "owner-a" || node.ExecutionToken == "" || node.LeaseUntil == nil {
+		t.Fatalf("claim=%+v", node)
+	}
+	secondRun, err := second.Advance(context.Background(), run.ID)
+	if err != nil || secondRun.Status != RunStatusRunning || tool.Invocations() != 1 {
+		t.Fatalf("second=%+v calls=%d err=%v", secondRun, tool.Invocations(), err)
+	}
+	tool.Release()
+	if result := <-firstDone; result.err != nil || result.run.Status != RunStatusSucceeded {
+		t.Fatalf("first=%+v err=%v", result.run, result.err)
+	}
+}
+```
+
+- [ ] **Step 2: 写 lease 过期接管与迟到结果 fencing 测试**
+
+第一个 Scheduler claim 后模拟进程退出；fake clock 推进超过 LeaseTTL。第二个 Scheduler 必须保留原 Attempt 和 IdempotencyKey、写入新 token 后接管。第一个 token 的迟到 outcome 必须成为 no-op，不增加 Version、不覆盖第二个 token 的权威结果。
+
+- [ ] **Step 3: 写 heartbeat 与主动释放测试**
+
+长 Tool 每 `LeaseTTL/3` 续租；clock 未超过最新 lease 时其他实例不能接管。Tool 返回 infrastructure error、caller cancel 或未开始的 claimed node 必须原子退回 pending，清 owner/token/lease，但保留 Attempt，使下一次 claim 使用同一 idempotency key。
+
+- [ ] **Step 4: 运行 RED**
+
+Run: `go test ./internal/aigc/orchestration -run 'TestExecutionClaim' -v`
+
+Expected: 编译失败，缺少 execution claim 字段、Scheduler owner/lease 配置或 claim 实现。
+
+- [ ] **Step 5: 实现 claim 类型与配置**
+
+```go
+type NodeRun struct {
+	// existing fields...
+	ExecutionOwner string     `json:"execution_owner,omitempty"`
+	ExecutionToken string     `json:"execution_token,omitempty"`
+	LeaseUntil     *time.Time `json:"lease_until,omitempty"`
+}
+
+type SchedulerConfig struct {
+	// existing fields...
+	OwnerID  string
+	LeaseTTL time.Duration
+	Now      func() time.Time
+	NewToken func() string
+}
+```
+
+`OwnerID`、`Now`、`NewToken` 必填；LeaseTTL 默认 30 秒。首次 claim 把 pending -> running、Attempt 0 -> 1；过期接管保持 Attempt 不变，只替换 owner/token/lease。Tool Call 使用 NodeRun 中已冻结的 Attempt。
+
+- [ ] **Step 6: 实现 claim wave、heartbeat 与 fenced merge**
+
+```go
+type executionClaim struct {
+	StepID  string
+	Attempt int
+	Owner   string
+	Token   string
+}
+
+func (s *Scheduler) claimReady(ctx context.Context, run PlanRun) (PlanRun, []executionClaim, error)
+func (s *Scheduler) renewClaims(ctx context.Context, runID string, claims []executionClaim) error
+func (s *Scheduler) releaseClaims(ctx context.Context, runID string, claims []executionClaim) error
+```
+
+每轮最多 claim `MaxParallel` 个 ready node。所有 outcome merge 必须同时匹配 `Status=running + ExecutionOwner + ExecutionToken + Attempt`；不匹配是迟到结果，直接 no-op。成功/业务失败/Suspension 清 claim 字段；基础设施失败/取消把同 token claim 退回 pending。Heartbeat 使用有界 CommitTimeout context，停止时等待 goroutine 退出，不泄漏 ticker。
+
+- [ ] **Step 7: 写 token mismatch 与 claim 清理测试**
+
+同一 Node 的旧 token outcome、错误 owner heartbeat、重复 release 都必须成为 no-op，不增加 Version；正常 terminal outcome 后 owner/token/lease 全部为空。该步骤只验证 claim/fencing 自身，不依赖 Task 4B 的 Revise API。
+
+- [ ] **Step 8: 运行 GREEN 与 claim Gate**
+
+Run:
+
+```bash
+go test -count=50 -race ./internal/aigc/orchestration -run 'TestExecutionClaim'
+go test -race ./internal/aigc/orchestration
+go test ./...
+go vet ./...
+```
+
+Expected: 全部 PASS；无双执行、无 stale overwrite、无 heartbeat/gate goroutine 泄漏。
+
+- [ ] **Step 9: 提交**
+
+```bash
+git add internal/aigc/orchestration/execution_claim.go internal/aigc/orchestration/execution_claim_test.go internal/aigc/orchestration/plan_run.go internal/aigc/orchestration/scheduler.go internal/aigc/orchestration/scheduler_test.go
+git commit -m "feat(orchestration): fence durable node execution"
+```
+
+---
+
+### Task 4B: 活计划修订 Gate 收口
+
+**Files:**
+- Modify: `internal/aigc/orchestration/revision.go`（`8049c4c` 已有实现未通过 Gate，本任务负责修正并复审）
+- Modify: `internal/aigc/orchestration/revision_test.go`
+- Modify: `internal/aigc/orchestration/plan_run.go`
+- Modify: `internal/aigc/orchestration/scheduler.go`
 
 - [ ] **Step 1: 写未执行节点裁剪和追加测试**
 
@@ -456,6 +580,10 @@ func TestReviseRejectsExecutedStepAtomically(t *testing.T) {
 }
 ```
 
+- [ ] **Step 2A: 写跨实例 Advance vs Revise 竞态测试**
+
+一个 Scheduler claim 并阻塞在 Tool，另一个 Scheduler 调 `Revise(...SkipStepIDs:[claimedStep])`，必须 `errors.Is(err, ErrReviseExecutedStep)` 且 Run Version/Plan 不变；Tool 释放后原结果正常提交。随后用新 Scheduler 只依赖 Store 对 replacement revision 执行 `Advance` 至终态，断言旧 revision-skipped required 节点不会把成功替代路径误判为 failed。
+
 - [ ] **Step 3: 运行 RED**
 
 Run: `go test ./internal/aigc/orchestration -run 'TestRevise' -v`
@@ -475,11 +603,15 @@ type PlanRevision struct {
 func (s *Scheduler) Revise(ctx context.Context, runID string, revision PlanRevision) (PlanRun, error)
 ```
 
-在单次 `MutateRun` 回调内构造候选 Plan 和 Nodes，验证：只能 skip pending；追加 ID 不重复；依赖可指向现有或同批追加节点；整份候选 Plan 必须通过 Validate。任何错误不得增加 Version。
+在单次 `MutateRun` 回调内构造候选 Plan 和 Nodes，验证：只能 skip pending；claimed/running 节点必须以 `ErrReviseExecutedStep` 拒绝；追加 ID 不重复；依赖可指向现有或同批追加节点；整份候选 Plan 必须通过 Validate。任何错误不得增加 Version。
+
+Revision 裁掉 required step 后，该 step 的 `NodeRun` 必须记录 `SkipReason="revision"`。终态归纳把 revision-skipped required step 视为明确缺口：只要其余 required replacement 路径成功，Run 为 `partial_succeeded`，不能误判 failed；dependency/error 导致的 skipped 仍按原失败规则处理。
+
+`clonePlanRevision` 与 `clonePlanRun` 都使用 `json.Decoder.UseNumber()` 保留 `map[string]any` 中的大整数；canonical step equality 必须区分 `9007199254740992` 与 `9007199254740993`，序列化错误用 `%w` 保留底层 JSON error chain。只修 revision clone 不够，因为 RunStore round-trip 可能更早把 Plan Params 精度压成 float64。
 
 - [ ] **Step 5: 运行 GREEN 和 race**
 
-Run: `go test -race ./internal/aigc/orchestration -run 'TestRevise' -v`
+Run: `go test -race ./internal/aigc/orchestration -run 'TestRevise|TestExecutionClaimPreventsRevise' -v`
 
 Expected: PASS。
 
@@ -487,7 +619,7 @@ Expected: PASS。
 
 Run: `go test -race ./internal/aigc/orchestration`
 
-Expected: PASS。若无法同时满足“已执行不回滚、挂起中可追加、CAS 冲突不泄漏”，停止计划。
+Expected: PASS。必须额外证明：跨 Scheduler 的 Tool 已 claim 后不能被 Revise；replacement DAG Advance 至终态为 `partial_succeeded`；新 Scheduler 只依赖 Store 即可继续 revised Run；大整数不同定义不被误判幂等。若任一失败，Gate 不通过并停止计划。
 
 ```bash
 git add internal/aigc/orchestration/revision.go internal/aigc/orchestration/revision_test.go
@@ -873,7 +1005,7 @@ Plan 3 负责模板持久化、计划 A2UI 和资产/actor 产品化，不得反
 - **当前状态：** 已完成的 vocabulary Registry 和 ExecutionPlan Validate 不重复实现；新任务从 `PlanRun` 开始。
 - **类型一致性：** `waiting_user/waiting_agent/waiting_jobs` 只存在于 `PlanRun.SuspendReason` 与 `vocabulary.Suspension.Reason`；generation bridge 不自建第四种挂起。
 - **正确性边界：** Postgres 为 Run 真源，Scheduler 不持有跨调用 goroutine；Redis/Worker 只通过 Batch terminal outcome 唤醒。
-- **停止条件：** Task 4 或 Task 8 的可行性 Gate 失败即停止，不用隐藏驻留 goroutine、不可修订 checkpoint 或进程内恢复旁路绕过规格。
+- **停止条件：** Task 4A/4B 或 Task 8 的可行性 Gate 失败即停止，不用进程内旁路掩盖跨实例 claim、不可修订 checkpoint 或迟到结果 fencing 问题。
 - **完整性扫描：** 没有未决占位或模糊实现项；Plan 2/3 是明确排除范围，不是本计划中的未实现步骤。
 
 ## 4. 执行记录
