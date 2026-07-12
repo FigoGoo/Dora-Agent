@@ -21,6 +21,7 @@ import (
 	aigcconfig "github.com/FigoGoo/Dora-Agent/internal/aigc/config"
 	aigcmw "github.com/FigoGoo/Dora-Agent/internal/aigc/middleware"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/modelreceipt"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/orchestration"
 	aigctools "github.com/FigoGoo/Dora-Agent/internal/aigc/tools"
 )
 
@@ -94,6 +95,7 @@ func NewDeepSeekRunner(ctx context.Context, cfg DeepSeekRunnerConfig) (*adk.Runn
 	先根据需要分析素材，再生成或修订创作规范；规范确认后才能创建或整体重规划故事板；故事板确认后才能生成素材；依赖齐备后才能合成。Tool 返回 waiting_user 时必须停止继续调用下游 Tool，等待用户通过系统发布的权威审核入口提交决定。不得创建重复的确认表单，不得提示用户在聊天中回复“确认”来代替 Approval Decision，也不得把普通聊天文本当成已完成审批。生成的候选素材统一在左侧故事板确认，不要为每个候选素材生成聊天审批卡或逐项确认提示。
 故事板模块、元素类型与数量必须按用户场景动态推理，不套用固定短剧模板。提示词生成是 Graph 内部 ChatModel 节点，不存在 prepare_prompts Tool。用户在前端进行单元素提示词编辑、素材上传/填充、候选采用或局部重生成时，不要再调用 plan_storyboard；只有用户改变整体背景、目标或结构时才整体 replan。
 用户明确说明没有参考素材、且当前会话也没有 asset_id 时，不要调用 analyze_materials，直接从 plan_creation_spec 开始。不要尝试调用积分、权限、资产 CRUD 或 Provider Tool；这些业务能力只允许在 Graph/Worker 内部执行。异步生成返回 accepted 后，只说明已受理和可见进度，不虚构尚未完成的素材地址、费用或结果。`
+		instruction = strings.TrimSpace(instruction + "\n" + orchestration.LightTemplateCatalogText())
 	}
 	instruction = strings.TrimSpace(instruction + "\n\n" + a2ui.AgentInstruction())
 
