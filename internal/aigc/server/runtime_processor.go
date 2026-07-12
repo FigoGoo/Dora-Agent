@@ -17,6 +17,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/approval"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/approvalruntime"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/capability"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/orchestration"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/session"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/sessionruntime"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/storyboard"
@@ -266,22 +267,16 @@ func approvalContinuationNextStageInstruction(value sessionruntime.ApprovalConti
 	if !strings.EqualFold(strings.TrimSpace(value.EffectiveStatus), string(approval.StatusApproved)) || terminalNoop || terminalErr != nil {
 		return "本次审批未形成可推进的已应用状态，不强制推进到下一个 Capability；准确解释结果并按当前状态决定停止、等待用户输入或重新规划。"
 	}
-
-	switch strings.TrimSpace(value.ArtifactType) {
-	case "creation_spec_revision":
-		return fmt.Sprintf("确定性下一阶段：必须调用 %s；禁止再次调用 %s。", capability.PlanStoryboardToolKey, capability.PlanCreationSpecToolKey)
-	case "storyboard_revision", "candidate_asset":
-		productionComplete, _ := approvalContinuationProductionComplete(value)
-		if productionComplete {
-			return fmt.Sprintf("确定性下一阶段：冻结的 Storyboard 已无候选待审且全部生产槽位已激活；必须调用 %s，参数固定为 {\"mode\":\"preview\",\"output_type\":\"video\"}，由该 Capability 先校验装配依赖再派发本地预览。", capability.AssembleOutputToolKey)
-		}
-		if strings.TrimSpace(value.ArtifactType) == "storyboard_revision" {
-			return fmt.Sprintf("确定性下一阶段：禁止再次调用 %s；必须调用 %s，参数固定为 {\"phase\":\"auto_next\",\"policy\":\"all_eligible\"}。", capability.PlanStoryboardToolKey, capability.GenerateMediaToolKey)
-		}
-		return fmt.Sprintf("确定性下一阶段：必须继续调用 %s，参数使用 {\"phase\":\"auto_next\",\"policy\":\"all_eligible\"}；仅当没有更多 eligible 媒体阶段且当前装配依赖已满足时，才调用 %s。", capability.GenerateMediaToolKey, capability.AssembleOutputToolKey)
-	default:
-		return "审批虽为 approved，但该 artifact_type 没有定义确定性下一阶段；只解释已持久化结果并重新读取当前状态，不要猜测或重复调用 Capability。"
-	}
+	// 谓词错误在文字指示通道历来按 false 继续（机器指令通道才传播），
+	// 保持原策略。谓词自身对不相关 artifact_type 走 fast-path 不解码。
+	productionComplete, _ := approvalContinuationProductionComplete(value)
+	return orchestration.DecideApprovalContinuation(orchestration.ApprovalContinuationInput{
+		ArtifactType: strings.TrimSpace(value.ArtifactType),
+		Guards: map[string]bool{
+			orchestration.GuardArtifactVersionGt1: value.ArtifactVersion > 1,
+			orchestration.GuardProductionComplete: productionComplete,
+		},
+	}).Instruction
 }
 
 func approvalContinuationNextCapabilityDirective(value sessionruntime.ApprovalContinuationResult) (string, error) {
@@ -296,32 +291,24 @@ func approvalContinuationNextCapabilityDirective(value sessionruntime.ApprovalCo
 		return "", nil
 	}
 
-	var tool string
-	var arguments json.RawMessage
-	switch strings.TrimSpace(value.ArtifactType) {
-	case "creation_spec_revision":
-		if value.ArtifactVersion > 1 {
-			tool, arguments = capability.PlanStoryboardToolKey, json.RawMessage(`{"mode":"replan","preserve_approved_assets":true}`)
-		} else {
-			tool, arguments = capability.PlanStoryboardToolKey, json.RawMessage(`{"mode":"create"}`)
-		}
-	case "storyboard_revision", "candidate_asset":
-		productionComplete, completeErr := approvalContinuationProductionComplete(value)
-		if completeErr != nil {
-			return "", completeErr
-		}
-		if productionComplete {
-			tool, arguments = capability.AssembleOutputToolKey, json.RawMessage(`{"mode":"preview","output_type":"video"}`)
-		} else {
-			tool, arguments = capability.GenerateMediaToolKey, json.RawMessage(`{"phase":"auto_next","policy":"all_eligible"}`)
-		}
-	default:
+	productionComplete, completeErr := approvalContinuationProductionComplete(value)
+	if completeErr != nil {
+		return "", completeErr
+	}
+	decision := orchestration.DecideApprovalContinuation(orchestration.ApprovalContinuationInput{
+		ArtifactType: strings.TrimSpace(value.ArtifactType),
+		Guards: map[string]bool{
+			orchestration.GuardArtifactVersionGt1: value.ArtifactVersion > 1,
+			orchestration.GuardProductionComplete: productionComplete,
+		},
+	})
+	if decision.Node == nil {
 		return "", nil
 	}
 	return agentcontrol.EncodeNextCapabilityDirective(agentcontrol.NextCapabilityDirective{
 		Version:  agentcontrol.NextCapabilityDirectiveVersion,
 		SourceID: fmt.Sprintf("approval:%s:%d:%d", strings.TrimSpace(value.ApprovalID), value.DecisionVersion, value.ExecutionEpoch),
-		Tool:     tool, Arguments: arguments,
+		Tool:     decision.Node.ToolKey, Arguments: decision.Node.Arguments,
 	})
 }
 
