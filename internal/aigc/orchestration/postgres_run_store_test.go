@@ -113,6 +113,32 @@ func TestPostgresRunStoreRoundTripAndCAS(t *testing.T) {
 	}
 }
 
+func TestPostgresRunStorePersistsCancellationIntent(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	id := postgresRunID(t)
+	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
+
+	run := postgresStoreRun(t, id)
+	run.Status = RunStatusSuspended
+	run.SuspendReason = SuspendWaitingJobs
+	run.SuspendedNodeID = "first"
+	run.CancelRequested = true
+	run.CancelReason = "user stop"
+	run.CancelBatchID = "batch-1"
+	run.CancelNodeID = "first"
+	run.Nodes["first"].Status = NodeStatusRunning
+	run.Nodes["first"].Suspension = &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1"}}
+	created, err := store.CreateRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetRun(ctx, created.ID)
+	if err != nil || !stored.CancelRequested || stored.CancelReason != "user stop" || stored.CancelBatchID != "batch-1" || stored.CancelNodeID != "first" || stored.Status != RunStatusSuspended {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+}
+
 func TestPostgresRunStoreMutationRollbackAndConcurrentCAS(t *testing.T) {
 	store, db := openPostgresRunStore(t)
 	ctx := context.Background()

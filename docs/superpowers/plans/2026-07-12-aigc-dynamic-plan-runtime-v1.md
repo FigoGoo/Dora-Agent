@@ -996,9 +996,12 @@ scheduler.Revise(ctx, runID, revision)
 scheduler.Cancel(ctx, runID, reason)
 ```
 
-`Cancel` 是用户主动终止和明确否决的唯一 Runtime 入口：非终态 Run 以 CAS 转为
-`cancelled` 并冻结首次 reason；`waiting_jobs` 必须先通过现有 generation command
-写入幂等 Batch cancel intent，未装配 canceller 时 fail closed，不允许只取消本地 Run。
+`Cancel` 是用户主动终止和明确否决的唯一 Runtime 入口：先以 CAS 冻结 durable
+`CancelRequested + CancelReason`（`waiting_jobs` 同时绑定 Batch/Node），再通过现有
+generation command 写入幂等 Batch cancel intent，最后 CAS 收敛 `cancelled`。外部取消
+失败时 Run 保留 intent 且所有推进入口 fail closed；首次 reason 永久冻结，intent 字段在
+`cancelled` 终态保留用于审计和 jobs outcome 重放。未装配 canceller 时不得写 intent，
+也不得只取消本地 Run。
 
 Plan 2 负责：
 

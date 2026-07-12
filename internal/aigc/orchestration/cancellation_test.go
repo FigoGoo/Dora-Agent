@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/generation"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
 )
 
@@ -17,9 +18,45 @@ type recordingBatchCanceller struct {
 	err     error
 }
 
+type blockingBatchCanceller struct {
+	started chan string
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (c *blockingBatchCanceller) CancelBatch(ctx context.Context, batchID string) error {
+	c.calls.Add(1)
+	select {
+	case c.started <- batchID:
+	default:
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.release:
+		return nil
+	}
+}
+
 type switchBatchOnConflictStore struct {
 	RunStore
 	switched atomic.Bool
+}
+
+type cancellationAckLossStore struct {
+	RunStore
+	mutations atomic.Int32
+	err       error
+}
+
+func (s *cancellationAckLossStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
+	if s.mutations.Add(1) == 2 {
+		if _, err := s.RunStore.MutateRun(ctx, id, expectedVersion, mutate); err != nil {
+			return PlanRun{}, err
+		}
+		return PlanRun{}, s.err
+	}
+	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
 }
 
 func (s *switchBatchOnConflictStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
@@ -297,7 +334,7 @@ func TestConcurrentCancelSameReasonConvergesToOneVersion(t *testing.T) {
 		if err := <-errs; err != nil {
 			t.Fatal(err)
 		}
-		if run := <-results; run.Status != RunStatusCancelled || run.Version != created.Version+1 {
+		if run := <-results; run.Status != RunStatusCancelled || run.Version != created.Version+2 {
 			t.Fatalf("run=%+v", run)
 		}
 	}
@@ -332,8 +369,31 @@ func TestCancelWaitingJobsFailsClosedAndCancelsBatchBeforeRun(t *testing.T) {
 	failingCanceller := &recordingBatchCanceller{err: cancelFailure}
 	failing, suspended := newSuspended(t, failingCanceller)
 	got, err = failing.Cancel(context.Background(), suspended.ID, "stop")
-	if !errors.Is(err, cancelFailure) || got.Version != suspended.Version || got.Status != RunStatusSuspended {
+	if !errors.Is(err, cancelFailure) || got.Version != suspended.Version+1 || got.Status != RunStatusSuspended || !got.CancelRequested || got.CancelBatchID != "batch-1" || got.CancelReason != "stop" {
 		t.Fatalf("failed intent run=%+v err=%v", got, err)
+	}
+	intentVersion := got.Version
+	unconfigured := schedulerForTest(t, failing.store, failing.vocabulary, 1)
+	blockedCancel, err := unconfigured.Cancel(context.Background(), suspended.ID, "stop")
+	if !errors.Is(err, ErrBatchCancellationUnavailable) || blockedCancel.Version != intentVersion {
+		t.Fatalf("unconfigured retry=%+v err=%v", blockedCancel, err)
+	}
+	blockedResume, err := failing.Resume(context.Background(), suspended.ID, suspended.Nodes["jobs"].ResumeKey, map[string]any{"approved": true})
+	if !errors.Is(err, ErrCancellationPending) || blockedResume.Version != intentVersion {
+		t.Fatalf("resume=%+v err=%v", blockedResume, err)
+	}
+	blockedAdvance, err := failing.Advance(context.Background(), suspended.ID)
+	if !errors.Is(err, ErrCancellationPending) || blockedAdvance.Version != intentVersion {
+		t.Fatalf("advance=%+v err=%v", blockedAdvance, err)
+	}
+	conflicted, err := failing.Cancel(context.Background(), suspended.ID, "different")
+	if !errors.Is(err, ErrRunCancellationConflict) || conflicted.Version != intentVersion {
+		t.Fatalf("conflict=%+v err=%v", conflicted, err)
+	}
+	failingCanceller.err = nil
+	retried, err := failing.Cancel(context.Background(), suspended.ID, "stop")
+	if err != nil || retried.Status != RunStatusCancelled || len(failingCanceller.calls()) != 2 {
+		t.Fatalf("retry=%+v calls=%v err=%v", retried, failingCanceller.calls(), err)
 	}
 
 	canceller := &recordingBatchCanceller{}
@@ -348,8 +408,108 @@ func TestCancelWaitingJobsFailsClosedAndCancelsBatchBeforeRun(t *testing.T) {
 		t.Fatalf("replay=%+v calls=%v err=%v", replayed, canceller.calls(), err)
 	}
 	late, err := with.CompleteJobsWait(context.Background(), suspended.ID, "jobs", JobsOutcome{BatchID: "batch-1", Status: "completed"})
-	if !errors.Is(err, ErrJobsWaitMismatch) || late.Version != version || late.Status != RunStatusCancelled {
+	if err != nil || late.Version != version || late.Status != RunStatusCancelled {
 		t.Fatalf("late=%+v err=%v", late, err)
+	}
+}
+
+func TestCancelIntentWinsCompleteJobsWaitAcrossSchedulers(t *testing.T) {
+	jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1"}}}, nil
+	}}
+	store := NewMemoryRunStore()
+	registry := schedulerRegistry(t, jobs)
+	base := schedulerForTest(t, store, registry, 1)
+	suspended, err := base.Submit(context.Background(), "s", "u", ExecutionPlan{
+		PlanID: "jobs", Source: "dynamic", Summary: "jobs", Direction: "image", Steps: []PlanStep{{ID: "jobs", Tool: "jobs", Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceller := &blockingBatchCanceller{started: make(chan string, 1), release: make(chan struct{})}
+	cancelCfg := schedulerConfigForTest(store, registry, func() string { return "unused-cancel" })
+	cancelCfg.BatchCanceller = canceller
+	cancelling, err := NewScheduler(cancelCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completing := schedulerForTest(t, store, registry, 1)
+	type cancelResult struct {
+		run PlanRun
+		err error
+	}
+	done := make(chan cancelResult, 1)
+	go func() {
+		run, cancelErr := cancelling.Cancel(context.Background(), suspended.ID, "user stop")
+		done <- cancelResult{run: run, err: cancelErr}
+	}()
+	if batchID := <-canceller.started; batchID != "batch-1" {
+		t.Fatalf("batch=%q", batchID)
+	}
+	intent, err := store.GetRun(context.Background(), suspended.ID)
+	if err != nil || !intent.CancelRequested || intent.CancelReason != "user stop" || intent.CancelBatchID != "batch-1" || intent.Status != RunStatusSuspended {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+	completed, err := completing.CompleteJobsWait(context.Background(), suspended.ID, "jobs", JobsOutcome{BatchID: "batch-1", Status: "cancelled"})
+	if err != nil || completed.Status != RunStatusCancelled || completed.CancelReason != "user stop" {
+		t.Fatalf("completed=%+v err=%v", completed, err)
+	}
+	version := completed.Version
+	replayed, err := completing.CompleteJobsWait(context.Background(), suspended.ID, "jobs", JobsOutcome{BatchID: "batch-1", Status: "cancelled"})
+	if err != nil || replayed.Version != version || replayed.Status != RunStatusCancelled {
+		t.Fatalf("replayed=%+v err=%v", replayed, err)
+	}
+	close(canceller.release)
+	result := <-done
+	if result.err != nil || result.run.Status != RunStatusCancelled || result.run.Version != version || result.run.CancelReason != "user stop" {
+		t.Fatalf("cancel=%+v err=%v", result.run, result.err)
+	}
+}
+
+func TestCancelIntentDominatesEveryTerminalJobsOutcome(t *testing.T) {
+	for _, status := range []string{generation.BatchStatusCompleted, generation.BatchStatusFailed, generation.BatchStatusCancelled} {
+		t.Run(status, func(t *testing.T) {
+			jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+				return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1"}}}, nil
+			}}
+			store := NewMemoryRunStore()
+			registry := schedulerRegistry(t, jobs)
+			canceller := &recordingBatchCanceller{err: errors.New("provider unavailable")}
+			cancelCfg := schedulerConfigForTest(store, registry, func() string { return "intent-" + status })
+			cancelCfg.BatchCanceller = canceller
+			cancelling, err := NewScheduler(cancelCfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			suspended, err := cancelling.Submit(context.Background(), "s", "u", ExecutionPlan{
+				PlanID: "jobs", Source: "dynamic", Summary: "jobs", Direction: "image", Steps: []PlanStep{{ID: "jobs", Tool: "jobs", Required: true}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			intent, err := cancelling.Cancel(context.Background(), suspended.ID, "user stop")
+			if err == nil || !intent.CancelRequested || intent.Status != RunStatusSuspended {
+				t.Fatalf("intent=%+v err=%v", intent, err)
+			}
+			completing := schedulerForTest(t, store, registry, 1)
+			completed, err := completing.CompleteJobsWait(context.Background(), suspended.ID, "jobs", JobsOutcome{BatchID: "batch-1", Status: status})
+			if err != nil || completed.Status != RunStatusCancelled || completed.CancelReason != "user stop" {
+				t.Fatalf("completed=%+v err=%v", completed, err)
+			}
+			version := completed.Version
+			replayed, err := completing.CompleteJobsWait(context.Background(), suspended.ID, "jobs", JobsOutcome{BatchID: "batch-1", Status: status})
+			if err != nil || replayed.Version != version {
+				t.Fatalf("replayed=%+v err=%v", replayed, err)
+			}
+			otherStatus := generation.BatchStatusFailed
+			if status == otherStatus {
+				otherStatus = generation.BatchStatusCompleted
+			}
+			conflicted, err := completing.CompleteJobsWait(context.Background(), suspended.ID, "jobs", JobsOutcome{BatchID: "batch-1", Status: otherStatus})
+			if !errors.Is(err, ErrJobsOutcomeConflict) || conflicted.Version != version {
+				t.Fatalf("conflicted=%+v err=%v", conflicted, err)
+			}
+		})
 	}
 }
 
@@ -377,7 +537,7 @@ func TestCancelWaitingJobsRetriesCASWithoutRepeatingExternalIntent(t *testing.T)
 	}
 }
 
-func TestCancelWaitingJobsCancelsNewBatchAfterConcurrentProgress(t *testing.T) {
+func TestCancelWaitingJobsBindsIntentToAuthoritativeBatchAfterConflict(t *testing.T) {
 	jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
 		return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1"}}}, nil
 	}}
@@ -397,8 +557,43 @@ func TestCancelWaitingJobsCancelsNewBatchAfterConcurrentProgress(t *testing.T) {
 	}
 	cancelled, err := recovering.Cancel(context.Background(), suspended.ID, "stop")
 	calls := canceller.calls()
-	if err != nil || cancelled.Status != RunStatusCancelled || len(calls) != 2 || calls[0] != "batch-1" || calls[1] != "batch-2" {
+	if err != nil || cancelled.Status != RunStatusCancelled || len(calls) != 1 || calls[0] != "batch-2" || cancelled.CancelBatchID != "batch-2" {
 		t.Fatalf("run=%+v calls=%v err=%v", cancelled, calls, err)
+	}
+}
+
+func TestCancelRetryConvergesAfterFinalizeAckLoss(t *testing.T) {
+	jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1"}}}, nil
+	}}
+	baseStore := NewMemoryRunStore()
+	registry := schedulerRegistry(t, jobs)
+	base := schedulerForTest(t, baseStore, registry, 1)
+	suspended, err := base.Submit(context.Background(), "s", "u", ExecutionPlan{
+		PlanID: "jobs", Source: "dynamic", Summary: "jobs", Direction: "image", Steps: []PlanStep{{ID: "jobs", Tool: "jobs", Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &cancellationAckLossStore{RunStore: baseStore, err: errors.New("commit acknowledgement lost")}
+	canceller := &recordingBatchCanceller{}
+	cfg := schedulerConfigForTest(store, registry, func() string { return "ack-loss" })
+	cfg.BatchCanceller = canceller
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := scheduler.Cancel(context.Background(), suspended.ID, "stop")
+	if !errors.Is(err, store.err) || first.Status != RunStatusSuspended || !first.CancelRequested {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	retried, err := scheduler.Cancel(context.Background(), suspended.ID, "stop")
+	if err != nil || retried.Status != RunStatusCancelled || len(canceller.calls()) != 1 {
+		t.Fatalf("retried=%+v calls=%v err=%v", retried, canceller.calls(), err)
+	}
+	conflicted, err := scheduler.Cancel(context.Background(), suspended.ID, "different")
+	if !errors.Is(err, ErrRunCancellationConflict) || conflicted.Version != retried.Version {
+		t.Fatalf("conflicted=%+v err=%v", conflicted, err)
 	}
 }
 

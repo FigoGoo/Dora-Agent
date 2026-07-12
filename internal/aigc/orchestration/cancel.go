@@ -11,6 +11,7 @@ var (
 	ErrCancelReasonInvalid          = errors.New("plan run cancellation reason invalid")
 	ErrRunCancellationConflict      = errors.New("plan run cancellation conflict")
 	ErrRunCancellationTerminal      = errors.New("terminal plan run cannot be cancelled")
+	ErrCancellationPending          = errors.New("plan run cancellation is pending")
 	ErrBatchCancellationUnavailable = errors.New("generation batch cancellation is unavailable")
 	ErrBatchCancellationInvalid     = errors.New("generation batch cancellation target is invalid")
 )
@@ -46,33 +47,93 @@ func (s *Scheduler) Cancel(ctx context.Context, runID, reason string) (PlanRun, 
 	if err != nil {
 		return PlanRun{}, err
 	}
-	if handled, terminalErr := cancellationTerminalResult(current, reason); handled {
-		return current, terminalErr
+	intentCtx, cancelIntent := context.WithTimeout(context.WithoutCancel(ctx), s.commitTimeout)
+	current, err = s.persistCancelIntent(intentCtx, current, reason)
+	cancelIntent()
+	if err != nil {
+		return current, err
 	}
-
-	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(ctx), s.commitTimeout)
-	defer cancelCommit()
-	cancelledBatches := make(map[string]struct{})
-	for range maxCASRetries {
-		if err := s.cancelActiveBatch(ctx, current, cancelledBatches); err != nil {
-			return current, err
+	if current.Status == RunStatusCancelled {
+		return current, nil
+	}
+	if current.CancelBatchID != "" {
+		if isNilInterface(s.batchCanceller) {
+			return current, ErrBatchCancellationUnavailable
 		}
-		cancelled, mutateErr := s.store.MutateRun(commitCtx, current.ID, current.Version, func(next *PlanRun) error {
+		if err := s.batchCanceller.CancelBatch(ctx, current.CancelBatchID); err != nil {
+			return current, fmt.Errorf("cancel generation batch: %w", err)
+		}
+	}
+	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), s.commitTimeout)
+	defer cancelFinalize()
+	return s.finalizeCancellation(finalizeCtx, current, reason)
+}
+
+func (s *Scheduler) persistCancelIntent(ctx context.Context, current PlanRun, reason string) (PlanRun, error) {
+	for range maxCASRetries {
+		if handled, terminalErr := cancellationTerminalResult(current, reason); handled {
+			return current, terminalErr
+		}
+		if current.CancelRequested {
+			if current.CancelReason != reason {
+				return current, ErrRunCancellationConflict
+			}
+			return current, nil
+		}
+		batchID := ""
+		cancelNodeID := ""
+		if current.Status == RunStatusSuspended && current.SuspendReason == SuspendWaitingJobs {
+			var err error
+			batchID, err = activeWaitingBatch(current)
+			if err != nil {
+				return current, err
+			}
+			if isNilInterface(s.batchCanceller) {
+				return current, ErrBatchCancellationUnavailable
+			}
+			cancelNodeID = current.SuspendedNodeID
+		}
+		requested, mutateErr := s.store.MutateRun(ctx, current.ID, current.Version, func(next *PlanRun) error {
 			if handled, terminalErr := cancellationTerminalResult(*next, reason); handled {
 				if terminalErr != nil {
 					return terminalErr
 				}
 				return errCancellationAlreadyApplied
 			}
-			return applyCancellation(next, reason)
+			if next.CancelRequested {
+				if next.CancelReason != reason {
+					return ErrRunCancellationConflict
+				}
+				return errCancellationAlreadyApplied
+			}
+			if batchID != "" {
+				freshBatchID, err := activeWaitingBatch(*next)
+				if err != nil {
+					return err
+				}
+				if freshBatchID != batchID {
+					return ErrRunVersionConflict
+				}
+			}
+			next.CancelRequested = true
+			next.CancelReason = reason
+			next.CancelBatchID = batchID
+			next.CancelNodeID = cancelNodeID
+			for _, node := range next.Nodes {
+				if node != nil {
+					clearExecutionClaim(node)
+				}
+			}
+			return nil
 		})
 		if mutateErr == nil {
-			return cancelled, nil
+			return requested, nil
 		}
 		if !errors.Is(mutateErr, ErrRunVersionConflict) && !errors.Is(mutateErr, errCancellationAlreadyApplied) {
 			return current, mutateErr
 		}
-		current, err = s.store.GetRun(commitCtx, current.ID)
+		var err error
+		current, err = s.store.GetRun(ctx, current.ID)
 		if err != nil {
 			return PlanRun{}, err
 		}
@@ -80,28 +141,41 @@ func (s *Scheduler) Cancel(ctx context.Context, runID, reason string) (PlanRun, 
 			return current, terminalErr
 		}
 	}
-	return current, fmt.Errorf("%w: cancellation exceeded retry limit", ErrRunVersionConflict)
+	return current, fmt.Errorf("%w: cancellation intent exceeded retry limit", ErrRunVersionConflict)
 }
 
-func (s *Scheduler) cancelActiveBatch(ctx context.Context, run PlanRun, cancelled map[string]struct{}) error {
-	if run.Status != RunStatusSuspended || run.SuspendReason != SuspendWaitingJobs {
-		return nil
+func (s *Scheduler) finalizeCancellation(ctx context.Context, current PlanRun, reason string) (PlanRun, error) {
+	for range maxCASRetries {
+		if handled, terminalErr := cancellationTerminalResult(current, reason); handled {
+			return current, terminalErr
+		}
+		if !current.CancelRequested || current.CancelReason != reason {
+			return current, ErrRunCancellationConflict
+		}
+		cancelled, err := s.store.MutateRun(ctx, current.ID, current.Version, func(next *PlanRun) error {
+			if handled, terminalErr := cancellationTerminalResult(*next, reason); handled {
+				if terminalErr != nil {
+					return terminalErr
+				}
+				return errCancellationAlreadyApplied
+			}
+			if !next.CancelRequested || next.CancelReason != reason {
+				return ErrRunCancellationConflict
+			}
+			return applyCancellation(next, reason)
+		})
+		if err == nil {
+			return cancelled, nil
+		}
+		if !errors.Is(err, ErrRunVersionConflict) && !errors.Is(err, errCancellationAlreadyApplied) {
+			return current, err
+		}
+		current, err = s.store.GetRun(ctx, current.ID)
+		if err != nil {
+			return PlanRun{}, err
+		}
 	}
-	batchID, err := activeWaitingBatch(run)
-	if err != nil {
-		return err
-	}
-	if _, ok := cancelled[batchID]; ok {
-		return nil
-	}
-	if isNilInterface(s.batchCanceller) {
-		return ErrBatchCancellationUnavailable
-	}
-	if err := s.batchCanceller.CancelBatch(ctx, batchID); err != nil {
-		return fmt.Errorf("cancel generation batch: %w", err)
-	}
-	cancelled[batchID] = struct{}{}
-	return nil
+	return current, fmt.Errorf("%w: cancellation finalize exceeded retry limit", ErrRunVersionConflict)
 }
 
 var errCancellationAlreadyApplied = errors.New("plan run cancellation already applied")
@@ -150,6 +224,7 @@ func applyCancellation(run *PlanRun, reason string) error {
 		clearExecutionClaim(node)
 	}
 	run.Status = RunStatusCancelled
+	run.CancelRequested = true
 	run.CancelReason = reason
 	run.SuspendReason = ""
 	run.SuspendedNodeID = ""

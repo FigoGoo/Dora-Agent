@@ -87,6 +87,9 @@ type PlanRun struct {
 	Resumed              bool                `json:"resumed,omitempty"`
 	ResumeDecision       map[string]any      `json:"resume_decision"`
 	ResumeDecisionSchema string              `json:"resume_decision_schema,omitempty"`
+	CancelRequested      bool                `json:"cancel_requested,omitempty"`
+	CancelBatchID        string              `json:"cancel_batch_id,omitempty"`
+	CancelNodeID         string              `json:"cancel_node_id,omitempty"`
 	CancelReason         string              `json:"cancel_reason,omitempty"`
 	Nodes                map[string]*NodeRun `json:"nodes"`
 	Version              int                 `json:"version"`

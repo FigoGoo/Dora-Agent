@@ -73,6 +73,13 @@ func (s *Scheduler) CompleteJobsWait(ctx context.Context, runID, nodeID string, 
 		}
 		return s.continueJobsRun(ctx, replayed)
 	}
+	if current.CancelRequested {
+		summary, err := cloneResumeDecision(outcome.Summary)
+		if err != nil {
+			return current, fmt.Errorf("%w: summary: %v", ErrJobsOutcomeInvalid, err)
+		}
+		return s.completeCancelledJobsWait(ctx, current, nodeID, identity, receipt, summary)
+	}
 	if err := validateJobsWait(current, nodeID, identity.BatchID); err != nil {
 		return current, err
 	}
@@ -118,11 +125,84 @@ func (s *Scheduler) CompleteJobsWait(ctx context.Context, runID, nodeID string, 
 			}
 			return s.continueJobsRun(ctx, replayed)
 		}
+		if current.CancelRequested {
+			return s.completeCancelledJobsWait(ctx, current, nodeID, identity, receipt, summary)
+		}
 		if !errors.Is(mutateErr, ErrRunVersionConflict) {
 			return current, mutateErr
 		}
 	}
 	return current, fmt.Errorf("%w: jobs outcome exceeded retry limit", ErrRunVersionConflict)
+}
+
+func (s *Scheduler) completeCancelledJobsWait(
+	ctx context.Context,
+	current PlanRun,
+	nodeID string,
+	identity jobsOutcomeIdentity,
+	receipt string,
+	summary map[string]any,
+) (PlanRun, error) {
+	if current.CancelNodeID != nodeID {
+		return current, fmt.Errorf("%w: cancellation waits for node %q, got %q", ErrJobsWaitMismatch, current.CancelNodeID, nodeID)
+	}
+	if current.Status == RunStatusCancelled && current.CancelBatchID == identity.BatchID {
+		return current, nil
+	}
+	if current.CancelBatchID != identity.BatchID {
+		return current, fmt.Errorf("%w: cancellation waits for batch %q, got %q", ErrJobsWaitMismatch, current.CancelBatchID, identity.BatchID)
+	}
+	if err := validateJobsWait(current, nodeID, identity.BatchID); err != nil {
+		return current, err
+	}
+	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(ctx), s.commitTimeout)
+	defer cancelCommit()
+	for range maxCASRetries {
+		committed, err := s.store.MutateRun(commitCtx, current.ID, current.Version, func(next *PlanRun) error {
+			if _, replayErr, handled := matchJobsOutcomeReceipt(*next, nodeID, identity); handled {
+				if replayErr != nil {
+					return replayErr
+				}
+				return errResumeAlreadyApplied
+			}
+			if next.Status == RunStatusCancelled && next.CancelRequested && next.CancelBatchID == identity.BatchID {
+				return errCancellationAlreadyApplied
+			}
+			if !next.CancelRequested || next.CancelBatchID != identity.BatchID {
+				return ErrJobsWaitMismatch
+			}
+			if err := validateJobsWait(*next, nodeID, identity.BatchID); err != nil {
+				return err
+			}
+			node := next.Nodes[nodeID]
+			if node.Outputs == nil {
+				node.Outputs = make(map[string]any)
+			}
+			node.Outputs[jobsOutcomeReceiptKey] = receipt
+			if len(summary) > 0 {
+				node.Outputs["jobs_summary"] = summary
+			}
+			node.Resumed = true
+			return applyCancellation(next, next.CancelReason)
+		})
+		if err == nil {
+			return committed, nil
+		}
+		if !errors.Is(err, ErrRunVersionConflict) && !errors.Is(err, errResumeAlreadyApplied) && !errors.Is(err, errCancellationAlreadyApplied) {
+			return current, err
+		}
+		current, err = s.store.GetRun(commitCtx, current.ID)
+		if err != nil {
+			return PlanRun{}, err
+		}
+		if replayed, replayErr, handled := matchJobsOutcomeReceipt(current, nodeID, identity); handled {
+			return replayed, replayErr
+		}
+		if current.Status == RunStatusCancelled && current.CancelRequested && current.CancelBatchID == identity.BatchID {
+			return current, nil
+		}
+	}
+	return current, fmt.Errorf("%w: cancelled jobs outcome exceeded retry limit", ErrRunVersionConflict)
 }
 
 func normalizeJobsOutcome(outcome JobsOutcome) (jobsOutcomeIdentity, string, error) {
@@ -253,6 +333,9 @@ func (s *Scheduler) resume(ctx context.Context, runID, resumeKey string, decisio
 	current, err := s.store.GetRun(ctx, runID)
 	if err != nil {
 		return PlanRun{}, err
+	}
+	if current.CancelRequested && current.Status != RunStatusCancelled {
+		return current, ErrCancellationPending
 	}
 	target, matched := findResumeTarget(&current, resumeKey)
 	if !matched {
@@ -451,6 +534,9 @@ func targetResumed(target resumeTarget, run *PlanRun) bool {
 }
 
 func applyResume(run *PlanRun, target resumeTarget, resumeKey string, decision map[string]any) error {
+	if run.CancelRequested && run.Status != RunStatusCancelled {
+		return ErrCancellationPending
+	}
 	if target.run {
 		if run.Status != RunStatusSuspended || run.SuspendReason != SuspendWaitingUser || !run.PreviewRequired || run.SuspendedNodeID != "" {
 			return resumeKeyMismatch(run.ID, resumeKey)

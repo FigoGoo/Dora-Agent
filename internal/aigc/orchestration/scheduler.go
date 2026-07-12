@@ -209,6 +209,9 @@ func (s *Scheduler) advance(ctx context.Context, runID string) (PlanRun, error) 
 		if err != nil {
 			return PlanRun{}, err
 		}
+		if run.CancelRequested && run.Status != RunStatusCancelled {
+			return run, ErrCancellationPending
+		}
 		if isTerminalRun(run.Status) || run.Status == RunStatusSuspended {
 			return run, nil
 		}
@@ -518,6 +521,9 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 		var appliedToolErr error
 		var appliedResolveErr error
 		merged, err := s.store.MutateRun(ctx, current.ID, current.Version, func(next *PlanRun) error {
+			if next.CancelRequested {
+				return ErrCancellationPending
+			}
 			applied := 0
 			for _, outcome := range outcomes {
 				node := next.Nodes[outcome.step.ID]
@@ -666,6 +672,9 @@ func (s *Scheduler) finalize(ctx context.Context, run PlanRun) (PlanRun, error) 
 	current := run
 	for range maxCASRetries {
 		finalized, err := s.store.MutateRun(ctx, current.ID, current.Version, func(next *PlanRun) error {
+			if next.CancelRequested {
+				return ErrCancellationPending
+			}
 			for _, step := range next.Plan.Steps {
 				node := next.Nodes[step.ID]
 				if node != nil && node.Status == NodeStatusPending {

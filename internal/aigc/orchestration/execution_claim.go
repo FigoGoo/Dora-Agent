@@ -83,7 +83,7 @@ func (s *Scheduler) claimReady(ctx context.Context, run PlanRun) (PlanRun, []exe
 }
 
 func nodeClaimable(run PlanRun, step PlanStep, node *NodeRun, now time.Time) bool {
-	if node == nil {
+	if node == nil || run.CancelRequested {
 		return false
 	}
 	if node.Status == NodeStatusRunning {
