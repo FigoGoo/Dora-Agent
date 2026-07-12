@@ -2,9 +2,11 @@ package orchestration
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -34,6 +36,9 @@ func TestReviseSkipsPendingAndAppendsSteps(t *testing.T) {
 	if revised.Nodes["generate"].Status != NodeStatusSkipped {
 		t.Fatalf("generate=%s", revised.Nodes["generate"].Status)
 	}
+	if revised.Nodes["generate"].SkipReason != SkipReasonRevision {
+		t.Fatalf("generate skip_reason=%q", revised.Nodes["generate"].SkipReason)
+	}
 	if node := revised.Nodes["replacement"]; node == nil || node.Status != NodeStatusPending || node.Attempt != 0 {
 		t.Fatalf("replacement=%+v", node)
 	}
@@ -42,6 +47,138 @@ func TestReviseSkipsPendingAndAppendsSteps(t *testing.T) {
 	}
 	if err := revised.Plan.Validate(registry, scheduler.jobBudget); err != nil {
 		t.Fatalf("revised plan invalid: %v", err)
+	}
+}
+
+func TestReviseTerminalStatusTreatsRevisionSkippedRequiredAsAcceptedGap(t *testing.T) {
+	tests := []struct {
+		name  string
+		steps []PlanStep
+		nodes map[string]*NodeRun
+		want  string
+	}{
+		{
+			name: "replacement_succeeded",
+			steps: []PlanStep{
+				{ID: "old", Required: true},
+				{ID: "replacement", Required: true},
+			},
+			nodes: map[string]*NodeRun{
+				"old":         {StepID: "old", Status: NodeStatusSkipped, SkipReason: SkipReasonRevision},
+				"replacement": {StepID: "replacement", Status: NodeStatusSucceeded},
+			},
+			want: RunStatusPartialSucceeded,
+		},
+		{
+			name:  "all_required_revision_skipped",
+			steps: []PlanStep{{ID: "a", Required: true}, {ID: "b", Required: true}},
+			nodes: map[string]*NodeRun{
+				"a": {StepID: "a", Status: NodeStatusSkipped, SkipReason: SkipReasonRevision},
+				"b": {StepID: "b", Status: NodeStatusSkipped, SkipReason: SkipReasonRevision},
+			},
+			want: RunStatusPartialSucceeded,
+		},
+		{
+			name:  "non_revision_required_skip_fails",
+			steps: []PlanStep{{ID: "required", Required: true}},
+			nodes: map[string]*NodeRun{
+				"required": {StepID: "required", Status: NodeStatusSkipped},
+			},
+			want: RunStatusFailed,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := terminalStatus(PlanRun{Plan: ExecutionPlan{Steps: test.steps}, Nodes: test.nodes})
+			if got != test.want {
+				t.Fatalf("status=%s want=%s", got, test.want)
+			}
+		})
+	}
+}
+
+func TestReviseSchedulerDependencySkipHasNoRevisionReason(t *testing.T) {
+	fail := schedulerTool{key: "fail", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		return vocabulary.Result{Fail: &vocabulary.Failure{Code: "expected", Message: "expected"}}, nil
+	}}
+	sink := schedulerTool{key: "sink"}
+	scheduler := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, fail, sink), 1)
+	run, err := scheduler.Submit(context.Background(), "s", "u", ExecutionPlan{
+		PlanID: "dependency-skip", Source: "dynamic", Summary: "dependency", Direction: "image",
+		Steps: []PlanStep{
+			{ID: "failed", Tool: "fail", Required: true},
+			{ID: "blocked", Tool: "sink", DependsOn: []string{"failed"}, Required: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != RunStatusFailed || run.Nodes["blocked"].Status != NodeStatusSkipped || run.Nodes["blocked"].SkipReason != "" {
+		t.Fatalf("run=%+v blocked=%+v", run, run.Nodes["blocked"])
+	}
+}
+
+func TestRevisePreservesLargeJSONNumbersAndDetectsAdjacentDefinition(t *testing.T) {
+	store := NewMemoryRunStore()
+	registry := testVocabulary(t)
+	scheduler := schedulerForTest(t, store, registry, 1)
+	plan := validPlan()
+	plan.Steps[0].Params["large"] = json.Number("9007199254740992")
+	run := createPendingSchedulerRun(t, store, "revise-large-number", plan)
+	storedNumber, ok := run.Plan.Steps[0].Params["large"].(json.Number)
+	if !ok || storedNumber.String() != "9007199254740992" {
+		t.Fatalf("stored number=%T(%v)", run.Plan.Steps[0].Params["large"], run.Plan.Steps[0].Params["large"])
+	}
+
+	different := plan.Steps[0]
+	different.Params = map[string]any{
+		"target_desc": "雨中柴犬",
+		"large":       json.Number("9007199254740993"),
+	}
+	_, err := scheduler.Revise(context.Background(), run.ID, PlanRevision{AppendSteps: []PlanStep{different}})
+	if !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("err=%v", err)
+	}
+	after, getErr := store.GetRun(context.Background(), run.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if after.Version != run.Version || after.Plan.Steps[0].Params["large"].(json.Number).String() != "9007199254740992" {
+		t.Fatalf("large number silently changed: %+v", after.Plan.Steps[0].Params)
+	}
+}
+
+func TestReviseSerializationErrorsWrapUnderlyingJSONError(t *testing.T) {
+	badStep := PlanStep{ID: "bad", Tool: "request_confirmation", Params: map[string]any{"question": "x", "bad": func() {}}}
+	for name, clone := range map[string]func() error{
+		"revision": func() error {
+			_, err := clonePlanRevision(PlanRevision{AppendSteps: []PlanStep{badStep}})
+			return err
+		},
+		"run": func() error {
+			_, err := clonePlanRun(PlanRun{Plan: ExecutionPlan{Steps: []PlanStep{badStep}}})
+			return err
+		},
+		"canonical_step": func() error {
+			_, err := planStepsEqual(badStep, badStep)
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := clone()
+			var unsupported *json.UnsupportedTypeError
+			if !errors.Is(err, ErrRunNotSerializable) || !errors.As(err, &unsupported) {
+				t.Fatalf("error chain=%v", err)
+			}
+		})
+	}
+}
+
+func TestReviseJSONDecoderRejectsTrailingValue(t *testing.T) {
+	var target map[string]any
+	err := decodeSingleJSONValue([]byte(`{"first":1} {"second":2}`), &target)
+	if err == nil {
+		t.Fatal("decoder accepted a trailing JSON value")
 	}
 }
 
@@ -273,6 +410,114 @@ func TestReviseSuspendedRunPreservesCheckpointAndBudgetPreview(t *testing.T) {
 	}
 }
 
+func TestReviseReplacementResumesOnNewSchedulerToPartialSucceeded(t *testing.T) {
+	store := NewMemoryRunStore()
+	clock := newClaimClock(time.Unix(1_700_000_000, 0))
+	var calls atomic.Int32
+	tool := schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		calls.Add(1)
+		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+	}}
+	registry := schedulerRegistry(t, tool)
+	newScheduler := func(owner string) *Scheduler {
+		t.Helper()
+		var token atomic.Int64
+		scheduler, err := NewScheduler(SchedulerConfig{
+			Store: store, Vocabulary: registry, MaxParallel: 1,
+			CommitTimeout: time.Second, NewID: func() string { return owner + "-run" },
+			OwnerID: owner, LeaseTTL: 30 * time.Second, HeartbeatInterval: time.Hour,
+			Now: clock.Now, NewToken: func() string { return fmt.Sprintf("%s-token-%d", owner, token.Add(1)) },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return scheduler
+	}
+	first := newScheduler("revision-owner")
+	plan := ExecutionPlan{
+		PlanID: "replacement-preview", Source: "dynamic", Summary: "replacement", Direction: "image",
+		Steps: []PlanStep{{ID: "old", Tool: "work", Required: true}},
+	}
+	created, err := store.CreateRun(context.Background(), PlanRun{
+		ID: "replacement-preview", SessionID: "s", UserID: "u", Plan: plan,
+		Status: RunStatusSuspended, SuspendReason: SuspendWaitingUser,
+		PreviewRequired: true, ResumeKey: "preview-receipt", Nodes: pendingNodes(plan),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revised, err := first.Revise(context.Background(), created.ID, PlanRevision{
+		SkipStepIDs: []string{"old"},
+		AppendSteps: []PlanStep{{ID: "replacement", Tool: "work", Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revised.Status != RunStatusSuspended || revised.ResumeKey != created.ResumeKey || !revised.PreviewRequired || calls.Load() != 0 {
+		t.Fatalf("revision crossed checkpoint: %+v calls=%d", revised, calls.Load())
+	}
+
+	second := newScheduler("resume-owner")
+	decision := map[string]any{"approved": true}
+	completed, err := second.Resume(context.Background(), revised.ID, revised.ResumeKey, decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != RunStatusPartialSucceeded || calls.Load() != 1 {
+		t.Fatalf("status=%s calls=%d run=%+v", completed.Status, calls.Load(), completed)
+	}
+	if old := completed.Nodes["old"]; old.Status != NodeStatusSkipped || old.SkipReason != SkipReasonRevision {
+		t.Fatalf("old=%+v", old)
+	}
+	if replacement := completed.Nodes["replacement"]; replacement.Status != NodeStatusSucceeded || replacement.ExecutionToken != "" {
+		t.Fatalf("replacement=%+v", replacement)
+	}
+	if !completed.Resumed || completed.PreviewRequired || !reflect.DeepEqual(completed.ResumeDecision, decision) {
+		t.Fatalf("resume receipt lost: %+v", completed)
+	}
+}
+
+func TestExecutionClaimPreventsReviseAfterToolStarted(t *testing.T) {
+	store := NewMemoryRunStore()
+	clock := newClaimClock(time.Unix(1_700_000_000, 0))
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	tool := schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		started <- struct{}{}
+		<-release
+		return vocabulary.Result{Outputs: map[string]any{"committed": true}}, nil
+	}}
+	executor := claimScheduler(t, store, "execute-owner", clock, time.Hour, tool)
+	reviser := claimScheduler(t, store, "revise-owner", clock, time.Hour, tool)
+	run := createPendingSchedulerRun(t, store, "claim-vs-revise", oneClaimStep("work"))
+	done := advanceAsync(executor, run.ID)
+	<-started
+	claimed, err := store.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node := claimed.Nodes["effect"]; node.Status != NodeStatusRunning || node.ExecutionToken == "" || node.ExecutionOwner != "execute-owner" {
+		t.Fatalf("claim not durable: %+v", node)
+	}
+	planBefore := claimed.Plan
+	_, err = reviser.Revise(context.Background(), run.ID, PlanRevision{SkipStepIDs: []string{"effect"}})
+	if !errors.Is(err, ErrReviseExecutedStep) {
+		t.Fatalf("err=%v", err)
+	}
+	after, getErr := store.GetRun(context.Background(), run.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if after.Version != claimed.Version || !reflect.DeepEqual(after.Plan, planBefore) || after.Nodes["effect"].Status != NodeStatusRunning {
+		t.Fatalf("revision changed claimed run: before=%+v after=%+v", claimed, after)
+	}
+	close(release)
+	result := <-done
+	if result.err != nil || result.run.Status != RunStatusSucceeded || result.run.Nodes["effect"].Status != NodeStatusSucceeded {
+		t.Fatalf("result=%+v err=%v", result.run, result.err)
+	}
+}
+
 func TestReviseAppendCanDependOnSameBatchAndDuplicateSkipsAreDeduplicated(t *testing.T) {
 	store := NewMemoryRunStore()
 	scheduler := schedulerForTest(t, store, testVocabulary(t), 1)
@@ -381,10 +626,20 @@ func TestReviseConcurrentCallsOnSameSchedulerAreGateSerialized(t *testing.T) {
 		}}})
 		results <- err
 	}()
-	select {
-	case err := <-results:
-		t.Fatalf("Revise returned while first mutation was blocked: %v", err)
-	case <-time.After(50 * time.Millisecond):
+	deadline := time.Now().Add(time.Second)
+	for {
+		scheduler.gateMu.Lock()
+		gate := scheduler.gates[run.ID]
+		waiterObserved := gate != nil && gate.refs == 2
+		scheduler.gateMu.Unlock()
+		if waiterObserved {
+			break
+		}
+		if time.Now().After(deadline) {
+			close(store.release)
+			t.Fatal("second Revise did not enter the run gate")
+		}
+		runtime.Gosched()
 	}
 	if store.peak.Load() != 1 {
 		t.Fatalf("concurrent Store mutations=%d", store.peak.Load())
@@ -545,7 +800,8 @@ func TestReviseRetriesCASAgainstLatestRunAndPreservesConcurrentFields(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if revised.Version != run.Version+4 || revised.Plan.EstimatedJobs != run.Plan.EstimatedJobs+3 || revised.ResumeDecision["concurrent"] != float64(1) {
+	concurrent, ok := revised.ResumeDecision["concurrent"].(json.Number)
+	if revised.Version != run.Version+4 || revised.Plan.EstimatedJobs != run.Plan.EstimatedJobs+3 || !ok || concurrent.String() != "1" {
 		t.Fatalf("concurrent progress lost: %+v", revised)
 	}
 }

@@ -81,6 +81,7 @@ func (s *Scheduler) Revise(ctx context.Context, runID string, revision PlanRevis
 					return fmt.Errorf("%w: run %q step %q is %s", ErrReviseExecutedStep, next.ID, stepID, node.Status)
 				}
 				node.Status = NodeStatusSkipped
+				node.SkipReason = SkipReasonRevision
 			}
 			for _, step := range cloned.AppendSteps {
 				if existing, exists := findPlanStep(candidatePlan.Steps, step.ID); exists {
@@ -120,11 +121,11 @@ func (s *Scheduler) Revise(ctx context.Context, runID string, revision PlanRevis
 func clonePlanRevision(revision PlanRevision) (PlanRevision, error) {
 	data, err := json.Marshal(revision)
 	if err != nil {
-		return PlanRevision{}, fmt.Errorf("%w: marshal plan revision: %v", ErrRunNotSerializable, err)
+		return PlanRevision{}, fmt.Errorf("%w: marshal plan revision: %w", ErrRunNotSerializable, err)
 	}
 	var cloned PlanRevision
-	if err := json.Unmarshal(data, &cloned); err != nil {
-		return PlanRevision{}, fmt.Errorf("%w: unmarshal plan revision: %v", ErrRunNotSerializable, err)
+	if err := decodeSingleJSONValue(data, &cloned); err != nil {
+		return PlanRevision{}, fmt.Errorf("%w: unmarshal plan revision: %w", ErrRunNotSerializable, err)
 	}
 	return cloned, nil
 }
@@ -157,7 +158,7 @@ func revisionEmpty(revision PlanRevision) bool {
 func revisionAlreadyApplied(run PlanRun, revision PlanRevision) bool {
 	for _, stepID := range uniqueStrings(revision.SkipStepIDs) {
 		node := run.Nodes[stepID]
-		if node == nil || node.Status != NodeStatusSkipped {
+		if node == nil || node.Status != NodeStatusSkipped || node.SkipReason != SkipReasonRevision {
 			return false
 		}
 	}
@@ -216,11 +217,11 @@ func findPlanStep(steps []PlanStep, id string) (PlanStep, bool) {
 func planStepsEqual(left, right PlanStep) (bool, error) {
 	leftJSON, err := json.Marshal(left)
 	if err != nil {
-		return false, fmt.Errorf("%w: marshal existing step %q: %v", ErrRunNotSerializable, left.ID, err)
+		return false, fmt.Errorf("%w: marshal existing step %q: %w", ErrRunNotSerializable, left.ID, err)
 	}
 	rightJSON, err := json.Marshal(right)
 	if err != nil {
-		return false, fmt.Errorf("%w: marshal appended step %q: %v", ErrRunNotSerializable, right.ID, err)
+		return false, fmt.Errorf("%w: marshal appended step %q: %w", ErrRunNotSerializable, right.ID, err)
 	}
 	return bytes.Equal(leftJSON, rightJSON), nil
 }

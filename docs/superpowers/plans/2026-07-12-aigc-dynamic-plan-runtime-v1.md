@@ -36,11 +36,11 @@ Plan 2 的入口条件：本计划 Task 4A/4B 的 execution fencing 与活计划
 
 | 文件 | 责任 |
 | --- | --- |
-| `internal/aigc/orchestration/plan_run.go` | `PlanRun/NodeRun`、状态转移、RunStore 接口、内存 Store |
-| `internal/aigc/orchestration/scheduler.go` | DAG 就绪集、并发执行、参数引用解析、终态归纳 |
+| `internal/aigc/orchestration/plan_run.go` | `PlanRun/NodeRun`、revision skip provenance、精确 JSON 数字 round-trip、状态转移、RunStore 接口、内存 Store |
+| `internal/aigc/orchestration/scheduler.go` | DAG 就绪集、并发执行、参数引用解析、含用户接受修订缺口的终态归纳 |
 | `internal/aigc/orchestration/execution_claim.go` | Node execution claim、lease/heartbeat、token fencing 与过期接管 |
 | `internal/aigc/orchestration/resume.go` | waiting_user/waiting_agent/waiting_jobs 的一次性恢复 |
-| `internal/aigc/orchestration/revision.go` | 活计划裁剪和追加，只允许修改未执行节点 |
+| `internal/aigc/orchestration/revision.go` | 活计划裁剪和追加，只允许修改未执行节点；跨实例 CAS 幂等与 canonical step conflict |
 | `internal/aigc/orchestration/postgres_run_store.go` | 单行 JSONB 聚合、Version CAS、跨实例恢复 |
 | `internal/aigc/orchestration/generation_bridge.go` | Plan node 与现有 generation workflow 的窄接口适配 |
 | `internal/aigc/vocabulary/write_media_prompt.go` | 第一个认知原子工具，模型调用委托给窄接口 |
@@ -540,8 +540,10 @@ git commit -m "feat(orchestration): fence durable node execution"
 - Modify: `internal/aigc/orchestration/revision_test.go`
 - Modify: `internal/aigc/orchestration/plan_run.go`
 - Modify: `internal/aigc/orchestration/scheduler.go`
+- Modify: `internal/aigc/orchestration/scheduler_test.go`
+- Modify: `docs/superpowers/plans/2026-07-12-aigc-dynamic-plan-runtime-v1.md`
 
-- [ ] **Step 1: 写未执行节点裁剪和追加测试**
+- [x] **Step 1: 写未执行节点裁剪和追加测试**
 
 ```go
 func TestReviseSkipsPendingAndAppendsSteps(t *testing.T) {
@@ -566,7 +568,7 @@ func TestReviseSkipsPendingAndAppendsSteps(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 写已执行节点不可修改和冲突原子回滚测试**
+- [x] **Step 2: 写已执行节点不可修改和冲突原子回滚测试**
 
 ```go
 func TestReviseRejectsExecutedStepAtomically(t *testing.T) {
@@ -583,17 +585,17 @@ func TestReviseRejectsExecutedStepAtomically(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2A: 写跨实例 Advance vs Revise 竞态测试**
+- [x] **Step 2A: 写跨实例 Advance vs Revise 竞态测试**
 
 一个 Scheduler claim 并阻塞在 Tool，另一个 Scheduler 调 `Revise(...SkipStepIDs:[claimedStep])`，必须 `errors.Is(err, ErrReviseExecutedStep)` 且 Run Version/Plan 不变；Tool 释放后原结果正常提交。随后用新 Scheduler 只依赖 Store 对 replacement revision 执行 `Advance` 至终态，断言旧 revision-skipped required 节点不会把成功替代路径误判为 failed。
 
-- [ ] **Step 3: 运行 RED**
+- [x] **Step 3: 运行 RED**
 
 Run: `go test ./internal/aigc/orchestration -run 'TestRevise' -v`
 
-Expected: 编译失败，缺少 `PlanRevision`、`Revise`。
+Expected: Task 4 初版 API 已存在；Task 4B RED 编译失败于缺少 `NodeRun.SkipReason` / `SkipReasonRevision`，实现前 replacement 终态与大整数精度契约也不成立。
 
-- [ ] **Step 4: 实现修订 API**
+- [x] **Step 4: 实现修订 API**
 
 ```go
 var ErrReviseExecutedStep = errors.New("cannot revise an executed plan step")
@@ -612,21 +614,23 @@ Revision 裁掉 required step 后，该 step 的 `NodeRun` 必须记录 `SkipRea
 
 `clonePlanRevision` 与 `clonePlanRun` 都使用 `json.Decoder.UseNumber()` 保留 `map[string]any` 中的大整数；canonical step equality 必须区分 `9007199254740992` 与 `9007199254740993`，序列化错误用 `%w` 保留底层 JSON error chain。只修 revision clone 不够，因为 RunStore round-trip 可能更早把 Plan Params 精度压成 float64。
 
-- [ ] **Step 5: 运行 GREEN 和 race**
+- [x] **Step 5: 运行 GREEN 和 race**
 
 Run: `go test -race ./internal/aigc/orchestration -run 'TestRevise|TestExecutionClaimPreventsRevise' -v`
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交并执行可行性 Gate 1**
+- [x] **Step 6: 提交并执行可行性 Gate 1**
 
 Run: `go test -race ./internal/aigc/orchestration`
+
+稳定性 Gate：`go test -count=50 -race ./internal/aigc/orchestration -run 'TestRevise|TestExecutionClaim'`
 
 Expected: PASS。必须额外证明：跨 Scheduler 的 Tool 已 claim 后不能被 Revise；replacement DAG Advance 至终态为 `partial_succeeded`；新 Scheduler 只依赖 Store 即可继续 revised Run；大整数不同定义不被误判幂等。若任一失败，Gate 不通过并停止计划。
 
 ```bash
-git add internal/aigc/orchestration/revision.go internal/aigc/orchestration/revision_test.go
-git commit -m "feat(orchestration): support live plan revision"
+git add docs/superpowers/plans/2026-07-12-aigc-dynamic-plan-runtime-v1.md internal/aigc/orchestration/plan_run.go internal/aigc/orchestration/revision.go internal/aigc/orchestration/revision_test.go internal/aigc/orchestration/scheduler.go internal/aigc/orchestration/scheduler_test.go
+git commit -m "fix(orchestration): close live revision feasibility gate"
 ```
 
 ---
@@ -1013,4 +1017,8 @@ Plan 3 负责模板持久化、计划 A2UI 和资产/actor 产品化，不得反
 
 ## 4. 执行记录
 
-尚未执行。任务勾选、commit、测试输出和偏差只在实际执行后追加。
+- **Task 4A（`f26f4be`..`462d7ac`）：** durable execution claim/lease/fencing 已完成并通过双审；Tool 开始执行前先持久化 `running` claim，迟到结果受 epoch/token fence 约束。
+- **Task 4B RED：** 新增终态/大整数/new Scheduler/claim-race 测试后，`go test ./internal/aigc/orchestration -run 'TestReviseTerminalStatus|TestRevisePreservesLarge|TestReviseSerialization|TestReviseReplacement|TestExecutionClaimPreventsRevise' -v` 按预期编译失败，缺少 `NodeRun.SkipReason` 与 `SkipReasonRevision`。
+- **Task 4B GREEN/Gate：** `go test -race ./internal/aigc/orchestration -run 'TestRevise|TestExecutionClaimPreventsRevise' -v`、`go test -count=50 -race ./internal/aigc/orchestration -run 'TestRevise|TestExecutionClaim'`、`go test -race ./internal/aigc/orchestration`、`go test ./...`、`go vet ./...` 全部退出码 0。
+- **Task 4B 语义结论：** claimed/running 节点不可裁；revision 裁剪具有 `SkipReason="revision"` provenance；replacement 成功和全 required revision-skipped 均归纳为 `partial_succeeded`；新 Scheduler 仅共享 Store/Registry 即可从原 preview receipt 恢复；相邻大整数 canonical definition 不再误判幂等。
+- **Task 4B 偏差：** 初版计划的 RED 文案仍写“缺少 Revise API”，但 `8049c4c` 已提供 API；本次 RED 改为针对质量审查发现的 provenance、终态和精度缺口。后续 Task 尚未执行，不在此处勾选。

@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -813,7 +814,8 @@ func TestEvaluateSuspendsWaitingAgentWithoutRerunningTool(t *testing.T) {
 		},
 	})
 	judge := suspended.Nodes["judge"]
-	if err != nil || suspended.Status != RunStatusSuspended || suspended.SuspendReason != SuspendWaitingAgent || judge.Status != NodeStatusSucceeded || judge.Outputs["score"] != 0.9 || judge.Suspension == nil || judge.ResumeKey == "" || evaluateCalls.Load() != 1 || sinkCalls.Load() != 0 {
+	score, scoreOK := judge.Outputs["score"].(json.Number)
+	if err != nil || suspended.Status != RunStatusSuspended || suspended.SuspendReason != SuspendWaitingAgent || judge.Status != NodeStatusSucceeded || !scoreOK || score.String() != "0.9" || judge.Suspension == nil || judge.ResumeKey == "" || evaluateCalls.Load() != 1 || sinkCalls.Load() != 0 {
 		t.Fatalf("run=%+v judge=%+v evaluate=%d sink=%d err=%v", suspended, judge, evaluateCalls.Load(), sinkCalls.Load(), err)
 	}
 	resumed, err := scheduler.Resume(context.Background(), suspended.ID, judge.ResumeKey, map[string]any{"continue": true})

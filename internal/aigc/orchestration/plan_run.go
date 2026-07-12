@@ -1,10 +1,12 @@
 package orchestration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -35,11 +37,14 @@ const (
 	NodeStatusSucceeded = "succeeded"
 	NodeStatusFailed    = "failed"
 	NodeStatusSkipped   = "skipped"
+
+	SkipReasonRevision = "revision"
 )
 
 type NodeRun struct {
 	StepID         string                 `json:"step_id"`
 	Status         string                 `json:"status"`
+	SkipReason     string                 `json:"skip_reason,omitempty"`
 	Attempt        int                    `json:"attempt"`
 	ExecutionEpoch int64                  `json:"execution_epoch,omitempty"`
 	ExecutionOwner string                 `json:"execution_owner,omitempty"`
@@ -215,11 +220,27 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 func clonePlanRun(run PlanRun) (PlanRun, error) {
 	data, err := json.Marshal(run)
 	if err != nil {
-		return PlanRun{}, fmt.Errorf("%w: marshal: %v", ErrRunNotSerializable, err)
+		return PlanRun{}, fmt.Errorf("%w: marshal: %w", ErrRunNotSerializable, err)
 	}
 	var cloned PlanRun
-	if err := json.Unmarshal(data, &cloned); err != nil {
-		return PlanRun{}, fmt.Errorf("%w: unmarshal: %v", ErrRunNotSerializable, err)
+	if err := decodeSingleJSONValue(data, &cloned); err != nil {
+		return PlanRun{}, fmt.Errorf("%w: unmarshal: %w", ErrRunNotSerializable, err)
 	}
 	return cloned, nil
+}
+
+func decodeSingleJSONValue(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("unexpected trailing JSON value")
+		}
+		return err
+	}
+	return nil
 }

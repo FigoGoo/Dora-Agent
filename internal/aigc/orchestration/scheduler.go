@@ -597,8 +597,19 @@ func terminalStatus(run PlanRun) string {
 	partial := false
 	for _, step := range run.Plan.Steps {
 		node := run.Nodes[step.ID]
-		if node == nil || (step.Required && node.Status != NodeStatusSucceeded) {
+		if node == nil {
 			return RunStatusFailed
+		}
+		if step.Required {
+			switch {
+			case node.Status == NodeStatusSucceeded:
+				continue
+			case node.Status == NodeStatusSkipped && node.SkipReason == SkipReasonRevision:
+				partial = true
+				continue
+			default:
+				return RunStatusFailed
+			}
 		}
 		if !step.Required && node.Status != NodeStatusSucceeded {
 			partial = true
