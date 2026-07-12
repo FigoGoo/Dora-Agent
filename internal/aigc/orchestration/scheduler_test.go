@@ -1227,15 +1227,29 @@ func TestResumeAcrossSchedulersConvergesFromSameSuspendedSnapshot(t *testing.T) 
 	base := NewMemoryRunStore()
 	store := &resumeReadBarrierStore{RunStore: base, ready: make(chan struct{}), release: make(chan struct{})}
 	var businessEffects atomic.Int32
+	var invocations atomic.Int32
 	var seen sync.Map
+	var keysMu sync.Mutex
+	var keys []string
+	sinkStarted := make(chan struct{}, 2)
+	sinkRelease := make(chan struct{})
+	var sinkReleaseOnce sync.Once
+	releaseSink := func() { sinkReleaseOnce.Do(func() { close(sinkRelease) }) }
+	defer releaseSink()
 	registry := schedulerRegistry(t,
 		schedulerTool{key: "pause", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
 			return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}}, nil
 		}},
 		schedulerTool{key: "sink", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			invocations.Add(1)
+			keysMu.Lock()
+			keys = append(keys, call.IdempotencyKey)
+			keysMu.Unlock()
 			if _, loaded := seen.LoadOrStore(call.IdempotencyKey, struct{}{}); !loaded {
 				businessEffects.Add(1)
 			}
+			sinkStarted <- struct{}{}
+			<-sinkRelease
 			return vocabulary.Result{}, nil
 		}},
 	)
@@ -1263,12 +1277,126 @@ func TestResumeAcrossSchedulersConvergesFromSameSuspendedSnapshot(t *testing.T) 
 			results <- result{run: run, err: resumeErr}
 		}(scheduler)
 	}
-	<-store.ready
-	close(store.release)
+	select {
+	case <-store.ready:
+		close(store.release)
+	case <-time.After(2 * time.Second):
+		close(store.release)
+		t.Fatal("both schedulers did not read the suspended snapshot")
+	}
+	for range 2 {
+		select {
+		case <-sinkStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("both schedulers did not invoke sink")
+		}
+	}
+	releaseSink()
 	a, b := <-results, <-results
 	authoritative, getErr := base.GetRun(context.Background(), suspended.ID)
-	if a.err != nil || b.err != nil || getErr != nil || a.run.Status != RunStatusSucceeded || b.run.Status != RunStatusSucceeded || authoritative.Status != RunStatusSucceeded || a.run.Version != authoritative.Version || b.run.Version != authoritative.Version || businessEffects.Load() != 1 {
-		t.Fatalf("a=%+v/%v b=%+v/%v authoritative=%+v/%v effects=%d", a.run, a.err, b.run, b.err, authoritative, getErr, businessEffects.Load())
+	wantVersion := suspended.Version + 3 // receipt + one sink merge + terminal finalize
+	keysMu.Lock()
+	defer keysMu.Unlock()
+	if a.err != nil || b.err != nil || getErr != nil || a.run.Status != RunStatusSucceeded || b.run.Status != RunStatusSucceeded || authoritative.Status != RunStatusSucceeded || a.run.Version != authoritative.Version || b.run.Version != authoritative.Version || authoritative.Version != wantVersion || invocations.Load() != 2 || len(keys) != 2 || keys[0] != keys[1] || businessEffects.Load() != 1 {
+		t.Fatalf("a=%+v/%v b=%+v/%v authoritative=%+v/%v wantVersion=%d invocations=%d keys=%v effects=%d", a.run, a.err, b.run, b.err, authoritative, getErr, wantVersion, invocations.Load(), keys, businessEffects.Load())
+	}
+}
+
+func TestSchedulerTerminalAuthorityDiscardsLateWaveToolError(t *testing.T) {
+	base := NewMemoryRunStore()
+	plan := ExecutionPlan{
+		PlanID: "terminal-authority", Source: "dynamic", Summary: "terminal-authority", Direction: "image",
+		Steps: []PlanStep{{ID: "good", Tool: "work", Required: true}, {ID: "flaky", Tool: "work", Required: true}},
+	}
+	created := createPendingSchedulerRun(t, base, "terminal-authority-run", plan)
+	store := &resumeReadBarrierStore{RunStore: base, ready: make(chan struct{}), release: make(chan struct{})}
+	store.enabled.Store(true)
+	goodStarted := make(chan struct{}, 2)
+	badStarted := make(chan struct{}, 2)
+	goodRelease := make(chan struct{})
+	badRelease := make(chan struct{})
+	goodRegistry := schedulerRegistry(t, schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		goodStarted <- struct{}{}
+		<-goodRelease
+		return vocabulary.Result{}, nil
+	}})
+	transientErr := errors.New("transient local failure")
+	badRegistry := schedulerRegistry(t, schedulerTool{key: "work", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+		badStarted <- struct{}{}
+		<-badRelease
+		if call.NodeID == "flaky" {
+			return vocabulary.Result{}, transientErr
+		}
+		return vocabulary.Result{}, nil
+	}})
+	goodScheduler := schedulerForTest(t, store, goodRegistry, 2)
+	badScheduler := schedulerForTest(t, store, badRegistry, 2)
+	type result struct {
+		run PlanRun
+		err error
+	}
+	goodDone := make(chan result, 1)
+	badDone := make(chan result, 1)
+	go func() {
+		run, err := goodScheduler.Advance(context.Background(), created.ID)
+		goodDone <- result{run: run, err: err}
+	}()
+	go func() {
+		run, err := badScheduler.Advance(context.Background(), created.ID)
+		badDone <- result{run: run, err: err}
+	}()
+	<-store.ready
+	close(store.release)
+	for _, started := range []chan struct{}{goodStarted, badStarted} {
+		for range 2 {
+			select {
+			case <-started:
+			case <-time.After(2 * time.Second):
+				close(goodRelease)
+				close(badRelease)
+				t.Fatal("both scheduler waves did not start")
+			}
+		}
+	}
+	close(goodRelease)
+	good := <-goodDone
+	if good.err != nil || good.run.Status != RunStatusSucceeded {
+		close(badRelease)
+		t.Fatalf("authoritative scheduler: run=%+v err=%v", good.run, good.err)
+	}
+	close(badRelease)
+	late := <-badDone
+	if late.err != nil || late.run.Status != RunStatusSucceeded || late.run.Version != good.run.Version {
+		t.Fatalf("late scheduler: run=%+v err=%v authoritative=%+v", late.run, late.err, good.run)
+	}
+}
+
+func TestSchedulerMergeOutcomesDoesNotCommitAlreadyAppliedWave(t *testing.T) {
+	store := NewMemoryRunStore()
+	plan := ExecutionPlan{
+		PlanID: "already-applied", Source: "dynamic", Summary: "already-applied", Direction: "image",
+		Steps: []PlanStep{{ID: "work", Tool: "work", Required: true}},
+	}
+	stale := createPendingSchedulerRun(t, store, "already-applied-run", plan)
+	authoritative, err := store.MutateRun(context.Background(), stale.ID, stale.Version, func(run *PlanRun) error {
+		run.Nodes["work"].Status = NodeStatusSucceeded
+		run.Nodes["work"].Attempt = 1
+		run.Nodes["work"].Outputs = map[string]any{"ok": true}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := schedulerForTest(t, store, schedulerRegistry(t, schedulerTool{key: "work"}), 1)
+	merged, err := scheduler.mergeOutcomes(context.Background(), stale, []nodeOutcome{{
+		step: plan.Steps[0], attempt: 1, invoked: true, result: vocabulary.Result{Outputs: map[string]any{"ok": true}},
+	}})
+	if err != nil || merged.Version != authoritative.Version {
+		t.Fatalf("merged=%+v authoritative=%+v err=%v", merged, authoritative, err)
+	}
+	stored, err := store.GetRun(context.Background(), stale.ID)
+	if err != nil || stored.Version != authoritative.Version {
+		t.Fatalf("stored=%+v authoritative=%+v err=%v", stored, authoritative, err)
 	}
 }
 

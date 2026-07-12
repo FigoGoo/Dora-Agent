@@ -227,6 +227,8 @@ type nodeOutcome struct {
 
 type inputResolutionError struct{ error }
 
+var errNoOutcomeApplied = errors.New("no scheduler outcome applied")
+
 func readySteps(run PlanRun) []PlanStep {
 	ready := make([]PlanStep, 0)
 	for _, step := range run.Plan.Steps {
@@ -348,6 +350,7 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 	current := run
 	for range maxCASRetries {
 		merged, err := s.store.MutateRun(ctx, current.ID, current.Version, func(next *PlanRun) error {
+			applied := 0
 			for _, outcome := range outcomes {
 				if !outcome.invoked || outcome.toolErr != nil {
 					continue
@@ -368,6 +371,10 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 					node.Resumed = false
 					node.ResumeDecision = nil
 				}
+				applied++
+			}
+			if applied == 0 {
+				return errNoOutcomeApplied
 			}
 			suspendedNodeIDs := make([]string, 0, 1)
 			for _, outcome := range outcomes {
@@ -410,6 +417,16 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 			}
 			return merged, firstToolError(outcomes)
 		}
+		if errors.Is(err, errNoOutcomeApplied) {
+			current, err = s.store.GetRun(ctx, current.ID)
+			if err != nil {
+				return PlanRun{}, err
+			}
+			if isTerminalRun(current.Status) || current.Status == RunStatusSuspended {
+				return current, nil
+			}
+			return current, firstToolError(outcomes)
+		}
 		if !errors.Is(err, ErrRunVersionConflict) {
 			return current, err
 		}
@@ -418,7 +435,7 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 			return PlanRun{}, err
 		}
 		if isTerminalRun(current.Status) || current.Status == RunStatusSuspended {
-			return current, firstToolError(outcomes)
+			return current, nil
 		}
 	}
 	return current, fmt.Errorf("%w: merge outcomes exceeded retry limit", ErrRunVersionConflict)
