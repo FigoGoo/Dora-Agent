@@ -14,27 +14,38 @@ import (
 const (
 	defaultMaxParallel   = 4
 	defaultCommitTimeout = 5 * time.Second
+	defaultLeaseTTL      = 30 * time.Second
 	maxCASRetries        = 8
 )
 
 type SchedulerConfig struct {
-	Store         RunStore
-	Vocabulary    *vocabulary.Registry
-	MaxParallel   int
-	JobBudget     int
-	CommitTimeout time.Duration
-	NewID         func() string
+	Store             RunStore
+	Vocabulary        *vocabulary.Registry
+	MaxParallel       int
+	JobBudget         int
+	CommitTimeout     time.Duration
+	NewID             func() string
+	OwnerID           string
+	LeaseTTL          time.Duration
+	HeartbeatInterval time.Duration
+	Now               func() time.Time
+	NewToken          func() string
 }
 
 type Scheduler struct {
-	store         RunStore
-	vocabulary    *vocabulary.Registry
-	maxParallel   int
-	jobBudget     int
-	commitTimeout time.Duration
-	newID         func() string
-	gateMu        sync.Mutex
-	gates         map[string]*runGate
+	store             RunStore
+	vocabulary        *vocabulary.Registry
+	maxParallel       int
+	jobBudget         int
+	commitTimeout     time.Duration
+	newID             func() string
+	ownerID           string
+	leaseTTL          time.Duration
+	heartbeatInterval time.Duration
+	now               func() time.Time
+	newToken          func() string
+	gateMu            sync.Mutex
+	gates             map[string]*runGate
 }
 
 type runGate struct {
@@ -52,6 +63,15 @@ func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
 	if cfg.NewID == nil {
 		return nil, errors.New("scheduler id generator is required")
 	}
+	if strings.TrimSpace(cfg.OwnerID) == "" {
+		return nil, errors.New("scheduler owner id is required")
+	}
+	if cfg.Now == nil {
+		return nil, errors.New("scheduler clock is required")
+	}
+	if cfg.NewToken == nil {
+		return nil, errors.New("scheduler execution token generator is required")
+	}
 	maxParallel := cfg.MaxParallel
 	if maxParallel <= 0 {
 		maxParallel = defaultMaxParallel
@@ -60,9 +80,22 @@ func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
 	if commitTimeout <= 0 {
 		commitTimeout = defaultCommitTimeout
 	}
+	leaseTTL := cfg.LeaseTTL
+	if leaseTTL <= 0 {
+		leaseTTL = defaultLeaseTTL
+	}
+	heartbeatInterval := cfg.HeartbeatInterval
+	if heartbeatInterval <= 0 {
+		heartbeatInterval = leaseTTL / 3
+		if heartbeatInterval <= 0 {
+			heartbeatInterval = time.Nanosecond
+		}
+	}
 	return &Scheduler{
 		store: cfg.Store, vocabulary: cfg.Vocabulary, maxParallel: maxParallel,
 		jobBudget: cfg.JobBudget, commitTimeout: commitTimeout, newID: cfg.NewID,
+		ownerID: strings.TrimSpace(cfg.OwnerID), leaseTTL: leaseTTL,
+		heartbeatInterval: heartbeatInterval, now: cfg.Now, newToken: cfg.NewToken,
 		gates: make(map[string]*runGate),
 	}, nil
 }
@@ -140,16 +173,25 @@ func (s *Scheduler) advance(ctx context.Context, runID string) (PlanRun, error) 
 			return run, fmt.Errorf("cannot advance plan run in status %q", run.Status)
 		}
 
-		ready := readySteps(run)
-		if len(ready) == 0 {
-			return s.finalize(ctx, run)
+		claimedRun, claims, claimErr := s.claimReady(ctx, run)
+		if claimErr != nil {
+			return claimedRun, claimErr
+		}
+		if len(claims) == 0 {
+			if hasActiveExecutionClaim(claimedRun) {
+				return claimedRun, nil
+			}
+			return s.finalize(ctx, claimedRun)
 		}
 
-		outcomes := s.executeReady(ctx, run, ready)
+		outcomes, heartbeatErr := s.executeClaims(ctx, claimedRun, claims)
 		executionErr := ctx.Err()
 		persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), s.commitTimeout)
-		merged, mergeErr := s.mergeOutcomes(persistCtx, run, outcomes)
+		merged, mergeErr := s.mergeOutcomes(persistCtx, claimedRun, outcomes)
 		cancelPersist()
+		if heartbeatErr != nil {
+			mergeErr = errors.Join(mergeErr, heartbeatErr)
+		}
 		if executionErr == nil {
 			executionErr = ctx.Err()
 		}
@@ -218,7 +260,7 @@ func (s *Scheduler) releaseRunGate(runID string, gate *runGate, held bool) {
 
 type nodeOutcome struct {
 	step       PlanStep
-	attempt    int
+	claim      executionClaim
 	invoked    bool
 	result     vocabulary.Result
 	toolErr    error
@@ -251,21 +293,24 @@ func readySteps(run PlanRun) []PlanStep {
 	return ready
 }
 
-func (s *Scheduler) executeReady(ctx context.Context, run PlanRun, ready []PlanStep) []nodeOutcome {
-	outcomes := make([]nodeOutcome, len(ready))
-	for index, step := range ready {
-		outcomes[index] = nodeOutcome{step: step, attempt: run.Nodes[step.ID].Attempt + 1}
+func (s *Scheduler) executeClaims(ctx context.Context, run PlanRun, claims []executionClaim) ([]nodeOutcome, error) {
+	outcomes := make([]nodeOutcome, len(claims))
+	for index, claim := range claims {
+		step, _ := findPlanStep(run.Plan.Steps, claim.StepID)
+		outcomes[index] = nodeOutcome{step: step, claim: claim}
 	}
 	type task struct {
 		index int
-		step  PlanStep
 	}
-	tasks := make(chan task, len(ready))
-	for index, step := range ready {
-		tasks <- task{index: index, step: step}
+	tasks := make(chan task, len(claims))
+	for index := range claims {
+		tasks <- task{index: index}
 	}
 	close(tasks)
-	workerCount := min(s.maxParallel, len(ready))
+	stopHeartbeat := make(chan struct{})
+	heartbeatDone := make(chan error, 1)
+	go s.heartbeatClaims(run.ID, claims, stopHeartbeat, heartbeatDone)
+	workerCount := min(s.maxParallel, len(claims))
 	var wait sync.WaitGroup
 	for range workerCount {
 		wait.Add(1)
@@ -285,18 +330,39 @@ func (s *Scheduler) executeReady(ctx context.Context, run PlanRun, ready []PlanS
 					if ctx.Err() != nil {
 						return
 					}
-					executeOutcome(ctx, s.vocabulary, run, next.step, &outcomes[next.index])
+					executeOutcome(ctx, s.vocabulary, run, &outcomes[next.index])
 				}
 			}
 		}()
 	}
 	wait.Wait()
-	return outcomes
+	close(stopHeartbeat)
+	return outcomes, <-heartbeatDone
 }
 
-func executeOutcome(ctx context.Context, registry *vocabulary.Registry, run PlanRun, step PlanStep, outcome *nodeOutcome) {
+func (s *Scheduler) heartbeatClaims(runID string, claims []executionClaim, stop <-chan struct{}, done chan<- error) {
+	ticker := time.NewTicker(s.heartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			done <- nil
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), s.commitTimeout)
+			err := s.renewClaims(ctx, runID, claims)
+			cancel()
+			if err != nil {
+				done <- err
+				return
+			}
+		}
+	}
+}
+
+func executeOutcome(ctx context.Context, registry *vocabulary.Registry, run PlanRun, outcome *nodeOutcome) {
 	outcome.invoked = true
-	inputs, err := resolveInputs(step.Params, run.Nodes)
+	inputs, err := resolveInputs(outcome.step.Params, run.Nodes)
 	if err != nil {
 		outcome.resolveErr = err
 		return
@@ -305,15 +371,15 @@ func executeOutcome(ctx context.Context, registry *vocabulary.Registry, run Plan
 		outcome.invoked = false
 		return
 	}
-	tool, ok := registry.Get(step.Tool)
+	tool, ok := registry.Get(outcome.step.Tool)
 	if !ok {
-		outcome.resolveErr = fmt.Errorf("tool %q is no longer registered", step.Tool)
+		outcome.resolveErr = fmt.Errorf("tool %q is no longer registered", outcome.step.Tool)
 		return
 	}
 	outcome.result, outcome.toolErr = tool.Run(ctx, vocabulary.Call{
 		SessionID: run.SessionID, UserID: run.UserID, PlanRunID: run.ID,
-		NodeID: step.ID, Attempt: outcome.attempt,
-		IdempotencyKey: fmt.Sprintf("%s:%s:%d", run.ID, step.ID, outcome.attempt),
+		NodeID: outcome.step.ID, Attempt: outcome.claim.Attempt,
+		IdempotencyKey: fmt.Sprintf("%s:%s:%d", run.ID, outcome.step.ID, outcome.claim.Attempt),
 		Inputs:         inputs,
 	})
 	if outcome.toolErr == nil {
@@ -344,30 +410,39 @@ func knownSuspensionReason(reason string) bool {
 }
 
 func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []nodeOutcome) (PlanRun, error) {
-	if !hasCommittableOutcome(outcomes) {
-		return run, firstToolError(outcomes)
-	}
 	current := run
 	for range maxCASRetries {
+		var appliedToolErr error
+		var appliedResolveErr error
 		merged, err := s.store.MutateRun(ctx, current.ID, current.Version, func(next *PlanRun) error {
 			applied := 0
 			for _, outcome := range outcomes {
-				if !outcome.invoked || outcome.toolErr != nil {
-					continue
-				}
 				node := next.Nodes[outcome.step.ID]
 				if node == nil {
 					return fmt.Errorf("node %q is missing", outcome.step.ID)
 				}
-				if node.Status != NodeStatusPending || node.Attempt+1 != outcome.attempt {
+				if !claimMatches(node, outcome.claim) {
+					continue
+				}
+				if !outcome.invoked || outcome.toolErr != nil {
+					node.Status = NodeStatusPending
+					clearExecutionClaim(node)
+					if outcome.invoked && appliedToolErr == nil {
+						appliedToolErr = outcome.toolErr
+					}
+					applied++
 					continue
 				}
 				applyOutcome(node, outcome)
+				clearExecutionClaim(node)
+				if outcome.resolveErr != nil && appliedResolveErr == nil {
+					appliedResolveErr = outcome.resolveErr
+				}
 				if node.Suspension == nil && outcome.step.Evaluate && node.Status == NodeStatusSucceeded {
 					node.Suspension = &vocabulary.Suspension{Reason: SuspendWaitingAgent}
 				}
 				if node.Suspension != nil {
-					node.ResumeKey = fmt.Sprintf("%s:%s:%d:resume", next.ID, outcome.step.ID, outcome.attempt)
+					node.ResumeKey = fmt.Sprintf("%s:%s:%d:resume", next.ID, outcome.step.ID, outcome.claim.Attempt)
 					node.Resumed = false
 					node.ResumeDecision = nil
 				}
@@ -410,12 +485,10 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 			return nil
 		})
 		if err == nil {
-			for _, outcome := range outcomes {
-				if outcome.resolveErr != nil {
-					return merged, &inputResolutionError{error: outcome.resolveErr}
-				}
+			if appliedResolveErr != nil {
+				return merged, &inputResolutionError{error: appliedResolveErr}
 			}
-			return merged, firstToolError(outcomes)
+			return merged, appliedToolErr
 		}
 		if errors.Is(err, errNoOutcomeApplied) {
 			current, err = s.store.GetRun(ctx, current.ID)
@@ -425,10 +498,14 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 			if isTerminalRun(current.Status) || current.Status == RunStatusSuspended {
 				return current, nil
 			}
-			return current, firstToolError(outcomes)
+			return current, nil
 		}
 		if !errors.Is(err, ErrRunVersionConflict) {
-			return current, err
+			released, releaseErr := s.releaseClaims(ctx, current.ID, outcomeClaims(outcomes))
+			if released.ID == "" {
+				released = current
+			}
+			return released, errors.Join(err, releaseErr)
 		}
 		current, err = s.store.GetRun(ctx, current.ID)
 		if err != nil {
@@ -441,26 +518,15 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 	return current, fmt.Errorf("%w: merge outcomes exceeded retry limit", ErrRunVersionConflict)
 }
 
-func hasCommittableOutcome(outcomes []nodeOutcome) bool {
-	for _, outcome := range outcomes {
-		if outcome.invoked && outcome.toolErr == nil {
-			return true
-		}
+func outcomeClaims(outcomes []nodeOutcome) []executionClaim {
+	claims := make([]executionClaim, len(outcomes))
+	for index := range outcomes {
+		claims[index] = outcomes[index].claim
 	}
-	return false
-}
-
-func firstToolError(outcomes []nodeOutcome) error {
-	for _, outcome := range outcomes {
-		if outcome.invoked && outcome.toolErr != nil {
-			return outcome.toolErr
-		}
-	}
-	return nil
+	return claims
 }
 
 func applyOutcome(node *NodeRun, outcome nodeOutcome) {
-	node.Attempt = outcome.attempt
 	node.Outputs = nil
 	node.Fail = nil
 	node.Suspension = nil

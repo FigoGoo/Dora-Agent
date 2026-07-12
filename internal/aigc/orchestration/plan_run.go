@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
 )
@@ -40,6 +41,9 @@ type NodeRun struct {
 	StepID         string                 `json:"step_id"`
 	Status         string                 `json:"status"`
 	Attempt        int                    `json:"attempt"`
+	ExecutionOwner string                 `json:"execution_owner,omitempty"`
+	ExecutionToken string                 `json:"execution_token,omitempty"`
+	LeaseUntil     *time.Time             `json:"lease_until,omitempty"`
 	Outputs        map[string]any         `json:"outputs,omitempty"`
 	Fail           *vocabulary.Failure    `json:"fail,omitempty"`
 	Suspension     *vocabulary.Suspension `json:"suspension,omitempty"`

@@ -44,14 +44,23 @@ func schedulerRegistry(t *testing.T, tools ...vocabulary.Tool) *vocabulary.Regis
 
 func schedulerForTest(t *testing.T, store RunStore, registry *vocabulary.Registry, maxParallel int) *Scheduler {
 	t.Helper()
-	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: store, Vocabulary: registry, MaxParallel: maxParallel,
-		NewID: func() string { return "run-1" },
-	})
+	cfg := schedulerConfigForTest(store, registry, func() string { return "run-1" })
+	cfg.MaxParallel = maxParallel
+	scheduler, err := NewScheduler(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return scheduler
+}
+
+var schedulerTestSequence atomic.Int64
+
+func schedulerConfigForTest(store RunStore, registry *vocabulary.Registry, newID func() string) SchedulerConfig {
+	owner := fmt.Sprintf("test-owner-%d", schedulerTestSequence.Add(1))
+	return SchedulerConfig{
+		Store: store, Vocabulary: registry, NewID: newID, OwnerID: owner,
+		Now: time.Now, NewToken: func() string { return fmt.Sprintf("token-%d", schedulerTestSequence.Add(1)) },
+	}
 }
 
 func createPendingSchedulerRun(t *testing.T, store RunStore, id string, plan ExecutionPlan) PlanRun {
@@ -537,10 +546,9 @@ func TestSchedulerBudgetPreviewDoesNotExecute(t *testing.T) {
 		calls.Add(1)
 		return vocabulary.Result{}, nil
 	}}
-	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: NewMemoryRunStore(), Vocabulary: schedulerRegistry(t, tool), MaxParallel: 1, JobBudget: 2,
-		NewID: func() string { return "preview-run" },
-	})
+	cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, tool), func() string { return "preview-run" })
+	cfg.MaxParallel, cfg.JobBudget = 1, 2
+	scheduler, err := NewScheduler(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,7 +625,7 @@ func TestSchedulerToolInfrastructureErrorRemainsPendingAndRetriesSameKey(t *test
 		}
 		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
 	}}
-	scheduler := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, tool), 1)
+	scheduler := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, tool), 2)
 	run, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
 		PlanID: "retry-tool", Source: "dynamic", Summary: "retry-tool", Direction: "image", Steps: []PlanStep{
 			{ID: "a", Tool: "work", Required: true}, {ID: "sibling", Tool: "work", Required: true},
@@ -627,7 +635,7 @@ func TestSchedulerToolInfrastructureErrorRemainsPendingAndRetriesSameKey(t *test
 		t.Fatalf("status=%s err=%v", run.Status, err)
 	}
 	node := run.Nodes["a"]
-	if node.Status != NodeStatusPending || node.Attempt != 0 || node.Fail != nil {
+	if node.Status != NodeStatusPending || node.Attempt != 1 || node.Fail != nil || node.ExecutionToken != "" {
 		t.Fatalf("node=%+v", node)
 	}
 	if run.Nodes["sibling"].Status != NodeStatusSucceeded || siblingCalls.Load() != 1 {
@@ -820,7 +828,9 @@ func TestBudgetPreviewResumeStartsExecutionAndReplaysTerminalReceipt(t *testing.
 		calls.Add(1)
 		return vocabulary.Result{}, nil
 	}}
-	scheduler, err := NewScheduler(SchedulerConfig{Store: NewMemoryRunStore(), Vocabulary: schedulerRegistry(t, tool), JobBudget: 1, NewID: func() string { return "preview-resume" }})
+	cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, tool), func() string { return "preview-resume" })
+	cfg.JobBudget = 1
+	scheduler, err := NewScheduler(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1043,7 +1053,9 @@ func TestResumeCallerCancelStillCommitsReceipt(t *testing.T) {
 			return vocabulary.Result{}, nil
 		}},
 	)
-	scheduler, err := NewScheduler(SchedulerConfig{Store: store, Vocabulary: registry, MaxParallel: 1, CommitTimeout: time.Second, NewID: func() string { return "cancel-receipt" }})
+	cfg := schedulerConfigForTest(store, registry, func() string { return "cancel-receipt" })
+	cfg.MaxParallel, cfg.CommitTimeout = 1, time.Second
+	scheduler, err := NewScheduler(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1284,90 +1296,68 @@ func TestResumeAcrossSchedulersConvergesFromSameSuspendedSnapshot(t *testing.T) 
 		close(store.release)
 		t.Fatal("both schedulers did not read the suspended snapshot")
 	}
-	for range 2 {
-		select {
-		case <-sinkStarted:
-		case <-time.After(2 * time.Second):
-			t.Fatal("both schedulers did not invoke sink")
-		}
+	select {
+	case <-sinkStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("claimed scheduler did not invoke sink")
 	}
 	releaseSink()
 	a, b := <-results, <-results
 	authoritative, getErr := base.GetRun(context.Background(), suspended.ID)
-	wantVersion := suspended.Version + 3 // receipt + one sink merge + terminal finalize
+	wantVersion := suspended.Version + 4 // receipt + sink claim + sink merge + terminal finalize
 	keysMu.Lock()
 	defer keysMu.Unlock()
-	if a.err != nil || b.err != nil || getErr != nil || a.run.Status != RunStatusSucceeded || b.run.Status != RunStatusSucceeded || authoritative.Status != RunStatusSucceeded || a.run.Version != authoritative.Version || b.run.Version != authoritative.Version || authoritative.Version != wantVersion || invocations.Load() != 2 || len(keys) != 2 || keys[0] != keys[1] || businessEffects.Load() != 1 {
+	validSnapshot := func(run PlanRun) bool { return run.Status == RunStatusRunning || run.Status == RunStatusSucceeded }
+	if a.err != nil || b.err != nil || getErr != nil || !validSnapshot(a.run) || !validSnapshot(b.run) || (a.run.Status != RunStatusSucceeded && b.run.Status != RunStatusSucceeded) || authoritative.Status != RunStatusSucceeded || authoritative.Version != wantVersion || invocations.Load() != 1 || len(keys) != 1 || businessEffects.Load() != 1 {
 		t.Fatalf("a=%+v/%v b=%+v/%v authoritative=%+v/%v wantVersion=%d invocations=%d keys=%v effects=%d", a.run, a.err, b.run, b.err, authoritative, getErr, wantVersion, invocations.Load(), keys, businessEffects.Load())
 	}
 }
 
 func TestSchedulerTerminalAuthorityDiscardsLateWaveToolError(t *testing.T) {
-	base := NewMemoryRunStore()
+	store := NewMemoryRunStore()
 	plan := ExecutionPlan{
 		PlanID: "terminal-authority", Source: "dynamic", Summary: "terminal-authority", Direction: "image",
-		Steps: []PlanStep{{ID: "good", Tool: "work", Required: true}, {ID: "flaky", Tool: "work", Required: true}},
+		Steps: []PlanStep{{ID: "work", Tool: "work", Required: true}},
 	}
-	created := createPendingSchedulerRun(t, base, "terminal-authority-run", plan)
-	store := &resumeReadBarrierStore{RunStore: base, ready: make(chan struct{}), release: make(chan struct{})}
-	store.enabled.Store(true)
-	goodStarted := make(chan struct{}, 2)
-	badStarted := make(chan struct{}, 2)
+	created := createPendingSchedulerRun(t, store, "terminal-authority-run", plan)
+	goodStarted := make(chan struct{}, 1)
 	goodRelease := make(chan struct{})
-	badRelease := make(chan struct{})
 	goodRegistry := schedulerRegistry(t, schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
 		goodStarted <- struct{}{}
 		<-goodRelease
 		return vocabulary.Result{}, nil
 	}})
-	transientErr := errors.New("transient local failure")
-	badRegistry := schedulerRegistry(t, schedulerTool{key: "work", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
-		badStarted <- struct{}{}
-		<-badRelease
-		if call.NodeID == "flaky" {
-			return vocabulary.Result{}, transientErr
-		}
-		return vocabulary.Result{}, nil
+	var badCalls atomic.Int32
+	badRegistry := schedulerRegistry(t, schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		badCalls.Add(1)
+		return vocabulary.Result{}, errors.New("must not run")
 	}})
-	goodScheduler := schedulerForTest(t, store, goodRegistry, 2)
-	badScheduler := schedulerForTest(t, store, badRegistry, 2)
+	goodScheduler := schedulerForTest(t, store, goodRegistry, 1)
+	badScheduler := schedulerForTest(t, store, badRegistry, 1)
 	type result struct {
 		run PlanRun
 		err error
 	}
 	goodDone := make(chan result, 1)
-	badDone := make(chan result, 1)
 	go func() {
 		run, err := goodScheduler.Advance(context.Background(), created.ID)
 		goodDone <- result{run: run, err: err}
 	}()
-	go func() {
-		run, err := badScheduler.Advance(context.Background(), created.ID)
-		badDone <- result{run: run, err: err}
-	}()
-	<-store.ready
-	close(store.release)
-	for _, started := range []chan struct{}{goodStarted, badStarted} {
-		for range 2 {
-			select {
-			case <-started:
-			case <-time.After(2 * time.Second):
-				close(goodRelease)
-				close(badRelease)
-				t.Fatal("both scheduler waves did not start")
-			}
-		}
+	select {
+	case <-goodStarted:
+	case <-time.After(2 * time.Second):
+		close(goodRelease)
+		t.Fatal("authoritative scheduler did not start")
+	}
+	contender, err := badScheduler.Advance(context.Background(), created.ID)
+	if err != nil || contender.Status != RunStatusRunning || badCalls.Load() != 0 {
+		close(goodRelease)
+		t.Fatalf("contender=%+v calls=%d err=%v", contender, badCalls.Load(), err)
 	}
 	close(goodRelease)
 	good := <-goodDone
 	if good.err != nil || good.run.Status != RunStatusSucceeded {
-		close(badRelease)
 		t.Fatalf("authoritative scheduler: run=%+v err=%v", good.run, good.err)
-	}
-	close(badRelease)
-	late := <-badDone
-	if late.err != nil || late.run.Status != RunStatusSucceeded || late.run.Version != good.run.Version {
-		t.Fatalf("late scheduler: run=%+v err=%v authoritative=%+v", late.run, late.err, good.run)
 	}
 }
 
@@ -1389,7 +1379,8 @@ func TestSchedulerMergeOutcomesDoesNotCommitAlreadyAppliedWave(t *testing.T) {
 	}
 	scheduler := schedulerForTest(t, store, schedulerRegistry(t, schedulerTool{key: "work"}), 1)
 	merged, err := scheduler.mergeOutcomes(context.Background(), stale, []nodeOutcome{{
-		step: plan.Steps[0], attempt: 1, invoked: true, result: vocabulary.Result{Outputs: map[string]any{"ok": true}},
+		step: plan.Steps[0], claim: executionClaim{StepID: "work", Attempt: 1, Owner: "stale", Token: "stale:token"},
+		invoked: true, result: vocabulary.Result{Outputs: map[string]any{"ok": true}},
 	}})
 	if err != nil || merged.Version != authoritative.Version {
 		t.Fatalf("merged=%+v authoritative=%+v err=%v", merged, authoritative, err)
@@ -1514,18 +1505,20 @@ func (s *blockingMutationStore) MutateRun(ctx context.Context, id string, expect
 
 func TestSchedulerReceiptCommitTimeoutBoundsCancelledSubmit(t *testing.T) {
 	store := &blockingMutationStore{RunStore: NewMemoryRunStore(), release: make(chan struct{})}
-	store.block.Store(true)
 	started := make(chan vocabulary.Call, 1)
 	releaseTool := make(chan struct{})
+	var blockOnce sync.Once
 	tool := schedulerTool{key: "work", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
 		started <- call
 		<-releaseTool
+		blockOnce.Do(func() { store.block.Store(true) })
 		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
 	}}
-	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: store, Vocabulary: schedulerRegistry(t, tool), MaxParallel: 1,
-		CommitTimeout: 50 * time.Millisecond, NewID: func() string { return "timeout-run" },
-	})
+	clock := newClaimClock(time.Unix(1_700_000_000, 0))
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { return "timeout-run" })
+	cfg.MaxParallel, cfg.CommitTimeout = 1, 50*time.Millisecond
+	cfg.Now, cfg.LeaseTTL, cfg.HeartbeatInterval = clock.Now, time.Second, time.Hour
+	scheduler, err := NewScheduler(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1556,10 +1549,11 @@ func TestSchedulerReceiptCommitTimeoutBoundsCancelledSubmit(t *testing.T) {
 		t.Fatalf("run=%+v err=%v", result.run, result.err)
 	}
 	node := result.run.Nodes["a"]
-	if result.run.Status != RunStatusRunning || node.Status != NodeStatusPending || node.Attempt != 0 {
+	if result.run.Status != RunStatusRunning || node.Status != NodeStatusRunning || node.Attempt != 1 || node.ExecutionToken == "" {
 		t.Fatalf("run=%+v node=%+v", result.run, node)
 	}
 	store.block.Store(false)
+	clock.Advance(2 * time.Second)
 	recovered, err := scheduler.Advance(context.Background(), result.run.ID)
 	if err != nil || recovered.Status != RunStatusSucceeded {
 		t.Fatalf("status=%s err=%v", recovered.Status, err)
@@ -1593,7 +1587,7 @@ func TestSchedulerSubmitMergeFailureLeavesRecoverableRunningRun(t *testing.T) {
 	run, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
 		PlanID: "recoverable", Source: "dynamic", Summary: "recoverable", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
 	})
-	if !errors.Is(err, mergeErr) || run.ID != "run-1" {
+	if !errors.Is(err, mergeErr) || run.ID != "run-1" || calls.Load() != 0 {
 		t.Fatalf("run=%+v err=%v", run, err)
 	}
 	stored, getErr := store.GetRun(context.Background(), run.ID)
@@ -1604,12 +1598,12 @@ func TestSchedulerSubmitMergeFailureLeavesRecoverableRunningRun(t *testing.T) {
 		t.Fatalf("stored=%+v node=%+v", stored, stored.Nodes["a"])
 	}
 	recovered, err := scheduler.Advance(context.Background(), run.ID)
-	if err != nil || recovered.Status != RunStatusSucceeded || calls.Load() != 2 {
+	if err != nil || recovered.Status != RunStatusSucceeded || calls.Load() != 1 {
 		t.Fatalf("status=%s calls=%d err=%v", recovered.Status, calls.Load(), err)
 	}
 	keysMu.Lock()
 	defer keysMu.Unlock()
-	if len(keys) != 2 || keys[0] != "run-1:a:1" || keys[1] != keys[0] {
+	if len(keys) != 1 || keys[0] != "run-1:a:1" {
 		t.Fatalf("keys=%v", keys)
 	}
 }
@@ -1643,7 +1637,7 @@ func TestSchedulerUnserializableReceiptRemainsPendingAndRecoverable(t *testing.T
 				t.Fatalf("run=%+v err=%v", run, err)
 			}
 			node := run.Nodes["a"]
-			if run.Status != RunStatusRunning || node.Status != NodeStatusPending || node.Attempt != 0 || node.Outputs != nil || node.Suspension != nil {
+			if run.Status != RunStatusRunning || node.Status != NodeStatusPending || node.Attempt != 1 || node.Outputs != nil || node.Suspension != nil || node.ExecutionToken != "" {
 				t.Fatalf("run=%+v node=%+v", run, node)
 			}
 			invalid.Store(false)
@@ -1751,7 +1745,7 @@ func TestSchedulerStopsAfterCASConflictLimit(t *testing.T) {
 	run, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
 		PlanID: "cas-limit", Source: "dynamic", Summary: "cas-limit", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
 	})
-	if !errors.Is(err, ErrRunVersionConflict) || calls.Load() != 1 || run.Nodes["a"].Status != NodeStatusPending || run.Nodes["a"].Attempt != 0 {
+	if !errors.Is(err, ErrRunVersionConflict) || calls.Load() != 0 || run.Nodes["a"].Status != NodeStatusPending || run.Nodes["a"].Attempt != 0 {
 		t.Fatalf("calls=%d err=%v", calls.Load(), err)
 	}
 	if run.Version != 1+maxCASRetries {
@@ -1763,12 +1757,12 @@ func TestSchedulerStopsAfterCASConflictLimit(t *testing.T) {
 		}
 	}
 	recovered, err := scheduler.Advance(context.Background(), run.ID)
-	if err != nil || recovered.Status != RunStatusSucceeded || calls.Load() != 2 {
+	if err != nil || recovered.Status != RunStatusSucceeded || calls.Load() != 1 {
 		t.Fatalf("recovered=%s calls=%d err=%v", recovered.Status, calls.Load(), err)
 	}
 	keysMu.Lock()
 	defer keysMu.Unlock()
-	if len(keys) != 2 || keys[0] != "run-1:a:1" || keys[1] != keys[0] {
+	if len(keys) != 1 || keys[0] != "run-1:a:1" {
 		t.Fatalf("keys=%v", keys)
 	}
 }
@@ -1784,7 +1778,9 @@ func TestSchedulerMissingReferenceOutputDoesNotCallTool(t *testing.T) {
 			return vocabulary.Result{}, nil
 		}},
 	)
-	scheduler, err := NewScheduler(SchedulerConfig{Store: NewMemoryRunStore(), Vocabulary: registry, MaxParallel: 1, NewID: func() string { return "missing-ref" }})
+	cfg := schedulerConfigForTest(NewMemoryRunStore(), registry, func() string { return "missing-ref" })
+	cfg.MaxParallel = 1
+	scheduler, err := NewScheduler(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1801,10 +1797,22 @@ func TestSchedulerMissingReferenceOutputDoesNotCallTool(t *testing.T) {
 func TestSchedulerRejectsInvalidConfigAndInputs(t *testing.T) {
 	registry := schedulerRegistry(t, schedulerTool{key: "work"})
 	newID := func() string { return "run" }
+	validConfig := schedulerConfigForTest(NewMemoryRunStore(), registry, newID)
+	nilStore := validConfig
+	nilStore.Store = nil
+	nilVocabulary := validConfig
+	nilVocabulary.Vocabulary = nil
+	nilNewID := validConfig
+	nilNewID.NewID = nil
+	nilOwner := validConfig
+	nilOwner.OwnerID = ""
+	nilClock := validConfig
+	nilClock.Now = nil
+	nilToken := validConfig
+	nilToken.NewToken = nil
 	for name, cfg := range map[string]SchedulerConfig{
-		"nil_store":      {Vocabulary: registry, NewID: newID},
-		"nil_vocabulary": {Store: NewMemoryRunStore(), NewID: newID},
-		"nil_new_id":     {Store: NewMemoryRunStore(), Vocabulary: registry},
+		"nil_store": nilStore, "nil_vocabulary": nilVocabulary, "nil_new_id": nilNewID,
+		"nil_owner": nilOwner, "nil_clock": nilClock, "nil_token": nilToken,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := NewScheduler(cfg); err == nil {
@@ -1812,11 +1820,11 @@ func TestSchedulerRejectsInvalidConfigAndInputs(t *testing.T) {
 			}
 		})
 	}
-	scheduler, err := NewScheduler(SchedulerConfig{Store: NewMemoryRunStore(), Vocabulary: registry, NewID: newID})
+	scheduler, err := NewScheduler(validConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scheduler.maxParallel != defaultMaxParallel || scheduler.jobBudget != 0 || scheduler.commitTimeout != defaultCommitTimeout {
+	if scheduler.maxParallel != defaultMaxParallel || scheduler.jobBudget != 0 || scheduler.commitTimeout != defaultCommitTimeout || scheduler.leaseTTL != defaultLeaseTTL || scheduler.heartbeatInterval != defaultLeaseTTL/3 {
 		t.Fatalf("defaults: maxParallel=%d jobBudget=%d commitTimeout=%s", scheduler.maxParallel, scheduler.jobBudget, scheduler.commitTimeout)
 	}
 	valid := ExecutionPlan{PlanID: "valid", Source: "dynamic", Summary: "valid", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}}}
@@ -1830,7 +1838,8 @@ func TestSchedulerRejectsInvalidConfigAndInputs(t *testing.T) {
 	if _, err := scheduler.Submit(context.Background(), "session", "user", invalidPolicy); !errors.Is(err, ErrPlanInvalid) {
 		t.Fatalf("unsupported success policy: %v", err)
 	}
-	emptyID, err := NewScheduler(SchedulerConfig{Store: NewMemoryRunStore(), Vocabulary: registry, NewID: func() string { return "" }})
+	emptyIDConfig := schedulerConfigForTest(NewMemoryRunStore(), registry, func() string { return "" })
+	emptyID, err := NewScheduler(emptyIDConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
