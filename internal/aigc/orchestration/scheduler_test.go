@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -51,6 +52,21 @@ func schedulerForTest(t *testing.T, store RunStore, registry *vocabulary.Registr
 		t.Fatal(err)
 	}
 	return scheduler
+}
+
+func createPendingSchedulerRun(t *testing.T, store RunStore, id string, plan ExecutionPlan) PlanRun {
+	t.Helper()
+	nodes := make(map[string]*NodeRun, len(plan.Steps))
+	for _, step := range plan.Steps {
+		nodes[step.ID] = &NodeRun{StepID: step.ID, Status: NodeStatusPending}
+	}
+	run, err := store.CreateRun(context.Background(), PlanRun{
+		ID: id, SessionID: "s1", UserID: "u1", Plan: plan, Status: RunStatusRunning, Nodes: nodes,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return run
 }
 
 func TestSchedulerRunsDiamondDAGOnce(t *testing.T) {
@@ -160,6 +176,160 @@ func TestSchedulerHonorsMaxParallel(t *testing.T) {
 	}
 	if peak.Load() != 2 {
 		t.Fatalf("peak=%d", peak.Load())
+	}
+}
+
+func TestSchedulerSerializesConcurrentAdvanceForSameRun(t *testing.T) {
+	var calls atomic.Int32
+	var active atomic.Int32
+	var peak atomic.Int32
+	started := make(chan struct{}, 64)
+	release := make(chan struct{})
+	tool := schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		calls.Add(1)
+		current := active.Add(1)
+		defer active.Add(-1)
+		for old := peak.Load(); current > old && !peak.CompareAndSwap(old, current); old = peak.Load() {
+		}
+		started <- struct{}{}
+		<-release
+		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+	}}
+	steps := make([]PlanStep, 4)
+	for index := range steps {
+		steps[index] = PlanStep{ID: fmt.Sprintf("n%d", index), Tool: "work", Required: true}
+	}
+	plan := ExecutionPlan{PlanID: "same-run", Source: "dynamic", Summary: "same-run", Direction: "image", Steps: steps}
+	store := NewMemoryRunStore()
+	createPendingSchedulerRun(t, store, "same-run", plan)
+	scheduler := schedulerForTest(t, store, schedulerRegistry(t, tool), 2)
+	const advances = 8
+	startAdvance := make(chan struct{})
+	results := make(chan error, advances)
+	for range advances {
+		go func() {
+			<-startAdvance
+			run, err := scheduler.Advance(context.Background(), "same-run")
+			if err == nil && run.Status != RunStatusSucceeded {
+				err = fmt.Errorf("status=%s", run.Status)
+			}
+			results <- err
+		}()
+	}
+	close(startAdvance)
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("first advance did not reach configured parallelism")
+		}
+	}
+	close(release)
+	for range advances {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != 4 || peak.Load() > 2 {
+		t.Fatalf("calls=%d peak=%d", calls.Load(), peak.Load())
+	}
+}
+
+func TestSchedulerRunGateWaitCanBeCancelled(t *testing.T) {
+	started := make(chan struct{}, 1)
+	releaseTool := make(chan struct{})
+	var calls atomic.Int32
+	tool := schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		calls.Add(1)
+		started <- struct{}{}
+		<-releaseTool
+		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+	}}
+	plan := ExecutionPlan{PlanID: "gate-cancel", Source: "dynamic", Summary: "gate-cancel", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}}}
+	store := NewMemoryRunStore()
+	createPendingSchedulerRun(t, store, "gate-cancel", plan)
+	scheduler := schedulerForTest(t, store, schedulerRegistry(t, tool), 1)
+	holderDone := make(chan error, 1)
+	go func() {
+		_, err := scheduler.Advance(context.Background(), "gate-cancel")
+		holderDone <- err
+	}()
+	<-started
+	waitCtx, cancelWait := context.WithCancel(context.Background())
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, err := scheduler.Advance(waitCtx, "gate-cancel")
+		waiterDone <- err
+	}()
+	cancelWait()
+	select {
+	case err := <-waiterDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("waiter err=%v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("cancelled gate waiter did not return")
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("calls=%d", calls.Load())
+	}
+	close(releaseTool)
+	if err := <-holderDone; err != nil {
+		t.Fatal(err)
+	}
+	scheduler.gateMu.Lock()
+	defer scheduler.gateMu.Unlock()
+	if len(scheduler.gates) != 0 {
+		t.Fatalf("gate entries leaked: %d", len(scheduler.gates))
+	}
+}
+
+func TestSchedulerRunGateAllowsDifferentRunsToAdvanceConcurrently(t *testing.T) {
+	started := make(chan string, 2)
+	releaseTool := make(chan struct{})
+	tool := schedulerTool{key: "work", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+		started <- call.PlanRunID
+		<-releaseTool
+		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+	}}
+	plan := ExecutionPlan{PlanID: "different-runs", Source: "dynamic", Summary: "different-runs", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}}}
+	store := NewMemoryRunStore()
+	createPendingSchedulerRun(t, store, "run-a", plan)
+	createPendingSchedulerRun(t, store, "run-b", plan)
+	scheduler := schedulerForTest(t, store, schedulerRegistry(t, tool), 1)
+	results := make(chan error, 2)
+	for _, runID := range []string{"run-a", "run-b"} {
+		go func() {
+			run, err := scheduler.Advance(context.Background(), runID)
+			if err == nil && run.Status != RunStatusSucceeded {
+				err = fmt.Errorf("run %s status=%s", runID, run.Status)
+			}
+			results <- err
+		}()
+	}
+	seen := map[string]bool{}
+	for range 2 {
+		select {
+		case runID := <-started:
+			seen[runID] = true
+		case <-time.After(500 * time.Millisecond):
+			close(releaseTool)
+			t.Fatal("different runs were serialized")
+		}
+	}
+	close(releaseTool)
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !seen["run-a"] || !seen["run-b"] {
+		t.Fatalf("seen=%v", seen)
+	}
+	scheduler.gateMu.Lock()
+	defer scheduler.gateMu.Unlock()
+	if len(scheduler.gates) != 0 {
+		t.Fatalf("gate entries leaked: %d", len(scheduler.gates))
 	}
 }
 
@@ -587,6 +757,81 @@ type failFirstMutationStore struct {
 	failed atomic.Bool
 }
 
+type blockingMutationStore struct {
+	RunStore
+	block   atomic.Bool
+	release chan struct{}
+}
+
+func (s *blockingMutationStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
+	if s.block.Load() {
+		select {
+		case <-ctx.Done():
+			return PlanRun{}, ctx.Err()
+		case <-s.release:
+			return PlanRun{}, errors.New("blocking store released without receipt timeout")
+		}
+	}
+	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
+}
+
+func TestSchedulerReceiptCommitTimeoutBoundsCancelledSubmit(t *testing.T) {
+	store := &blockingMutationStore{RunStore: NewMemoryRunStore(), release: make(chan struct{})}
+	store.block.Store(true)
+	started := make(chan vocabulary.Call, 1)
+	releaseTool := make(chan struct{})
+	tool := schedulerTool{key: "work", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+		started <- call
+		<-releaseTool
+		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+	}}
+	scheduler, err := NewScheduler(SchedulerConfig{
+		Store: store, Vocabulary: schedulerRegistry(t, tool), MaxParallel: 1,
+		CommitTimeout: 50 * time.Millisecond, NewID: func() string { return "timeout-run" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	type outcome struct {
+		run PlanRun
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		run, err := scheduler.Submit(ctx, "s1", "u1", ExecutionPlan{
+			PlanID: "timeout", Source: "dynamic", Summary: "timeout", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
+		})
+		done <- outcome{run: run, err: err}
+	}()
+	firstCall := <-started
+	cancel()
+	close(releaseTool)
+	var result outcome
+	select {
+	case result = <-done:
+	case <-time.After(500 * time.Millisecond):
+		close(store.release)
+		result = <-done
+		t.Fatalf("receipt persist exceeded bound: %v", result.err)
+	}
+	if !errors.Is(result.err, context.Canceled) || !errors.Is(result.err, context.DeadlineExceeded) || result.run.ID != "timeout-run" {
+		t.Fatalf("run=%+v err=%v", result.run, result.err)
+	}
+	node := result.run.Nodes["a"]
+	if result.run.Status != RunStatusRunning || node.Status != NodeStatusPending || node.Attempt != 0 {
+		t.Fatalf("run=%+v node=%+v", result.run, node)
+	}
+	store.block.Store(false)
+	recovered, err := scheduler.Advance(context.Background(), result.run.ID)
+	if err != nil || recovered.Status != RunStatusSucceeded {
+		t.Fatalf("status=%s err=%v", recovered.Status, err)
+	}
+	if firstCall.IdempotencyKey != "timeout-run:a:1" {
+		t.Fatalf("first key=%s", firstCall.IdempotencyKey)
+	}
+}
+
 func (s *failFirstMutationStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
 	if s.failed.CompareAndSwap(false, true) {
 		return PlanRun{}, s.err
@@ -678,11 +923,10 @@ func TestSchedulerUnserializableReceiptRemainsPendingAndRecoverable(t *testing.T
 	}
 }
 
-type conflictRangeStore struct {
+type advancingConflictRangeStore struct {
 	RunStore
-	mutation atomic.Int32
-	from     int32
-	through  int32
+	mutation  atomic.Int32
+	conflicts int32
 }
 
 type advancingConflictStore struct {
@@ -703,9 +947,15 @@ func (s *advancingConflictStore) MutateRun(ctx context.Context, id string, expec
 	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
 }
 
-func (s *conflictRangeStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
+func (s *advancingConflictRangeStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
 	mutation := s.mutation.Add(1)
-	if mutation >= s.from && mutation <= s.through {
+	if mutation <= s.conflicts {
+		if _, err := s.RunStore.MutateRun(ctx, id, expectedVersion, func(run *PlanRun) error {
+			run.Plan.Summary += fmt.Sprintf("|conflict-%d", mutation)
+			return nil
+		}); err != nil {
+			return PlanRun{}, err
+		}
 		return PlanRun{}, ErrRunVersionConflict
 	}
 	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
@@ -759,13 +1009,21 @@ func TestSchedulerStopsAfterCASConflictLimit(t *testing.T) {
 		keysMu.Unlock()
 		return vocabulary.Result{}, nil
 	}}
-	store := &conflictRangeStore{RunStore: NewMemoryRunStore(), from: 1, through: maxCASRetries}
+	store := &advancingConflictRangeStore{RunStore: NewMemoryRunStore(), conflicts: maxCASRetries}
 	scheduler := schedulerForTest(t, store, schedulerRegistry(t, tool), 1)
 	run, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
 		PlanID: "cas-limit", Source: "dynamic", Summary: "cas-limit", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
 	})
 	if !errors.Is(err, ErrRunVersionConflict) || calls.Load() != 1 || run.Nodes["a"].Status != NodeStatusPending || run.Nodes["a"].Attempt != 0 {
 		t.Fatalf("calls=%d err=%v", calls.Load(), err)
+	}
+	if run.Version != 1+maxCASRetries {
+		t.Fatalf("version=%d", run.Version)
+	}
+	for conflict := 1; conflict <= maxCASRetries; conflict++ {
+		if !strings.Contains(run.Plan.Summary, fmt.Sprintf("|conflict-%d", conflict)) {
+			t.Fatalf("missing conflict update %d in %q", conflict, run.Plan.Summary)
+		}
 	}
 	recovered, err := scheduler.Advance(context.Background(), run.ID)
 	if err != nil || recovered.Status != RunStatusSucceeded || calls.Load() != 2 {
@@ -821,8 +1079,8 @@ func TestSchedulerRejectsInvalidConfigAndInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scheduler.maxParallel != defaultMaxParallel || scheduler.jobBudget != 0 {
-		t.Fatalf("defaults: maxParallel=%d jobBudget=%d", scheduler.maxParallel, scheduler.jobBudget)
+	if scheduler.maxParallel != defaultMaxParallel || scheduler.jobBudget != 0 || scheduler.commitTimeout != defaultCommitTimeout {
+		t.Fatalf("defaults: maxParallel=%d jobBudget=%d commitTimeout=%s", scheduler.maxParallel, scheduler.jobBudget, scheduler.commitTimeout)
 	}
 	valid := ExecutionPlan{PlanID: "valid", Source: "dynamic", Summary: "valid", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}}}
 	for _, input := range [][2]string{{"", "user"}, {"session", ""}} {

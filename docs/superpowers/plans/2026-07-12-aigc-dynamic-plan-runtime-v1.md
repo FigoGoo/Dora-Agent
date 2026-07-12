@@ -279,6 +279,7 @@ type SchedulerConfig struct {
 	Vocabulary *vocabulary.Registry
 	MaxParallel int
 	JobBudget int
+	CommitTimeout time.Duration // <=0 默认 5s，限制 receipt 持久化活性
 	NewID func() string
 }
 
@@ -297,7 +298,9 @@ func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error)
 
 `Submit` 顺序固定为：校验 config/input 与 `plan.Validate` -> 初始化全部 NodeRun 为 pending -> **直接创建最终提交初态**。超预算时 Create `suspended(waiting_user)+PreviewRequired@v1` 并返回；普通计划 Create `running@v1` 后进入 `Advance`。Scheduler 不持久化 draft 中转，避免初态 mutation 失败遗留不可推进的 draft；Task 1 保留 `draft -> suspended` 作为状态机合法边，但 Scheduler 不依赖它。
 
-`Advance` 每轮读取快照，只选择“自身 pending 且全部依赖 succeeded/skipped”的节点。ready 节点仅在当轮局部工作集内视为 executing，不在调用 Tool 前持久化 running；固定 worker pool 大小为 `min(MaxParallel, len(ready))`，取消后不再领取/调用未开始节点。Tool 结果可提交时，才按计划顺序以单次 CAS 将节点从 pending 原子落为 succeeded/failed/suspension；`Tool.Run` Go error 属基础设施错误，节点保持 pending，同 wave 其他 receipt 仍尽力以 `context.WithoutCancel` 落库，然后返回 error。进程崩溃或 merge 失败时 durable 节点仍 pending，下一次 `Advance` 用相同 `Attempt`/`IdempotencyKey`（`planRunID:stepID:attempt`）重放，正确性依赖原子 Tool 的幂等契约；这是明确的 at-least-once crash window，不宣称 exactly-once，Task 8 前不引入 lease/owner。
+`Advance` 每轮读取快照，只选择“自身 pending 且全部依赖 succeeded/skipped”的节点。ready 节点仅在当轮局部工作集内视为 executing，不在调用 Tool 前持久化 running；固定 worker pool 大小为 `min(MaxParallel, len(ready))`，取消后不再领取/调用未开始节点。Tool 结果可提交时，才按计划顺序以单次 CAS 将节点从 pending 原子落为 succeeded/failed/suspension；`Tool.Run` Go error 属基础设施错误，节点保持 pending，同 wave 其他 receipt 仍尽力以 `context.WithTimeout(context.WithoutCancel(ctx), CommitTimeout)` 落库（默认 5s，测试用短配置），然后返回 error。进程崩溃或 merge 失败时 durable 节点仍 pending，下一次 `Advance` 用相同 `Attempt`/`IdempotencyKey`（`planRunID:stepID:attempt`）重放，正确性依赖原子 Tool 的幂等契约；这是明确的 at-least-once crash window，不宣称 exactly-once，Task 8 前不引入 lease/owner。
+
+同一 Scheduler 实例内，`Advance` 以可取消、引用计数的 per-run gate 串行化同一个 `PlanRun`，避免同实例并发入口重复调用 Tool；不同 run 使用不同 gate，可各自达到 `MaxParallel`（该上限按 active PlanRun 计算，不是进程全局上限）。gate 在 holder 与全部 waiter refs 归零后安全删除，等待者取消不泄漏引用。跨 Scheduler 实例/跨进程仍可能在 crash window 内以同一幂等键重放，Task 8 持久 Store 接入前不宣称 exactly-once。
 
 Tool Result 在持久化前 fail closed 校验：Suspension reason 仅允许 `waiting_user|waiting_agent|waiting_jobs`；Fail 与 Suspension 互斥；Fail 不得同时携带 Outputs；Suspension 可以携带 Outputs（如 `batch_id`）。同一 ready wave 多个 Suspension 是非法歧义恢复点，相关节点以 `multiple_suspensions` 失败、Run 直接 failed、未执行节点 skipped。
 

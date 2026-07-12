@@ -6,29 +6,40 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
 )
 
 const (
-	defaultMaxParallel = 4
-	maxCASRetries      = 8
+	defaultMaxParallel   = 4
+	defaultCommitTimeout = 5 * time.Second
+	maxCASRetries        = 8
 )
 
 type SchedulerConfig struct {
-	Store       RunStore
-	Vocabulary  *vocabulary.Registry
-	MaxParallel int
-	JobBudget   int
-	NewID       func() string
+	Store         RunStore
+	Vocabulary    *vocabulary.Registry
+	MaxParallel   int
+	JobBudget     int
+	CommitTimeout time.Duration
+	NewID         func() string
 }
 
 type Scheduler struct {
-	store       RunStore
-	vocabulary  *vocabulary.Registry
-	maxParallel int
-	jobBudget   int
-	newID       func() string
+	store         RunStore
+	vocabulary    *vocabulary.Registry
+	maxParallel   int
+	jobBudget     int
+	commitTimeout time.Duration
+	newID         func() string
+	gateMu        sync.Mutex
+	gates         map[string]*runGate
+}
+
+type runGate struct {
+	token chan struct{}
+	refs  int
 }
 
 func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
@@ -45,9 +56,14 @@ func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
 	if maxParallel <= 0 {
 		maxParallel = defaultMaxParallel
 	}
+	commitTimeout := cfg.CommitTimeout
+	if commitTimeout <= 0 {
+		commitTimeout = defaultCommitTimeout
+	}
 	return &Scheduler{
 		store: cfg.Store, vocabulary: cfg.Vocabulary, maxParallel: maxParallel,
-		jobBudget: cfg.JobBudget, newID: cfg.NewID,
+		jobBudget: cfg.JobBudget, commitTimeout: commitTimeout, newID: cfg.NewID,
+		gates: make(map[string]*runGate),
 	}, nil
 }
 
@@ -101,6 +117,15 @@ func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error) 
 	if strings.TrimSpace(runID) == "" {
 		return PlanRun{}, errors.New("plan run id is required")
 	}
+	release, err := s.acquireRunGate(ctx, runID)
+	if err != nil {
+		return PlanRun{}, err
+	}
+	defer release()
+	return s.advance(ctx, runID)
+}
+
+func (s *Scheduler) advance(ctx context.Context, runID string) (PlanRun, error) {
 	for {
 		run, err := s.store.GetRun(ctx, runID)
 		if err != nil {
@@ -120,8 +145,9 @@ func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error) 
 
 		outcomes := s.executeReady(ctx, run, ready)
 		executionErr := ctx.Err()
-		persistCtx := context.WithoutCancel(ctx)
+		persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), s.commitTimeout)
 		merged, mergeErr := s.mergeOutcomes(persistCtx, run, outcomes)
+		cancelPersist()
 		if executionErr == nil {
 			executionErr = ctx.Err()
 		}
@@ -131,7 +157,7 @@ func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error) 
 			}
 			var resolutionErr *inputResolutionError
 			if errors.As(mergeErr, &resolutionErr) && merged.ID != "" {
-				finalized, advanceErr := s.Advance(ctx, merged.ID)
+				finalized, advanceErr := s.advance(ctx, merged.ID)
 				if advanceErr != nil {
 					return finalized, errors.Join(mergeErr, advanceErr)
 				}
@@ -146,6 +172,46 @@ func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error) 
 			return merged, nil
 		}
 	}
+}
+
+func (s *Scheduler) acquireRunGate(ctx context.Context, runID string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.gateMu.Lock()
+	gate := s.gates[runID]
+	if gate == nil {
+		gate = &runGate{token: make(chan struct{}, 1)}
+		gate.token <- struct{}{}
+		s.gates[runID] = gate
+	}
+	gate.refs++
+	s.gateMu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		s.releaseRunGate(runID, gate, false)
+		return nil, ctx.Err()
+	case <-gate.token:
+		if err := ctx.Err(); err != nil {
+			gate.token <- struct{}{}
+			s.releaseRunGate(runID, gate, false)
+			return nil, err
+		}
+		return func() { s.releaseRunGate(runID, gate, true) }, nil
+	}
+}
+
+func (s *Scheduler) releaseRunGate(runID string, gate *runGate, held bool) {
+	if held {
+		gate.token <- struct{}{}
+	}
+	s.gateMu.Lock()
+	gate.refs--
+	if gate.refs == 0 && s.gates[runID] == gate {
+		delete(s.gates, runID)
+	}
+	s.gateMu.Unlock()
 }
 
 type nodeOutcome struct {
