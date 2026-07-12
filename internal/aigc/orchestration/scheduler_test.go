@@ -2418,7 +2418,7 @@ func TestCompleteJobsWaitMapsTerminalBatchStatuses(t *testing.T) {
 		failureCode string
 	}{
 		{name: "required partial", status: generation.BatchStatusPartialFailed, required: true, wantRun: RunStatusFailed, wantNode: NodeStatusFailed, failureCode: "generation_partial_failed"},
-		{name: "optional partial", status: generation.BatchStatusPartialFailed, required: false, wantRun: RunStatusSucceeded, wantNode: NodeStatusSucceeded},
+		{name: "optional partial blocks required downstream", status: generation.BatchStatusPartialFailed, required: false, wantRun: RunStatusFailed, wantNode: NodeStatusFailed, failureCode: "generation_partial_failed"},
 		{name: "failed", status: generation.BatchStatusFailed, required: true, wantRun: RunStatusFailed, wantNode: NodeStatusFailed, failureCode: "generation_failed"},
 		{name: "cancelled", status: generation.BatchStatusCancelled, required: true, wantRun: RunStatusFailed, wantNode: NodeStatusFailed, failureCode: "generation_cancelled"},
 	}

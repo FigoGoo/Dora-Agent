@@ -198,12 +198,12 @@ func applyJobsOutcome(run *PlanRun, nodeID, status, receipt string, summary map[
 	case generation.BatchStatusCompleted:
 		node.Status = NodeStatusSucceeded
 	case generation.BatchStatusPartialFailed:
+		node.Status = NodeStatusFailed
+		message := "generation batch partially failed"
 		if step.Required && (run.Plan.SuccessPolicy == "" || run.Plan.SuccessPolicy == "all_required") {
-			node.Status = NodeStatusFailed
-			node.Fail = &vocabulary.Failure{Code: "generation_partial_failed", Message: "required generation batch partially failed"}
-		} else {
-			node.Status = NodeStatusSucceeded
+			message = "required generation batch partially failed"
 		}
+		node.Fail = &vocabulary.Failure{Code: "generation_partial_failed", Message: message}
 	case generation.BatchStatusFailed:
 		node.Status = NodeStatusFailed
 		node.Fail = &vocabulary.Failure{Code: "generation_failed", Message: "generation batch failed"}

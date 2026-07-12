@@ -728,11 +728,11 @@ git commit -m "feat(vocabulary): add runtime acceptance tools"
 - Modify: `internal/aigc/orchestration/resume.go`
 - Modify: `internal/aigc/orchestration/scheduler_test.go`
 
-- [ ] **Step 1: 写现有 Workflow 创建映射测试**
+- [x] **Step 1: 写现有 Workflow 创建映射测试**
 
 使用 generation fake store，断言 `GenerationDispatchRequest` 映射为：target=`session_deliverable`；Operation/Batch/Job 同一创建调用；request fingerprint 包含 PlanRunID、NodeID、target 和 Attempt；返回真实 OperationID/BatchID/JobIDs。
 
-- [ ] **Step 2: 写 waiting_jobs 完成测试**
+- [x] **Step 2: 写 waiting_jobs 完成测试**
 
 ```go
 func TestCompleteJobsWaitResumesExactlyOnce(t *testing.T) {
@@ -751,17 +751,17 @@ func TestCompleteJobsWaitResumesExactlyOnce(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: 写 BatchID/NodeID 错配测试**
+- [x] **Step 3: 写 BatchID/NodeID 错配测试**
 
 错误 BatchID 或非 suspended node 必须返回哨兵错误，且不改变 Run Version。
 
-- [ ] **Step 4: 运行 RED**
+- [x] **Step 4: 运行 RED**
 
 Run: `go test ./internal/aigc/orchestration -run 'TestGenerationBridge|TestCompleteJobsWait' -v`
 
 Expected: 编译失败，缺少 bridge 或 `CompleteJobsWait`。
 
-- [ ] **Step 5: 实现 outcome 和恢复 API**
+- [x] **Step 5: 实现 outcome 和恢复 API**
 
 ```go
 type JobsOutcome struct {
@@ -775,13 +775,13 @@ func (s *Scheduler) CompleteJobsWait(ctx context.Context, runID, nodeID string, 
 
 `completed` 把节点置 succeeded；`partial_failed` 根据 step.Required 和 SuccessPolicy 进入 succeeded 或 failed；`failed/cancelled` 写入 `vocabulary.Failure`。首次恢复前必须核对 suspension payload 中的 batch_id，并把 canonical outcome JSON 与摘要写入 NodeRun Outputs。Run 已离开 suspended 后，同一 node_id + batch_id + canonical outcome 的重放直接返回当前快照；同一 batch_id 携带不同 outcome 返回 `ErrJobsOutcomeConflict`，不得改写 receipt。
 
-- [ ] **Step 6: 运行 GREEN 和 generation 回归**
+- [x] **Step 6: 运行 GREEN 和 generation 回归**
 
 Run: `go test -race ./internal/aigc/orchestration -run 'TestGenerationBridge|TestCompleteJobsWait' -v && go test ./internal/aigc/generation ./internal/aigc/generationruntime`
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add internal/aigc/orchestration/generation_bridge.go internal/aigc/orchestration/generation_bridge_test.go internal/aigc/orchestration/resume.go internal/aigc/orchestration/scheduler_test.go
@@ -798,7 +798,7 @@ git commit -m "feat(orchestration): bridge plan runs to generation batches"
 - Modify: `internal/aigc/orchestration/scheduler.go`
 - Modify: `internal/aigc/orchestration/scheduler_test.go`
 
-- [ ] **Step 1: 写硬拦、软拦和通过测试**
+- [x] **Step 1: 写硬拦、软拦和通过测试**
 
 ```go
 func TestGuardChainComplianceDecisions(t *testing.T) {
@@ -815,27 +815,27 @@ func TestGuardChainComplianceDecisions(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 写非媒体工具不织入和媒体工具必织入测试**
+- [x] **Step 2: 写非媒体工具不织入和媒体工具必织入测试**
 
 Scheduler 根据 Descriptor.Category 判断，仅 `media` 节点执行 GuardChain；data/interaction/cognition 不重复织入。媒体节点在 guard fail/suspend 时不得调用 Tool.Run。
 
-- [ ] **Step 3: 运行 RED**
+- [x] **Step 3: 运行 RED**
 
 Run: `go test ./internal/aigc/vocabulary ./internal/aigc/orchestration -run 'TestGuardChain|TestSchedulerGuards' -v`
 
 Expected: 编译失败，缺少 GuardChain。
 
-- [ ] **Step 4: 实现固定顺序切面**
+- [x] **Step 4: 实现固定顺序切面**
 
 切面顺序固定：permission -> compliance -> reserve credits。v1 permission 只验证 SessionID/UserID 非空；reserve credits 返回通过；compliance 只使用构造时注入的最小规则表，不从 Skill 或模型动态改写。
 
-- [ ] **Step 5: 运行 GREEN 和 race**
+- [x] **Step 5: 运行 GREEN 和 race**
 
 Run: `go test -race ./internal/aigc/vocabulary ./internal/aigc/orchestration -run 'TestGuardChain|TestSchedulerGuards' -v`
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add internal/aigc/vocabulary/guard_chain.go internal/aigc/vocabulary/guard_chain_test.go internal/aigc/orchestration/scheduler.go internal/aigc/orchestration/scheduler_test.go
@@ -850,7 +850,7 @@ git commit -m "feat(orchestration): weave media guard chain"
 - Create: `internal/aigc/orchestration/postgres_run_store.go`
 - Create: `internal/aigc/orchestration/postgres_run_store_test.go`
 
-- [ ] **Step 1: 写本地 Postgres 可跳过的 CAS 测试**
+- [x] **Step 1: 写本地 Postgres 可跳过的 CAS 测试**
 
 ```go
 func TestPostgresRunStoreRoundTripAndCAS(t *testing.T) {
@@ -879,17 +879,17 @@ func TestPostgresRunStoreRoundTripAndCAS(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 写“新 Scheduler 实例恢复同一 suspended Run”测试**
+- [x] **Step 2: 写“新 Scheduler 实例恢复同一 suspended Run”测试**
 
 第一个 Scheduler Submit 到 waiting_user 后丢弃；第二个 Scheduler 只共享 Postgres Store 和 Vocabulary，以持久化 ResumeKey 恢复并完成。断言交互节点不重跑、下游只跑一次。
 
-- [ ] **Step 3: 运行 RED**
+- [x] **Step 3: 运行 RED**
 
 Run: `go test ./internal/aigc/orchestration -run 'TestPostgresRunStore|TestSchedulerRecovers' -v`
 
 Expected: 编译失败，缺少 Postgres Store。
 
-- [ ] **Step 4: 实现单表 JSONB 聚合 Store**
+- [x] **Step 4: 实现单表 JSONB 聚合 Store**
 
 ```go
 type planRunRecord struct {
@@ -905,13 +905,13 @@ type planRunRecord struct {
 
 `MutateRun` 在事务内 `SELECT ... FOR UPDATE`，比较 expected Version，执行与内存 Store 相同的状态转移校验，然后写入完整 payload 和新 Version。禁止为 Nodes 单独拆表，本阶段需要聚合 CAS 而不是查询优化。
 
-- [ ] **Step 5: 运行 GREEN、包回归和可行性 Gate 2**
+- [x] **Step 5: 运行 GREEN、包回归和可行性 Gate 2**
 
 Run: `go test -race ./internal/aigc/orchestration`
 
 Expected: PASS。若新实例不能只依赖 Store 恢复，则停止，不进入 Agent 改造。`cmd/aigc-agent` 的 AutoMigrate 和 Scheduler 生产装配由 Plan 2 与用户消息入口同批完成，避免本阶段构造一个无消费者、且缺少生产 PromptWriter 的半接线对象。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add internal/aigc/orchestration/postgres_run_store.go internal/aigc/orchestration/postgres_run_store_test.go
@@ -926,7 +926,7 @@ git commit -m "feat(orchestration): persist dynamic plan runs"
 - Create: `internal/aigc/integration/dynamic_plan_runtime_test.go`
 - Modify: `docs/superpowers/plans/2026-07-12-aigc-dynamic-plan-runtime-v1.md`
 
-- [ ] **Step 1: 写全链测试**
+- [x] **Step 1: 写全链测试**
 
 测试必须使用真实 Scheduler、MemoryRunStore、真实三个 vocabulary 工具和 generation bridge fake，计划如下：
 
@@ -944,21 +944,21 @@ plan := orchestration.ExecutionPlan{
 
 断言顺序：Submit -> waiting_user；Resume -> waiting_jobs；CompleteJobsWait -> succeeded。重复 Resume 和重复 CompleteJobsWait 都不改变 Version、Tool 调用次数或 BatchID。
 
-- [ ] **Step 2: 写失败/部分成功验收**
+- [x] **Step 2: 写失败/部分成功验收**
 
 覆盖 `failed` Batch 使 required dispatch 节点失败；`partial_failed` 配合 optional dispatch 使 Run `partial_succeeded`；任何路径都不能遗留 running 节点。
 
-- [ ] **Step 3: 运行端到端验收测试**
+- [x] **Step 3: 运行端到端验收测试**
 
 Run: `go test ./internal/aigc/integration -run 'TestDynamicPlanRuntime' -v`
 
 Expected: PASS。如果首次失败，只允许失败于 Task 1-8 已定义契约之间的字段映射或状态归纳；测试本身是验收，不为了制造 RED 增加重复需求。
 
-- [ ] **Step 4: 只修正接线，不新增抽象**
+- [x] **Step 4: 只修正接线，不新增抽象**
 
 允许修改本计划已创建文件中的字段映射和构造器；不得在验收阶段引入第二套 Scheduler、第二套 generation 状态或绕过 RunStore 的进程内快捷路径。
 
-- [ ] **Step 5: 运行 GREEN、race 和全量回归**
+- [x] **Step 5: 运行 GREEN、race 和全量回归**
 
 Run:
 
@@ -970,11 +970,11 @@ cd frontend && npm test -- --run && npm run build
 
 Expected: 全部退出码 0。Postgres/Redis 不可用的测试按仓库约定明确 skip；必须在执行记录中列出 skip 情况，不能把 skip 说成集成基础设施已验证。
 
-- [ ] **Step 6: 更新计划执行记录**
+- [x] **Step 6: 更新计划执行记录**
 
 在本文末尾追加实际 commit、命令、测试计数、skip 和偏差。不得提前勾选未执行任务。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add internal/aigc/integration/dynamic_plan_runtime_test.go docs/superpowers/plans/2026-07-12-aigc-dynamic-plan-runtime-v1.md
@@ -1022,3 +1022,17 @@ Plan 3 负责模板持久化、计划 A2UI 和资产/actor 产品化，不得反
 - **Task 4B GREEN/Gate：** `go test -race ./internal/aigc/orchestration -run 'TestRevise|TestExecutionClaimPreventsRevise' -v`、`go test -count=50 -race ./internal/aigc/orchestration -run 'TestRevise|TestExecutionClaim'`、`go test -race ./internal/aigc/orchestration`、`go test ./...`、`go vet ./...` 全部退出码 0。
 - **Task 4B 语义结论：** claimed/running 节点不可裁；revision 裁剪具有 `SkipReason="revision"` provenance；replacement 成功和全 required revision-skipped 均归纳为 `partial_succeeded`；新 Scheduler 仅共享 Store/Registry 即可从原 preview receipt 恢复；相邻大整数 canonical definition 不再误判幂等。
 - **Task 4B 偏差：** 初版计划的 RED 文案仍写“缺少 Revise API”，但 `8049c4c` 已提供 API；本次 RED 改为针对质量审查发现的 provenance、终态和精度缺口。后续 Task 尚未执行，不在此处勾选。
+- **Task 1（`b8f4423`、`ac934b4`、`5fd4b04`）：** 建立 PlanRun 状态机与 MemoryRunStore，并补齐存储隔离和预算预览挂起边界。
+- **Task 2（`cb1b578`、`1a675ac`、`32d0a99`、`cd5625f`）：** 实现动态 DAG Scheduler、输入引用解析、可恢复执行与有界提交。
+- **Task 3（`4ae1c6d`、`4d29e38`、`5bc25b8`）：** 实现 `waiting_user`/`waiting_agent` 一次性 Resume，并收敛 receipt 重放与并发恢复。
+- **Task 4A（`f21caa9`、`f26f4be`、`df735d2`、`f8aee54`、`462d7ac`）：** 加入 durable claim/lease/fencing、heartbeat 丢失处理和每次 claim 的 epoch 推进。
+- **Task 4B（`8049c4c`、`74ab3b5`）：** 实现并收口活计划修订 Gate；详细 RED/GREEN 与偏差保留在上方原记录。
+- **Task 5（`ee1b8c6`、`1ad8402`、`a2a4f15`）：** 加入三个真实验收原子工具，并使无效 provider receipt 保持可重试。
+- **Task 6（`6d0ec9d`、`44999fd`）：** 将 dispatch 接入现有 generation aggregate，并完成 `waiting_jobs` terminal outcome、canonical receipt 与边界加固。
+- **Task 7（`e0ce788`、`e9337a7`、`d482f2d`、`41410fc`、`9e187c4`）：** 织入媒体 Guard Chain，处理 typed nil、approval continuation、身份绑定与 suspension key 隔离。
+- **Task 8（`61a83dd`、`9c43b8d`、`ffb3700`）：** 实现 PostgreSQL 聚合 RunStore、事务内权威时间采样与 timed lease mutation 原子性。
+- **Task 9（本提交）：** 新增真实 Scheduler + MemoryRunStore + 三个真实 vocabulary Tool + GenerationBridge/MemoryStore 的端到端验收。首次运行 3 个 acceptance 中 2 PASS、1 FAIL：optional dispatch 的 `partial_failed` 被错误归纳为 `succeeded`；保留该验收作为 RED，最小修正 Batch outcome 映射为 optional Node failed，使无 required 下游的 Run 归纳为 `partial_succeeded`。已有“optional dispatch 后接 required 下游”单测同步明确为 Run `failed`，未新增 Scheduler、generation 状态或内存旁路。
+- **Task 9 GREEN：** `go test ./internal/aigc/integration -run 'TestDynamicPlanRuntime' -v` 为 3 PASS；`go test -race ./internal/aigc/orchestration ./internal/aigc/vocabulary ./internal/aigc/integration`、`go test ./...`、`go vet ./...` 均退出码 0。另以 `go test -json -count=1 ./...` 统计 737 个测试 PASS、0 个测试 SKIP；本次 Postgres/Redis 路径未 skip。
+- **前端验证：** 初次 `npm test -- --run` 因隔离 worktree 缺少 `vitest` 未进入测试；执行 `npm install`（112 packages，0 vulnerabilities）后重跑，2 个文件共 73 个测试 PASS。`npm run build` 成功，Vite 转换 91 modules。
+- **Task 9 偏差：** 原计划 Files 只列验收测试与本文；验收 RED 证明 Task 6 状态归纳不符合“optional partial => partial_succeeded”，因此按 Step 4 允许范围最小修改 `orchestration/resume.go` 并校准既有 `scheduler_test.go`。没有伪造 Task 1-8 的历史 RED 命令或计数；上方 commits 来自本分支 `git log`。
+- **记录时序：** 原 Task 4B 条目中的“后续 Task 尚未执行”是该 Task 完成时的点时记录；按保留历史记录要求未覆盖，后续实际状态以上方 Task 5-9 条目为准。

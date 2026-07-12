@@ -1,0 +1,226 @@
+package integration_test
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/generation"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/orchestration"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
+)
+
+const acceptancePrompt = "cinematic rainy city at night"
+
+type acceptancePromptWriter struct {
+	mu     sync.Mutex
+	calls  int
+	inputs []map[string]any
+}
+
+func (w *acceptancePromptWriter) WritePrompt(_ context.Context, inputs map[string]any) (string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.calls++
+	w.inputs = append(w.inputs, inputs)
+	return acceptancePrompt, nil
+}
+
+func (w *acceptancePromptWriter) callCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.calls
+}
+
+type countingWorkflowStore struct {
+	generation.WorkflowStore
+	mu          sync.Mutex
+	createCalls int
+}
+
+func (s *countingWorkflowStore) CreateWorkflow(ctx context.Context, command generation.CreateWorkflowCommand) (generation.WorkflowAggregate, bool, error) {
+	s.mu.Lock()
+	s.createCalls++
+	s.mu.Unlock()
+	return s.WorkflowStore.CreateWorkflow(ctx, command)
+}
+
+func (s *countingWorkflowStore) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.createCalls
+}
+
+type dynamicRuntimeHarness struct {
+	scheduler      *orchestration.Scheduler
+	promptWriter   *acceptancePromptWriter
+	workflowStore  *generation.MemoryStore
+	countingStore  *countingWorkflowStore
+	dispatchNeeded bool
+}
+
+func newDynamicRuntimeHarness(t *testing.T, runID string, dispatchRequired bool) *dynamicRuntimeHarness {
+	t.Helper()
+	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	promptWriter := &acceptancePromptWriter{}
+	workflowStore := generation.NewMemoryStore(generation.WithMemoryClock(func() time.Time { return now }))
+	countingStore := &countingWorkflowStore{WorkflowStore: workflowStore}
+	generationID := 0
+	commands := generation.NewCommandService(generation.CommandServiceConfig{
+		Store: countingStore,
+		NewID: func() string {
+			generationID++
+			return fmt.Sprintf("%s-generation-%d", runID, generationID)
+		},
+		Clock: func() time.Time { return now },
+	})
+	registry := vocabulary.NewRegistry()
+	for _, tool := range []vocabulary.Tool{
+		vocabulary.NewWriteMediaPromptTool(promptWriter),
+		vocabulary.NewRequestConfirmationTool(),
+		vocabulary.NewDispatchGenerationTool(orchestration.NewGenerationBridge(commands)),
+	} {
+		if err := registry.Register(tool); err != nil {
+			t.Fatalf("register %s: %v", tool.Descriptor().Key, err)
+		}
+	}
+	tokenID := 0
+	scheduler, err := orchestration.NewScheduler(orchestration.SchedulerConfig{
+		Store:       orchestration.NewMemoryRunStore(orchestration.WithMemoryRunStoreClock(func() time.Time { return now })),
+		Vocabulary:  registry,
+		MaxParallel: 1,
+		JobBudget:   10,
+		NewID:       func() string { return runID },
+		OwnerID:     "acceptance-owner-" + runID,
+		Now:         func() time.Time { return now },
+		NewToken: func() string {
+			tokenID++
+			return fmt.Sprintf("%s-token-%d", runID, tokenID)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &dynamicRuntimeHarness{
+		scheduler: scheduler, promptWriter: promptWriter, workflowStore: workflowStore,
+		countingStore: countingStore, dispatchNeeded: dispatchRequired,
+	}
+}
+
+func acceptancePlan(dispatchRequired bool) orchestration.ExecutionPlan {
+	return orchestration.ExecutionPlan{
+		PlanID: "acceptance-image", Source: "dynamic", Summary: "生成一张雨景图", Direction: "image",
+		Steps: []orchestration.PlanStep{
+			{ID: "prompt", Tool: "write_media_prompt", Params: map[string]any{"target_desc": "雨夜城市"}, Required: true},
+			{ID: "confirm", Tool: "request_confirmation", Params: map[string]any{
+				"question": "使用该提示词生成？", "prompt": "$prompt.prompt",
+			}, DependsOn: []string{"prompt"}, Required: true},
+			{ID: "dispatch", Tool: "dispatch_generation", Params: map[string]any{
+				"targets": []any{map[string]any{"prompt": "$prompt.prompt", "target_type": "session_deliverable"}},
+			}, DependsOn: []string{"confirm"}, Required: dispatchRequired},
+		},
+		EstimatedJobs: 1,
+	}
+}
+
+func (h *dynamicRuntimeHarness) submitAndResume(t *testing.T) (orchestration.PlanRun, string) {
+	t.Helper()
+	ctx := context.Background()
+	suspended, err := h.scheduler.Submit(ctx, "acceptance-session", "acceptance-user", acceptancePlan(h.dispatchNeeded))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suspended.Status != orchestration.RunStatusSuspended || suspended.SuspendReason != orchestration.SuspendWaitingUser || suspended.SuspendedNodeID != "confirm" {
+		t.Fatalf("Submit run = %+v", suspended)
+	}
+	if h.promptWriter.callCount() != 1 || h.countingStore.callCount() != 0 {
+		t.Fatalf("calls after Submit: prompt=%d dispatch=%d", h.promptWriter.callCount(), h.countingStore.callCount())
+	}
+	confirm := suspended.Nodes["confirm"]
+	if confirm == nil || confirm.Suspension == nil || confirm.Suspension.Payload["question"] != "使用该提示词生成？" {
+		t.Fatalf("confirmation suspension = %+v", confirm)
+	}
+	resumeKey := confirm.ResumeKey
+	waitingJobs, err := h.scheduler.Resume(ctx, suspended.ID, resumeKey, map[string]any{"approved": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waitingJobs.Status != orchestration.RunStatusSuspended || waitingJobs.SuspendReason != orchestration.SuspendWaitingJobs || waitingJobs.SuspendedNodeID != "dispatch" {
+		t.Fatalf("Resume run = %+v", waitingJobs)
+	}
+	if h.promptWriter.callCount() != 1 || h.countingStore.callCount() != 1 {
+		t.Fatalf("calls after Resume: prompt=%d dispatch=%d", h.promptWriter.callCount(), h.countingStore.callCount())
+	}
+	dispatch := waitingJobs.Nodes["dispatch"]
+	batchID, _ := dispatch.Outputs["batch_id"].(string)
+	if batchID == "" || dispatch.Suspension == nil || dispatch.Suspension.Payload["batch_id"] != batchID {
+		t.Fatalf("dispatch suspension = %+v", dispatch)
+	}
+	jobs, err := h.workflowStore.ListJobsByBatch(ctx, batchID)
+	if err != nil || len(jobs) != 1 || jobs[0].Payload["prompt"] != acceptancePrompt || jobs[0].TargetType != generation.TargetKindSessionDeliverable {
+		t.Fatalf("generation jobs = %+v err=%v", jobs, err)
+	}
+
+	replayed, err := h.scheduler.Resume(ctx, suspended.ID, resumeKey, map[string]any{"approved": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed.Version != waitingJobs.Version || replayed.Nodes["confirm"].Attempt != 1 || replayed.Nodes["dispatch"].Attempt != 1 || replayed.Nodes["dispatch"].Outputs["batch_id"] != batchID || h.promptWriter.callCount() != 1 || h.countingStore.callCount() != 1 {
+		t.Fatalf("Resume replay mutated run=%+v prompt=%d dispatch=%d", replayed, h.promptWriter.callCount(), h.countingStore.callCount())
+	}
+	return waitingJobs, batchID
+}
+
+func TestDynamicPlanRuntimeCompletesAndReplaysExactlyOnce(t *testing.T) {
+	harness := newDynamicRuntimeHarness(t, "acceptance-completed", true)
+	waitingJobs, batchID := harness.submitAndResume(t)
+	completed, err := harness.scheduler.CompleteJobsWait(context.Background(), waitingJobs.ID, "dispatch", orchestration.JobsOutcome{
+		BatchID: batchID, Status: generation.BatchStatusCompleted, Summary: map[string]any{"asset_ids": []any{"asset-1"}},
+	})
+	if err != nil || completed.Status != orchestration.RunStatusSucceeded {
+		t.Fatalf("CompleteJobsWait run=%+v err=%v", completed, err)
+	}
+	assertNoRunningNodes(t, completed)
+
+	replayed, err := harness.scheduler.CompleteJobsWait(context.Background(), waitingJobs.ID, "dispatch", orchestration.JobsOutcome{
+		BatchID: batchID, Status: generation.BatchStatusCompleted,
+	})
+	if err != nil || replayed.Version != completed.Version || replayed.Nodes["dispatch"].Outputs["batch_id"] != batchID || harness.promptWriter.callCount() != 1 || harness.countingStore.callCount() != 1 {
+		t.Fatalf("jobs replay run=%+v err=%v prompt=%d dispatch=%d", replayed, err, harness.promptWriter.callCount(), harness.countingStore.callCount())
+	}
+}
+
+func TestDynamicPlanRuntimeMapsFailedRequiredBatch(t *testing.T) {
+	harness := newDynamicRuntimeHarness(t, "acceptance-failed", true)
+	waitingJobs, batchID := harness.submitAndResume(t)
+	failed, err := harness.scheduler.CompleteJobsWait(context.Background(), waitingJobs.ID, "dispatch", orchestration.JobsOutcome{
+		BatchID: batchID, Status: generation.BatchStatusFailed,
+	})
+	if err != nil || failed.Status != orchestration.RunStatusFailed || failed.Nodes["dispatch"].Status != orchestration.NodeStatusFailed {
+		t.Fatalf("failed run=%+v err=%v", failed, err)
+	}
+	assertNoRunningNodes(t, failed)
+}
+
+func TestDynamicPlanRuntimeMapsPartialFailedOptionalBatch(t *testing.T) {
+	harness := newDynamicRuntimeHarness(t, "acceptance-partial", false)
+	waitingJobs, batchID := harness.submitAndResume(t)
+	partial, err := harness.scheduler.CompleteJobsWait(context.Background(), waitingJobs.ID, "dispatch", orchestration.JobsOutcome{
+		BatchID: batchID, Status: generation.BatchStatusPartialFailed,
+	})
+	if err != nil || partial.Status != orchestration.RunStatusPartialSucceeded || partial.Nodes["dispatch"].Status != orchestration.NodeStatusFailed {
+		t.Fatalf("partial run=%+v err=%v", partial, err)
+	}
+	assertNoRunningNodes(t, partial)
+}
+
+func assertNoRunningNodes(t *testing.T, run orchestration.PlanRun) {
+	t.Helper()
+	for id, node := range run.Nodes {
+		if node == nil || node.Status == orchestration.NodeStatusRunning || node.Status == orchestration.NodeStatusPending {
+			t.Fatalf("terminal run %s has non-terminal node %s: %+v", run.Status, id, node)
+		}
+	}
+}
