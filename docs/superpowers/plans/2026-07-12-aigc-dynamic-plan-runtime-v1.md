@@ -61,6 +61,7 @@ Plan 2 的入口条件：本计划 Task 8 的新实例恢复测试和 Task 9 的
 func TestRunStatusTransitions(t *testing.T) {
 	legal := [][2]string{
 		{RunStatusDraft, RunStatusRunning},
+		{RunStatusDraft, RunStatusSuspended}, // 计划预览直接提交为 suspended(waiting_user)
 		{RunStatusRunning, RunStatusSuspended},
 		{RunStatusSuspended, RunStatusRunning},
 		{RunStatusRunning, RunStatusSucceeded},
@@ -294,7 +295,7 @@ func (s *Scheduler) Submit(ctx context.Context, sessionID, userID string, plan E
 func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error)
 ```
 
-`Submit` 顺序固定为：`plan.Validate` -> 初始化全部 NodeRun 为 pending -> 创建 Run -> 预算判定 -> `draft->running` -> `Advance`。`Advance` 每轮读取快照，只选择“自身 pending 且全部依赖 succeeded/skipped”的节点；用容量为 `MaxParallel` 的 semaphore 并发执行；每个节点的幂等键固定为 `planRunID:stepID:attempt`。
+`Submit` 顺序固定为：`plan.Validate` -> 初始化全部 NodeRun 为 pending -> 创建 Run -> 预算判定；超预算时按终版 §3.6 从 `draft` 直接进入 `suspended(waiting_user)`（Task 2 实现时发现并修正 Task 1 状态表的一致性缺口），否则 `draft->running` -> `Advance`。`Advance` 每轮读取快照，只选择“自身 pending 且全部依赖 succeeded/skipped”的节点；用容量为 `MaxParallel` 的 semaphore 并发执行；每个节点的幂等键固定为 `planRunID:stepID:attempt`。
 
 - [ ] **Step 6: 运行 GREEN、race 和包回归**
 

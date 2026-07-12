@@ -26,6 +26,7 @@ type cyclicOutput struct {
 func TestRunStatusTransitions(t *testing.T) {
 	legal := [][2]string{
 		{RunStatusDraft, RunStatusRunning},
+		{RunStatusDraft, RunStatusSuspended},
 		{RunStatusRunning, RunStatusSuspended},
 		{RunStatusSuspended, RunStatusRunning},
 		{RunStatusRunning, RunStatusSucceeded},

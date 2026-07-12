@@ -76,6 +76,7 @@ func ValidateRunTransition(from, to string) error {
 	legal := map[string]map[string]bool{
 		RunStatusDraft: {
 			RunStatusRunning:   true,
+			RunStatusSuspended: true,
 			RunStatusCancelled: true,
 		},
 		RunStatusRunning: {
