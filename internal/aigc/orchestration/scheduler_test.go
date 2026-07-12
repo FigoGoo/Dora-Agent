@@ -152,6 +152,28 @@ func TestSchedulerGuardsMediaPassAndIgnoresOtherCategories(t *testing.T) {
 	}
 }
 
+func TestSchedulerGuardsTypedNilAsUnconfigured(t *testing.T) {
+	var guard *vocabulary.GuardChain
+	var toolCalls atomic.Int32
+	tool := schedulerTool{key: "render", category: "media", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		toolCalls.Add(1)
+		return vocabulary.Result{Outputs: map[string]any{"asset": "asset-1"}}, nil
+	}}
+	cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, tool), func() string { return "typed-nil-run" })
+	cfg.Guard = guard
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "typed-nil", Source: "dynamic", Summary: "typed nil guard", Direction: "image",
+		Steps: []PlanStep{{ID: "render", Tool: "render", Required: true}},
+	})
+	if err != nil || run.Status != RunStatusSucceeded || toolCalls.Load() != 1 {
+		t.Fatalf("status=%s err=%v tool_calls=%d", run.Status, err, toolCalls.Load())
+	}
+}
+
 func createPendingSchedulerRun(t *testing.T, store RunStore, id string, plan ExecutionPlan) PlanRun {
 	t.Helper()
 	nodes := make(map[string]*NodeRun, len(plan.Steps))

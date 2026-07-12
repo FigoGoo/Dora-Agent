@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -95,13 +96,30 @@ func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
 			heartbeatInterval = time.Nanosecond
 		}
 	}
+	guard := cfg.Guard
+	if isNilGuard(guard) {
+		guard = nil
+	}
 	return &Scheduler{
-		store: cfg.Store, vocabulary: cfg.Vocabulary, guard: cfg.Guard, maxParallel: maxParallel,
+		store: cfg.Store, vocabulary: cfg.Vocabulary, guard: guard, maxParallel: maxParallel,
 		jobBudget: cfg.JobBudget, commitTimeout: commitTimeout, newID: cfg.NewID,
 		ownerID: strings.TrimSpace(cfg.OwnerID), leaseTTL: leaseTTL,
 		heartbeatInterval: heartbeatInterval, now: cfg.Now, newToken: cfg.NewToken,
 		gates: make(map[string]*runGate),
 	}, nil
+}
+
+func isNilGuard(guard vocabulary.Guard) bool {
+	if guard == nil {
+		return true
+	}
+	value := reflect.ValueOf(guard)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func (s *Scheduler) Submit(ctx context.Context, sessionID, userID string, plan ExecutionPlan) (PlanRun, error) {
