@@ -2,9 +2,9 @@ package orchestration
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
@@ -13,6 +13,7 @@ import (
 var (
 	ErrRunNotFound        = errors.New("plan run not found")
 	ErrRunVersionConflict = errors.New("plan run version conflict")
+	ErrRunNotSerializable = errors.New("plan run is not serializable")
 )
 
 const (
@@ -130,10 +131,17 @@ func (s *MemoryRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun, e
 	if _, exists := s.runs[run.ID]; exists {
 		return PlanRun{}, fmt.Errorf("%w: run %q already exists", ErrRunVersionConflict, run.ID)
 	}
-	stored := clonePlanRun(run)
-	stored.Version = 1
+	run.Version = 1
+	stored, err := clonePlanRun(run)
+	if err != nil {
+		return PlanRun{}, err
+	}
+	result, err := clonePlanRun(stored)
+	if err != nil {
+		return PlanRun{}, err
+	}
 	s.runs[stored.ID] = stored
-	return clonePlanRun(stored), nil
+	return result, nil
 }
 
 func (s *MemoryRunStore) GetRun(ctx context.Context, id string) (PlanRun, error) {
@@ -146,7 +154,11 @@ func (s *MemoryRunStore) GetRun(ctx context.Context, id string) (PlanRun, error)
 	if !exists {
 		return PlanRun{}, fmt.Errorf("%w: %q", ErrRunNotFound, id)
 	}
-	return clonePlanRun(run), nil
+	cloned, err := clonePlanRun(run)
+	if err != nil {
+		return PlanRun{}, err
+	}
+	return cloned, nil
 }
 
 func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
@@ -167,7 +179,10 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 		return PlanRun{}, fmt.Errorf("%w: run %q expected version %d, got %d", ErrRunVersionConflict, id, expectedVersion, current.Version)
 	}
 
-	next := clonePlanRun(current)
+	next, err := clonePlanRun(current)
+	if err != nil {
+		return PlanRun{}, err
+	}
 	if err := mutate(&next); err != nil {
 		return PlanRun{}, err
 	}
@@ -175,118 +190,26 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 		return PlanRun{}, err
 	}
 	next.Version = current.Version + 1
-	s.runs[id] = next
-	return clonePlanRun(next), nil
+	stored, err := clonePlanRun(next)
+	if err != nil {
+		return PlanRun{}, err
+	}
+	result, err := clonePlanRun(stored)
+	if err != nil {
+		return PlanRun{}, err
+	}
+	s.runs[id] = stored
+	return result, nil
 }
 
-func clonePlanRun(run PlanRun) PlanRun {
-	cloned := run
-	cloned.Plan = cloneExecutionPlan(run.Plan)
-	if run.Nodes != nil {
-		cloned.Nodes = make(map[string]*NodeRun, len(run.Nodes))
-		for id, node := range run.Nodes {
-			cloned.Nodes[id] = cloneNodeRun(node)
-		}
+func clonePlanRun(run PlanRun) (PlanRun, error) {
+	data, err := json.Marshal(run)
+	if err != nil {
+		return PlanRun{}, fmt.Errorf("%w: marshal: %v", ErrRunNotSerializable, err)
 	}
-	return cloned
-}
-
-func cloneExecutionPlan(plan ExecutionPlan) ExecutionPlan {
-	cloned := plan
-	if plan.Steps != nil {
-		cloned.Steps = make([]PlanStep, len(plan.Steps))
-		for i, step := range plan.Steps {
-			cloned.Steps[i] = step
-			cloned.Steps[i].Params = cloneStringAnyMap(step.Params)
-			cloned.Steps[i].DependsOn = append([]string(nil), step.DependsOn...)
-			if step.Expand != nil {
-				expand := *step.Expand
-				cloned.Steps[i].Expand = &expand
-			}
-		}
+	var cloned PlanRun
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return PlanRun{}, fmt.Errorf("%w: unmarshal: %v", ErrRunNotSerializable, err)
 	}
-	return cloned
-}
-
-func cloneNodeRun(node *NodeRun) *NodeRun {
-	if node == nil {
-		return nil
-	}
-	cloned := *node
-	cloned.Outputs = cloneStringAnyMap(node.Outputs)
-	if node.Fail != nil {
-		failure := *node.Fail
-		cloned.Fail = &failure
-	}
-	if node.Suspension != nil {
-		suspension := *node.Suspension
-		suspension.Payload = cloneStringAnyMap(node.Suspension.Payload)
-		cloned.Suspension = &suspension
-	}
-	return &cloned
-}
-
-func cloneStringAnyMap(values map[string]any) map[string]any {
-	if values == nil {
-		return nil
-	}
-	cloned := make(map[string]any, len(values))
-	for key, value := range values {
-		cloned[key] = cloneAny(value)
-	}
-	return cloned
-}
-
-func cloneAny(value any) any {
-	if value == nil {
-		return nil
-	}
-	return cloneReflectValue(reflect.ValueOf(value)).Interface()
-}
-
-func cloneReflectValue(value reflect.Value) reflect.Value {
-	switch value.Kind() {
-	case reflect.Interface:
-		if value.IsNil() {
-			return reflect.Zero(value.Type())
-		}
-		cloned := cloneReflectValue(value.Elem())
-		wrapped := reflect.New(value.Type()).Elem()
-		wrapped.Set(cloned)
-		return wrapped
-	case reflect.Map:
-		if value.IsNil() {
-			return reflect.Zero(value.Type())
-		}
-		cloned := reflect.MakeMapWithSize(value.Type(), value.Len())
-		iterator := value.MapRange()
-		for iterator.Next() {
-			cloned.SetMapIndex(cloneReflectValue(iterator.Key()), cloneReflectValue(iterator.Value()))
-		}
-		return cloned
-	case reflect.Slice:
-		if value.IsNil() {
-			return reflect.Zero(value.Type())
-		}
-		cloned := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
-		for i := range value.Len() {
-			cloned.Index(i).Set(cloneReflectValue(value.Index(i)))
-		}
-		return cloned
-	case reflect.Array:
-		cloned := reflect.New(value.Type()).Elem()
-		for i := range value.Len() {
-			cloned.Index(i).Set(cloneReflectValue(value.Index(i)))
-		}
-		return cloned
-	case reflect.Pointer:
-		if value.IsNil() {
-			return reflect.Zero(value.Type())
-		}
-		cloned := reflect.New(value.Type().Elem())
-		cloned.Elem().Set(cloneReflectValue(value.Elem()))
-		return cloned
-	default:
-		return value
-	}
+	return cloned, nil
 }

@@ -3,12 +3,25 @@ package orchestration
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
+	"os/exec"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
 )
+
+type mutableOutput struct {
+	Labels map[string]string `json:"labels"`
+	Items  []string          `json:"items"`
+}
+
+type cyclicOutput struct {
+	Self *cyclicOutput `json:"self"`
+}
 
 func TestRunStatusTransitions(t *testing.T) {
 	legal := [][2]string{
@@ -198,5 +211,149 @@ func TestMemoryRunStoreDuplicateAndNotFound(t *testing.T) {
 	}
 	if _, err := store.MutateRun(ctx, "missing", 1, func(*PlanRun) error { return nil }); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("mutate missing: %v", err)
+	}
+}
+
+func TestMemoryRunStoreMutationDoesNotRetainCallbackValues(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryRunStore()
+	created, err := store.CreateRun(ctx, PlanRun{ID: "run-callback", Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	external := map[string]any{"items": []any{"stored"}}
+	if _, err := store.MutateRun(ctx, created.ID, created.Version, func(run *PlanRun) error {
+		run.Status = RunStatusRunning
+		run.Nodes["node"] = &NodeRun{
+			StepID:  "node",
+			Status:  NodeStatusSucceeded,
+			Outputs: map[string]any{"payload": external},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	external["added"] = true
+	external["items"].([]any)[0] = "changed"
+	got, err := store.GetRun(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := got.Nodes["node"].Outputs["payload"].(map[string]any)
+	if _, exists := payload["added"]; exists || payload["items"].([]any)[0] != "stored" {
+		t.Fatal("callback-owned values alias stored run")
+	}
+}
+
+func TestMemoryRunStoreClonesStructFieldsThroughStorageFormat(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryRunStore()
+	output := mutableOutput{
+		Labels: map[string]string{"quality": "original"},
+		Items:  []string{"original"},
+	}
+	created, err := store.CreateRun(ctx, PlanRun{
+		ID: "run-struct", Status: RunStatusDraft,
+		Nodes: map[string]*NodeRun{
+			"node": {StepID: "node", Status: NodeStatusSucceeded, Outputs: map[string]any{"value": output}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output.Labels["quality"] = "changed"
+	output.Items[0] = "changed"
+	got, err := store.GetRun(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, ok := got.Nodes["node"].Outputs["value"].(map[string]any)
+	if !ok {
+		t.Fatalf("stored output type = %T, want JSON object", got.Nodes["node"].Outputs["value"])
+	}
+	labels := value["labels"].(map[string]any)
+	items := value["items"].([]any)
+	if labels["quality"] != "original" || items[0] != "original" {
+		t.Fatal("mutable struct fields alias stored run")
+	}
+}
+
+func TestMemoryRunStoreRejectsUnserializableValuesAtomically(t *testing.T) {
+	ctx := context.Background()
+	for name, value := range map[string]any{
+		"function": func() {},
+		"channel":  make(chan struct{}),
+	} {
+		t.Run("create_"+name, func(t *testing.T) {
+			store := NewMemoryRunStore()
+			_, err := store.CreateRun(ctx, PlanRun{
+				ID: "run-invalid", Status: RunStatusDraft,
+				Nodes: map[string]*NodeRun{"node": {Outputs: map[string]any{"invalid": value}}},
+			})
+			if !errors.Is(err, ErrRunNotSerializable) {
+				t.Fatalf("create error = %v, want ErrRunNotSerializable", err)
+			}
+			if _, err := store.GetRun(ctx, "run-invalid"); !errors.Is(err, ErrRunNotFound) {
+				t.Fatalf("failed create left a record: %v", err)
+			}
+		})
+	}
+
+	store := NewMemoryRunStore()
+	created, err := store.CreateRun(ctx, PlanRun{ID: "run-mutate-invalid", Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.MutateRun(ctx, created.ID, created.Version, func(run *PlanRun) error {
+		run.Status = RunStatusRunning
+		run.Nodes["invalid"] = &NodeRun{Outputs: map[string]any{"fn": func() {}}}
+		return nil
+	})
+	if !errors.Is(err, ErrRunNotSerializable) {
+		t.Fatalf("mutate error = %v, want ErrRunNotSerializable", err)
+	}
+	got, err := store.GetRun(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != created.Version || got.Status != RunStatusDraft || len(got.Nodes) != 0 {
+		t.Fatalf("failed mutation leaked: version=%d status=%s nodes=%v", got.Version, got.Status, got.Nodes)
+	}
+}
+
+func TestMemoryRunStoreRejectsCyclicValues(t *testing.T) {
+	const helperEnv = "DORA_TEST_CYCLIC_PLAN_RUN"
+	if os.Getenv(helperEnv) == "1" {
+		cyclicMap := map[string]any{}
+		cyclicMap["self"] = cyclicMap
+		cyclicPointer := &cyclicOutput{}
+		cyclicPointer.Self = cyclicPointer
+		for name, value := range map[string]any{"map": cyclicMap, "pointer": cyclicPointer} {
+			store := NewMemoryRunStore()
+			_, err := store.CreateRun(context.Background(), PlanRun{
+				ID: "run-cyclic-" + name, Status: RunStatusDraft,
+				Nodes: map[string]*NodeRun{"node": {Outputs: map[string]any{"value": value}}},
+			})
+			if !errors.Is(err, ErrRunNotSerializable) {
+				t.Fatalf("%s create error = %v, want ErrRunNotSerializable", name, err)
+			}
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMemoryRunStoreRejectsCyclicValues$")
+	cmd.Env = append(os.Environ(), helperEnv+"=1")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			t.Fatalf("cyclic value handling exceeded timeout: %v", ctx.Err())
+		}
+		t.Fatalf("cyclic value helper failed: %v", err)
 	}
 }
