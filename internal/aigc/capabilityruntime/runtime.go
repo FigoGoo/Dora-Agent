@@ -74,6 +74,25 @@ type ApprovalRequest struct {
 
 type ApprovalCreator func(context.Context, ApprovalRequest) (string, error)
 type StoryboardPublisher func(context.Context, storyboard.StoryboardAggregate, string) error
+type PrimaryReviewGate func(context.Context, string) error
+
+// approvalPayload freezes the trusted Tool correlation beside the semantic
+// command arguments. The command executor ignores these correlation fields;
+// the system Decision publisher uses them to close the exact waiting ToolRun
+// that produced this durable Approval.
+func approvalPayload(command capability.CommandContext, values map[string]any) map[string]any {
+	out := make(map[string]any, len(values)+2)
+	for key, value := range values {
+		out[key] = value
+	}
+	if toolCallID := strings.TrimSpace(command.ToolCallID); toolCallID != "" {
+		out["tool_call_id"] = toolCallID
+	}
+	if stageRunID := strings.TrimSpace(command.StageRunID); stageRunID != "" {
+		out["stage_run_id"] = stageRunID
+	}
+	return out
+}
 
 type Config struct {
 	Model               einomodel.BaseChatModel
@@ -87,6 +106,7 @@ type Config struct {
 	GenerationWorkflow  GenerationWorkflowSource
 	GenerationPreflight GenerationPreflight
 	CreateApproval      ApprovalCreator
+	PrimaryReviewGate   PrimaryReviewGate
 	PublishStoryboard   StoryboardPublisher
 	// LocalDemoPlanning allows deterministic storyboard/prompt fallbacks only
 	// for the local acceptance environment. Production remains fail closed.
@@ -108,6 +128,8 @@ const (
 	GenerateMediaNoOpProductionComplete         = "production_complete"
 	GenerateMediaNoOpNoTargetsForRequestedPhase = "no_targets_for_requested_phase"
 )
+
+var ErrCreationSpecReviewPending = errors.New("creation spec review must be decided before storyboard planning")
 
 func New(config Config) (*Runtime, error) {
 	if config.Artifacts == nil || config.Specs == nil || config.Storyboards == nil || config.StoryboardCommands == nil || config.GenerationCommands == nil {
@@ -274,6 +296,11 @@ func (r *Runtime) planCreationSpec(ctx context.Context, request capability.Reque
 			return capability.CapabilityResult[capability.PlanCreationSpecData]{}, err
 		}
 	}
+	if r.cfg.PrimaryReviewGate != nil {
+		if err := r.cfg.PrimaryReviewGate(ctx, request.Command.SessionID); err != nil {
+			return capability.CapabilityResult[capability.PlanCreationSpecData]{}, err
+		}
+	}
 	var previous spec.FinalVideoSpec
 	if request.Intent.Mode == "revise" {
 		loaded, err := r.cfg.Specs.GetConfirmedBySession(ctx, request.Command.SessionID)
@@ -343,8 +370,8 @@ func (r *Runtime) creationSpecCapabilityResult(ctx context.Context, request capa
 			ID: approvalID, SessionID: request.Command.SessionID, UserID: request.Command.UserID,
 			ArtifactKind: "creation_spec_revision", ArtifactID: saved.ID, ArtifactVersion: saved.Version,
 			ReviewMode: "durable", ExecutionMode: "durable", VersionMismatchPolicy: "mark_stale",
-			Approve: ApprovalCommand{Kind: "ActivateCreationSpecRevision", Payload: map[string]any{"spec_id": saved.ID, "spec_version": saved.Version}},
-			Reject:  ApprovalCommand{Kind: "RejectCreationSpecRevision", Payload: map[string]any{"spec_id": saved.ID, "spec_version": saved.Version}},
+			Approve: ApprovalCommand{Kind: "ActivateCreationSpecRevision", Payload: approvalPayload(request.Command, map[string]any{"spec_id": saved.ID, "spec_version": saved.Version})},
+			Reject:  ApprovalCommand{Kind: "RejectCreationSpecRevision", Payload: approvalPayload(request.Command, map[string]any{"spec_id": saved.ID, "spec_version": saved.Version})},
 		})
 		if err != nil {
 			return capability.CapabilityResult[capability.PlanCreationSpecData]{}, err
@@ -381,6 +408,13 @@ const storyboardPlannerInstruction = `你是动态故事板规划节点（元素
 modules 必须至少一个，每个 module.elements 必须至少一个，planned_count 必须等于 elements 数量。不要使用 storyboard、shots、scenes 等别名替代顶层 modules。`
 
 func (r *Runtime) planStoryboard(ctx context.Context, request capability.Request[capability.PlanStoryboardIntent]) (capability.CapabilityResult[capability.PlanStoryboardData], error) {
+	latestReviewState, err := r.cfg.Specs.GetLatestBySession(ctx, request.Command.SessionID)
+	if err != nil && !errors.Is(err, spec.ErrNotFound) {
+		return capability.CapabilityResult[capability.PlanStoryboardData]{}, fmt.Errorf("load latest creation spec: %w", err)
+	}
+	if err == nil && latestReviewState.Status == spec.StatusReviewing {
+		return capability.CapabilityResult[capability.PlanStoryboardData]{}, fmt.Errorf("%w: spec_id=%s spec_version=%d", ErrCreationSpecReviewPending, latestReviewState.ID, latestReviewState.Version)
+	}
 	latestSpec, err := r.cfg.Specs.GetConfirmedBySession(ctx, request.Command.SessionID)
 	if err != nil {
 		return capability.CapabilityResult[capability.PlanStoryboardData]{}, fmt.Errorf("load creation spec: %w", err)
@@ -407,6 +441,11 @@ func (r *Runtime) planStoryboard(ctx context.Context, request capability.Request
 			return capability.CapabilityResult[capability.PlanStoryboardData]{}, replayErr
 		}
 		return r.storyboardPlanCapabilityResult(ctx, request, aggregate, revision, diff, planVersion, reviewStoryboardVersion)
+	}
+	if r.cfg.PrimaryReviewGate != nil {
+		if err := r.cfg.PrimaryReviewGate(ctx, request.Command.SessionID); err != nil {
+			return capability.CapabilityResult[capability.PlanStoryboardData]{}, err
+		}
 	}
 	if request.Intent.Mode == "create" && aggregate.ActiveRevisionID != "" {
 		return capability.CapabilityResult[capability.PlanStoryboardData]{}, fmt.Errorf("storyboard already exists; use mode=replan for a whole-plan revision")
@@ -549,8 +588,8 @@ func (r *Runtime) storyboardPlanCapabilityResult(ctx context.Context, request ca
 			ArtifactKind: "storyboard_revision", ArtifactID: revision.ID, ArtifactVersion: planVersion,
 			StoryboardID: updated.ID, StoryboardVersion: reviewStoryboardVersion,
 			ReviewMode: "durable", ExecutionMode: "durable", VersionMismatchPolicy: "mark_stale",
-			Approve: ApprovalCommand{Kind: "PromoteStoryboardRevision", Payload: map[string]any{"storyboard_id": updated.ID, "base_version": reviewStoryboardVersion, "revision_id": revision.ID}},
-			Reject:  ApprovalCommand{Kind: "RejectAndArchivePendingRevision", Payload: map[string]any{"storyboard_id": updated.ID, "base_version": reviewStoryboardVersion, "revision_id": revision.ID}},
+			Approve: ApprovalCommand{Kind: "PromoteStoryboardRevision", Payload: approvalPayload(request.Command, map[string]any{"storyboard_id": updated.ID, "base_version": reviewStoryboardVersion, "revision_id": revision.ID})},
+			Reject:  ApprovalCommand{Kind: "RejectAndArchivePendingRevision", Payload: approvalPayload(request.Command, map[string]any{"storyboard_id": updated.ID, "base_version": reviewStoryboardVersion, "revision_id": revision.ID})},
 		})
 		if err != nil {
 			return capability.CapabilityResult[capability.PlanStoryboardData]{}, err

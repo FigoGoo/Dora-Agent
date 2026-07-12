@@ -22,6 +22,7 @@ import (
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/asset"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/capability"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/generation"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/session"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/skill"
@@ -1200,6 +1201,147 @@ func TestCreateMessagePersistsToolCallAndToolResult(t *testing.T) {
 	}
 	if rebuilt[2].Role != schema.Tool || rebuilt[2].ToolCallID != "call-1" {
 		t.Fatalf("rebuilt tool result = %#v", rebuilt[2])
+	}
+}
+
+func TestPublishAgentEventsSuppressesModelPreviewWhenSystemApprovalOwnsNextStep(t *testing.T) {
+	store := newFakeSessionStore()
+	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
+	broker := &fakeEventSubscriber{}
+	preview := assistantCardEnvelope(t, "spec-review", "创作规范已生成，请确认。")
+	events := make(chan AgentEvent, 3)
+	events <- AgentEvent{
+		Event: a2ui.EventToolProgress, ProgressPublished: true,
+		Message: schema.AssistantMessage("", []schema.ToolCall{{
+			ID: "call-spec", Type: "function",
+			Function: schema.FunctionCall{Name: capability.PlanCreationSpecToolKey, Arguments: `{}`},
+		}}),
+	}
+	events <- AgentEvent{
+		Event: a2ui.EventToolProgress, ProgressPublished: true,
+		Message: schema.ToolMessage(
+			`{"status":"waiting_user","data":{"approval_id":"approval-spec"}}`,
+			"call-spec", schema.WithToolName(capability.PlanCreationSpecToolKey),
+		),
+	}
+	events <- AgentEvent{
+		Event: a2ui.EventChatMessage, AssistantText: preview,
+		Message: schema.AssistantMessage(preview, nil),
+	}
+	close(events)
+
+	cfg := Config{Store: store, Events: broker, NewID: sequentialIDs("tool-call", "tool-result"), Now: fixedNow}
+	if err := cfg.publishAgentEvents(context.Background(), "s1", "run-spec", events); err != nil {
+		t.Fatal(err)
+	}
+	if len(broker.published) != 0 {
+		t.Fatalf("model preview duplicated the system Approval: %#v", broker.published)
+	}
+	got := store.messages["s1"]
+	if len(got) != 2 || got[0].Role != string(schema.Assistant) || got[1].Role != string(schema.Tool) {
+		t.Fatalf("Tool history was not preserved while preview was suppressed: %#v", got)
+	}
+	for _, record := range got {
+		if strings.Contains(record.Content, "spec-review") {
+			t.Fatalf("model preview leaked into message history: %#v", got)
+		}
+	}
+}
+
+func TestPublishAgentEventsSuppressesModelSummaryWhenCapabilityCardOwnsProgress(t *testing.T) {
+	store := newFakeSessionStore()
+	store.sessions["s1"] = session.SessionRecord{ID: "s1", Status: "active"}
+	broker := &fakeEventSubscriber{}
+	modelSummary := assistantCardEnvelope(t, "media-progress", "素材生成已启动。")
+	events := make(chan AgentEvent, 3)
+	events <- messageToAgentEvent(
+		schema.AssistantMessage("", []schema.ToolCall{{
+			ID: "call-media", Type: "function",
+			Function: schema.FunctionCall{Name: capability.GenerateMediaToolKey, Arguments: `{}`},
+		}}),
+	)
+	events <- messageToAgentEvent(
+		schema.ToolMessage(
+			`{"status":"accepted","operation_id":"operation-1"}`,
+			"call-media", schema.WithToolName(capability.GenerateMediaToolKey),
+		),
+	)
+	events <- AgentEvent{
+		Event: a2ui.EventChatMessage, AssistantText: modelSummary,
+		Message: schema.AssistantMessage(modelSummary, nil),
+	}
+	close(events)
+
+	cfg := Config{Store: store, Events: broker, NewID: sequentialIDs("tool-call", "tool-result"), Now: fixedNow}
+	if err := cfg.publishAgentEvents(context.Background(), "s1", "run-media", events); err != nil {
+		t.Fatal(err)
+	}
+	if len(broker.published) != 2 {
+		t.Fatalf("durable Tool progress events = %d, want 2: %#v", len(broker.published), broker.published)
+	}
+	for _, event := range broker.published {
+		raw, err := json.Marshal(event.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "media-progress") || !strings.Contains(string(raw), "tool_run:generate_media") {
+			t.Fatalf("model progress duplicated or stable ToolRun missing: %s", raw)
+		}
+	}
+	got := store.messages["s1"]
+	if len(got) != 2 || got[0].Role != string(schema.Assistant) || got[1].Role != string(schema.Tool) {
+		t.Fatalf("Tool history was not preserved while model summary was suppressed: %#v", got)
+	}
+	for _, record := range got {
+		if strings.Contains(record.Content, "media-progress") {
+			t.Fatalf("model progress leaked into message history: %#v", got)
+		}
+	}
+}
+
+func TestAuthoritativeCapabilityProgressTrackerRequiresMatchedPublishedExclusiveSuccess(t *testing.T) {
+	type observation struct {
+		message   *schema.Message
+		published bool
+	}
+	targetCall := func(id, name string) *schema.Message {
+		return schema.AssistantMessage("", []schema.ToolCall{{ID: id, Type: "function", Function: schema.FunctionCall{Name: name}}})
+	}
+	persistedPreview := func(preview string) string {
+		return "<persisted-output>\nOutput too large (12000). Full output saved to: /tmp/trunc/call\nPreview (first 6000):\n" + preview + "\n\nPreview (last 6000):\n...\n\n</persisted-output>"
+	}
+	tests := []struct {
+		name         string
+		observations []observation
+		want         bool
+	}{
+		{name: "media accepted", observations: []observation{{targetCall("call-1", capability.GenerateMediaToolKey), true}, {schema.ToolMessage(`{"status":"accepted"}`, "call-1", schema.WithToolName(capability.GenerateMediaToolKey)), true}}, want: true},
+		{name: "assembly completed", observations: []observation{{targetCall("call-2", capability.AssembleOutputToolKey), true}, {schema.ToolMessage(`{"status":"completed"}`, "call-2", schema.WithToolName(capability.AssembleOutputToolKey)), true}}, want: true},
+		{name: "truncated assembly accepted", observations: []observation{{targetCall("call-2b", capability.AssembleOutputToolKey), true}, {schema.ToolMessage(persistedPreview(`{"status":"accepted","data":{"large":"`), "call-2b", schema.WithToolName(capability.AssembleOutputToolKey)), true}}, want: true},
+		{name: "truncated assembly failure needs explanation", observations: []observation{{targetCall("call-2c", capability.AssembleOutputToolKey), true}, {schema.ToolMessage(persistedPreview(`{"status":"failed","data":{"large":"`), "call-2c", schema.WithToolName(capability.AssembleOutputToolKey)), true}}, want: false},
+		{name: "unpublished progress", observations: []observation{{targetCall("call-3", capability.GenerateMediaToolKey), false}, {schema.ToolMessage(`{"status":"accepted"}`, "call-3", schema.WithToolName(capability.GenerateMediaToolKey)), false}}, want: false},
+		{name: "media failure needs explanation", observations: []observation{{targetCall("call-4", capability.GenerateMediaToolKey), true}, {schema.ToolMessage(`{"status":"failed"}`, "call-4", schema.WithToolName(capability.GenerateMediaToolKey)), true}}, want: false},
+		{name: "mismatched result", observations: []observation{{targetCall("call-5", capability.GenerateMediaToolKey), true}, {schema.ToolMessage(`{"status":"accepted"}`, "other-call", schema.WithToolName(capability.GenerateMediaToolKey)), true}}, want: false},
+		{name: "target plus other public tool", observations: []observation{{schema.AssistantMessage("", []schema.ToolCall{
+			{ID: "call-6", Type: "function", Function: schema.FunctionCall{Name: capability.GenerateMediaToolKey}},
+			{ID: "call-analyze", Type: "function", Function: schema.FunctionCall{Name: capability.AnalyzeMaterialsToolKey}},
+		}), true}, {schema.ToolMessage(`{"status":"accepted"}`, "call-6", schema.WithToolName(capability.GenerateMediaToolKey)), true}}, want: false},
+		{name: "internal skill plus target", observations: []observation{{schema.AssistantMessage("", []schema.ToolCall{
+			{ID: "call-7", Type: "function", Function: schema.FunctionCall{Name: capability.GenerateMediaToolKey}},
+			{ID: "call-skill", Type: "function", Function: schema.FunctionCall{Name: "skill"}},
+		}), true}, {schema.ToolMessage(`{"status":"accepted"}`, "call-7", schema.WithToolName(capability.GenerateMediaToolKey)), true}}, want: true},
+		{name: "invalid result remains visible", observations: []observation{{targetCall("call-8", capability.GenerateMediaToolKey), true}, {schema.ToolMessage(`not-json`, "call-8", schema.WithToolName(capability.GenerateMediaToolKey)), true}}, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tracker := newAuthoritativeCapabilityProgressTracker()
+			for _, observation := range test.observations {
+				tracker.Observe(observation.message, observation.published)
+			}
+			if got := tracker.SuppressModelAssistant(); got != test.want {
+				t.Fatalf("SuppressModelAssistant() = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 

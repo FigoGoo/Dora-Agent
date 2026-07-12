@@ -1,7 +1,7 @@
 # AIGC Tool 编排与动态故事板详细设计
 
 > 状态：Current Implementation + Target Gaps
-> 日期：2026-07-11
+> 日期：2026-07-12
 > 适用范围：Dora Agent 的 Agent Tool、UI 定向操作、Graph 内部节点、动态故事板、媒体生成衔接
 > 关联文档：[AIGC ChatModelAgent Demo 详细设计](./aigc-chatmodelagent-demo-design.md)、[AIGC Generation Worker 详细设计](./aigc-worker-design.md)
 
@@ -43,14 +43,14 @@
 | Skill 渐进加载 | 已实现 | 每个 Agent run 调用 `SkillBackend.List`；空列表不注入 Eino Skill 指令或 `skill` loader，导入后下一 turn 在同一 Runner 生效；loader 的内部 progress/error 不进入用户 `tool_runs`。 |
 | Capability Graph 外壳 | 已实现 | 每个 Tool 预编译为 `validate_request → execute_capability → validate_result` 的 bounded Eino Graph。 |
 | 内部 ChatModel 推理 | 已实现 | `prepare_messages → chat_model → decode_json` 是显式 Eino 子图；Creation Spec 使用精确字段 schema，持久化前最多重试一次且失败无写副作用；Storyboard 规划与 Prompt 生成仍走各自严格领域校验。 |
-| Spec/Storyboard/Candidate 审核 | 已实现 | Spec/Storyboard 保留 chat approval 卡；Candidate 每项仍创建 durable Approval，但不逐项发 chat 卡。左侧 Storyboard 等相关 Job 全终态后一次冻结并批准精确候选批次，子决定可幂等恢复。 |
+| Spec/Storyboard/Candidate 审核 | 已实现 | Spec/Storyboard 保留系统 chat Approval，同一 Session 只允许一个可操作审核并按流程串行；系统 Approval 存在时抑制模型重复预览。Candidate 每项仍创建 durable Approval，但素材预览与统一确认只在左侧 Storyboard，相关 Job 全终态后一次冻结并批准精确候选批次。 |
 | 动态 Storyboard | 已实现 | Active/Pending Revision、动态 Module/Element/数量、Dependency DAG、PromptSlot、AssetSlot、Binding 和稳定 ID；`ResolveGenerationInput` 是派发/Finalization/候选审批的单一语义源。 |
 | 局部操作 | 已实现 | Prompt 直接替换、上传资产填充、局部重生成、候选资产审核、整板 Replan；AI Prompt Rewrite 尚未接入 UI Command。 |
 | Operation/Batch/Job | 已实现 | 创建时与 generation Outbox 同事务；Worker、Barrier、费用和 Session Signal 均使用持久化状态。 |
 | Operation 控制 | 已实现 | 非终态 Operation 可取消；`retry_failed` replay-first，只为仍语义有效的 provider/transient 失败 Job 创建新的 recovery Operation/Batch/Jobs，不回退原终态。 |
 | Provider | 部分实现 | 本地验收配置 `DORA_IMAGE2_API_KEY` 使用真实同步 Image2 Adapter；Seedance 可留空并生成确定性 MP4 占位 Asset，音频生成 Demo WAV，Assembly 生成 Demo JSON manifest。真实 Seedance Key 仍支持持久化 Submit/Poll/Cancel。 |
-| Batch 回流 | 部分实现 | 正常媒体/装配 Batch 使用 `on_failure`，成功由 durable A2UI projection 展示；Barrier 已把完整不可变 `PostBatchPayload` 写入 Operation、terminal outbox 与 durable `BatchContinuationResult.Result`，只有失败类终态按需启动 Agent 解释。没有独立 Stage Ledger、ToolOperationResult 或 PostBatchContinuation Graph。 |
-| UI 事件 | 部分实现 | 严格 A2UI 1.0/known-action parser 与整包 fail-closed 不变；模型外层 normalizer 只提取单个顶层对象并做极有限闭合符修复，generic required 表单和状态版本门禁已实现；尚无全域 Projector/Inbox。 |
+| Batch 回流 | 部分实现 | 正常媒体/装配 Batch 使用 `on_failure`；每次 `generate_media`/`assemble_output` 在 chat 只维护一张稳定高层 ToolRun，终态 `refresh_resources` 刷新左侧 Storyboard/Assets/Jobs。Barrier 已把完整不可变 `PostBatchPayload` 写入 Operation、terminal outbox 与 durable `BatchContinuationResult.Result`，只有失败类终态按需启动 Agent 解释。没有独立 Stage Ledger、ToolOperationResult 或 PostBatchContinuation Graph。 |
+| UI 事件 | 部分实现 | 严格 A2UI 1.0/known-action parser 与整包 fail-closed 不变；模型外层 normalizer 只提取单个顶层对象并做极有限闭合符修复。Operation/Batch/Job 及逐 Job `status_version` 仍在 Store/read model，chat 不展开 Operation/Job/Stage 多卡、逐 Job 节点或素材预览；尚无全域 Projector/Inbox。 |
 | 队列 | 部分实现 | 当前 Redis List/BLPOP 仅作唤醒传输，Postgres Job + Outbox + Recovery Scheduler 保证恢复；Generation/Approval Outbox 已有 attempts 和指数退避，普通事件 10 次后 dead，`batch.finalize_requested` 持续重试，尚无 publisher claim lease、dead-row 管理 API 和 Redis Streams/ACK/Reclaim。 |
 | Durable Turn 因果与 receipt | 已实现 | 已启动输入保持 Session HOL；消息按 RunID 因果分组和冻结边界重建；外层 Agent Model receipt、完整 Turn output receipt、稳定 ToolCall 幂等和 durable terminal error 已接入。 |
 | Artifact 审核 receipt | 已实现但入口有限 | Artifact Review 命令以 first-write-wins receipt 与生命周期同事务提交，防止旧版本重放回滚新 Active；当前 `assemble_output` 主流程仍不自动创建 Export Result Approval。 |
@@ -132,7 +132,7 @@ flowchart LR
 
 | 调用面 | 调用者 | 实现形态 | Agent Registry | 用户感知 |
 | --- | --- | --- | --- | --- |
-| Agent-facing Graph Tool | ChatModelAgent | Eino Tool 外壳 + 预编译 Graph/Workflow | 注册 | 展示 Public Stage |
+| Agent-facing Graph Tool | ChatModelAgent | Eino Tool 外壳 + 预编译 Graph/Workflow | 注册 | 媒体/装配仅展示单张高层 Capability ToolRun |
 | UI 定向 Command | 前端确定性操作 | 当前为 HTTP Command + Domain Service；后续可按需要抽成 Graph | 不注册 | 展示目标操作状态 |
 | Graph-internal Node | Capability Handler | 当前 ChatModel 是显式子图，其他 Query/Command 是 typed Go/Domain Service | 不注册 | 默认不单独展示 |
 | Worker-only Capability | Worker | Provider/Storage/Media Adapter | 不注册 | 只通过领域事件展示 |
@@ -532,11 +532,11 @@ decision version
 
 当前五个 bounded Capability Graph 不在审核点调用 `compose.Interrupt`，因此 Spec/Storyboard/Candidate 审批不会恢复原 Tool 调用栈。冻结命令 applied 后，Approval Relay 幂等 UPSERT `approval:<id>:continuation-result:<decision_version>`；Session lane 以可信 system 内部事件开启新的 Agent Turn。Approved Turn 不让模型自由选择下游：Creation Spec v1/v2+ 分别固定 `plan_storyboard(create)` / `plan_storyboard(replan,preserve_approved_assets=true)`；Storyboard/Candidate 从冻结 command result 中读取最终 Aggregate，仅当无 Candidate 且全部 Provider-backed/required 生产槽都有匹配 active Binding 时固定 `assemble_output(preview,video)`，否则固定 `generate_media(auto_next,all_eligible)`。中间件只执行这一条受信 ToolCall，完成后的任意额外 ToolCall 都转换为 strict A2UI stop card。Rejected/stale/expired 只解释或重新规划，绝不伪造用户消息。通用 Runner 的真实 interrupt 已接入生产 durable SessionInput：`messages/resume` 在 Runtime 配置下只验证 mapping 并持久化确认 Message + `ResumeRequested`，由 Session Runtime 串行恢复 Runner。Approval-bound mapping 禁止走 generic resume，仍必须通过 Approval Decision 路由。无 Runtime 的 HTTP 直连 Resume 只保留为测试兼容路径。
 
-Spec/Storyboard 的系统 Approval Card 必须携带 `data.approval_id`，可用 Markdown 展示 Revision 详情，但不能把 Markdown 文案当作交互。当前 A2UI 不提供独立 Button 组件；权威卡使用 required `SingleChoice(decision)` 展示“确认/拒绝”，再由 Card 的统一提交控件触发单项 Decision API。普通聊天消息和无 `approval_id` 的 A2UI 表单只进入 UserMessage 路径，即使内容恰好为“确认”也不改变 Approval。`waiting_user` 后模型不得生成“请回复确认/输入确认”或自行拼装审核控件；模型最终 ActionEnvelope 若包含这种伪入口，必须在持久化和发布前 fail closed，并只允许有界纠错重试。
+Spec/Storyboard 的系统 Approval Card 必须携带 `data.approval_id`，可用 Markdown 展示 Revision 详情，但不能把 Markdown 文案当作交互。当前 A2UI 不提供独立 Button 组件；权威卡使用 required `SingleChoice(decision)` 展示“确认/拒绝”，再由 Card 的统一提交控件触发单项 Decision API。同一 Session 同一时刻最多存在一张可操作的 Spec/Storyboard Approval，Spec 决定完成后才能发布 Storyboard 审核；系统 Approval 存在时必须抑制模型对同一候选生成的预览卡，避免并行确认入口。普通聊天消息和无 `approval_id` 的 A2UI 表单只进入 UserMessage 路径，即使内容恰好为“确认”也不改变 Approval。`waiting_user` 后模型不得生成“请回复确认/输入确认”或自行拼装审核控件；模型最终 ActionEnvelope 若包含这种伪入口，必须在持久化和发布前 fail closed，并只允许有界纠错重试。
 
 当前规则：
 
-1. 创建 Approval 时冻结 Artifact/Storyboard/Target 版本以及 approve/reject Command；Spec/Storyboard 初始卡在 Approval 提交后直接 AppendOnce，且卡片携带 `approval_id` 并使用 `SingleChoice + Card submit`。Candidate Approval 不发布 chat 卡，`job.succeeded` 只投影最新 Storyboard。
+1. 创建 Approval 时冻结 Artifact/Storyboard/Target 版本以及 approve/reject Command；Spec/Storyboard 初始卡在 Approval 提交后直接 AppendOnce，且卡片携带 `approval_id` 并使用 `SingleChoice + Card submit`。发布前按 Session 校验不存在另一张可操作 Spec/Storyboard Approval；系统卡存在时抑制同候选模型预览。Candidate Approval 不发布 chat 卡，`job.succeeded` 只触发左侧资源刷新。
 2. Spec/Storyboard 调用单项 `decide_approval`。Candidate 由左侧 Storyboard 在相关 Job 全终态后一次调用 `candidate-approvals/decision`，仅支持 `approved`；服务端先按 Storyboard version + 幂等键冻结精确 `(approval_id,binding_id,expected_decision_version)` 集合，再逐项执行原 Decision。
 3. Decision 请求使用稳定幂等键；`ApprovalContinuation` 以 `(approval_id, decision_version)` 唯一，executor 为 `deterministic_continuation`。
 4. Continuation claim 后重读决定和当前版本，执行冻结 Command，并以 Command Ledger/领域 receipt 防止重复 Activate/Promote/Reject。若领域提交后、外层 ledger 尚未落库就崩溃，重试会检查 Spec 状态、Storyboard command receipt 或 Artifact review receipt，确认已提交后只补写 ledger/continuation applied。
@@ -567,7 +567,7 @@ CheckpointMapping 状态不是一个模糊的“已恢复”布尔值：`resume_
 
 ### 8.6 `control_generation_operation`
 
-前端 Operation 卡片只在非终态显示“取消任务”，在 `failed/partial_failed` 显示“重试失败项”：
+前端高层 Capability ToolRun 通过 `operation_id` 在非终态显示“取消任务”，在 `failed/partial_failed` 显示“重试失败项”：
 
 ```text
 cancel
@@ -736,22 +736,16 @@ runnable, err := graph.Compile(ctx,
 
 当前 durable 审核不需要 Graph Checkpoint。Runner CheckPointStore 供生产 generic Runner interrupt 的 durable `/messages/resume` 使用，但不是 Storyboard 的长期存储；无 Runtime 直连只用于测试兼容。
 
-## 11. 用户可见 Public Stage
+## 11. 用户可见高层 Capability ToolRun
 
-内部节点不逐一暴露。当前前端以 `operation:<operation_id>` 和 `job:<job_id>` 卡展示生成进度，尚未聚合成持久化 `tool_run:<stage_run_id>` Public Stage 卡。下表是后续统一 Stage 展示时的目标映射：
+内部 Graph 节点、Operation、Batch 和 Job 不逐一暴露到 chat。所有 `generate_media` 调用归并到 `tool_run:generate_media`，所有 `assemble_output` 调用归并到 `tool_run:assemble_output`，后续 generation outbox 事件继续更新同一能力卡。卡片只呈现符合用户心智的能力名称、总体状态、完成/总数、简短失败摘要和必要操作，不把 Provider、Finalization、Billing 等内部 Stage 展开为多卡或逐 Job 节点。同一 Turn 的成功 Tool Result 已完成权威投影且没有其他公开 Tool 时，模型进度复述必须被抑制；失败或混合 Tool Turn 仍允许输出解释。
 
-| Public Stage | 典型内部节点 |
-| --- | --- |
-| `material_analysis` | load、multimodal inference、analysis validate/save |
-| `creation_spec_planning` | spec inference、validate、save |
-| `storyboard_planning` | module planning、element planning、initial prompts、reconcile |
-| `prompt_preparing` | ensure/rewrite prompt、prompt validate/save |
-| `media_dispatching` | readiness、cost estimate、operation/batch/jobs |
-| `media_generating` | Worker provider submit/poll |
-| `asset_finalizing` | download、probe、upload、billing、binding |
-| `storyboard_review` | pending revision approval |
-| `asset_review` | candidate asset approval |
-| `output_assembly` | readiness、timeline、render/export |
+| 高层 ToolRun | 内部 durable truth | chat 展示 |
+| --- | --- | --- |
+| `generate_media` | Operation/Batch/Jobs、Provider/Finalization/Billing、结果 Asset | 素材生成中/完成/部分失败/失败/已取消、总体计数、简短错误；`operation_id` 支持取消/失败重试 |
+| `assemble_output` | Assembly Operation/Batch/Job、manifest Asset | 合成准备中/完成/失败/已取消、简短错误；`operation_id` 支持取消/失败重试 |
+
+逐 Job 状态、`status_version`、费用和结果 Asset 仍持久化在 Store，并通过 REST read model 提供给左侧工作区或诊断界面。Batch 终态在完成高层卡的同时发送 `refresh_resources`，前端统一重新读取 Storyboard、Assets 和 Jobs；素材预览与 Candidate 统一审核只出现在左侧，不复制到 ToolRun。这里的 ToolRun 是 A2UI 投影，不是持久化 Stage Ledger。
 
 ## 12. 同步与异步策略
 
@@ -1327,7 +1321,7 @@ job progress/terminal
 
 Job、Asset 和 Storyboard 更新不会按单个 Job 唤醒 Agent。只有 Batch 终态会创建 `BatchContinuationResult`，并且最多再启动一次 Agent 解释。
 
-正常 `generate_media` 和 `assemble_output` Batch 冻结 `WakePolicy=on_failure`。成功 Batch 的 `NeedsAgentExplanation=false`：generation outbox 展示 Operation/Job，`job.succeeded` 只刷新 Storyboard；Candidate 不进入 chat，左侧 Storyboard 在相关 Job 全终态后开放一次统一确认。只有 `partial_failed/failed/cancelled` 需要模型解释。因此成功链路不依赖模型生成一段结果说明才能对用户可见。
+正常 `generate_media` 和 `assemble_output` Batch 冻结 `WakePolicy=on_failure`。成功 Batch 的 `NeedsAgentExplanation=false`：generation outbox 完成同一张高层 Capability ToolRun，并发出 `refresh_resources` 让前端重读左侧 Storyboard、Assets 和 Jobs；素材预览与 Candidate 统一确认不进入 chat，左侧 Storyboard 在相关 Job 全终态后开放一次统一确认。只有 `partial_failed/failed/cancelled` 需要模型解释。因此成功链路不依赖模型生成一段结果说明才能对用户可见。
 
 当前 `PostBatchPayload` 包含 SessionID、WorkflowRunID、StageRunID、OperationID、ToolCallID、BatchID/Version、终态、完整 CostSummary、逐 Job 的 target/slot/status/disposition/asset IDs/error code/gross/refund/net、`NeedsAgentExplanation` 和 CreatedAt。它是 Barrier 事务生成的可信快照，不是 Publisher 或 Agent 从 Provider Payload 拼接的轻量摘要。
 
@@ -1461,16 +1455,16 @@ result_disposition?, aggregate_version, occurred_at
 当前 UI 写入 SessionEventLog 的来源有三类：
 
 1. ChatModelAgent 输出的聊天类 A2UI Action。
-2. Generation Outbox 的 `SessionSignalPublisher` 对 Operation/Job/Batch 状态做确定性投影；`job.succeeded` 后只投影已提交的 Storyboard，不投影 Candidate chat Approval。
+2. Generation Outbox 的 `SessionSignalPublisher` 从 Operation/Job/Batch durable 状态计算单张高层 Capability ToolRun；终态发布 `refresh_resources`，不投影 Operation/Job 明细、素材预览或 Candidate chat Approval。
 3. Capability 创建的 Storyboard/Spec Approval 卡和 Approval Decision 仍在各自业务事务提交后直接发布 A2UI Action。
 
 后端不得根据自然语言或任意 Tool Result 猜测 UI。
 
 当前 A2UI 合同只接受 `a2ui_version="1.0"` 和已知的 `append_card/update_card`。后端 parser、前端实时 SSE 与历史回放仍采用整包 fail-closed；parser 本身不修复 JSON。模型外层 provider-output normalizer 只允许“单个顶层 object + 最多一个明确闭合符修复”，结果仍须通过严格 parser，不能借此接受未知版本、Action 或 Card。归一化后仍非法时才进入最多一次模型级纠错重试。Generic 表单提交前统一校验 required TextInput、SingleChoice、MultiChoice 和 FileUpload。
 
-Generation Outbox 会同时投影 Operation/Job 卡和 `tool_run:<tool_call_id|stage_run_id>` Public Stage 卡。Operation/Job、Stage 顶层以及逐 Job Node 携带 `status_version`，前端按稳定 ID 单调合并，防止重放或乱序事件把状态回滚。成功 Job 的 `result_asset_ids` 会刷新 available Asset，在 ToolRun 中展示本地媒体预览或 Assembly manifest 链接。该 Public Stage 仍不是持久化 Stage Ledger。
+Generation Outbox 不创建 Operation、Job 或内部 Stage 的独立聊天卡。`generate_media`、`assemble_output` 分别只更新 `tool_run:generate_media`、`tool_run:assemble_output`，以 Batch/Operation 版本门禁保证单调状态，并携带 `operation_id` 保留取消与失败重试；不展开逐 Job Node，也不展示本地媒体或 Assembly manifest。Operation/Batch/Job、逐 Job `status_version`、费用与结果 Asset 继续作为 Store/REST read model 的 durable truth。Batch 终态附带 `refresh_resources`，前端据此刷新左侧 Storyboard、Assets 和 Jobs。该 ToolRun 仍不是持久化 Stage Ledger。
 
-当前没有通用 Domain Event Projector/Inbox，也没有持久化 Public Stage 聚合。`job.succeeded` 的专用 Finalization projector 使用稳定 Job/Storyboard source key 重试；其他 publisher 同样必须提供稳定 EventID，避免重复卡。Generation Outbox 的普通投影事件失败不会阻止同批后续 Row；失败 Row 按 AvailableAt 退避，累计 10 次后进入 dead。`batch.finalize_requested` 不是 UI 投影事件，遵循持续恢复 Barrier 的例外语义。
+当前没有通用 Domain Event Projector/Inbox，也没有持久化 Capability ToolRun 聚合。`job.succeeded` 的专用 Finalization projector 使用稳定 Job/Storyboard source key 重试；其他 publisher 同样必须提供稳定 EventID，避免重复卡。Generation Outbox 的普通投影事件失败不会阻止同批后续 Row；失败 Row 按 AvailableAt 退避，累计 10 次后进入 dead。`batch.finalize_requested` 不是 UI 投影事件，遵循持续恢复 Barrier 的例外语义。
 
 内部 generation Outbox 和 Storyboard DomainEvent 不直接占用外部 Session seq。只有具体 A2UI Row 通过 `AppendSessionEventOnce` 时分配 seq：
 
@@ -1638,7 +1632,7 @@ internal/aigc/
 ### 下一阶段：一致性和投影
 
 1. 为仍直发的 Capability/Approval Decision 补 Transactional Outbox，并把现有 `job.succeeded` 专用投影收敛到统一 Domain Projector/Inbox。
-2. 聚合持久化 Public Stage/ToolOperationResult，并增加独立 PostBatchContinuation。
+2. 聚合持久化 Capability ToolRun/ToolOperationResult，并增加独立 PostBatchContinuation。
 3. 将 Finalization 的 generation Job、Asset、Storyboard/Approval commit 收敛到可证明的一致性边界。
 4. 为当前 `retry_failed` Recovery Operation 增加运营审计，并实现只续跑 Finalization 的独立恢复模式；provider/transient 错误分类和 replay-first 已完成。
 
@@ -1707,17 +1701,17 @@ internal/aigc/
 ### 30.6 UI 和事件
 
 - Prompt 编辑和局部重生成不产生 Agent Tool Call。
-- 槽位本地上传完成后直接绑定正确 Target/AssetSlot；动态 Active/Candidate 音频和显式 AudioPreview 可在浏览器试听。
-- Operation 取消作用于原 Batch；`retry_failed` 先返回同幂等键已有 Recovery，再只复制 provider/transient 且语义有效的失败 Job，不复制 superseded/orphaned Job。
-- Job 进度只更新 UI，不唤醒 Agent。
+- 槽位本地上传完成后直接绑定正确 Target/AssetSlot；动态 Active/Candidate 图片、视频、音频与 Assembly manifest 只在左侧预览，音频可在浏览器试听。
+- 高层 Capability ToolRun 通过 `operation_id` 取消原 Batch；`retry_failed` 先返回同幂等键已有 Recovery，再只复制 provider/transient 且语义有效的失败 Job，不复制 superseded/orphaned Job。
+- Job 进度只归并更新同一张高层 ToolRun，不生成独立 Job/Operation/Stage 卡，也不唤醒 Agent。
 - Batch Terminal 只创建一个幂等 `BatchContinuationResult`，并且最多启动一次 Agent Turn。
-- Generation outbox 可重放 Operation/Job 以及 Finalization Storyboard；Candidate 不产生 chat Approval 卡，Capability/Decision 的全域 Event Projector 重建仍是后续测试目标。
+- Generation outbox 可重放高层 ToolRun 并在终态发出 `refresh_resources`；Operation/Batch/Job 明细只从 Store/read model 读取，素材与 Candidate 不产生 chat 卡，Capability/Decision 的全域 Event Projector 重建仍是后续测试目标。
 - 断线重连按 seq 补齐 Patch、候选资产和 Approval。
 - Rejected durable Approval 永不执行 Activate/Promote。
 - Approval Decision、Continuation Outbox 和冻结 Command 幂等，崩溃后由 relay 补执行。
-- 当前 Spec/Storyboard 审核只创建一张 durable Approval 卡，不产生 interrupt 卡。
+- 当前同一 Session 的 Spec/Storyboard 审核唯一且串行，只创建一张可操作 durable Approval 卡，不产生 interrupt 卡；系统 Approval 存在时抑制模型候选预览。
 - BatchContinuationResult 标记 `NeedsAgentExplanation=false` 时不启动 Agent Turn。
-- 正常媒体/装配成功使用 `on_failure`，由 durable A2UI projection 展示结果；approved continuation 每 Turn 只执行一个受信 Capability，Candidate 冻结 Aggregate 决定 generate/assemble，额外 ToolCall 输出 stop card。
+- 正常媒体/装配成功使用 `on_failure`，由单张高层 ToolRun + `refresh_resources` 展示结果；approved continuation 每 Turn 只执行一个受信 Capability，Candidate 冻结 Aggregate 决定 generate/assemble，额外 ToolCall 输出 stop card。
 - BatchContinuationResult.Result 完整等于 Barrier 冻结的 PostBatchPayload，并包含可信 CostSummary 与逐 Job 终态。
 - Generation/Approval poison outbox row 退避并最终 dead，不阻塞同批其他到期行。
 - Approval 决定后领域命令已提交但 Continuation receipt 未写入时，重试只补 receipt，不重复执行命令。
@@ -1753,10 +1747,12 @@ internal/aigc/
 15. 内部事件不占外部 seq；Session Runtime terminal error 与 dead 状态原子落库，SessionEventLog AppendOnce、cursor Tail Relay、前端 seq/version 栅栏保证 SSE 可按序恢复。
 16. 当前仅为受信本地 Demo；验收图片来自真实 Image2，Seedance 可使用本地 MP4 占位，Audio 使用 Demo WAV，Assembly 使用 JSON manifest。只验收 Image2 的真实 Provider 调用和完整 Tool → Worker → Finalization/Barrier → A2UI 流程；真实视频/音频合成、转码、鉴权/限流及其他生产媒体 Provider 不在承诺内。
 17. Approved ApprovalContinuation 每 Turn 恰好执行一个受信 Capability；Candidate 最终 Aggregate 全生产槽 active 才 assemble，否则 generate，额外 ToolCall 被 strict A2UI stop card 阻断。
-18. `generate_media` 五种 no-op reason 使用持久化 receipt 幂等；成功 Batch 通过 `on_failure` + durable A2UI projection 展示，不依赖模型解释。
+18. `generate_media` 五种 no-op reason 使用持久化 receipt 幂等；成功 Batch 通过 `on_failure` + 单张高层 ToolRun + `refresh_resources` 展示，不依赖模型解释。
 19. `ResolveGenerationInput` 是 dispatch/finalization/candidate approval 的单一语义源；Finalization Commit error 保留原 Job ID 和原始错误，不无限停在 `finalizing`。
 20. Candidate durable Approval 不发布逐项 chat 卡；相关 Job 全终态后左侧 Storyboard 只 POST 一次，服务端冻结精确批次并以同一幂等键恢复逐项 Decision。
 21. 每个 Agent run 都动态 List Skill；空列表不注入 Skill 指令/loader，导入后下一 turn 无需重启即可启用，loader progress/error 不投影到用户 ToolRun。
+22. 每次 `generate_media`/`assemble_output` 在 chat 只有一个稳定高层 ToolRun，不得投影 Operation/Job/Stage 多卡、逐 Job 节点或结果素材；卡片通过 `operation_id` 保留取消/重试，终态刷新左侧 Storyboard/Assets/Jobs。
+23. 同一 Session 的 Spec/Storyboard Approval 唯一且串行；系统 Approval 存在时必须抑制模型预览，避免同时出现多个确认入口。
 
 ## 32. 最终原则
 

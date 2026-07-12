@@ -460,6 +460,8 @@ func assertDurableA2UIFlow(t *testing.T, rows []events.SessionEvent) {
 	}
 	statuses := map[string]bool{}
 	surfaces := map[string]bool{}
+	capabilityCards := map[string]bool{}
+	terminalRefresh := false
 	approvalCards := 0
 	for index, row := range rows {
 		if row.Seq != int64(index+1) || row.EventType != a2ui.EventAction {
@@ -477,28 +479,55 @@ func assertDurableA2UIFlow(t *testing.T, rows []events.SessionEvent) {
 			if action.Type == a2ui.ActionAppendCard && strings.HasPrefix(action.CardID, "approval:") {
 				approvalCards++
 			}
+			if action.Surface != "tool_runs" {
+				continue
+			}
+			if action.Target == nil {
+				t.Fatalf("tool-run action has no stable target: %+v", action)
+			}
+			cardID := action.Target.CardID
+			if cardID != "tool_run:generate_media" && cardID != "tool_run:assemble_output" {
+				t.Fatalf("unexpected per-operation/job chat card %q", cardID)
+			}
+			capabilityCards[cardID] = true
 			payload, _ := action.Payload.(map[string]any)
-			for _, key := range []string{"tool_run", "operation"} {
-				view, _ := payload[key].(map[string]any)
-				status, _ := view["status"].(string)
-				if status != "" {
-					statuses[status] = true
+			if _, exists := payload["operation"]; exists {
+				t.Fatalf("tool-run payload exposes operation projection: %#v", payload)
+			}
+			view, _ := payload["tool_run"].(map[string]any)
+			for _, forbidden := range []string{"nodes", "target_id", "asset_slot", "result_asset_ids"} {
+				if _, exists := view[forbidden]; exists {
+					t.Fatalf("capability card %q exposes %q: %#v", cardID, forbidden, view)
 				}
-				nodes, _ := view["nodes"].([]any)
-				for _, rawNode := range nodes {
-					node, _ := rawNode.(map[string]any)
-					status, _ := node["status"].(string)
-					if status != "" {
-						statuses[status] = true
+			}
+			status, _ := view["status"].(string)
+			if status != "" {
+				statuses[status] = true
+			}
+			if status == generation.BatchStatusCompleted {
+				refresh, _ := payload["refresh_resources"].([]any)
+				if len(refresh) == 0 {
+					if typed, ok := payload["refresh_resources"].([]string); ok {
+						terminalRefresh = len(typed) > 0
 					}
+				} else {
+					terminalRefresh = true
 				}
 			}
 		}
 	}
-	for _, want := range []string{generation.StatusRunning, generation.StatusFinalizing, generation.StatusSucceeded, generation.BatchStatusCompleted} {
+	for _, want := range []string{generation.BatchStatusWaitingJobs, generation.BatchStatusCompleted} {
 		if !statuses[want] {
 			t.Fatalf("durable A2UI statuses = %v, missing %q", statuses, want)
 		}
+	}
+	for _, want := range []string{"tool_run:generate_media", "tool_run:assemble_output"} {
+		if !capabilityCards[want] {
+			t.Fatalf("durable A2UI capability cards = %v, missing %q", capabilityCards, want)
+		}
+	}
+	if !terminalRefresh {
+		t.Fatal("terminal capability card did not request resource refresh")
 	}
 	if !surfaces["tool_runs"] || !surfaces["storyboard"] || approvalCards != 0 {
 		t.Fatalf("A2UI surfaces=%v approval_cards=%d", surfaces, approvalCards)

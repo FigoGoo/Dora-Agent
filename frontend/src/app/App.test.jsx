@@ -699,11 +699,11 @@ describe('DORAIGC static client pages', () => {
     await user.click(screen.getByRole('button', { name: '发送' }));
 
     expect(await screen.findByText('竹林夜雨')).toBeInTheDocument();
-    expect(screen.getByText('shot-1')).toBeInTheDocument();
-    expect(screen.getAllByText('生成中').length).toBeGreaterThan(0);
+    expect(screen.getByText('1 项正在生成 · 0/1 项已完成')).toBeInTheDocument();
+    expect(screen.queryByText('shot-1')).not.toBeInTheDocument();
   });
 
-  it('renders tool runs and storyboard patches from A2UI update actions', async () => {
+  it('renders one user-facing capability status and keeps internal nodes out of chat', async () => {
     window.history.pushState({}, '', '/workspace');
     const user = userEvent.setup();
     const fetchMock = mockAigcFetch({
@@ -748,13 +748,14 @@ describe('DORAIGC static client pages', () => {
     await user.click(screen.getByRole('button', { name: '发送' }));
 
     expect(await screen.findByText('竹林夜雨')).toBeInTheDocument();
-    expect(screen.getByText('Media Assets')).toBeInTheDocument();
-    expect(screen.getByText('正在为 Shot 01 生成关键帧')).toBeInTheDocument();
-    expect(screen.getByText('注册所有元素资产')).toBeInTheDocument();
-    expect(screen.getByText('生成素材')).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: '素材生成进度' })).toBeInTheDocument();
+    expect(screen.getByText('素材生成正在进行，完成后会自动同步到左侧故事板。')).toBeInTheDocument();
+    expect(screen.queryByText('Media Assets')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在为 Shot 01 生成关键帧')).not.toBeInTheDocument();
+    expect(screen.queryByText('注册所有元素资产')).not.toBeInTheDocument();
   });
 
-  it('merges media provider progress into one Media Assets tool run', async () => {
+  it('collapses provider progress into one high-level media capability card', async () => {
     window.history.pushState({}, '', '/workspace');
     const user = userEvent.setup();
     const fetchMock = mockAigcFetch({
@@ -787,10 +788,117 @@ describe('DORAIGC static client pages', () => {
     await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '生成素材');
     await user.click(screen.getByRole('button', { name: '发送' }));
 
-    expect(await screen.findByText('Image2 正在生成产品图')).toBeInTheDocument();
-    expect(screen.getAllByText('Media Assets')).toHaveLength(1);
-    expect(screen.getByText('Write The Prompt')).toBeInTheDocument();
-    expect(screen.getByText('Image2 生成图片')).toBeInTheDocument();
+    expect(await screen.findByRole('article', { name: '素材生成进度' })).toBeInTheDocument();
+    expect(screen.getAllByText('素材生成')).toHaveLength(1);
+    expect(screen.queryByText('Image2 正在生成产品图')).not.toBeInTheDocument();
+    expect(screen.queryByText('Write The Prompt')).not.toBeInTheDocument();
+    expect(screen.queryByText('Image2 生成图片')).not.toBeInTheDocument();
+  });
+
+  it('never renders one chat card per generated audio asset', async () => {
+    window.history.pushState({}, '', '/workspace');
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal('fetch', mockAigcFetch());
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    const source = DefaultMockEventSource.instances[0];
+    act(() => {
+      source.emit({
+        ...updateCardEvent('tool_runs', 'tool_run:generate_media', {
+          tool_run: { tool_key: 'generate_media', status: 'running' }
+        }),
+        seq: 1
+      });
+      ['bgm', 'voice', 'sfx'].forEach((slot, index) => {
+        source.emit({
+          ...updateCardEvent('tool_runs', `job:audio-${slot}`, {
+            tool_run: {
+              job_id: `job-audio-${slot}`,
+              tool_key: 'generate_media',
+              target_id: 'elem_audio_mix',
+              asset_slot: `asset_audio_${slot}`,
+              display_name: '音频素材生成',
+              status: 'succeeded',
+              result_asset_ids: [`asset-audio-${slot}`]
+            }
+          }),
+          seq: index + 2
+        });
+      });
+    });
+
+    expect(await screen.findByRole('article', { name: '素材生成进度' })).toBeInTheDocument();
+    expect(screen.getAllByRole('article', { name: /素材生成进度/ })).toHaveLength(1);
+    expect(screen.queryByText('音频素材生成')).not.toBeInTheDocument();
+    expect(screen.queryByText('elem_audio_mix')).not.toBeInTheDocument();
+    expect(screen.queryByText(/asset_audio_/)).not.toBeInTheDocument();
+  });
+
+  it('does not revive a stale planning waiting state after its Approval is gone', async () => {
+    window.history.pushState({}, '', '/workspace');
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal('fetch', mockAigcFetch());
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    act(() => {
+      DefaultMockEventSource.instances[0].emit({
+        ...updateCardEvent('tool_runs', 'tool_run:legacy-spec', {
+          tool_run: { tool_key: 'plan_creation_spec', status: 'waiting_user' }
+        }),
+        seq: 1
+      });
+      DefaultMockEventSource.instances[0].emit({
+        ...updateCardEvent('tool_runs', 'tool_run:generate_media', {
+          tool_run: { tool_key: 'generate_media', status: 'running' }
+        }),
+        seq: 2
+      });
+    });
+
+    expect(await screen.findByRole('article', { name: '素材生成进度' })).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '创作规范进度' })).not.toBeInTheDocument();
+  });
+
+  it('refreshes storyboard resources from a terminal capability hint without adding detail cards', async () => {
+    window.history.pushState({}, '', '/workspace');
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    const fetchMock = mockAigcFetch();
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    act(() => {
+      DefaultMockEventSource.instances[0].emit({
+        ...updateCardEvent('tool_runs', 'tool_run:generate_media', {
+          tool_run: { tool_key: 'generate_media', status: 'succeeded' },
+          refresh_resources: ['storyboard', 'assets', 'jobs']
+        }),
+        seq: 1
+      });
+    });
+
+    await waitFor(() => {
+      for (const resource of ['storyboard', 'assets', 'jobs']) {
+        const reads = fetchMock.mock.calls.filter(
+          ([path, options = {}]) =>
+            path === `/api/aigc/sessions/s1/${resource}` && (options.method || 'GET') === 'GET'
+        );
+        expect(reads.length).toBeGreaterThanOrEqual(2);
+      }
+    });
+    expect(screen.getAllByRole('article', { name: '素材生成进度' })).toHaveLength(1);
+    expect(screen.queryByText(/job-|asset-/)).not.toBeInTheDocument();
   });
 
   it('renders generated shot images after storyboard update hints and asset refresh', async () => {
@@ -1246,7 +1354,7 @@ describe('DORAIGC static client pages', () => {
     });
   });
 
-  it('keeps operation, job, and tool-run status projections monotonic by status_version', async () => {
+  it('keeps capability status monotonic without exposing operation, job, or node identifiers', async () => {
     window.history.pushState({}, '', '/workspace');
     DefaultMockEventSource.instances = [];
     vi.stubGlobal('EventSource', DefaultMockEventSource);
@@ -1263,8 +1371,8 @@ describe('DORAIGC static client pages', () => {
           status_version: 3,
           operation: {
             operation_id: 'op-monotonic',
-            job_id: 'job-monotonic',
             session_id: 's1',
+            tool_key: 'generate_media',
             target_id: 'target-monotonic',
             display_name: '单调状态任务',
             status: 'succeeded',
@@ -1278,8 +1386,8 @@ describe('DORAIGC static client pages', () => {
           status_version: 2,
           operation: {
             operation_id: 'op-monotonic',
-            job_id: 'job-monotonic',
             session_id: 's1',
+            tool_key: 'generate_media',
             target_id: 'target-monotonic',
             display_name: '单调状态任务',
             status: 'running',
@@ -1337,16 +1445,16 @@ describe('DORAIGC static client pages', () => {
       });
     });
 
-    const latestSummary = await screen.findByText('最新终态');
-    expect(within(latestSummary.closest('article')).getByText('完成')).toBeInTheDocument();
+    const capability = await screen.findByRole('article', { name: '素材生成进度' });
+    expect(within(capability).getByText('完成')).toBeInTheDocument();
     expect(screen.queryByText('过期运行状态')).not.toBeInTheDocument();
-    expect(within(screen.getByText('target-monotonic').closest('.aigc-job-chip')).getByText('完成')).toBeInTheDocument();
-    const latestNode = await screen.findByText('节点最新终态');
-    expect(latestNode.closest('li')).toHaveClass('aigc-a2ui-step--succeeded');
+    expect(screen.queryByText('最新终态')).not.toBeInTheDocument();
+    expect(screen.queryByText('target-monotonic')).not.toBeInTheDocument();
+    expect(screen.queryByText('节点最新终态')).not.toBeInTheDocument();
     expect(screen.queryByText('过期节点状态')).not.toBeInTheDocument();
   });
 
-  it('renders a completed local assembly manifest from the projected job result', async () => {
+  it('keeps a completed assembly job result out of chat asset cards', async () => {
     window.history.pushState({}, '', '/workspace');
     DefaultMockEventSource.instances = [];
     vi.stubGlobal('EventSource', DefaultMockEventSource);
@@ -1386,8 +1494,9 @@ describe('DORAIGC static client pages', () => {
       });
     });
 
-    const manifest = await screen.findByRole('link', { name: 'local-preview-manifest.json' });
-    expect(manifest).toHaveAttribute('href', '/api/aigc/local-assets/session/local-preview-manifest.json');
+    expect(await screen.findByText('后台生成任务已完成')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'local-preview-manifest.json' })).not.toBeInTheDocument();
+    expect(screen.queryByText('assembly-1')).not.toBeInTheDocument();
   });
 
   it('keeps a plain-text confirmation on the message API and leaves the pending Approval untouched', async () => {
@@ -1502,6 +1611,186 @@ describe('DORAIGC static client pages', () => {
         ([path, options]) => path === '/api/aigc/sessions/s1/messages' && options?.method === 'POST'
       )
     ).toHaveLength(0);
+  });
+
+  it('shows pending approvals as one sequential next step instead of simultaneous cards', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const specApproval = appendCardEvent(
+      'approval-spec',
+      {
+        root: 'root',
+        title: '创作规范预览',
+        status: 'pending',
+        data: {
+          approval_id: 'approval-spec',
+          artifact_type: 'creation_spec_revision',
+          decision_version: 0
+        },
+        components: [
+          { id: 'root', component: { Card: { children: ['details'] } } },
+          { id: 'details', component: { Markdown: { value: '创作规范详情' } } }
+        ]
+      },
+      { card_id: 'approval:approval-spec' }
+    );
+    const storyboardApproval = appendCardEvent(
+      'approval-storyboard',
+      {
+        root: 'root',
+        title: '故事板预览',
+        status: 'pending',
+        data: {
+          approval_id: 'approval-storyboard',
+          artifact_type: 'storyboard_revision',
+          decision_version: 0
+        },
+        components: [
+          { id: 'root', component: { Card: { children: ['details'] } } },
+          { id: 'details', component: { Markdown: { value: '故事板详情' } } }
+        ]
+      },
+      { card_id: 'approval:approval-storyboard' }
+    );
+    vi.stubGlobal(
+      'fetch',
+      mockAigcFetch({
+        messages: [
+          { id: 'm-spec', role: 'assistant', content: JSON.stringify(specApproval.payload), seq: 1 },
+          { id: 'm-storyboard', role: 'assistant', content: JSON.stringify(storyboardApproval.payload), seq: 2 }
+        ]
+      })
+    );
+
+    render(<App />);
+
+    const specCard = await screen.findByRole('article', { name: '确认创作规范' });
+    expect(screen.queryByRole('article', { name: '确认故事板方案' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '提交' })).toHaveLength(1);
+    expect(within(specCard).getByText('查看完整审核内容')).toBeInTheDocument();
+    await user.click(within(specCard).getByRole('radio', { name: '确认' }));
+    await user.click(within(specCard).getByRole('button', { name: '提交' }));
+
+    expect(await screen.findByRole('article', { name: '确认故事板方案' })).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '确认创作规范' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '提交' })).toHaveLength(1);
+  });
+
+  it('drops a model spec preview that arrives after the authoritative Approval and keeps it dropped after Decision', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal('fetch', mockAigcFetch());
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    const source = DefaultMockEventSource.instances[0];
+    act(() => {
+      source.emit({
+        ...appendCardEvent(
+          'approval-spec-live',
+          {
+            root: 'root',
+            title: '创作规范审核',
+            status: 'pending',
+            data: {
+              approval_id: 'approval-spec-live',
+              artifact_type: 'creation_spec_revision',
+              decision_version: 0
+            },
+            components: [
+              { id: 'root', component: { Card: { children: ['details'] } } },
+              { id: 'details', component: { Markdown: { value: '系统审核详情' } } }
+            ]
+          },
+          { card_id: 'approval:approval-spec-live' }
+        ),
+        seq: 1
+      });
+      source.emit({
+        ...appendCardEvent(
+          'spec-review',
+          {
+            root: 'root',
+            title: '规格预览',
+            components: [
+              { id: 'root', component: { Card: { children: ['details'] } } },
+              { id: 'details', component: { Markdown: { value: '模型重复规格预览' } } }
+            ]
+          },
+          { card_id: 'spec-review:duplicate-live' }
+        ),
+        seq: 2
+      });
+    });
+
+    const approvalCard = await screen.findByRole('article', { name: '确认创作规范' });
+    expect(screen.queryByRole('article', { name: '规格预览' })).not.toBeInTheDocument();
+    expect(screen.queryByText('模型重复规格预览')).not.toBeInTheDocument();
+    await user.click(within(approvalCard).getByRole('radio', { name: '确认' }));
+    await user.click(within(approvalCard).getByRole('button', { name: '提交' }));
+
+    await waitFor(() => expect(screen.queryByRole('article', { name: '确认创作规范' })).not.toBeInTheDocument());
+    expect(screen.queryByRole('article', { name: '规格预览' })).not.toBeInTheDocument();
+    expect(screen.queryByText('模型重复规格预览')).not.toBeInTheDocument();
+  });
+
+  it('replays Approval, model preview, and terminal Decision history without restoring the preview', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const approvalCard = appendCardEvent(
+      'approval-storyboard-history',
+      {
+        root: 'root',
+        title: '故事板审核',
+        status: 'pending',
+        data: {
+          approval_id: 'approval-storyboard-history',
+          artifact_type: 'storyboard_revision',
+          decision_version: 0
+        },
+        components: [
+          { id: 'root', component: { Card: { children: ['details'] } } },
+          { id: 'details', component: { Markdown: { value: '系统故事板审核详情' } } }
+        ]
+      },
+      { card_id: 'approval:approval-storyboard-history' }
+    );
+    const modelPreview = appendCardEvent(
+      'storyboard-preview',
+      {
+        root: 'root',
+        title: '故事板预览',
+        components: [
+          { id: 'root', component: { Card: { children: ['details'] } } },
+          { id: 'details', component: { Markdown: { value: '历史中的重复故事板预览' } } }
+        ]
+      },
+      { card_id: 'storyboard-preview:duplicate-history' }
+    );
+    const terminalDecision = updateCardEvent('chat', 'approval:approval-storyboard-history', {
+      status: 'approved',
+      data: { approval_id: 'approval-storyboard-history' }
+    });
+    vi.stubGlobal(
+      'fetch',
+      mockAigcFetch({
+        messages: [
+          { id: 'm-approval-history', role: 'assistant', content: JSON.stringify(approvalCard.payload), seq: 1 },
+          { id: 'm-preview-history', role: 'assistant', content: JSON.stringify(modelPreview.payload), seq: 2 },
+          { id: 'm-decision-history', role: 'assistant', content: JSON.stringify(terminalDecision.payload), seq: 3 }
+        ]
+      })
+    );
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    expect(screen.queryByRole('article', { name: '确认故事板方案' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '故事板预览' })).not.toBeInTheDocument();
+    expect(screen.queryByText('历史中的重复故事板预览')).not.toBeInTheDocument();
   });
 
   it('blocks an approval-like A2UI form that has no approval_id', async () => {
@@ -1847,7 +2136,8 @@ describe('DORAIGC static client pages', () => {
     });
     expect(await screen.findByText('实时镜头版本')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '实时审核卡' })).toBeInTheDocument();
-    expect(screen.getAllByText('实时任务目标').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('1 项正在生成 · 0/1 项已完成')).toBeInTheDocument();
+    expect(screen.queryByText('实时任务目标')).not.toBeInTheDocument();
     expect(screen.getAllByText('实时确认消息').length).toBeGreaterThanOrEqual(1);
     expect(container.querySelector('img[src="https://example.com/live.png"]')).not.toBeNull();
 
@@ -1865,7 +2155,8 @@ describe('DORAIGC static client pages', () => {
 
     expect(screen.getByText('实时镜头版本')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '实时审核卡' })).toBeInTheDocument();
-    expect(screen.getAllByText('实时任务目标').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('1 项正在生成 · 0/1 项已完成')).toBeInTheDocument();
+    expect(screen.queryByText('实时任务目标')).not.toBeInTheDocument();
     expect(screen.queryByText('过期任务目标')).not.toBeInTheDocument();
     expect(screen.getAllByText('实时确认消息').length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText('过期历史消息')).not.toBeInTheDocument();
@@ -1920,7 +2211,8 @@ describe('DORAIGC static client pages', () => {
     const refresh = screen.getByRole('button', { name: '刷新' });
     await user.click(refresh);
     await user.click(refresh);
-    expect(await screen.findByText('最新刷新任务')).toBeInTheDocument();
+    expect(await screen.findByText('1 项正在生成 · 0/1 项已完成')).toBeInTheDocument();
+    expect(screen.queryByText('最新刷新任务')).not.toBeInTheDocument();
 
     await act(async () => {
       resolveOlderJobs(
@@ -1929,7 +2221,8 @@ describe('DORAIGC static client pages', () => {
       await olderJobsResponse;
     });
 
-    expect(screen.getByText('最新刷新任务')).toBeInTheDocument();
+    expect(screen.getByText('1 项正在生成 · 0/1 项已完成')).toBeInTheDocument();
+    expect(screen.queryByText('最新刷新任务')).not.toBeInTheDocument();
     expect(screen.queryByText('过期刷新任务')).not.toBeInTheDocument();
   });
 
@@ -2663,6 +2956,7 @@ describe('DORAIGC static client pages', () => {
     const fetchMock = mockAigcFetch({
       messages: [
         { id: 'm1', role: 'user', content: '生成一个武侠短片' },
+        { id: 'm-tool-call', role: 'assistant', content: '内部规划后调用故事板工具。', tool_calls: 'W3siaWQiOiJjYWxsLTEifV0=' },
         { id: 'm2', role: 'assistant', content: '故事板已生成。' }
       ]
     });
@@ -2672,6 +2966,7 @@ describe('DORAIGC static client pages', () => {
 
     expect(await screen.findByText('生成一个武侠短片')).toBeInTheDocument();
     expect(screen.getByText('故事板已生成。')).toBeInTheDocument();
+    expect(screen.queryByText('内部规划后调用故事板工具。')).not.toBeInTheDocument();
   });
 
   it('imports a Skill.md file and binds it to the current workspace session', async () => {

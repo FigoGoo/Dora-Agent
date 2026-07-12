@@ -51,7 +51,7 @@ func (s *chatA2UISurface) toolProgressEvents(event AgentEvent) []a2ui.RenderEven
 			if strings.TrimSpace(call.ID) == "" || isInternalToolProgress(call.Function.Name) {
 				continue
 			}
-			actions = append(actions, toolRunAction(call.ID, call.Function.Name, "running", nil))
+			actions = append(actions, toolRunAction(publicToolRunCardID(call.Function.Name, call.ID), call.ID, call.Function.Name, "running", nil))
 		}
 	} else if role == "tool" {
 		toolCallID, toolName := payloadString(values, "tool_call_id"), payloadString(values, "tool_name")
@@ -66,7 +66,7 @@ func (s *chatA2UISurface) toolProgressEvents(event AgentEvent) []a2ui.RenderEven
 			}
 		}
 		if toolCallID != "" {
-			actions = append(actions, toolRunAction(toolCallID, toolName, status, result))
+			actions = append(actions, toolRunAction(publicToolRunCardID(toolName, toolCallID), toolCallID, toolName, status, result))
 		}
 	}
 	if len(actions) == 0 {
@@ -80,7 +80,7 @@ func isInternalToolProgress(toolName string) bool {
 	return strings.TrimSpace(toolName) == "skill"
 }
 
-func toolRunAction(toolCallID, toolName, status string, result map[string]any) a2ui.Action {
+func toolRunAction(cardID, toolCallID, toolName, status string, result map[string]any) a2ui.Action {
 	toolName = strings.TrimSpace(toolName)
 	displayNames := map[string]string{
 		"analyze_materials": "素材分析中", "plan_creation_spec": "创作规范生成中",
@@ -93,13 +93,26 @@ func toolRunAction(toolCallID, toolName, status string, result map[string]any) a
 	view := map[string]any{"tool_call_id": toolCallID, "stage_run_id": toolCallID, "tool_key": toolName, "display_name": displayName, "status": status}
 	if result != nil {
 		view["result"] = result
-		for _, key := range []string{"operation_id", "batch_id", "storyboard_id", "storyboard_version"} {
+		for _, key := range []string{"operation_id", "batch_id", "storyboard_id", "storyboard_version", "stage_run_id"} {
 			if value, ok := result[key]; ok {
 				view[key] = value
 			}
 		}
 	}
-	return a2ui.Action{Type: a2ui.ActionUpdateCard, Surface: "tool_runs", Target: &a2ui.ActionTarget{Surface: "tool_runs", CardID: "tool_run:" + toolCallID}, Payload: map[string]any{"tool_run": view}}
+	return a2ui.Action{Type: a2ui.ActionUpdateCard, Surface: "tool_runs", Target: &a2ui.ActionTarget{Surface: "tool_runs", CardID: cardID}, Payload: map[string]any{"tool_run": view}}
+}
+
+// publicToolRunCardID 把会跨多个 ToolCall/Batch 的高层生成能力投影到同一张卡。
+// Provider Job 和 Operation 有自己的 durable 领域 ID，但它们不是聊天卡边界。
+func publicToolRunCardID(toolName, toolCallID string) string {
+	switch strings.TrimSpace(toolName) {
+	case "generate_media":
+		return "tool_run:generate_media"
+	case "assemble_output":
+		return "tool_run:assemble_output"
+	default:
+		return "tool_run:" + strings.TrimSpace(toolCallID)
+	}
 }
 
 // assistantEvents 只接受 Agent 直出的纯 A2UI ActionEnvelope。

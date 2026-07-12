@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
@@ -42,6 +44,10 @@ func TestPublishApprovalCardUsesAuthoritativeDecisionForm(t *testing.T) {
 	card := envelope.Actions[0].Card
 	if card.SubmitLabel != "提交" {
 		t.Fatalf("submit label = %q, want 提交", card.SubmitLabel)
+	}
+	rawCard, _ := json.Marshal(card)
+	if strings.Contains(string(rawCard), record.Binding.ArtifactID) || strings.Contains(string(rawCard), record.ArtifactType+" ·") {
+		t.Fatalf("approval card exposes internal artifact identifiers: %s", rawCard)
 	}
 	data, ok := card.Data.(map[string]any)
 	if !ok || data["approval_id"] != record.ID {

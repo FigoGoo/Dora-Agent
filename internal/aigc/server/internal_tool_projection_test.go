@@ -41,3 +41,30 @@ func TestToolProgressEventsHideSkillLoaderError(t *testing.T) {
 		t.Fatalf("Skill loader error leaked to user-visible tool_runs: %#v", events)
 	}
 }
+
+func TestToolProgressEventsCollapseGenerationCallsIntoStableCapabilityCards(t *testing.T) {
+	surface := newChatA2UISurface("s1")
+	tests := []struct {
+		toolName string
+		callIDs  []string
+		wantCard string
+	}{
+		{toolName: "generate_media", callIDs: []string{"call-media-1", "call-media-2"}, wantCard: "tool_run:generate_media"},
+		{toolName: "assemble_output", callIDs: []string{"call-assembly-1", "call-assembly-2"}, wantCard: "tool_run:assemble_output"},
+	}
+	for _, test := range tests {
+		for _, callID := range test.callIDs {
+			event := messageToAgentEvent(schema.AssistantMessage("", []schema.ToolCall{{
+				ID: callID, Type: "function", Function: schema.FunctionCall{Name: test.toolName, Arguments: `{}`},
+			}}))
+			events := surface.eventsFromAgentEvent(event)
+			if len(events) != 1 {
+				t.Fatalf("%s progress events = %#v", test.toolName, events)
+			}
+			envelope := events[0].Payload.(a2ui.ActionEnvelope)
+			if len(envelope.Actions) != 1 || envelope.Actions[0].Target == nil || envelope.Actions[0].Target.CardID != test.wantCard {
+				t.Fatalf("%s call %s projected as %#v", test.toolName, callID, envelope.Actions)
+			}
+		}
+	}
+}

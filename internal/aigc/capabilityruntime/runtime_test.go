@@ -264,6 +264,7 @@ func TestRuntimeExecutesAllFiveCapabilityHandlers(t *testing.T) {
 		t.Fatalf("analysis replay=%+v err=%v", analysisReplay, err)
 	}
 	command.RequestID, command.IdempotencyKey = "request-2", "idem-2"
+	command.ToolCallID, command.StageRunID = "call-spec", "stage:call-spec"
 	plannedSpec, err := handlers.PlanCreationSpec(ctx, capability.Request[capability.PlanCreationSpecIntent]{Command: command, Intent: capability.PlanCreationSpecIntent{Mode: "create", Goal: "make short drama"}})
 	if err != nil || plannedSpec.Status != capability.StatusWaitingUser || plannedSpec.Data.ApprovalID == "" {
 		t.Fatalf("spec=%+v err=%v", plannedSpec, err)
@@ -272,8 +273,12 @@ func TestRuntimeExecutesAllFiveCapabilityHandlers(t *testing.T) {
 	if err != nil || plannedSpecReplay.Data.SpecID != plannedSpec.Data.SpecID || plannedSpecReplay.Data.SpecVersion != plannedSpec.Data.SpecVersion {
 		t.Fatalf("spec replay=%+v err=%v", plannedSpecReplay, err)
 	}
+	if request := approvalRequests[len(approvalRequests)-1]; request.Approve.Payload["tool_call_id"] != "call-spec" || request.Approve.Payload["stage_run_id"] != "stage:call-spec" || request.Reject.Payload["tool_call_id"] != "call-spec" {
+		t.Fatalf("spec approval lost trusted ToolRun correlation: %+v", request)
+	}
 	specs.values[len(specs.values)-1].Status = spec.StatusConfirmed
 	command.RequestID, command.IdempotencyKey = "request-3", "idem-3"
+	command.ToolCallID, command.StageRunID = "call-storyboard", "stage:call-storyboard"
 	plannedBoard, err := handlers.PlanStoryboard(ctx, capability.Request[capability.PlanStoryboardIntent]{Command: command, Intent: capability.PlanStoryboardIntent{Mode: "create"}})
 	if err != nil || plannedBoard.Data.Revision.Modules[0].PlannedCount != 1 {
 		t.Fatalf("board=%+v err=%v", plannedBoard, err)
@@ -299,6 +304,9 @@ func TestRuntimeExecutesAllFiveCapabilityHandlers(t *testing.T) {
 	lastApproval := approvalRequests[len(approvalRequests)-1]
 	if lastApproval.StoryboardVersion != reviewVersion || intFromAny(lastApproval.Approve.Payload["base_version"]) != reviewVersion {
 		t.Fatalf("approval replay was rebuilt from mutable aggregate: %+v", lastApproval)
+	}
+	if lastApproval.Approve.Payload["tool_call_id"] != "call-storyboard" || lastApproval.Approve.Payload["stage_run_id"] != "stage:call-storyboard" || lastApproval.Reject.Payload["tool_call_id"] != "call-storyboard" {
+		t.Fatalf("storyboard approval lost trusted ToolRun correlation: %+v", lastApproval)
 	}
 	if !aggregate.HasApplied("idem-3") || aggregate.HasApplied("request-3") {
 		t.Fatalf("plan command identity must use per-tool idempotency key: %+v", aggregate.AppliedCommandIDs)
@@ -339,6 +347,82 @@ func TestRuntimeExecutesAllFiveCapabilityHandlers(t *testing.T) {
 	assemblyReplay, err := handlers.AssembleOutput(ctx, capability.Request[capability.AssembleOutputIntent]{Command: command, Intent: capability.AssembleOutputIntent{Mode: "plan", OutputType: "vertical_video"}})
 	if err != nil || assemblyReplay.Data.AssemblyRevisionID != assembly.Data.AssemblyRevisionID {
 		t.Fatalf("assembly replay=%+v err=%v", assemblyReplay, err)
+	}
+}
+
+func TestPlanStoryboardRejectsWhileNewerCreationSpecIsReviewing(t *testing.T) {
+	ctx := context.Background()
+	artifacts := artifact.NewMemoryStore()
+	specs := &memorySpecs{values: []spec.FinalVideoSpec{
+		{ID: "spec-1", SessionID: "session-1", Version: 1, Status: spec.StatusConfirmed, Title: "已确认规范", VideoType: "short_video", DurationSeconds: 8, AspectRatio: "9:16"},
+		{ID: "spec-1", SessionID: "session-1", Version: 2, Status: spec.StatusReviewing, Title: "待审新规范", VideoType: "short_video", DurationSeconds: 12, AspectRatio: "9:16"},
+	}}
+	repository := storyboard.NewMemoryAggregateRepository()
+	storyCommands, _ := storyboard.NewCommandService(repository)
+	workflowStore := generation.NewMemoryStore()
+	approvalCalls := 0
+	runtime, err := New(Config{
+		Model: scriptedModel{}, Artifacts: artifacts, Specs: specs,
+		Storyboards: repository, StoryboardCommands: storyCommands,
+		GenerationCommands: generation.NewCommandService(generation.CommandServiceConfig{Store: workflowStore}),
+		CreateApproval: func(context.Context, ApprovalRequest) (string, error) {
+			approvalCalls++
+			return "unexpected", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = runtime.Handlers().PlanStoryboard(ctx, capability.Request[capability.PlanStoryboardIntent]{
+		Command: capability.CommandContext{SessionID: "session-1", RequestID: "request-storyboard", IdempotencyKey: "idem-storyboard"},
+		Intent:  capability.PlanStoryboardIntent{Mode: "replan"},
+	})
+	if !errors.Is(err, ErrCreationSpecReviewPending) {
+		t.Fatalf("PlanStoryboard() error = %v, want ErrCreationSpecReviewPending", err)
+	}
+	if approvalCalls != 0 {
+		t.Fatalf("storyboard approval created before Spec decision: %d", approvalCalls)
+	}
+	if _, err := repository.GetAggregateBySession(ctx, "session-1"); !errors.Is(err, storyboard.ErrAggregateNotFound) {
+		t.Fatalf("storyboard side effect created before Spec decision: %v", err)
+	}
+}
+
+func TestPrimaryReviewGateRunsBeforeNewCreationSpecSideEffects(t *testing.T) {
+	ctx := context.Background()
+	gateErr := errors.New("storyboard review is pending")
+	specs := &memorySpecs{values: []spec.FinalVideoSpec{{
+		ID: "spec-1", SessionID: "session-1", Version: 1, Status: spec.StatusConfirmed,
+		Title: "已确认规范", VideoType: "short_video", DurationSeconds: 8, AspectRatio: "9:16",
+	}}}
+	repository := storyboard.NewMemoryAggregateRepository()
+	storyCommands, _ := storyboard.NewCommandService(repository)
+	workflowStore := generation.NewMemoryStore()
+	approvalCalls := 0
+	runtime, err := New(Config{
+		Model: scriptedModel{}, Artifacts: artifact.NewMemoryStore(), Specs: specs,
+		Storyboards: repository, StoryboardCommands: storyCommands,
+		GenerationCommands: generation.NewCommandService(generation.CommandServiceConfig{Store: workflowStore}),
+		PrimaryReviewGate:  func(context.Context, string) error { return gateErr },
+		CreateApproval: func(context.Context, ApprovalRequest) (string, error) {
+			approvalCalls++
+			return "unexpected", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = runtime.Handlers().PlanCreationSpec(ctx, capability.Request[capability.PlanCreationSpecIntent]{
+		Command: capability.CommandContext{SessionID: "session-1", RequestID: "request-revise", IdempotencyKey: "idem-revise"},
+		Intent:  capability.PlanCreationSpecIntent{Mode: "revise", Goal: "revise while storyboard review is pending"},
+	})
+	if !errors.Is(err, gateErr) {
+		t.Fatalf("PlanCreationSpec() error = %v, want primary review gate error", err)
+	}
+	if len(specs.values) != 1 || approvalCalls != 0 {
+		t.Fatalf("primary review gate ran after side effects: specs=%+v approval_calls=%d", specs.values, approvalCalls)
 	}
 }
 

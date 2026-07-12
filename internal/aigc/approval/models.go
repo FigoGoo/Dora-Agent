@@ -57,15 +57,34 @@ const (
 )
 
 var (
-	ErrNotFound            = errors.New("approval not found")
-	ErrAlreadyDecided      = errors.New("approval already decided")
-	ErrVersionConflict     = errors.New("approval decision version conflict")
-	ErrIdempotencyConflict = errors.New("approval idempotency conflict")
-	ErrInvalidTransition   = errors.New("invalid approval transition")
-	ErrReviewModeImmutable = errors.New("approval review mode is immutable")
-	ErrFallbackFenced      = errors.New("approval fallback fence rejected")
-	ErrContinuationBusy    = errors.New("approval continuation has an active claim")
+	ErrNotFound             = errors.New("approval not found")
+	ErrAlreadyDecided       = errors.New("approval already decided")
+	ErrVersionConflict      = errors.New("approval decision version conflict")
+	ErrIdempotencyConflict  = errors.New("approval idempotency conflict")
+	ErrInvalidTransition    = errors.New("invalid approval transition")
+	ErrReviewModeImmutable  = errors.New("approval review mode is immutable")
+	ErrFallbackFenced       = errors.New("approval fallback fence rejected")
+	ErrContinuationBusy     = errors.New("approval continuation has an active claim")
+	ErrPrimaryReviewPending = errors.New("a primary creation review is already pending for the session")
 )
+
+const pendingPrimaryReviewIndex = "idx_aigc_approvals_one_pending_primary_review_per_session"
+
+// isPrimaryReviewApproval identifies the two system-owned review gates that
+// must be serialized for a session. Candidate assets are intentionally not in
+// this set: they are reviewed as one storyboard-level batch and may have many
+// durable Approval rows underneath that single surface.
+func isPrimaryReviewApproval(value Approval) bool {
+	if value.Status != StatusPending {
+		return false
+	}
+	switch strings.TrimSpace(value.ArtifactType) {
+	case "creation_spec_revision", "storyboard_revision":
+		return true
+	default:
+		return false
+	}
+}
 
 // VersionBinding freezes the semantic artifact versions reviewed by the user.
 // For a target-scoped approval, the target/prompt/epoch tuple is authoritative

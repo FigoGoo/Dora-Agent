@@ -110,6 +110,52 @@ func TestInterruptDecisionWithoutMappingRollsBack(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreSerializesSpecAndStoryboardPrimaryReviews(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	specReview := testApproval("approval-spec", ReviewModeDurable)
+	specReview.ArtifactType = "creation_spec_revision"
+	specReview.Binding = VersionBinding{ArtifactID: "spec-1", ArtifactVersion: 1}
+	created, err := store.Create(ctx, specReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := store.GetPendingPrimaryReviewBySession(ctx, specReview.SessionID); err != nil || pending.ID != created.Approval.ID {
+		t.Fatalf("pending primary review = %+v, err=%v", pending, err)
+	}
+
+	storyboardReview := testApproval("approval-storyboard", ReviewModeDurable)
+	storyboardReview.Binding = VersionBinding{ArtifactID: "revision-2", ArtifactVersion: 1, StoryboardID: "storyboard-1", StoryboardVersion: 1}
+	if _, err := store.Create(ctx, storyboardReview); !errors.Is(err, ErrPrimaryReviewPending) {
+		t.Fatalf("concurrent primary review error = %v, want ErrPrimaryReviewPending", err)
+	}
+	candidateReview := testApproval("approval-candidate", ReviewModeDurable)
+	candidateReview.ArtifactType = "candidate_asset"
+	candidateReview.Binding.ArtifactID = "binding-1"
+	if candidate, err := store.Create(ctx, candidateReview); err != nil || !candidate.Created {
+		t.Fatalf("candidate Approval was incorrectly serialized with the system review card: %+v, err=%v", candidate, err)
+	}
+
+	// Idempotent replay of the already-created review remains valid while the
+	// pending gate is held.
+	if replay, err := store.Create(ctx, specReview); err != nil || replay.Created || replay.Approval.ID != created.Approval.ID {
+		t.Fatalf("pending primary review replay = %+v, err=%v", replay, err)
+	}
+
+	if _, err := store.Decide(ctx, DecideCommand{
+		ApprovalID: created.Approval.ID, IdempotencyKey: "decision-spec-approved",
+		Decision: DecisionApprove, CurrentBinding: created.Approval.Binding,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetPendingPrimaryReviewBySession(ctx, specReview.SessionID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("decided Spec still holds primary review gate: %v", err)
+	}
+	if next, err := store.Create(ctx, storyboardReview); err != nil || !next.Created {
+		t.Fatalf("storyboard review after spec decision = %+v, err=%v", next, err)
+	}
+}
+
 func TestDurableDecisionUsesDeterministicContinuationAndRejectCommand(t *testing.T) {
 	store := NewMemoryStore()
 	created, err := store.Create(context.Background(), testApproval("approval-durable", ReviewModeDurable))

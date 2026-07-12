@@ -2,6 +2,7 @@ package approval
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -17,11 +18,65 @@ func TestMigrationOwnsApprovalDecisionContinuationOutboxAndImmutability(t *testi
 	for _, required := range []string{
 		"aigc_approvals", "aigc_approval_decisions", "aigc_approval_continuations",
 		"aigc_outbox_events", "aigc_candidate_approval_batches", "review_mode", "durable_fallback",
-		"trg_aigc_approval_review_mode_immutable",
+		"trg_aigc_approval_review_mode_immutable", pendingPrimaryReviewIndex,
 	} {
 		if !strings.Contains(joined, required) {
 			t.Errorf("migration is missing %q", required)
 		}
+	}
+}
+
+func TestPostgresSerializesSpecAndStoryboardPrimaryReviews(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db, err := aigcstorage.OpenAgentPostgres(ctx, aigcconfig.LoadFromEnv())
+	if err != nil {
+		t.Skipf("local postgres is not available: %v", err)
+	}
+	store := NewPostgresStore(db)
+	if err := store.AutoMigrate(ctx); err != nil {
+		t.Fatalf("AutoMigrate() error = %v", err)
+	}
+
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	sessionID := "session-primary-review-" + suffix
+	specReview := testApproval("approval-primary-spec-"+suffix, ReviewModeDurable)
+	specReview.SessionID = sessionID
+	specReview.ArtifactType = "creation_spec_revision"
+	specReview.Binding = VersionBinding{ArtifactID: "spec-" + suffix, ArtifactVersion: 1}
+	created, err := store.Create(ctx, specReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := store.GetPendingPrimaryReviewBySession(ctx, sessionID); err != nil || pending.ID != created.Approval.ID {
+		t.Fatalf("pending primary review = %+v, err=%v", pending, err)
+	}
+
+	storyboardReview := testApproval("approval-primary-storyboard-"+suffix, ReviewModeDurable)
+	storyboardReview.SessionID = sessionID
+	storyboardReview.Binding = VersionBinding{ArtifactID: "revision-" + suffix, ArtifactVersion: 1, StoryboardID: "storyboard-" + suffix, StoryboardVersion: 1}
+	if _, err := store.Create(ctx, storyboardReview); !errors.Is(err, ErrPrimaryReviewPending) {
+		t.Fatalf("concurrent primary review error = %v, want ErrPrimaryReviewPending", err)
+	}
+
+	if _, err := store.Decide(ctx, DecideCommand{
+		ApprovalID: created.Approval.ID, IdempotencyKey: "decision-primary-spec-" + suffix,
+		Decision: DecisionApprove, CurrentBinding: created.Approval.Binding,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetPendingPrimaryReviewBySession(ctx, sessionID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("decided Spec still holds primary review gate: %v", err)
+	}
+	createdBoard, err := store.Create(ctx, storyboardReview)
+	if err != nil || !createdBoard.Created {
+		t.Fatalf("storyboard review after spec decision = %+v, err=%v", createdBoard, err)
+	}
+	if _, err := store.Decide(ctx, DecideCommand{
+		ApprovalID: createdBoard.Approval.ID, IdempotencyKey: "decision-primary-storyboard-" + suffix,
+		Decision: DecisionReject, CurrentBinding: createdBoard.Approval.Binding,
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

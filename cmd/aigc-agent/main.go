@@ -199,6 +199,16 @@ func main() {
 		Model: chatModel, Artifacts: artifactStore, Specs: specStore, Assets: assetStore,
 		Storyboards: storyboardStore, StoryboardCommands: storyboardCommands,
 		GenerationCommands: generationCommands, GenerationJobs: workflowStore, GenerationWorkflow: workflowStore, GenerationPreflight: generationPreflight, CreateApproval: createApproval,
+		PrimaryReviewGate: func(ctx context.Context, sessionID string) error {
+			pending, err := approvalStore.GetPendingPrimaryReviewBySession(ctx, sessionID)
+			if errors.Is(err, aigcapproval.ErrNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("%w: approval_id=%s artifact_type=%s", aigcapproval.ErrPrimaryReviewPending, pending.ID, pending.ArtifactType)
+		},
 		LocalDemoPlanning: localDemoProviders,
 		PublishStoryboard: func(ctx context.Context, aggregate aigcstoryboard.StoryboardAggregate, source string) error {
 			envelope := aigca2ui.ActionEnvelope{Version: aigca2ui.Version1, Actions: []aigca2ui.Action{{
@@ -318,9 +328,19 @@ func publishApprovalCard(ctx context.Context, publisher aigca2ui.EventPublisher,
 	if record.ArtifactType == "candidate_asset" {
 		return nil
 	}
+	reviewTitle := "确认创作结果"
+	reviewIntro := "请审核当前创作结果。"
+	switch record.ArtifactType {
+	case "creation_spec_revision":
+		reviewTitle = "确认创作规范"
+		reviewIntro = "请审核本次创作规范。"
+	case "storyboard_revision":
+		reviewTitle = "确认故事板方案"
+		reviewIntro = "请审核本次故事板方案。"
+	}
 	children := []string{"message"}
 	components := []aigca2ui.Component{
-		aigca2ui.Text("message", fmt.Sprintf("%s · %s v%d", record.ArtifactType, record.Binding.ArtifactID, record.Binding.ArtifactVersion), "", ""),
+		aigca2ui.Text("message", reviewIntro, "", ""),
 	}
 	data := map[string]any{"approval_id": record.ID, "review_mode": record.ReviewMode, "artifact_type": record.ArtifactType}
 	switch record.ArtifactType {
@@ -372,7 +392,7 @@ func publishApprovalCard(ctx context.Context, publisher aigca2ui.EventPublisher,
 	components = append(components, aigca2ui.SingleChoice("decision", aigca2ui.ChoiceComp{Key: "decision", Label: "审核决定", Required: true, Options: []aigca2ui.ChoiceOption{{Value: aigcapproval.DecisionApprove, Label: "确认"}, {Value: aigcapproval.DecisionReject, Label: "拒绝"}}}))
 	children = append(children, "decision")
 	components = append([]aigca2ui.Component{aigca2ui.CardContainer("root", children)}, components...)
-	card := aigca2ui.Card{Type: aigca2ui.CardTypeInfoCollection, Title: "请审核创作结果", Message: "确认后继续下一阶段；拒绝会保留当前已生效版本。", Status: string(record.Status), Root: "root", SubmitLabel: "提交",
+	card := aigca2ui.Card{Type: aigca2ui.CardTypeInfoCollection, Title: reviewTitle, Message: "确认后继续下一阶段；拒绝会保留当前已生效版本。", Status: string(record.Status), Root: "root", SubmitLabel: "提交",
 		Components: components,
 		Data:       data,
 	}

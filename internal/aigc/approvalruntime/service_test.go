@@ -273,16 +273,17 @@ func TestCreationSpecApprovalCannotRollBackAfterLatestCandidateIsApproved(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	v3ApprovalID := createApproval(v3)
+	// The primary-review invariant no longer allows v2 and v3 Approval rows to
+	// remain pending together. Simulate the competing latest semantic commit
+	// directly; the older frozen v2 decision must still resolve to stale.
+	if _, err := specs.DecideRevision(ctx, v3.ID, v3.Version, true); err != nil {
+		t.Fatal(err)
+	}
 	service, err := New(Config{Approvals: approvals, Continuations: continuations, Inputs: runtimeInputs(continuations), Specs: specs})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	latestDecision, err := service.Decide(ctx, DecideRequest{ApprovalID: v3ApprovalID, IdempotencyKey: "decision-v3", Decision: approval.DecisionApprove})
-	if err != nil || !latestDecision.Applied || latestDecision.Decision.Approval.Status != approval.StatusApproved {
-		t.Fatalf("latest decision=%+v err=%v", latestDecision, err)
-	}
 	staleDecision, err := service.Decide(ctx, DecideRequest{ApprovalID: v2ApprovalID, IdempotencyKey: "decision-v2", Decision: approval.DecisionApprove})
 	if err != nil {
 		t.Fatal(err)

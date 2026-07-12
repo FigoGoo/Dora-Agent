@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,7 +108,7 @@ func TestBatchContinuationCarriesTrustedTerminalResultAndCost(t *testing.T) {
 	}
 }
 
-func TestLifecycleProjectionUsesDurableSnapshotAndUpdatesPublicStage(t *testing.T) {
+func TestLifecycleProjectionHidesJobCardsAndUsesOneStableCapabilityCard(t *testing.T) {
 	ctx := context.Background()
 	store := generation.NewMemoryStore()
 	_, _, err := store.CreateWorkflow(ctx, generation.CreateWorkflowCommand{
@@ -155,6 +156,16 @@ func TestLifecycleProjectionUsesDurableSnapshotAndUpdatesPublicStage(t *testing.
 	if _, err := generation.NewBatchBarrier(store).TryFinalize(ctx, "batch-progress"); err != nil {
 		t.Fatal(err)
 	}
+	events, _ = store.ListOutbox(ctx, generation.OutboxPending, 0)
+	var terminalEvent generation.OutboxEvent
+	for _, event := range events {
+		if strings.HasPrefix(event.EventType, "batch.") && event.EventType != generation.EventBatchFinalizeRequested {
+			terminalEvent = event
+		}
+	}
+	if terminalEvent.ID == "" {
+		t.Fatalf("terminal batch event missing: %+v", events)
+	}
 	captured := &capturingA2UIEvents{}
 	publisher := SessionSignalPublisher{Store: store, Events: captured, Now: func() time.Time { return time.Unix(100, 0) }}
 	if err := publisher.PublishOutbox(ctx, runningEvent); err != nil {
@@ -166,26 +177,67 @@ func TestLifecycleProjectionUsesDurableSnapshotAndUpdatesPublicStage(t *testing.
 	if err := publisher.PublishOutbox(ctx, acceptedEvent); err != nil {
 		t.Fatal(err)
 	}
-	if len(captured.events) != 3 || captured.events[0].ID != runningEvent.ID+":projection" || captured.events[1].ID != captured.events[0].ID {
-		t.Fatalf("projection replay ids=%+v", captured.events)
+	if err := publisher.PublishOutbox(ctx, terminalEvent); err != nil {
+		t.Fatal(err)
 	}
-	envelope, ok := captured.events[0].Payload.(a2ui.ActionEnvelope)
-	if !ok || len(envelope.Actions) != 2 {
-		t.Fatalf("envelope=%#v", captured.events[0].Payload)
+	// Replayed Job lifecycle rows are deliberately silent in chat. Only the
+	// accepted and terminal Operation/Batch snapshots update the capability card.
+	if len(captured.events) != 2 {
+		t.Fatalf("projection events=%+v", captured.events)
 	}
-	jobPayload := envelope.Actions[0].Payload.(map[string]any)["tool_run"].(map[string]any)
-	if envelope.Actions[0].Target.CardID != "job:job-progress" || jobPayload["status"] != generation.StatusRunning || jobPayload["status_version"] != 2 || jobPayload["error_code"] != "" {
-		t.Fatalf("job projection=%+v action=%+v", jobPayload, envelope.Actions[0])
+	acceptedEnvelope, ok := captured.events[0].Payload.(a2ui.ActionEnvelope)
+	if !ok || len(acceptedEnvelope.Actions) != 1 {
+		t.Fatalf("accepted envelope=%#v", captured.events[0].Payload)
 	}
-	stagePayload := envelope.Actions[1].Payload.(map[string]any)["tool_run"].(map[string]any)
-	nodes := stagePayload["nodes"].([]map[string]any)
-	if envelope.Actions[1].Target.CardID != "tool_run:call-progress" || stagePayload["stage_run_id"] != "stage-progress" || len(nodes) != 1 || nodes[0]["status"] != generation.StatusRunning || nodes[0]["status_version"] != 2 {
-		t.Fatalf("stage projection=%+v action=%+v", stagePayload, envelope.Actions[1])
+	acceptedAction := acceptedEnvelope.Actions[0]
+	acceptedPayload := acceptedAction.Payload.(map[string]any)
+	acceptedView := acceptedPayload["tool_run"].(map[string]any)
+	if acceptedAction.Target == nil || acceptedAction.Target.CardID != "tool_run:generate_media" || acceptedView["status"] != generation.BatchStatusWaitingJobs {
+		t.Fatalf("accepted projection=%+v action=%+v", acceptedView, acceptedAction)
 	}
-	acceptedEnvelope := captured.events[2].Payload.(a2ui.ActionEnvelope)
-	operationView := acceptedEnvelope.Actions[0].Payload.(map[string]any)["operation"].(map[string]any)
-	acceptedStage := acceptedEnvelope.Actions[1].Payload.(map[string]any)["tool_run"].(map[string]any)
-	if operationView["status"] != generation.BatchStatusWaitingJobs || operationView["status_version"] != 1 || acceptedStage["status"] != generation.BatchStatusWaitingJobs || acceptedStage["status_version"] != 1 {
-		t.Fatalf("accepted operation=%+v stage=%+v", operationView, acceptedStage)
+	if _, exists := acceptedView["status_version"]; exists {
+		t.Fatalf("session-stable capability card must not reuse per-operation status versions: %+v", acceptedView)
+	}
+	for _, forbidden := range []string{"job_id", "target_id", "asset_slot", "result_asset_ids", "nodes"} {
+		if _, exists := acceptedView[forbidden]; exists {
+			t.Fatalf("public capability card leaked %s: %+v", forbidden, acceptedView)
+		}
+	}
+	if _, exists := acceptedPayload["refresh_resources"]; exists {
+		t.Fatalf("non-terminal projection requested a resource refresh: %+v", acceptedPayload)
+	}
+
+	terminalEnvelope := captured.events[1].Payload.(a2ui.ActionEnvelope)
+	terminalAction := terminalEnvelope.Actions[0]
+	terminalPayload := terminalAction.Payload.(map[string]any)
+	terminalView := terminalPayload["tool_run"].(map[string]any)
+	if terminalAction.Target == nil || terminalAction.Target.CardID != acceptedAction.Target.CardID || terminalView["status"] != generation.BatchStatusFailed {
+		t.Fatalf("terminal projection=%+v action=%+v", terminalView, terminalAction)
+	}
+	refresh, ok := terminalPayload["refresh_resources"].([]string)
+	if !ok || len(refresh) != 3 || refresh[0] != "storyboard" || refresh[1] != "assets" || refresh[2] != "jobs" {
+		t.Fatalf("terminal refresh hint=%#v", terminalPayload["refresh_resources"])
+	}
+}
+
+func TestPublicCapabilityCardNormalizesWorkflowKinds(t *testing.T) {
+	tests := []struct {
+		kind     string
+		wantCard string
+		wantTool string
+	}{
+		{kind: "generate_media", wantCard: "tool_run:generate_media", wantTool: "generate_media"},
+		{kind: "target_regeneration_recovery", wantCard: "tool_run:generate_media", wantTool: "generate_media"},
+		{kind: "assemble_preview", wantCard: "tool_run:assemble_output", wantTool: "assemble_output"},
+		{kind: "assemble_export_recovery", wantCard: "tool_run:assemble_output", wantTool: "assemble_output"},
+	}
+	for _, test := range tests {
+		card, tool := publicCapabilityCard(test.kind)
+		if card != test.wantCard || tool != test.wantTool {
+			t.Fatalf("publicCapabilityCard(%q) = (%q, %q), want (%q, %q)", test.kind, card, tool, test.wantCard, test.wantTool)
+		}
+	}
+	if card, tool := publicCapabilityCard("unknown"); card != "" || tool != "" {
+		t.Fatalf("unknown workflow projected as (%q, %q)", card, tool)
 	}
 }

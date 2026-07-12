@@ -35,6 +35,9 @@ var MigrationStatements = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_aigc_approvals_session_status
 		ON aigc_approvals (session_id, status, created_at)`,
+	fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS %s
+		ON aigc_approvals (session_id)
+		WHERE status = 'pending' AND artifact_type IN ('creation_spec_revision', 'storyboard_revision')`, pendingPrimaryReviewIndex),
 	`CREATE TABLE IF NOT EXISTS aigc_candidate_approval_batches (
 		id VARCHAR(128) PRIMARY KEY,
 		idempotency_key VARCHAR(256) NOT NULL UNIQUE,

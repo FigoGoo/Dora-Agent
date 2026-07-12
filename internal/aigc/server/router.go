@@ -24,6 +24,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/approvalruntime"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/asset"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/billing"
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/capability"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/events"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/generation"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/session"
@@ -1935,6 +1936,16 @@ func (cfg Config) publishApprovalDecision(ctx context.Context, record approval.A
 	}
 	if record.ArtifactType != "candidate_asset" {
 		actions := []a2ui.Action{{Type: a2ui.ActionUpdateCard, Surface: "chat", Target: &a2ui.ActionTarget{Surface: "chat", CardID: "approval:" + record.ID}, Payload: map[string]any{"status": record.Status, "decision_version": record.DecisionVersion}}}
+		if toolCallID, stageRunID, toolKey, ok := approvalToolRunCorrelation(record); ok {
+			status := "cancelled"
+			if record.Status == approval.StatusApproved {
+				status = "completed"
+			}
+			actions = append(actions, toolRunAction(publicToolRunCardID(toolKey, toolCallID), toolCallID, toolKey, status, map[string]any{
+				"approval_id": record.ID, "approval_status": record.Status,
+				"decision_version": record.DecisionVersion, "stage_run_id": stageRunID,
+			}))
+		}
 		// Candidate approvals deliberately have no chat card. Other decision
 		// events contain only data frozen by that approval; the mutable
 		// storyboard snapshot is projected separately below.
@@ -1949,6 +1960,38 @@ func (cfg Config) publishApprovalDecision(ctx context.Context, record approval.A
 		}
 	}
 	return nil
+}
+
+// approvalToolRunCorrelation reads correlation that the Capability runtime
+// froze into both possible commands when it created the Approval. This lets a
+// Decision close the exact planning ToolRun without guessing from chat text or
+// treating an ordinary UserMessage as an approval.
+func approvalToolRunCorrelation(record approval.Approval) (toolCallID, stageRunID, toolKey string, ok bool) {
+	switch strings.TrimSpace(record.ArtifactType) {
+	case "creation_spec_revision":
+		toolKey = capability.PlanCreationSpecToolKey
+	case "storyboard_revision":
+		toolKey = capability.PlanStoryboardToolKey
+	default:
+		return "", "", "", false
+	}
+	type correlation struct {
+		ToolCallID string `json:"tool_call_id"`
+		StageRunID string `json:"stage_run_id"`
+	}
+	var approve, reject correlation
+	if json.Unmarshal(record.ApproveCommand.Payload, &approve) != nil || json.Unmarshal(record.RejectCommand.Payload, &reject) != nil {
+		return "", "", "", false
+	}
+	approve.ToolCallID, reject.ToolCallID = strings.TrimSpace(approve.ToolCallID), strings.TrimSpace(reject.ToolCallID)
+	approve.StageRunID, reject.StageRunID = strings.TrimSpace(approve.StageRunID), strings.TrimSpace(reject.StageRunID)
+	if approve.ToolCallID == "" || approve.ToolCallID != reject.ToolCallID || approve.StageRunID != reject.StageRunID {
+		return "", "", "", false
+	}
+	if approve.StageRunID == "" {
+		approve.StageRunID = "stage:" + approve.ToolCallID
+	}
+	return approve.ToolCallID, approve.StageRunID, toolKey, true
 }
 
 func (cfg Config) getGenerationOperation(c *gin.Context) {
@@ -2537,6 +2580,13 @@ func (cfg Config) publishInterruptResolved(ctx context.Context, sessionID, check
 func (cfg Config) publishAgentEvents(ctx context.Context, sessionID string, runID string, events <-chan AgentEvent) error {
 	var assistant strings.Builder
 	var latestAssistantEvent *AgentEvent
+	// Planning approvals and long-running media capabilities publish their
+	// authoritative A2UI state from the system while their Tool result is being
+	// produced. A model-authored preview/progress recap for the same result would
+	// create a duplicate confirmation or progress block, so it is neither shown
+	// nor persisted as an assistant message.
+	authoritativeApprovalPending := false
+	capabilityProgress := newAuthoritativeCapabilityProgressTracker()
 	chatSurface := newChatA2UISurface(sessionID)
 	seq := int64(1)
 	for event := range events {
@@ -2561,7 +2611,11 @@ func (cfg Config) publishAgentEvents(ctx context.Context, sessionID string, runI
 		if event.AssistantText != "" {
 			assistant.WriteString(event.AssistantText)
 		}
+		if toolResultWaitsForAuthoritativeApproval(event.Message) {
+			authoritativeApprovalPending = true
+		}
 		if event.Event == a2ui.EventChatDelta || event.Event == a2ui.EventChatMessage {
+			capabilityProgress.Observe(event.Message, event.ProgressPublished)
 			if event.Message != nil {
 				if shouldPersistImmediately(event.Message) {
 					if _, err := cfg.appendSchemaMessage(ctx, sessionID, runID, event.Message); err != nil {
@@ -2571,11 +2625,15 @@ func (cfg Config) publishAgentEvents(ctx context.Context, sessionID string, runI
 			}
 			continue
 		}
+		renderEvents := chatSurface.eventsFromAgentEvent(event)
+		progressPublished := event.ProgressPublished
 		if !event.ProgressPublished {
-			if err := cfg.publishRenderEvents(ctx, sessionID, runID, &seq, chatSurface.eventsFromAgentEvent(event)); err != nil {
+			if err := cfg.publishRenderEvents(ctx, sessionID, runID, &seq, renderEvents); err != nil {
 				return err
 			}
+			progressPublished = len(renderEvents) > 0
 		}
+		capabilityProgress.Observe(event.Message, progressPublished)
 		if event.Message != nil {
 			if shouldPersistImmediately(event.Message) {
 				if _, err := cfg.appendSchemaMessage(ctx, sessionID, runID, event.Message); err != nil {
@@ -2586,6 +2644,9 @@ func (cfg Config) publishAgentEvents(ctx context.Context, sessionID string, runI
 		if event.Err != nil {
 			return event.Err
 		}
+	}
+	if authoritativeApprovalPending || capabilityProgress.SuppressModelAssistant() {
+		return nil
 	}
 
 	if latestAssistantEvent != nil {
@@ -2617,6 +2678,25 @@ func (cfg Config) publishAgentEvents(ctx context.Context, sessionID string, runI
 	assistantMessage := schema.AssistantMessage(assistantText, nil)
 	_, err := cfg.appendSchemaMessage(ctx, sessionID, runID, assistantMessage)
 	return err
+}
+
+// toolResultWaitsForAuthoritativeApproval identifies a planning Tool result
+// that already created a durable system Approval. The approval_id requirement
+// keeps unrelated waiting_user tools eligible to explain their result.
+func toolResultWaitsForAuthoritativeApproval(message *schema.Message) bool {
+	if message == nil || message.Role != schema.Tool {
+		return false
+	}
+	var result struct {
+		Status string `json:"status"`
+		Data   struct {
+			ApprovalID string `json:"approval_id"`
+		} `json:"data"`
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(message.Content)), &result) != nil {
+		return false
+	}
+	return result.Status == capability.StatusWaitingUser && strings.TrimSpace(result.Data.ApprovalID) != ""
 }
 
 // isCompleteAssistantMessageEvent 判断事件是否是可直接渲染/持久化的 assistant 完整消息。

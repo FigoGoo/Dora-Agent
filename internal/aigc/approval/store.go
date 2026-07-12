@@ -18,6 +18,7 @@ type CreateResult struct {
 type Store interface {
 	Create(ctx context.Context, approval Approval) (CreateResult, error)
 	Get(ctx context.Context, approvalID string) (Approval, error)
+	GetPendingPrimaryReviewBySession(ctx context.Context, sessionID string) (Approval, error)
 	GetDecision(ctx context.Context, approvalID string, decisionVersion int) (ApprovalDecision, error)
 	CreateCandidateApprovalBatch(ctx context.Context, batch CandidateApprovalBatch) (CandidateApprovalBatchCreateResult, error)
 	GetCandidateApprovalBatchByKey(ctx context.Context, idempotencyKey string) (CandidateApprovalBatch, error)

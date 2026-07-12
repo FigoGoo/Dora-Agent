@@ -96,6 +96,8 @@ func (r *JobWakeupRunner) Wakeup(ctx context.Context, wakeup session.JobWakeupEv
 func (r *JobWakeupRunner) publishAgentEvents(ctx context.Context, sessionID string, runID string, events <-chan AgentEvent) error {
 	var assistant strings.Builder
 	var latestAssistantEvent *AgentEvent
+	authoritativeApprovalPending := false
+	capabilityProgress := newAuthoritativeCapabilityProgressTracker()
 	chatSurface := newChatA2UISurface(sessionID)
 	seq := int64(1)
 	for event := range events {
@@ -120,7 +122,11 @@ func (r *JobWakeupRunner) publishAgentEvents(ctx context.Context, sessionID stri
 		if event.AssistantText != "" {
 			assistant.WriteString(event.AssistantText)
 		}
+		if toolResultWaitsForAuthoritativeApproval(event.Message) {
+			authoritativeApprovalPending = true
+		}
 		if event.Event == a2ui.EventChatDelta || event.Event == a2ui.EventChatMessage {
+			capabilityProgress.Observe(event.Message, event.ProgressPublished)
 			if event.Message != nil {
 				if shouldPersistImmediately(event.Message) {
 					if _, err := r.appendSchemaMessage(ctx, sessionID, runID, event.Message); err != nil {
@@ -130,22 +136,15 @@ func (r *JobWakeupRunner) publishAgentEvents(ctx context.Context, sessionID stri
 			}
 			continue
 		}
-		for _, renderEvent := range chatSurface.eventsFromAgentEvent(event) {
-			if err := r.cfg.Events.Publish(ctx, a2ui.SSEEvent{
-				ID:           r.cfg.NewID(),
-				SessionID:    sessionID,
-				RunID:        runID,
-				Seq:          seq,
-				Event:        renderEvent.Event,
-				SurfaceID:    renderEvent.SurfaceID,
-				DataModelKey: renderEvent.DataModelKey,
-				Payload:      renderEvent.Payload,
-				CreatedAt:    r.cfg.Now(),
-			}); err != nil {
+		renderEvents := chatSurface.eventsFromAgentEvent(event)
+		progressPublished := event.ProgressPublished
+		if !event.ProgressPublished {
+			if err := r.publishRenderEvents(ctx, sessionID, runID, &seq, renderEvents); err != nil {
 				return err
 			}
-			seq++
+			progressPublished = len(renderEvents) > 0
 		}
+		capabilityProgress.Observe(event.Message, progressPublished)
 		if event.Message != nil {
 			if shouldPersistImmediately(event.Message) {
 				if _, err := r.appendSchemaMessage(ctx, sessionID, runID, event.Message); err != nil {
@@ -156,6 +155,9 @@ func (r *JobWakeupRunner) publishAgentEvents(ctx context.Context, sessionID stri
 		if event.Err != nil {
 			return event.Err
 		}
+	}
+	if authoritativeApprovalPending || capabilityProgress.SuppressModelAssistant() {
+		return nil
 	}
 
 	if latestAssistantEvent != nil {

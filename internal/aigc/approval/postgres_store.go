@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/sessionruntime"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -132,7 +133,21 @@ func (s *PostgresStore) Create(ctx context.Context, requested Approval) (CreateR
 			result = CreateResult{Approval: existing}
 			return nil
 		}
+		if isPrimaryReviewApproval(normalized) {
+			var pending approvalRecord
+			lookupErr := tx.Where("session_id = ? AND status = ? AND artifact_type IN ?", normalized.SessionID, StatusPending, []string{"creation_spec_revision", "storyboard_revision"}).First(&pending).Error
+			if lookupErr == nil {
+				return fmt.Errorf("%w: session_id=%s pending_approval_id=%s", ErrPrimaryReviewPending, normalized.SessionID, pending.ID)
+			}
+			if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("lookup pending primary review: %w", lookupErr)
+			}
+		}
 		if err := tx.Create(&record).Error; err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == pendingPrimaryReviewIndex {
+				return fmt.Errorf("%w: session_id=%s", ErrPrimaryReviewPending, normalized.SessionID)
+			}
 			return fmt.Errorf("create approval %s: %w", normalized.ID, err)
 		}
 		result = CreateResult{Approval: normalized, Created: true}
@@ -156,6 +171,27 @@ func (s *PostgresStore) Get(ctx context.Context, approvalID string) (Approval, e
 	}
 	if err != nil {
 		return Approval{}, fmt.Errorf("get approval %s: %w", approvalID, err)
+	}
+	return recordToApproval(record)
+}
+
+func (s *PostgresStore) GetPendingPrimaryReviewBySession(ctx context.Context, sessionID string) (Approval, error) {
+	if s == nil || s.db == nil {
+		return Approval{}, fmt.Errorf("postgres approval store db is required")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return Approval{}, fmt.Errorf("session id is required")
+	}
+	var record approvalRecord
+	err := s.db.WithContext(ctx).
+		Where("session_id = ? AND status = ? AND artifact_type IN ?", sessionID, StatusPending, []string{"creation_spec_revision", "storyboard_revision"}).
+		Order("created_at ASC").First(&record).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Approval{}, fmt.Errorf("%w: pending primary review for session %s", ErrNotFound, sessionID)
+	}
+	if err != nil {
+		return Approval{}, fmt.Errorf("get pending primary review: %w", err)
 	}
 	return recordToApproval(record)
 }

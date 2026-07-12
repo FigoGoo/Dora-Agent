@@ -64,6 +64,13 @@ func (s *MemoryStore) Create(_ context.Context, requested Approval) (CreateResul
 		}
 		return CreateResult{Approval: cloneApproval(existing)}, nil
 	}
+	if isPrimaryReviewApproval(normalized) {
+		for _, existing := range s.approvals {
+			if existing.SessionID == normalized.SessionID && isPrimaryReviewApproval(existing) {
+				return CreateResult{}, fmt.Errorf("%w: session_id=%s pending_approval_id=%s", ErrPrimaryReviewPending, normalized.SessionID, existing.ID)
+			}
+		}
+	}
 	s.approvals[normalized.ID] = cloneApproval(normalized)
 	s.approvalByCreateKey[normalized.IdempotencyKey] = normalized.ID
 	return CreateResult{Approval: cloneApproval(normalized), Created: true}, nil
@@ -80,6 +87,24 @@ func (s *MemoryStore) Get(_ context.Context, approvalID string) (Approval, error
 		return Approval{}, fmt.Errorf("%w: %s", ErrNotFound, approvalID)
 	}
 	return cloneApproval(value), nil
+}
+
+func (s *MemoryStore) GetPendingPrimaryReviewBySession(_ context.Context, sessionID string) (Approval, error) {
+	if s == nil {
+		return Approval{}, fmt.Errorf("approval memory store is required")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return Approval{}, fmt.Errorf("session id is required")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, value := range s.approvals {
+		if value.SessionID == sessionID && isPrimaryReviewApproval(value) {
+			return cloneApproval(value), nil
+		}
+	}
+	return Approval{}, fmt.Errorf("%w: pending primary review for session %s", ErrNotFound, sessionID)
 }
 
 func (s *MemoryStore) GetDecision(_ context.Context, approvalID string, decisionVersion int) (ApprovalDecision, error) {
