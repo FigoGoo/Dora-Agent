@@ -195,6 +195,32 @@ func TestSchedulerResolvesRecursiveReferencesAndCopiesInputs(t *testing.T) {
 	}
 }
 
+func TestSchedulerTreatsReferencedOutputStringsAsLiterals(t *testing.T) {
+	var received any
+	registry := schedulerRegistry(t,
+		schedulerTool{key: "source", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			if call.NodeID == "a" {
+				return vocabulary.Result{Outputs: map[string]any{"value": "$other.key"}}, nil
+			}
+			return vocabulary.Result{Outputs: map[string]any{"key": "rewritten"}}, nil
+		}},
+		schedulerTool{key: "sink", inputs: map[string]vocabulary.ParamSpec{"value": {Required: true}}, run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			received = call.Inputs["value"]
+			return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+		}},
+	)
+	_, err := schedulerForTest(t, NewMemoryRunStore(), registry, 2).Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "literal-output", Source: "dynamic", Summary: "literal-output", Direction: "image", Steps: []PlanStep{
+			{ID: "a", Tool: "source", Required: true},
+			{ID: "other", Tool: "source", Required: true},
+			{ID: "sink", Tool: "sink", Params: map[string]any{"value": "$a.value"}, DependsOn: []string{"a", "other"}, Required: true},
+		},
+	})
+	if err != nil || received != "$other.key" {
+		t.Fatalf("received=%v err=%v", received, err)
+	}
+}
+
 func TestSchedulerResolvesReferenceWithoutASCIIRestriction(t *testing.T) {
 	var received any
 	registry := schedulerRegistry(t,
@@ -364,6 +390,45 @@ func TestSchedulerSuspensionStopsDownstream(t *testing.T) {
 	again, err := scheduler.Advance(context.Background(), run.ID)
 	if err != nil || again.Version != version || downstream.Load() != 0 {
 		t.Fatalf("suspended rerun: version=%d/%d downstream=%d err=%v", version, again.Version, downstream.Load(), err)
+	}
+}
+
+func TestSchedulerFailsClosedOnMultipleSuspensions(t *testing.T) {
+	var downstream atomic.Int32
+	registry := schedulerRegistry(t,
+		schedulerTool{key: "pause", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			return vocabulary.Result{Suspension: &vocabulary.Suspension{
+				Reason: SuspendWaitingUser, Payload: map[string]any{"node": call.NodeID},
+			}}, nil
+		}},
+		schedulerTool{key: "next", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			downstream.Add(1)
+			return vocabulary.Result{}, nil
+		}},
+	)
+	run, err := schedulerForTest(t, NewMemoryRunStore(), registry, 2).Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "ambiguous-pause", Source: "dynamic", Summary: "ambiguous-pause", Direction: "image", Steps: []PlanStep{
+			{ID: "pause-a", Tool: "pause", Required: false},
+			{ID: "pause-b", Tool: "pause", Required: false},
+			{ID: "next", Tool: "next", DependsOn: []string{"pause-a", "pause-b"}, Required: false},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != RunStatusFailed || run.SuspendReason != "" || run.SuspendedNodeID != "" || downstream.Load() != 0 {
+		t.Fatalf("status=%s reason=%q node=%q downstream=%d", run.Status, run.SuspendReason, run.SuspendedNodeID, downstream.Load())
+	}
+	for _, id := range []string{"pause-a", "pause-b"} {
+		node := run.Nodes[id]
+		if node.Status != NodeStatusFailed || node.Fail == nil || node.Fail.Code != "multiple_suspensions" || node.Suspension != nil {
+			t.Fatalf("node %s = %+v", id, node)
+		}
+	}
+	for id, node := range run.Nodes {
+		if node.Status == NodeStatusRunning {
+			t.Fatalf("terminal run left node %s running", id)
+		}
 	}
 }
 

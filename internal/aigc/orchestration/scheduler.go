@@ -251,14 +251,35 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 				}
 				applyOutcome(node, outcome)
 			}
+			suspendedNodeIDs := make([]string, 0, 1)
 			for _, outcome := range outcomes {
 				node := next.Nodes[outcome.step.ID]
 				if node != nil && node.Suspension != nil {
-					next.Status = RunStatusSuspended
-					next.SuspendReason = node.Suspension.Reason
-					next.SuspendedNodeID = outcome.step.ID
-					break
+					suspendedNodeIDs = append(suspendedNodeIDs, outcome.step.ID)
 				}
+			}
+			if len(suspendedNodeIDs) > 1 {
+				for _, nodeID := range suspendedNodeIDs {
+					node := next.Nodes[nodeID]
+					node.Status = NodeStatusFailed
+					node.Suspension = nil
+					node.Fail = &vocabulary.Failure{
+						Code: "multiple_suspensions", Message: "a ready wave produced multiple suspension points",
+					}
+				}
+				for _, node := range next.Nodes {
+					if node != nil && node.Status == NodeStatusPending {
+						node.Status = NodeStatusSkipped
+					}
+				}
+				next.Status = RunStatusFailed
+				next.SuspendReason = ""
+				next.SuspendedNodeID = ""
+			} else if len(suspendedNodeIDs) == 1 {
+				nodeID := suspendedNodeIDs[0]
+				next.Status = RunStatusSuspended
+				next.SuspendReason = next.Nodes[nodeID].Suspension.Reason
+				next.SuspendedNodeID = nodeID
 			}
 			return nil
 		})
@@ -384,7 +405,7 @@ func resolveValue(value any, nodes map[string]*NodeRun) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("upstream node %q has no output %q", stepID, outputKey)
 		}
-		return resolveValue(output, nodes)
+		return copyJSONValue(output), nil
 	case []any:
 		resolved := make([]any, len(typed))
 		for index, item := range typed {
@@ -407,6 +428,25 @@ func resolveValue(value any, nodes map[string]*NodeRun) (any, error) {
 		return resolved, nil
 	default:
 		return typed, nil
+	}
+}
+
+func copyJSONValue(value any) any {
+	switch typed := value.(type) {
+	case []any:
+		copied := make([]any, len(typed))
+		for index, item := range typed {
+			copied[index] = copyJSONValue(item)
+		}
+		return copied
+	case map[string]any:
+		copied := make(map[string]any, len(typed))
+		for key, item := range typed {
+			copied[key] = copyJSONValue(item)
+		}
+		return copied
+	default:
+		return typed
 	}
 }
 
