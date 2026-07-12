@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/generation"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
 )
 
@@ -1847,5 +1848,148 @@ func TestSchedulerRejectsInvalidConfigAndInputs(t *testing.T) {
 	}
 	if _, err := emptyID.Submit(context.Background(), "session", "user", valid); err == nil {
 		t.Fatal("empty generated run id must fail")
+	}
+}
+
+func runWaitingForBatch(t *testing.T, required bool) (*Scheduler, PlanRun) {
+	t.Helper()
+	dispatch := schedulerTool{key: "dispatch", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		return vocabulary.Result{
+			Outputs:    map[string]any{"operation_id": "operation-1", "batch_id": "batch-1", "job_ids": []string{"job-1"}},
+			Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1", "job_ids": []string{"job-1"}}},
+		}, nil
+	}}
+	after := schedulerTool{key: "after"}
+	scheduler := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, dispatch, after), 1)
+	run, err := scheduler.Submit(context.Background(), "session-1", "user-1", ExecutionPlan{
+		PlanID: "jobs-wait", Source: "dynamic", Summary: "jobs wait", Direction: "image",
+		Steps: []PlanStep{
+			{ID: "dispatch", Tool: "dispatch", Required: required},
+			{ID: "after", Tool: "after", DependsOn: []string{"dispatch"}, Required: true},
+		},
+	})
+	if err != nil || run.Status != RunStatusSuspended || run.SuspendReason != SuspendWaitingJobs {
+		t.Fatalf("suspended=%+v err=%v", run, err)
+	}
+	return scheduler, run
+}
+
+func TestCompleteJobsWaitResumesExactlyOnce(t *testing.T) {
+	scheduler, suspended := runWaitingForBatch(t, true)
+	completed, err := scheduler.CompleteJobsWait(context.Background(), suspended.ID, suspended.SuspendedNodeID, JobsOutcome{
+		BatchID: "batch-1", Status: generation.BatchStatusCompleted, Summary: map[string]any{"assets": []any{"asset-1"}},
+	})
+	if err != nil || completed.Status != RunStatusSucceeded {
+		t.Fatalf("completed=%+v err=%v", completed, err)
+	}
+	node := completed.Nodes["dispatch"]
+	if node.Status != NodeStatusSucceeded || node.Suspension != nil || node.Outputs["jobs_outcome_receipt"] != `{"batch_id":"batch-1","status":"completed"}` || !reflect.DeepEqual(node.Outputs["jobs_summary"], map[string]any{"assets": []any{"asset-1"}}) {
+		t.Fatalf("completed node=%+v", node)
+	}
+
+	replayed, err := scheduler.CompleteJobsWait(context.Background(), suspended.ID, suspended.SuspendedNodeID, JobsOutcome{BatchID: "batch-1", Status: generation.BatchStatusCompleted})
+	if err != nil || replayed.Version != completed.Version {
+		t.Fatalf("replay=%+v err=%v", replayed, err)
+	}
+	if !reflect.DeepEqual(replayed.Nodes["dispatch"].Outputs["jobs_summary"], node.Outputs["jobs_summary"]) {
+		t.Fatalf("replay rewrote summary: %+v", replayed.Nodes["dispatch"].Outputs)
+	}
+}
+
+func TestCompleteJobsWaitRejectsMismatchesWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name    string
+		nodeID  string
+		outcome JobsOutcome
+		wantErr error
+	}{
+		{name: "batch", nodeID: "dispatch", outcome: JobsOutcome{BatchID: "batch-other", Status: generation.BatchStatusCompleted}, wantErr: ErrJobsWaitMismatch},
+		{name: "node", nodeID: "after", outcome: JobsOutcome{BatchID: "batch-1", Status: generation.BatchStatusCompleted}, wantErr: ErrJobsWaitMismatch},
+		{name: "status", nodeID: "dispatch", outcome: JobsOutcome{BatchID: "batch-1", Status: "waiting_jobs"}, wantErr: ErrJobsOutcomeInvalid},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scheduler, suspended := runWaitingForBatch(t, true)
+			got, err := scheduler.CompleteJobsWait(context.Background(), suspended.ID, test.nodeID, test.outcome)
+			if !errors.Is(err, test.wantErr) || got.Version != suspended.Version {
+				t.Fatalf("run=%+v err=%v", got, err)
+			}
+			stored, getErr := scheduler.store.GetRun(context.Background(), suspended.ID)
+			if getErr != nil || stored.Version != suspended.Version {
+				t.Fatalf("stored=%+v err=%v", stored, getErr)
+			}
+		})
+	}
+}
+
+func TestCompleteJobsWaitMapsTerminalBatchStatuses(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      string
+		required    bool
+		wantRun     string
+		wantNode    string
+		failureCode string
+	}{
+		{name: "required partial", status: generation.BatchStatusPartialFailed, required: true, wantRun: RunStatusFailed, wantNode: NodeStatusFailed, failureCode: "generation_partial_failed"},
+		{name: "optional partial", status: generation.BatchStatusPartialFailed, required: false, wantRun: RunStatusSucceeded, wantNode: NodeStatusSucceeded},
+		{name: "failed", status: generation.BatchStatusFailed, required: true, wantRun: RunStatusFailed, wantNode: NodeStatusFailed, failureCode: "generation_failed"},
+		{name: "cancelled", status: generation.BatchStatusCancelled, required: true, wantRun: RunStatusFailed, wantNode: NodeStatusFailed, failureCode: "generation_cancelled"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scheduler, suspended := runWaitingForBatch(t, test.required)
+			completed, err := scheduler.CompleteJobsWait(context.Background(), suspended.ID, "dispatch", JobsOutcome{BatchID: "batch-1", Status: test.status})
+			if err != nil || completed.Status != test.wantRun || completed.Nodes["dispatch"].Status != test.wantNode {
+				t.Fatalf("completed=%+v err=%v", completed, err)
+			}
+			failure := completed.Nodes["dispatch"].Fail
+			if test.failureCode == "" && failure != nil || test.failureCode != "" && (failure == nil || failure.Code != test.failureCode) {
+				t.Fatalf("failure=%+v", failure)
+			}
+		})
+	}
+}
+
+func TestCompleteJobsWaitRejectsConflictingReplay(t *testing.T) {
+	scheduler, suspended := runWaitingForBatch(t, true)
+	completed, err := scheduler.CompleteJobsWait(context.Background(), suspended.ID, "dispatch", JobsOutcome{BatchID: "batch-1", Status: generation.BatchStatusCompleted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflicted, err := scheduler.CompleteJobsWait(context.Background(), suspended.ID, "dispatch", JobsOutcome{BatchID: "batch-1", Status: generation.BatchStatusFailed})
+	if !errors.Is(err, ErrJobsOutcomeConflict) || conflicted.Version != completed.Version {
+		t.Fatalf("conflicted=%+v err=%v", conflicted, err)
+	}
+}
+
+func TestCompleteJobsWaitPreservesLargeSummaryNumbers(t *testing.T) {
+	scheduler, suspended := runWaitingForBatch(t, true)
+	completed, err := scheduler.CompleteJobsWait(context.Background(), suspended.ID, "dispatch", JobsOutcome{
+		BatchID: "batch-1", Status: generation.BatchStatusCompleted,
+		Summary: map[string]any{"provider_sequence": int64(9007199254740993)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := completed.Nodes["dispatch"].Outputs["jobs_summary"].(map[string]any)["provider_sequence"].(json.Number)
+	if !ok || got.String() != "9007199254740993" {
+		t.Fatalf("provider_sequence lost precision: %#v", completed.Nodes["dispatch"].Outputs["jobs_summary"])
+	}
+}
+
+func TestCompleteJobsWaitReplayIgnoresNonIdentitySummary(t *testing.T) {
+	scheduler, suspended := runWaitingForBatch(t, true)
+	completed, err := scheduler.CompleteJobsWait(context.Background(), suspended.ID, "dispatch", JobsOutcome{
+		BatchID: "batch-1", Status: generation.BatchStatusCompleted, Summary: map[string]any{"asset": "asset-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := scheduler.CompleteJobsWait(context.Background(), suspended.ID, "dispatch", JobsOutcome{
+		BatchID: "batch-1", Status: generation.BatchStatusCompleted, Summary: map[string]any{"ignored": func() {}},
+	})
+	if err != nil || replayed.Version != completed.Version || !reflect.DeepEqual(replayed.Nodes["dispatch"].Outputs["jobs_summary"], completed.Nodes["dispatch"].Outputs["jobs_summary"]) {
+		t.Fatalf("replayed=%+v err=%v", replayed, err)
 	}
 }
