@@ -45,7 +45,7 @@ type NodeRun struct {
 	Suspension     *vocabulary.Suspension `json:"suspension,omitempty"`
 	ResumeKey      string                 `json:"resume_key,omitempty"`
 	Resumed        bool                   `json:"resumed,omitempty"`
-	ResumeDecision map[string]any         `json:"resume_decision,omitempty"`
+	ResumeDecision map[string]any         `json:"resume_decision"`
 }
 
 type PlanRun struct {
@@ -59,7 +59,7 @@ type PlanRun struct {
 	PreviewRequired bool                `json:"preview_required,omitempty"`
 	ResumeKey       string              `json:"resume_key,omitempty"`
 	Resumed         bool                `json:"resumed,omitempty"`
-	ResumeDecision  map[string]any      `json:"resume_decision,omitempty"`
+	ResumeDecision  map[string]any      `json:"resume_decision"`
 	Nodes           map[string]*NodeRun `json:"nodes"`
 	Version         int                 `json:"version"`
 }

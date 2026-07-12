@@ -391,7 +391,7 @@ func (s *Scheduler) Resume(
 ) (PlanRun, error)
 ```
 
-Resume 先在全部 NodeRun 中查找 ResumeKey。若命中节点已 `Resumed=true`，必须直接返回当前快照，即使 Run 已经终态；这是 HTTP 重放的 receipt 路径。首次恢复才要求 Run 为 suspended 且命中 `SuspendedNodeID`，并在同一个 CAS 回调内把 decision 合并到节点 outputs、清空 Suspension、置 `Resumed=true`、执行 Run `suspended->running`。CAS 成功后才调用 `Advance`。
+Resume 先匹配 Run 级预览 receipt，再按 Plan Step 顺序查找 NodeRun ResumeKey。首次恢复才要求 Run 为 suspended 且命中当前挂起载体，并在同一个 CAS 回调内冻结 decision、清空 Suspension、置 `Resumed=true`、执行 Run `suspended->running`；`Outputs["resume_decision"]` 是保留命名空间，Tool 已占用时原子拒绝，nil decision 冻结为空 map。一次性只表示 decision/receipt 不重复应用，不表示执行推进只尝试一次：命中 `Resumed=true` receipt 后，若 Run 仍为 running，必须在当前 per-run gate 内调用私有 `advance` 继续收敛；只有 Run 已 terminal 或再次 suspended（包括下游新卡点）才只读返回当前权威快照。caller cancel、下游基础设施错误或 commit ACK 丢失后，fresh context 使用同一 key 重放必须继续 running receipt，且不得改写已冻结 decision 或增加 receipt Version。单 Scheduler 的 per-run gate 防止本地重复推进；多个 Scheduler 实例可对同一 running receipt 产生 at-least-once Tool 调用，Tool 必须使用稳定 IdempotencyKey 吸收重复业务效果，CAS 重读后所有调用返回同一 terminal 权威 Run。
 
 - [ ] **Step 6: 运行 GREEN 与 race**
 

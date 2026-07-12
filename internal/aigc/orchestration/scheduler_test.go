@@ -737,7 +737,7 @@ func TestResumeWaitingUserIsOneShotAndPreservesDecision(t *testing.T) {
 	for _, invalid := range []string{"", "wrong"} {
 		before := suspended.Version
 		got, resumeErr := scheduler.Resume(context.Background(), suspended.ID, invalid, nil)
-		if !errors.Is(resumeErr, ErrResumeKeyMismatch) || got.Version != before {
+		if !errors.Is(resumeErr, ErrResumeKeyMismatch) || got.Version != before || !strings.Contains(resumeErr.Error(), suspended.ID) || !strings.Contains(resumeErr.Error(), invalid) {
 			t.Fatalf("invalid key %q: run=%+v err=%v", invalid, got, resumeErr)
 		}
 	}
@@ -853,7 +853,7 @@ func TestResumeRejectsWaitingJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := scheduler.Resume(context.Background(), suspended.ID, suspended.Nodes["jobs"].ResumeKey, nil)
-	if !errors.Is(err, ErrResumeReasonUnsupported) || got.Version != suspended.Version {
+	if !errors.Is(err, ErrResumeReasonUnsupported) || got.Version != suspended.Version || !strings.Contains(err.Error(), suspended.ID) || !strings.Contains(err.Error(), suspended.Nodes["jobs"].ResumeKey) {
 		t.Fatalf("run=%+v err=%v", got, err)
 	}
 }
@@ -1028,15 +1028,29 @@ func (s *resumeCommitStore) MutateRun(ctx context.Context, id string, expectedVe
 func TestResumeCallerCancelStillCommitsReceipt(t *testing.T) {
 	base := NewMemoryRunStore()
 	store := &resumeCommitStore{RunStore: base, entered: make(chan struct{}, 1), release: make(chan struct{})}
-	registry := schedulerRegistry(t, schedulerTool{key: "pause", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
-		return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}}, nil
-	}})
+	var sinkEffects atomic.Int32
+	var sinkKeysMu sync.Mutex
+	var sinkKeys []string
+	registry := schedulerRegistry(t,
+		schedulerTool{key: "pause", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}}, nil
+		}},
+		schedulerTool{key: "sink", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			sinkEffects.Add(1)
+			sinkKeysMu.Lock()
+			sinkKeys = append(sinkKeys, call.IdempotencyKey)
+			sinkKeysMu.Unlock()
+			return vocabulary.Result{}, nil
+		}},
+	)
 	scheduler, err := NewScheduler(SchedulerConfig{Store: store, Vocabulary: registry, MaxParallel: 1, CommitTimeout: time.Second, NewID: func() string { return "cancel-receipt" }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	suspended, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
-		PlanID: "cancel-receipt", Source: "dynamic", Summary: "cancel-receipt", Direction: "image", Steps: []PlanStep{{ID: "pause", Tool: "pause", Required: true}},
+		PlanID: "cancel-receipt", Source: "dynamic", Summary: "cancel-receipt", Direction: "image", Steps: []PlanStep{
+			{ID: "pause", Tool: "pause", Required: true}, {ID: "sink", Tool: "sink", DependsOn: []string{"pause"}, Required: true},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1062,6 +1076,242 @@ func TestResumeCallerCancelStillCommitsReceipt(t *testing.T) {
 	stored, err := base.GetRun(context.Background(), suspended.ID)
 	if err != nil || !stored.Nodes["pause"].Resumed || stored.Status != RunStatusRunning {
 		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	store.block.Store(false)
+	recovered, err := scheduler.Resume(context.Background(), suspended.ID, suspended.Nodes["pause"].ResumeKey, map[string]any{"approved": false})
+	if err != nil || recovered.Status != RunStatusSucceeded || sinkEffects.Load() != 1 {
+		t.Fatalf("recovered=%+v effects=%d err=%v", recovered, sinkEffects.Load(), err)
+	}
+	sinkKeysMu.Lock()
+	defer sinkKeysMu.Unlock()
+	if len(sinkKeys) != 1 || sinkKeys[0] != "cancel-receipt:sink:1" {
+		t.Fatalf("sink keys=%v", sinkKeys)
+	}
+}
+
+func TestResumeAppliedReceiptContinuesAfterDownstreamInfrastructureError(t *testing.T) {
+	providerErr := errors.New("provider unavailable")
+	var sinkCalls atomic.Int32
+	var keysMu sync.Mutex
+	var keys []string
+	registry := schedulerRegistry(t,
+		schedulerTool{key: "pause", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}}, nil
+		}},
+		schedulerTool{key: "sink", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			attempt := sinkCalls.Add(1)
+			keysMu.Lock()
+			keys = append(keys, call.IdempotencyKey)
+			keysMu.Unlock()
+			if attempt == 1 {
+				return vocabulary.Result{}, providerErr
+			}
+			return vocabulary.Result{}, nil
+		}},
+	)
+	scheduler := schedulerForTest(t, NewMemoryRunStore(), registry, 1)
+	suspended, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "resume-retry", Source: "dynamic", Summary: "resume-retry", Direction: "image", Steps: []PlanStep{
+			{ID: "pause", Tool: "pause", Required: true}, {ID: "sink", Tool: "sink", DependsOn: []string{"pause"}, Required: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := suspended.Nodes["pause"].ResumeKey
+	decision := map[string]any{"approved": true}
+	failed, err := scheduler.Resume(context.Background(), suspended.ID, key, decision)
+	if !errors.Is(err, providerErr) || failed.Status != RunStatusRunning || !failed.Nodes["pause"].Resumed {
+		t.Fatalf("failed=%+v err=%v", failed, err)
+	}
+	receiptVersion := failed.Version
+	recovered, err := scheduler.Resume(context.Background(), suspended.ID, key, map[string]any{"approved": false})
+	if err != nil || recovered.Status != RunStatusSucceeded || sinkCalls.Load() != 2 {
+		t.Fatalf("recovered=%+v calls=%d err=%v", recovered, sinkCalls.Load(), err)
+	}
+	if !reflect.DeepEqual(recovered.Nodes["pause"].ResumeDecision, decision) || recovered.Version <= receiptVersion {
+		t.Fatalf("receipt changed or run did not advance: %+v", recovered.Nodes["pause"])
+	}
+	keysMu.Lock()
+	defer keysMu.Unlock()
+	if len(keys) != 2 || keys[0] != "run-1:sink:1" || keys[1] != keys[0] {
+		t.Fatalf("keys=%v", keys)
+	}
+}
+
+type commitThenErrorStore struct {
+	RunStore
+	enabled atomic.Bool
+	fired   atomic.Bool
+	err     error
+}
+
+func (s *commitThenErrorStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
+	committed, err := s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
+	if err != nil {
+		return committed, err
+	}
+	if s.enabled.Load() && s.fired.CompareAndSwap(false, true) {
+		return PlanRun{}, s.err
+	}
+	return committed, nil
+}
+
+func TestResumeReplaysReceiptAfterCommitReturnedAmbiguousError(t *testing.T) {
+	ambiguousErr := errors.New("commit acknowledgement lost")
+	base := NewMemoryRunStore()
+	store := &commitThenErrorStore{RunStore: base, err: ambiguousErr}
+	var sinkCalls atomic.Int32
+	registry := schedulerRegistry(t,
+		schedulerTool{key: "pause", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}}, nil
+		}},
+		schedulerTool{key: "sink", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			sinkCalls.Add(1)
+			return vocabulary.Result{}, nil
+		}},
+	)
+	scheduler := schedulerForTest(t, store, registry, 1)
+	suspended, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "ambiguous-resume", Source: "dynamic", Summary: "ambiguous-resume", Direction: "image", Steps: []PlanStep{
+			{ID: "pause", Tool: "pause", Required: true}, {ID: "sink", Tool: "sink", DependsOn: []string{"pause"}, Required: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.enabled.Store(true)
+	key := suspended.Nodes["pause"].ResumeKey
+	first, err := scheduler.Resume(context.Background(), suspended.ID, key, map[string]any{"approved": true})
+	if !errors.Is(err, ambiguousErr) || first.Status != RunStatusSuspended {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	stored, err := base.GetRun(context.Background(), suspended.ID)
+	if err != nil || stored.Status != RunStatusRunning || !stored.Nodes["pause"].Resumed {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	recovered, err := scheduler.Resume(context.Background(), suspended.ID, key, map[string]any{"approved": false})
+	if err != nil || recovered.Status != RunStatusSucceeded || sinkCalls.Load() != 1 {
+		t.Fatalf("recovered=%+v calls=%d err=%v", recovered, sinkCalls.Load(), err)
+	}
+}
+
+type resumeReadBarrierStore struct {
+	RunStore
+	enabled atomic.Bool
+	reads   atomic.Int32
+	ready   chan struct{}
+	release chan struct{}
+}
+
+func (s *resumeReadBarrierStore) GetRun(ctx context.Context, id string) (PlanRun, error) {
+	run, err := s.RunStore.GetRun(ctx, id)
+	if err != nil || !s.enabled.Load() {
+		return run, err
+	}
+	read := s.reads.Add(1)
+	if read <= 2 {
+		if read == 2 {
+			close(s.ready)
+		}
+		select {
+		case <-ctx.Done():
+			return PlanRun{}, ctx.Err()
+		case <-s.release:
+		}
+	}
+	return run, nil
+}
+
+func TestResumeAcrossSchedulersConvergesFromSameSuspendedSnapshot(t *testing.T) {
+	base := NewMemoryRunStore()
+	store := &resumeReadBarrierStore{RunStore: base, ready: make(chan struct{}), release: make(chan struct{})}
+	var businessEffects atomic.Int32
+	var seen sync.Map
+	registry := schedulerRegistry(t,
+		schedulerTool{key: "pause", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}}, nil
+		}},
+		schedulerTool{key: "sink", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			if _, loaded := seen.LoadOrStore(call.IdempotencyKey, struct{}{}); !loaded {
+				businessEffects.Add(1)
+			}
+			return vocabulary.Result{}, nil
+		}},
+	)
+	creator := schedulerForTest(t, store, registry, 1)
+	suspended, err := creator.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "cross-scheduler", Source: "dynamic", Summary: "cross-scheduler", Direction: "image", Steps: []PlanStep{
+			{ID: "pause", Tool: "pause", Required: true}, {ID: "sink", Tool: "sink", DependsOn: []string{"pause"}, Required: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := schedulerForTest(t, store, registry, 1)
+	second := schedulerForTest(t, store, registry, 1)
+	store.enabled.Store(true)
+	key := suspended.Nodes["pause"].ResumeKey
+	type result struct {
+		run PlanRun
+		err error
+	}
+	results := make(chan result, 2)
+	for _, scheduler := range []*Scheduler{first, second} {
+		go func(s *Scheduler) {
+			run, resumeErr := s.Resume(context.Background(), suspended.ID, key, map[string]any{"approved": true})
+			results <- result{run: run, err: resumeErr}
+		}(scheduler)
+	}
+	<-store.ready
+	close(store.release)
+	a, b := <-results, <-results
+	authoritative, getErr := base.GetRun(context.Background(), suspended.ID)
+	if a.err != nil || b.err != nil || getErr != nil || a.run.Status != RunStatusSucceeded || b.run.Status != RunStatusSucceeded || authoritative.Status != RunStatusSucceeded || a.run.Version != authoritative.Version || b.run.Version != authoritative.Version || businessEffects.Load() != 1 {
+		t.Fatalf("a=%+v/%v b=%+v/%v authoritative=%+v/%v effects=%d", a.run, a.err, b.run, b.err, authoritative, getErr, businessEffects.Load())
+	}
+}
+
+func TestResumeRejectsReservedOutputConflictWithoutMutation(t *testing.T) {
+	registry := schedulerRegistry(t, schedulerTool{key: "pause", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		return vocabulary.Result{Outputs: map[string]any{"resume_decision": "tool-owned"}, Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}}, nil
+	}})
+	scheduler := schedulerForTest(t, NewMemoryRunStore(), registry, 1)
+	suspended, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "reserved-output", Source: "dynamic", Summary: "reserved-output", Direction: "image", Steps: []PlanStep{{ID: "pause", Tool: "pause", Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := suspended.Nodes["pause"].ResumeKey
+	got, err := scheduler.Resume(context.Background(), suspended.ID, key, map[string]any{"approved": true})
+	if !errors.Is(err, ErrResumeDecisionConflict) || got.Version != suspended.Version || !strings.Contains(err.Error(), suspended.ID) || !strings.Contains(err.Error(), key) {
+		t.Fatalf("run=%+v err=%v", got, err)
+	}
+	stored, _ := scheduler.store.GetRun(context.Background(), suspended.ID)
+	if stored.Version != suspended.Version || stored.Nodes["pause"].Outputs["resume_decision"] != "tool-owned" || stored.Nodes["pause"].Resumed {
+		t.Fatalf("stored=%+v", stored)
+	}
+}
+
+func TestResumeNilDecisionFreezesEmptyMap(t *testing.T) {
+	registry := schedulerRegistry(t, schedulerTool{key: "pause", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}}, nil
+	}})
+	scheduler := schedulerForTest(t, NewMemoryRunStore(), registry, 1)
+	suspended, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "nil-decision", Source: "dynamic", Summary: "nil-decision", Direction: "image", Steps: []PlanStep{{ID: "pause", Tool: "pause", Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := scheduler.Resume(context.Background(), suspended.ID, suspended.Nodes["pause"].ResumeKey, nil)
+	if err != nil || resumed.Status != RunStatusSucceeded || resumed.Nodes["pause"].ResumeDecision == nil || len(resumed.Nodes["pause"].ResumeDecision) != 0 {
+		t.Fatalf("run=%+v err=%v", resumed, err)
+	}
+	output, exists := resumed.Nodes["pause"].Outputs["resume_decision"]
+	if !exists || !reflect.DeepEqual(output, map[string]any{}) {
+		t.Fatalf("output=%#v exists=%v", output, exists)
 	}
 }
 

@@ -417,6 +417,9 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 		if err != nil {
 			return PlanRun{}, err
 		}
+		if isTerminalRun(current.Status) || current.Status == RunStatusSuspended {
+			return current, firstToolError(outcomes)
+		}
 	}
 	return current, fmt.Errorf("%w: merge outcomes exceeded retry limit", ErrRunVersionConflict)
 }

@@ -11,6 +11,7 @@ import (
 var (
 	ErrResumeKeyMismatch       = errors.New("plan run resume key mismatch")
 	ErrResumeReasonUnsupported = errors.New("plan run resume reason unsupported")
+	ErrResumeDecisionConflict  = errors.New("plan run resume decision output conflict")
 )
 
 type resumeTarget struct {
@@ -40,10 +41,10 @@ func (s *Scheduler) resume(ctx context.Context, runID, resumeKey string, decisio
 	}
 	target, matched := findResumeTarget(&current, resumeKey)
 	if !matched {
-		return current, ErrResumeKeyMismatch
+		return current, resumeKeyMismatch(current.ID, resumeKey)
 	}
 	if targetResumed(target, &current) {
-		return current, nil
+		return s.continueResumedRun(ctx, current, resumeKey)
 	}
 
 	clonedDecision, err := cloneResumeDecision(decision)
@@ -58,15 +59,22 @@ func (s *Scheduler) resume(ctx context.Context, runID, resumeKey string, decisio
 		committed, err = s.store.MutateRun(commitCtx, current.ID, current.Version, func(next *PlanRun) error {
 			freshTarget, ok := findResumeTarget(next, resumeKey)
 			if !ok {
-				return ErrResumeKeyMismatch
+				return resumeKeyMismatch(next.ID, resumeKey)
 			}
 			if targetResumed(freshTarget, next) {
-				return nil
+				return errResumeAlreadyApplied
 			}
-			return applyResume(next, freshTarget, clonedDecision)
+			return applyResume(next, freshTarget, resumeKey, clonedDecision)
 		})
 		if err == nil {
 			break
+		}
+		if errors.Is(err, errResumeAlreadyApplied) {
+			current, err = s.store.GetRun(commitCtx, current.ID)
+			if err != nil {
+				return PlanRun{}, err
+			}
+			return s.continueResumedRun(ctx, current, resumeKey)
 		}
 		if !errors.Is(err, ErrRunVersionConflict) {
 			if callerErr := ctx.Err(); callerErr != nil {
@@ -83,19 +91,36 @@ func (s *Scheduler) resume(ctx context.Context, runID, resumeKey string, decisio
 		}
 		target, matched = findResumeTarget(&current, resumeKey)
 		if !matched {
-			return current, ErrResumeKeyMismatch
+			return current, resumeKeyMismatch(current.ID, resumeKey)
 		}
 		if targetResumed(target, &current) {
-			return current, nil
+			return s.continueResumedRun(ctx, current, resumeKey)
 		}
 	}
 	if err != nil {
 		return current, fmt.Errorf("%w: resume exceeded retry limit", ErrRunVersionConflict)
 	}
-	if callerErr := ctx.Err(); callerErr != nil {
-		return committed, callerErr
+	return s.continueResumedRun(ctx, committed, resumeKey)
+}
+
+var errResumeAlreadyApplied = errors.New("plan run resume receipt already applied")
+
+func (s *Scheduler) continueResumedRun(ctx context.Context, current PlanRun, resumeKey string) (PlanRun, error) {
+	switch {
+	case current.Status == RunStatusRunning:
+		if err := ctx.Err(); err != nil {
+			return current, err
+		}
+		advanced, err := s.advance(ctx, current.ID)
+		if err != nil && advanced.ID == "" {
+			return current, err
+		}
+		return advanced, err
+	case current.Status == RunStatusSuspended || isTerminalRun(current.Status):
+		return current, nil
+	default:
+		return current, resumeKeyMismatch(current.ID, resumeKey)
 	}
-	return s.advance(ctx, committed.ID)
 }
 
 func findResumeTarget(run *PlanRun, resumeKey string) (resumeTarget, bool) {
@@ -121,10 +146,10 @@ func targetResumed(target resumeTarget, run *PlanRun) bool {
 	return target.node != nil && target.node.Resumed
 }
 
-func applyResume(run *PlanRun, target resumeTarget, decision map[string]any) error {
+func applyResume(run *PlanRun, target resumeTarget, resumeKey string, decision map[string]any) error {
 	if target.run {
 		if run.Status != RunStatusSuspended || run.SuspendReason != SuspendWaitingUser || !run.PreviewRequired || run.SuspendedNodeID != "" {
-			return ErrResumeKeyMismatch
+			return resumeKeyMismatch(run.ID, resumeKey)
 		}
 		run.ResumeDecision = decision
 		run.Resumed = true
@@ -135,22 +160,25 @@ func applyResume(run *PlanRun, target resumeTarget, decision map[string]any) err
 		return nil
 	}
 	if run.Status != RunStatusSuspended || run.SuspendedNodeID == "" || target.node == nil || target.node.StepID != run.SuspendedNodeID {
-		return ErrResumeKeyMismatch
+		return resumeKeyMismatch(run.ID, resumeKey)
+	}
+	if _, exists := target.node.Outputs["resume_decision"]; exists {
+		return fmt.Errorf("%w: run %q key %q", ErrResumeDecisionConflict, run.ID, resumeKey)
 	}
 	switch run.SuspendReason {
 	case SuspendWaitingUser:
 		if target.node.Status != NodeStatusRunning {
-			return ErrResumeKeyMismatch
+			return resumeKeyMismatch(run.ID, resumeKey)
 		}
 		target.node.Status = NodeStatusSucceeded
 	case SuspendWaitingAgent:
 		if target.node.Status != NodeStatusSucceeded {
-			return ErrResumeKeyMismatch
+			return resumeKeyMismatch(run.ID, resumeKey)
 		}
 	case SuspendWaitingJobs:
-		return ErrResumeReasonUnsupported
+		return fmt.Errorf("%w: run %q key %q reason %q", ErrResumeReasonUnsupported, run.ID, resumeKey, run.SuspendReason)
 	default:
-		return ErrResumeReasonUnsupported
+		return fmt.Errorf("%w: run %q key %q reason %q", ErrResumeReasonUnsupported, run.ID, resumeKey, run.SuspendReason)
 	}
 	target.node.ResumeDecision = decision
 	if target.node.Outputs == nil {
@@ -167,7 +195,7 @@ func applyResume(run *PlanRun, target resumeTarget, decision map[string]any) err
 
 func cloneResumeDecision(decision map[string]any) (map[string]any, error) {
 	if decision == nil {
-		return nil, nil
+		return map[string]any{}, nil
 	}
 	data, err := json.Marshal(decision)
 	if err != nil {
@@ -178,4 +206,8 @@ func cloneResumeDecision(decision map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("%w: unmarshal resume decision: %v", ErrRunNotSerializable, err)
 	}
 	return cloned, nil
+}
+
+func resumeKeyMismatch(runID, resumeKey string) error {
+	return fmt.Errorf("%w: run %q key %q", ErrResumeKeyMismatch, runID, resumeKey)
 }
