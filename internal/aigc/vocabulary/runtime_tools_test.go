@@ -148,6 +148,30 @@ func TestRuntimeToolsExposeStableContracts(t *testing.T) {
 	}
 }
 
+func TestRequestConfirmationSuspensionCarriesStrictApprovalSchema(t *testing.T) {
+	result, err := NewRequestConfirmationTool().Run(context.Background(), Call{
+		Inputs: map[string]any{"question": "continue?"},
+	})
+	if err != nil || result.Suspension == nil {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if result.Suspension.Origin != "request_confirmation" || result.Suspension.DecisionSchema != "approved_bool_v1" {
+		t.Fatalf("suspension=%+v", result.Suspension)
+	}
+	schema, ok := result.Suspension.Payload["decision_schema"].(map[string]any)
+	if !ok || schema["type"] != "object" || schema["additional_properties"] != false {
+		t.Fatalf("decision_schema=%#v", result.Suspension.Payload["decision_schema"])
+	}
+	required, ok := schema["required"].([]any)
+	if !ok || len(required) != 1 || required[0] != "approved" {
+		t.Fatalf("required=%#v", schema["required"])
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok || properties["approved"] != "bool" {
+		t.Fatalf("properties=%#v", schema["properties"])
+	}
+}
+
 func validDispatchCall() Call {
 	return Call{
 		SessionID: "session-1", UserID: "user-1", PlanRunID: "run-1", NodeID: "node-1",
@@ -262,7 +286,7 @@ func TestRuntimeToolsRequestConfirmationBoundaries(t *testing.T) {
 		if err != nil || result.Suspension == nil || result.Suspension.Reason != "waiting_user" || result.Fail != nil || result.Outputs != nil {
 			t.Fatalf("result=%+v err=%v", result, err)
 		}
-		if len(result.Suspension.Payload) != 2 || result.Suspension.Payload["question"] != "continue?" {
+		if len(result.Suspension.Payload) != 3 || result.Suspension.Payload["question"] != "continue?" {
 			t.Fatalf("payload=%+v", result.Suspension.Payload)
 		}
 		payloadOption := result.Suspension.Payload["options"].([]any)[0].(map[string]any)

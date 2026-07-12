@@ -993,7 +993,12 @@ scheduler.Advance(ctx, runID)
 scheduler.Resume(ctx, runID, resumeKey, decision)
 scheduler.CompleteJobsWait(ctx, runID, nodeID, outcome)
 scheduler.Revise(ctx, runID, revision)
+scheduler.Cancel(ctx, runID, reason)
 ```
+
+`Cancel` 是用户主动终止和明确否决的唯一 Runtime 入口：非终态 Run 以 CAS 转为
+`cancelled` 并冻结首次 reason；`waiting_jobs` 必须先通过现有 generation command
+写入幂等 Batch cancel intent，未装配 canceller 时 fail closed，不允许只取消本地 Run。
 
 Plan 2 负责：
 

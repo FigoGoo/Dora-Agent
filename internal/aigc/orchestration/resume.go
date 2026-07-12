@@ -12,13 +12,14 @@ import (
 )
 
 var (
-	ErrResumeKeyMismatch       = errors.New("plan run resume key mismatch")
-	ErrResumeReasonUnsupported = errors.New("plan run resume reason unsupported")
-	ErrResumeDecisionConflict  = errors.New("plan run resume decision output conflict")
-	ErrGuardDecisionInvalid    = errors.New("media guard approval decision invalid")
-	ErrJobsWaitMismatch        = errors.New("plan run jobs wait mismatch")
-	ErrJobsOutcomeInvalid      = errors.New("plan run jobs outcome invalid")
-	ErrJobsOutcomeConflict     = errors.New("plan run jobs outcome conflict")
+	ErrResumeKeyMismatch           = errors.New("plan run resume key mismatch")
+	ErrResumeReasonUnsupported     = errors.New("plan run resume reason unsupported")
+	ErrResumeDecisionConflict      = errors.New("plan run resume decision output conflict")
+	ErrGuardDecisionInvalid        = errors.New("media guard approval decision invalid")
+	ErrConfirmationDecisionInvalid = errors.New("confirmation approval decision invalid")
+	ErrJobsWaitMismatch            = errors.New("plan run jobs wait mismatch")
+	ErrJobsOutcomeInvalid          = errors.New("plan run jobs outcome invalid")
+	ErrJobsOutcomeConflict         = errors.New("plan run jobs outcome conflict")
 )
 
 const jobsOutcomeReceiptKey = "jobs_outcome_receipt"
@@ -257,8 +258,11 @@ func (s *Scheduler) resume(ctx context.Context, runID, resumeKey string, decisio
 	if !matched {
 		return current, resumeKeyMismatch(current.ID, resumeKey)
 	}
+	if err := validateResumeDecision(target, &current, decision); err != nil {
+		return current, err
+	}
 	if targetResumed(target, &current) {
-		if err := validateGuardResumeReplay(target, decision); err != nil {
+		if err := validateResumeReplay(target, &current, decision); err != nil {
 			return current, err
 		}
 		return s.continueResumedRun(ctx, current, resumeKey)
@@ -295,7 +299,7 @@ func (s *Scheduler) resume(ctx context.Context, runID, resumeKey string, decisio
 			if !ok {
 				return current, resumeKeyMismatch(current.ID, resumeKey)
 			}
-			if replayErr := validateGuardResumeReplay(replayedTarget, decision); replayErr != nil {
+			if replayErr := validateResumeReplay(replayedTarget, &current, decision); replayErr != nil {
 				return current, replayErr
 			}
 			return s.continueResumedRun(ctx, current, resumeKey)
@@ -318,7 +322,7 @@ func (s *Scheduler) resume(ctx context.Context, runID, resumeKey string, decisio
 			return current, resumeKeyMismatch(current.ID, resumeKey)
 		}
 		if targetResumed(target, &current) {
-			if replayErr := validateGuardResumeReplay(target, decision); replayErr != nil {
+			if replayErr := validateResumeReplay(target, &current, decision); replayErr != nil {
 				return current, replayErr
 			}
 			return s.continueResumedRun(ctx, current, resumeKey)
@@ -343,6 +347,56 @@ func validateGuardResumeReplay(target resumeTarget, decision map[string]any) err
 		return fmt.Errorf("%w: guard approval decision differs from stored receipt", ErrResumeDecisionConflict)
 	}
 	return nil
+}
+
+func validateResumeDecision(target resumeTarget, run *PlanRun, decision map[string]any) error {
+	if target.node != nil && target.node.GuardApproval != nil {
+		_, err := parseGuardApprovalDecision(decision)
+		return err
+	}
+	if targetRequiresConfirmationDecision(target, run) {
+		_, err := parseConfirmationDecision(decision)
+		return err
+	}
+	return nil
+}
+
+func validateResumeReplay(target resumeTarget, run *PlanRun, decision map[string]any) error {
+	if err := validateGuardResumeReplay(target, decision); err != nil {
+		return err
+	}
+	stored := run.ResumeDecision
+	if target.node != nil {
+		stored = target.node.ResumeDecision
+	}
+	if !targetRequiresConfirmationDecision(target, run) {
+		return nil
+	}
+	approved, err := parseConfirmationDecision(decision)
+	if err != nil {
+		return err
+	}
+	storedApproved, ok := stored["approved"].(bool)
+	if !ok || storedApproved != approved {
+		return ErrResumeDecisionConflict
+	}
+	return nil
+}
+
+func targetRequiresConfirmationDecision(target resumeTarget, run *PlanRun) bool {
+	if target.run {
+		return run.ResumeDecisionSchema == "approved_bool_v1"
+	}
+	return target.node != nil && target.node.SuspensionOrigin == "request_confirmation" &&
+		target.node.ResumeDecisionSchema == "approved_bool_v1"
+}
+
+func parseConfirmationDecision(decision map[string]any) (bool, error) {
+	approved, ok := decision["approved"].(bool)
+	if !ok || len(decision) != 1 {
+		return false, fmt.Errorf("%w: requires exactly one boolean approved field", ErrConfirmationDecisionInvalid)
+	}
+	return approved, nil
 }
 
 func parseGuardApprovalDecision(decision map[string]any) (bool, error) {
@@ -403,6 +457,13 @@ func applyResume(run *PlanRun, target resumeTarget, resumeKey string, decision m
 		}
 		run.ResumeDecision = decision
 		run.Resumed = true
+		approved, err := parseConfirmationDecision(decision)
+		if err != nil {
+			return err
+		}
+		if !approved {
+			return applyCancellation(run, CancelReasonPreviewRejected)
+		}
 		run.PreviewRequired = false
 		run.SuspendReason = ""
 		run.SuspendedNodeID = ""
@@ -433,6 +494,21 @@ func applyResume(run *PlanRun, target resumeTarget, resumeKey string, decision m
 				target.node.Fail = &vocabulary.Failure{Code: "compliance_soft_block_rejected", Message: "user rejected the sensitive media request"}
 				target.node.GuardApproval.Status = guardApprovalRejected
 			}
+		} else if target.node.SuspensionOrigin == "request_confirmation" && target.node.ResumeDecisionSchema == "approved_bool_v1" {
+			approved, err := parseConfirmationDecision(decision)
+			if err != nil {
+				return err
+			}
+			target.node.Resumed = true
+			target.node.ResumeDecision = decision
+			if target.node.Outputs == nil {
+				target.node.Outputs = make(map[string]any)
+			}
+			target.node.Outputs["resume_decision"] = decision
+			if !approved {
+				return applyCancellation(run, CancelReasonConfirmationRejected)
+			}
+			target.node.Status = NodeStatusSucceeded
 		} else {
 			target.node.Status = NodeStatusSucceeded
 		}

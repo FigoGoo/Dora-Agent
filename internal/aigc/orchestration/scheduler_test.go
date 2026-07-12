@@ -313,7 +313,9 @@ func TestSchedulerGuardsRejectInvalidApprovalDecisionWithoutMutation(t *testing.
 
 func TestSchedulerGuardsDoNotChangeOrdinaryWaitingUserResume(t *testing.T) {
 	var downstreamCalls atomic.Int32
-	confirm := vocabulary.NewRequestConfirmationTool()
+	confirm := schedulerTool{key: "custom_confirmation", category: "interaction", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser}}, nil
+	}}
 	downstream := schedulerTool{key: "after", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
 		downstreamCalls.Add(1)
 		return vocabulary.Result{}, nil
@@ -326,7 +328,7 @@ func TestSchedulerGuardsDoNotChangeOrdinaryWaitingUserResume(t *testing.T) {
 	}
 	suspended, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
 		PlanID: "ordinary", Source: "dynamic", Summary: "ordinary", Direction: "image", Steps: []PlanStep{
-			{ID: "confirm", Tool: "request_confirmation", Params: map[string]any{"question": "continue?"}, Required: true},
+			{ID: "confirm", Tool: "custom_confirmation", Required: true},
 			{ID: "after", Tool: "after", DependsOn: []string{"confirm"}, Required: true},
 		},
 	})
@@ -1285,7 +1287,7 @@ func TestBudgetPreviewResumeStartsExecutionAndReplaysTerminalReceipt(t *testing.
 		t.Fatalf("run=%+v calls=%d err=%v", resumed, calls.Load(), err)
 	}
 	replayed, err := scheduler.Resume(context.Background(), suspended.ID, suspended.ResumeKey, map[string]any{"approved": false})
-	if err != nil || replayed.Version != resumed.Version || calls.Load() != 1 {
+	if !errors.Is(err, ErrResumeDecisionConflict) || replayed.Version != resumed.Version || calls.Load() != 1 {
 		t.Fatalf("replay=%+v calls=%d err=%v", replayed, calls.Load(), err)
 	}
 }

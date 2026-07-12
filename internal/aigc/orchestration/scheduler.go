@@ -34,6 +34,7 @@ type SchedulerConfig struct {
 	OwnerID           string
 	LeaseTTL          time.Duration
 	HeartbeatInterval time.Duration
+	BatchCanceller    BatchCanceller
 	// Now remains required for process-local scheduler behavior. Lease eligibility
 	// and deadlines come exclusively from RunStore.MutateRunAtAuthoritativeNow.
 	Now      func() time.Time
@@ -52,6 +53,7 @@ type Scheduler struct {
 	leaseTTL          time.Duration
 	heartbeatInterval time.Duration
 	newToken          func() string
+	batchCanceller    BatchCanceller
 	gateMu            sync.Mutex
 	gates             map[string]*runGate
 }
@@ -107,7 +109,7 @@ func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
 		store: cfg.Store, vocabulary: cfg.Vocabulary, guard: guard, maxParallel: maxParallel,
 		jobBudget: cfg.JobBudget, commitTimeout: commitTimeout, newID: cfg.NewID,
 		ownerID: strings.TrimSpace(cfg.OwnerID), leaseTTL: leaseTTL,
-		heartbeatInterval: heartbeatInterval, newToken: cfg.NewToken,
+		heartbeatInterval: heartbeatInterval, newToken: cfg.NewToken, batchCanceller: cfg.BatchCanceller,
 		gates: make(map[string]*runGate),
 	}, nil
 }
@@ -163,16 +165,19 @@ func (s *Scheduler) Submit(ctx context.Context, sessionID, userID string, plan E
 	suspendReason := ""
 	previewRequired := false
 	resumeKey := ""
+	resumeDecisionSchema := ""
 	if plan.ExceedsJobBudget(s.jobBudget) {
 		initialStatus = RunStatusSuspended
 		suspendReason = SuspendWaitingUser
 		previewRequired = true
 		resumeKey = fmt.Sprintf("%s:preview:resume", runID)
+		resumeDecisionSchema = "approved_bool_v1"
 	}
 	created, err := s.store.CreateRun(ctx, PlanRun{
 		ID: runID, SessionID: sessionID, UserID: userID, Plan: plan,
 		Status: initialStatus, SuspendReason: suspendReason,
 		PreviewRequired: previewRequired, ResumeKey: resumeKey, Nodes: nodes,
+		ResumeDecisionSchema: resumeDecisionSchema,
 	})
 	if err != nil {
 		return PlanRun{}, err
@@ -546,6 +551,8 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 					node.Suspension = &vocabulary.Suspension{Reason: SuspendWaitingAgent}
 				}
 				if node.Suspension != nil {
+					node.SuspensionOrigin = outcome.step.Tool
+					node.ResumeDecisionSchema = node.Suspension.DecisionSchema
 					if node.SuspensionGeneration == math.MaxInt64 {
 						return fmt.Errorf("suspension generation exhausted for run %q step %q", next.ID, outcome.step.ID)
 					}

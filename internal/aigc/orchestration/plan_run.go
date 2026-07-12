@@ -40,7 +40,11 @@ const (
 	NodeStatusFailed    = "failed"
 	NodeStatusSkipped   = "skipped"
 
-	SkipReasonRevision = "revision"
+	SkipReasonRevision  = "revision"
+	SkipReasonCancelled = "cancelled"
+
+	CancelReasonPreviewRejected      = "preview_rejected"
+	CancelReasonConfirmationRejected = "confirmation_rejected"
 )
 
 type NodeRun struct {
@@ -59,6 +63,8 @@ type NodeRun struct {
 	SuspensionGeneration int64                  `json:"suspension_generation,omitempty"`
 	Resumed              bool                   `json:"resumed,omitempty"`
 	ResumeDecision       map[string]any         `json:"resume_decision"`
+	SuspensionOrigin     string                 `json:"suspension_origin,omitempty"`
+	ResumeDecisionSchema string                 `json:"resume_decision_schema,omitempty"`
 	GuardApproval        *GuardApprovalReceipt  `json:"guard_approval,omitempty"`
 }
 
@@ -69,19 +75,21 @@ type GuardApprovalReceipt struct {
 }
 
 type PlanRun struct {
-	ID              string              `json:"id"`
-	SessionID       string              `json:"session_id"`
-	UserID          string              `json:"user_id"`
-	Plan            ExecutionPlan       `json:"plan"`
-	Status          string              `json:"status"`
-	SuspendReason   string              `json:"suspend_reason,omitempty"`
-	SuspendedNodeID string              `json:"suspended_node_id,omitempty"`
-	PreviewRequired bool                `json:"preview_required,omitempty"`
-	ResumeKey       string              `json:"resume_key,omitempty"`
-	Resumed         bool                `json:"resumed,omitempty"`
-	ResumeDecision  map[string]any      `json:"resume_decision"`
-	Nodes           map[string]*NodeRun `json:"nodes"`
-	Version         int                 `json:"version"`
+	ID                   string              `json:"id"`
+	SessionID            string              `json:"session_id"`
+	UserID               string              `json:"user_id"`
+	Plan                 ExecutionPlan       `json:"plan"`
+	Status               string              `json:"status"`
+	SuspendReason        string              `json:"suspend_reason,omitempty"`
+	SuspendedNodeID      string              `json:"suspended_node_id,omitempty"`
+	PreviewRequired      bool                `json:"preview_required,omitempty"`
+	ResumeKey            string              `json:"resume_key,omitempty"`
+	Resumed              bool                `json:"resumed,omitempty"`
+	ResumeDecision       map[string]any      `json:"resume_decision"`
+	ResumeDecisionSchema string              `json:"resume_decision_schema,omitempty"`
+	CancelReason         string              `json:"cancel_reason,omitempty"`
+	Nodes                map[string]*NodeRun `json:"nodes"`
+	Version              int                 `json:"version"`
 }
 
 type RunStore interface {

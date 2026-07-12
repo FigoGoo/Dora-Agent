@@ -98,6 +98,30 @@ func TestGenerationBridgeDefaultsPromptOnlyTargetToImage(t *testing.T) {
 	}
 }
 
+func TestGenerationBridgeCancelsExistingBatchIdempotently(t *testing.T) {
+	store := generation.NewMemoryStore()
+	commands := generation.NewCommandService(generation.CommandServiceConfig{Store: store})
+	bridge := NewGenerationBridge(commands)
+	result, err := bridge.Dispatch(context.Background(), vocabulary.GenerationDispatchRequest{
+		SessionID: "session-1", UserID: "user-1", PlanRunID: "run-1", NodeID: "dispatch", Attempt: 1,
+		IdempotencyKey: "plan:run-1:dispatch:1",
+		Inputs:         map[string]any{"targets": []any{map[string]any{"prompt": "cinematic rain"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.CancelBatch(context.Background(), result.BatchID); err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.CancelBatch(context.Background(), result.BatchID); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := store.GetBatch(context.Background(), result.BatchID)
+	if err != nil || !batch.CancelRequested || batch.Status != generation.BatchStatusCancelling {
+		t.Fatalf("batch=%+v err=%v", batch, err)
+	}
+}
+
 func TestGenerationBridgeFingerprintCoversPlanNodeTargetAndAttempt(t *testing.T) {
 	base := vocabulary.GenerationDispatchRequest{
 		SessionID: "session-1", UserID: "user-1", PlanRunID: "run-1", NodeID: "dispatch", Attempt: 1,

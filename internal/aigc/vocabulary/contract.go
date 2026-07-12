@@ -42,8 +42,10 @@ type Failure struct {
 
 // Suspension 表示工具主动声明挂起，供交互类/派发类工具等待外部条件。
 type Suspension struct {
-	Reason  string         `json:"reason"` // waiting_user | waiting_jobs
-	Payload map[string]any `json:"payload,omitempty"`
+	Reason         string         `json:"reason"` // waiting_user | waiting_jobs
+	Origin         string         `json:"origin,omitempty"`
+	DecisionSchema string         `json:"decision_schema,omitempty"`
+	Payload        map[string]any `json:"payload,omitempty"`
 }
 
 // Result 是工具调用的一等结果：

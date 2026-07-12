@@ -41,14 +41,22 @@ func (requestConfirmationTool) Run(ctx context.Context, call Call) (Result, erro
 	if !ok || strings.TrimSpace(question) == "" {
 		return invalidConfirmationRequest("question must be a non-empty string"), nil
 	}
-	payload := map[string]any{"question": question}
+	payload := map[string]any{
+		"question": question,
+		"decision_schema": map[string]any{
+			"type": "object", "required": []any{"approved"},
+			"properties": map[string]any{"approved": "bool"}, "additional_properties": false,
+		},
+	}
 	if options, exists := inputs["options"]; exists {
 		if _, ok := options.([]any); !ok {
 			return invalidConfirmationRequest("options must be an array"), nil
 		}
 		payload["options"] = options
 	}
-	return Result{Suspension: &Suspension{Reason: "waiting_user", Payload: payload}}, nil
+	return Result{Suspension: &Suspension{
+		Reason: "waiting_user", Origin: "request_confirmation", DecisionSchema: "approved_bool_v1", Payload: payload,
+	}}, nil
 }
 
 func invalidConfirmationRequest(message string) Result {
