@@ -174,6 +174,205 @@ func TestSchedulerGuardsTypedNilAsUnconfigured(t *testing.T) {
 	}
 }
 
+func TestSchedulerGuardsSoftApprovalExecutesMediaOnceAndReplays(t *testing.T) {
+	var mediaCalls atomic.Int32
+	var downstreamCalls atomic.Int32
+	var gotCall vocabulary.Call
+	media := schedulerTool{key: "render", category: "media", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+		mediaCalls.Add(1)
+		gotCall = call
+		return vocabulary.Result{Outputs: map[string]any{"asset": "asset-1"}}, nil
+	}}
+	downstream := schedulerTool{key: "publish", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		downstreamCalls.Add(1)
+		return vocabulary.Result{}, nil
+	}}
+	cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, media, downstream), func() string { return "soft-approve-run" })
+	cfg.Guard = vocabulary.NewGuardChain(vocabulary.GuardConfig{SoftTerms: []string{"soft-risk"}})
+	cfg.MaxParallel = 1
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suspended, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "soft-approve", Source: "dynamic", Summary: "soft approve", Direction: "image",
+		Steps: []PlanStep{
+			{ID: "render", Tool: "render", Params: map[string]any{"prompt": "contains soft-risk"}, Required: true},
+			{ID: "publish", Tool: "publish", DependsOn: []string{"render"}, Required: true},
+		},
+	})
+	if err != nil || suspended.Status != RunStatusSuspended || mediaCalls.Load() != 0 || downstreamCalls.Load() != 0 {
+		t.Fatalf("suspended=%+v media=%d downstream=%d err=%v", suspended, mediaCalls.Load(), downstreamCalls.Load(), err)
+	}
+	key := suspended.Nodes["render"].ResumeKey
+	approved := map[string]any{"approved": true}
+	resumed, err := scheduler.Resume(context.Background(), suspended.ID, key, approved)
+	if err != nil || resumed.Status != RunStatusSucceeded || mediaCalls.Load() != 1 || downstreamCalls.Load() != 1 {
+		t.Fatalf("resumed=%+v media=%d downstream=%d err=%v", resumed, mediaCalls.Load(), downstreamCalls.Load(), err)
+	}
+	if gotCall.Attempt != 1 || gotCall.IdempotencyKey != "soft-approve-run:render:1" {
+		t.Fatalf("media call=%+v", gotCall)
+	}
+	version := resumed.Version
+	replayed, err := scheduler.Resume(context.Background(), suspended.ID, key, approved)
+	if err != nil || replayed.Version != version || mediaCalls.Load() != 1 || downstreamCalls.Load() != 1 {
+		t.Fatalf("replayed=%+v media=%d downstream=%d err=%v", replayed, mediaCalls.Load(), downstreamCalls.Load(), err)
+	}
+	conflicted, err := scheduler.Resume(context.Background(), suspended.ID, key, map[string]any{"approved": false})
+	if !errors.Is(err, ErrResumeDecisionConflict) || conflicted.Version != version || mediaCalls.Load() != 1 {
+		t.Fatalf("conflicted=%+v media=%d err=%v", conflicted, mediaCalls.Load(), err)
+	}
+}
+
+func TestSchedulerGuardsSoftRejectionUsesTerminalPolicy(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		required      bool
+		successPolicy string
+		wantRun       string
+	}{
+		{name: "required_all_required", required: true, successPolicy: "all_required", wantRun: RunStatusFailed},
+		{name: "optional", required: false, wantRun: RunStatusPartialSucceeded},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var mediaCalls atomic.Int32
+			var downstreamCalls atomic.Int32
+			media := schedulerTool{key: "render", category: "media", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+				mediaCalls.Add(1)
+				return vocabulary.Result{}, nil
+			}}
+			downstream := schedulerTool{key: "after", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+				downstreamCalls.Add(1)
+				return vocabulary.Result{}, nil
+			}}
+			cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, media, downstream), func() string { return "soft-deny-" + test.name })
+			cfg.Guard = vocabulary.NewGuardChain(vocabulary.GuardConfig{SoftTerms: []string{"soft-risk"}})
+			scheduler, err := NewScheduler(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			suspended, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+				PlanID: "soft-deny", Source: "dynamic", Summary: "soft deny", Direction: "image", SuccessPolicy: test.successPolicy,
+				Steps: []PlanStep{
+					{ID: "render", Tool: "render", Params: map[string]any{"prompt": "soft-risk"}, Required: test.required},
+					{ID: "after", Tool: "after", DependsOn: []string{"render"}, Required: test.required},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			denied, err := scheduler.Resume(context.Background(), suspended.ID, suspended.Nodes["render"].ResumeKey, map[string]any{"approved": false})
+			node := denied.Nodes["render"]
+			if err != nil || denied.Status != test.wantRun || node.Status != NodeStatusFailed || node.Fail == nil || node.Fail.Code != "compliance_soft_block_rejected" || mediaCalls.Load() != 0 || downstreamCalls.Load() != 0 {
+				t.Fatalf("run=%+v node=%+v media=%d downstream=%d err=%v", denied, node, mediaCalls.Load(), downstreamCalls.Load(), err)
+			}
+			version := denied.Version
+			replayed, err := scheduler.Resume(context.Background(), suspended.ID, suspended.Nodes["render"].ResumeKey, map[string]any{"approved": false})
+			if err != nil || replayed.Version != version || mediaCalls.Load() != 0 {
+				t.Fatalf("replayed=%+v media=%d err=%v", replayed, mediaCalls.Load(), err)
+			}
+		})
+	}
+}
+
+func TestSchedulerGuardsRejectInvalidApprovalDecisionWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		decision map[string]any
+	}{
+		{name: "missing", decision: map[string]any{}},
+		{name: "non_bool", decision: map[string]any{"approved": "yes"}},
+		{name: "extra_field", decision: map[string]any{"approved": true, "note": "forged"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			media := schedulerTool{key: "render", category: "media"}
+			cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, media), func() string { return "invalid-decision-" + test.name })
+			cfg.Guard = vocabulary.NewGuardChain(vocabulary.GuardConfig{SoftTerms: []string{"soft-risk"}})
+			scheduler, err := NewScheduler(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			suspended, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+				PlanID: "invalid-decision", Source: "dynamic", Summary: "invalid", Direction: "image",
+				Steps: []PlanStep{{ID: "render", Tool: "render", Params: map[string]any{"prompt": "soft-risk"}, Required: true}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := scheduler.Resume(context.Background(), suspended.ID, suspended.Nodes["render"].ResumeKey, test.decision)
+			if !errors.Is(err, ErrGuardDecisionInvalid) || got.Version != suspended.Version || got.Status != RunStatusSuspended {
+				t.Fatalf("run=%+v err=%v", got, err)
+			}
+			stored, getErr := scheduler.store.GetRun(context.Background(), suspended.ID)
+			if getErr != nil || stored.Version != suspended.Version || stored.Nodes["render"].Status != NodeStatusRunning || stored.Nodes["render"].Resumed {
+				t.Fatalf("stored=%+v err=%v", stored, getErr)
+			}
+		})
+	}
+}
+
+func TestSchedulerGuardsDoNotChangeOrdinaryWaitingUserResume(t *testing.T) {
+	var downstreamCalls atomic.Int32
+	confirm := vocabulary.NewRequestConfirmationTool()
+	downstream := schedulerTool{key: "after", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		downstreamCalls.Add(1)
+		return vocabulary.Result{}, nil
+	}}
+	cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, confirm, downstream), func() string { return "ordinary-confirm" })
+	cfg.Guard = vocabulary.NewGuardChain(vocabulary.GuardConfig{SoftTerms: []string{"soft-risk"}})
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suspended, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "ordinary", Source: "dynamic", Summary: "ordinary", Direction: "image", Steps: []PlanStep{
+			{ID: "confirm", Tool: "request_confirmation", Params: map[string]any{"question": "continue?"}, Required: true},
+			{ID: "after", Tool: "after", DependsOn: []string{"confirm"}, Required: true},
+		},
+	})
+	if err != nil || suspended.Status != RunStatusSuspended {
+		t.Fatalf("suspended=%+v err=%v", suspended, err)
+	}
+	resumed, err := scheduler.Resume(context.Background(), suspended.ID, suspended.Nodes["confirm"].ResumeKey, map[string]any{"choice": "yes"})
+	if err != nil || resumed.Status != RunStatusSucceeded || downstreamCalls.Load() != 1 || resumed.Nodes["confirm"].Status != NodeStatusSucceeded {
+		t.Fatalf("resumed=%+v downstream=%d err=%v", resumed, downstreamCalls.Load(), err)
+	}
+}
+
+func TestSchedulerGuardsMediaToolCanStartOrdinaryWaitingUserAfterApproval(t *testing.T) {
+	var mediaCalls atomic.Int32
+	media := schedulerTool{key: "render", category: "media", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		mediaCalls.Add(1)
+		return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser, Payload: map[string]any{"question": "use this asset?"}}}, nil
+	}}
+	cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, media), func() string { return "guard-then-tool-confirm" })
+	cfg.Guard = vocabulary.NewGuardChain(vocabulary.GuardConfig{SoftTerms: []string{"soft-risk"}})
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardWait, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "guard-then-tool-confirm", Source: "dynamic", Summary: "two origins", Direction: "image",
+		Steps: []PlanStep{{ID: "render", Tool: "render", Params: map[string]any{"prompt": "soft-risk"}, Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolWait, err := scheduler.Resume(context.Background(), guardWait.ID, guardWait.Nodes["render"].ResumeKey, map[string]any{"approved": true})
+	if err != nil || toolWait.Status != RunStatusSuspended || mediaCalls.Load() != 1 || toolWait.Nodes["render"].Suspension.Payload["question"] != "use this asset?" {
+		t.Fatalf("toolWait=%+v calls=%d err=%v", toolWait, mediaCalls.Load(), err)
+	}
+	ordinaryDecision := map[string]any{"choice": "yes"}
+	completed, err := scheduler.Resume(context.Background(), toolWait.ID, toolWait.Nodes["render"].ResumeKey, ordinaryDecision)
+	if err != nil || completed.Status != RunStatusSucceeded || mediaCalls.Load() != 1 {
+		t.Fatalf("completed=%+v calls=%d err=%v", completed, mediaCalls.Load(), err)
+	}
+	replayed, err := scheduler.Resume(context.Background(), completed.ID, toolWait.Nodes["render"].ResumeKey, ordinaryDecision)
+	if err != nil || replayed.Version != completed.Version || mediaCalls.Load() != 1 {
+		t.Fatalf("replayed=%+v calls=%d err=%v", replayed, mediaCalls.Load(), err)
+	}
+}
+
 func createPendingSchedulerRun(t *testing.T, store RunStore, id string, plan ExecutionPlan) PlanRun {
 	t.Helper()
 	nodes := make(map[string]*NodeRun, len(plan.Steps))

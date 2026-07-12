@@ -53,6 +53,8 @@ func (g *GuardChain) Check(ctx context.Context, call Call) Result {
 			Payload: map[string]any{
 				"message":      "This media request may be sensitive. Confirm before continuing.",
 				"matched_term": term,
+				"decision_key": "approved",
+				"options":      []any{true, false},
 			},
 		}}
 	}

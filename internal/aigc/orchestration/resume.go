@@ -15,12 +15,19 @@ var (
 	ErrResumeKeyMismatch       = errors.New("plan run resume key mismatch")
 	ErrResumeReasonUnsupported = errors.New("plan run resume reason unsupported")
 	ErrResumeDecisionConflict  = errors.New("plan run resume decision output conflict")
+	ErrGuardDecisionInvalid    = errors.New("media guard approval decision invalid")
 	ErrJobsWaitMismatch        = errors.New("plan run jobs wait mismatch")
 	ErrJobsOutcomeInvalid      = errors.New("plan run jobs outcome invalid")
 	ErrJobsOutcomeConflict     = errors.New("plan run jobs outcome conflict")
 )
 
 const jobsOutcomeReceiptKey = "jobs_outcome_receipt"
+
+const (
+	guardApprovalPending  = "pending"
+	guardApprovalApproved = "approved"
+	guardApprovalRejected = "rejected"
+)
 
 type JobsOutcome struct {
 	BatchID string         `json:"batch_id"`
@@ -251,6 +258,9 @@ func (s *Scheduler) resume(ctx context.Context, runID, resumeKey string, decisio
 		return current, resumeKeyMismatch(current.ID, resumeKey)
 	}
 	if targetResumed(target, &current) {
+		if err := validateGuardResumeReplay(target, decision); err != nil {
+			return current, err
+		}
 		return s.continueResumedRun(ctx, current, resumeKey)
 	}
 
@@ -281,6 +291,13 @@ func (s *Scheduler) resume(ctx context.Context, runID, resumeKey string, decisio
 			if err != nil {
 				return PlanRun{}, err
 			}
+			replayedTarget, ok := findResumeTarget(&current, resumeKey)
+			if !ok {
+				return current, resumeKeyMismatch(current.ID, resumeKey)
+			}
+			if replayErr := validateGuardResumeReplay(replayedTarget, decision); replayErr != nil {
+				return current, replayErr
+			}
 			return s.continueResumedRun(ctx, current, resumeKey)
 		}
 		if !errors.Is(err, ErrRunVersionConflict) {
@@ -301,6 +318,9 @@ func (s *Scheduler) resume(ctx context.Context, runID, resumeKey string, decisio
 			return current, resumeKeyMismatch(current.ID, resumeKey)
 		}
 		if targetResumed(target, &current) {
+			if replayErr := validateGuardResumeReplay(target, decision); replayErr != nil {
+				return current, replayErr
+			}
 			return s.continueResumedRun(ctx, current, resumeKey)
 		}
 	}
@@ -308,6 +328,29 @@ func (s *Scheduler) resume(ctx context.Context, runID, resumeKey string, decisio
 		return current, fmt.Errorf("%w: resume exceeded retry limit", ErrRunVersionConflict)
 	}
 	return s.continueResumedRun(ctx, committed, resumeKey)
+}
+
+func validateGuardResumeReplay(target resumeTarget, decision map[string]any) error {
+	if target.node == nil || target.node.GuardApproval == nil || target.node.GuardApproval.Status == guardApprovalPending {
+		return nil
+	}
+	approved, err := parseGuardApprovalDecision(decision)
+	if err != nil {
+		return err
+	}
+	wantApproved := target.node.GuardApproval.Status == guardApprovalApproved
+	if approved != wantApproved {
+		return fmt.Errorf("%w: guard approval decision differs from stored receipt", ErrResumeDecisionConflict)
+	}
+	return nil
+}
+
+func parseGuardApprovalDecision(decision map[string]any) (bool, error) {
+	approved, ok := decision["approved"].(bool)
+	if !ok || len(decision) != 1 {
+		return false, fmt.Errorf("%w: requires exactly one boolean approved field", ErrGuardDecisionInvalid)
+	}
+	return approved, nil
 }
 
 var errResumeAlreadyApplied = errors.New("plan run resume receipt already applied")
@@ -377,7 +420,22 @@ func applyResume(run *PlanRun, target resumeTarget, resumeKey string, decision m
 		if target.node.Status != NodeStatusRunning {
 			return resumeKeyMismatch(run.ID, resumeKey)
 		}
-		target.node.Status = NodeStatusSucceeded
+		if target.node.GuardApproval != nil && target.node.GuardApproval.Status == guardApprovalPending {
+			approved, err := parseGuardApprovalDecision(decision)
+			if err != nil {
+				return err
+			}
+			if approved {
+				target.node.Status = NodeStatusPending
+				target.node.GuardApproval.Status = guardApprovalApproved
+			} else {
+				target.node.Status = NodeStatusFailed
+				target.node.Fail = &vocabulary.Failure{Code: "compliance_soft_block_rejected", Message: "user rejected the sensitive media request"}
+				target.node.GuardApproval.Status = guardApprovalRejected
+			}
+		} else {
+			target.node.Status = NodeStatusSucceeded
+		}
 	case SuspendWaitingAgent:
 		if target.node.Status != NodeStatusSucceeded {
 			return resumeKeyMismatch(run.ID, resumeKey)

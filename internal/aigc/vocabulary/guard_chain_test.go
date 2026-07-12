@@ -37,6 +37,13 @@ func TestGuardChainHardSoftAndSafe(t *testing.T) {
 		if result.Suspension.Payload["message"] == "" || result.Suspension.Payload["matched_term"] != "soft-risk" {
 			t.Fatalf("payload=%+v", result.Suspension.Payload)
 		}
+		if result.Suspension.Payload["decision_key"] != "approved" {
+			t.Fatalf("payload=%+v", result.Suspension.Payload)
+		}
+		options, ok := result.Suspension.Payload["options"].([]any)
+		if !ok || len(options) != 2 || options[0] != true || options[1] != false {
+			t.Fatalf("options=%#v", result.Suspension.Payload["options"])
+		}
 	})
 
 	t.Run("safe input passes", func(t *testing.T) {

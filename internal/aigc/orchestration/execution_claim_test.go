@@ -674,6 +674,80 @@ func TestExecutionClaimHeartbeatLossDiscardsSuccessAndRetriesSameKey(t *testing.
 	}
 }
 
+func TestSchedulerGuardsApprovedMediaHeartbeatLossDiscardsOutcome(t *testing.T) {
+	base := NewMemoryRunStore()
+	heartbeatErr := errors.New("guarded media heartbeat failed")
+	store := &failHeartbeatStore{RunStore: base, err: heartbeatErr}
+	clock := newClaimClock(time.Unix(1_700_000_000, 0))
+	started := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	var keysMu sync.Mutex
+	var keys []string
+	tool := schedulerTool{key: "render", category: "media", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+		attempt := calls.Add(1)
+		keysMu.Lock()
+		keys = append(keys, call.IdempotencyKey)
+		keysMu.Unlock()
+		if attempt == 1 {
+			started <- struct{}{}
+			<-releaseFirst
+			return vocabulary.Result{Outputs: map[string]any{"asset": "stale"}}, nil
+		}
+		return vocabulary.Result{Outputs: map[string]any{"asset": "fresh"}}, nil
+	}}
+	scheduler, err := NewScheduler(SchedulerConfig{
+		Store: store, Vocabulary: schedulerRegistry(t, tool), Guard: vocabulary.NewGuardChain(vocabulary.GuardConfig{SoftTerms: []string{"soft-risk"}}),
+		MaxParallel: 1, CommitTimeout: 50 * time.Millisecond, NewID: func() string { return "guard-heartbeat" },
+		OwnerID: "owner", LeaseTTL: time.Second, HeartbeatInterval: time.Millisecond, Now: clock.Now, NewToken: func() string { return "token" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	suspended, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "guard-heartbeat", Source: "dynamic", Summary: "guard heartbeat", Direction: "image",
+		Steps: []PlanStep{{ID: "render", Tool: "render", Params: map[string]any{"prompt": "soft-risk"}, Required: true}},
+	})
+	if err != nil || suspended.Status != RunStatusSuspended || calls.Load() != 0 {
+		t.Fatalf("suspended=%+v calls=%d err=%v", suspended, calls.Load(), err)
+	}
+	type resumeResult struct {
+		run PlanRun
+		err error
+	}
+	done := make(chan resumeResult, 1)
+	decision := map[string]any{"approved": true}
+	go func() {
+		run, resumeErr := scheduler.Resume(context.Background(), suspended.ID, suspended.Nodes["render"].ResumeKey, decision)
+		done <- resumeResult{run: run, err: resumeErr}
+	}()
+	<-started
+	store.failNext.Store(true)
+	time.Sleep(5 * time.Millisecond)
+	close(releaseFirst)
+	failed := <-done
+	if !errors.Is(failed.err, heartbeatErr) {
+		t.Fatalf("failed=%+v err=%v", failed.run, failed.err)
+	}
+	stored, err := base.GetRun(context.Background(), suspended.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := stored.Nodes["render"]
+	if stored.Status != RunStatusRunning || node.Status != NodeStatusPending || node.ExecutionToken != "" || node.Outputs["asset"] != nil || !node.Resumed {
+		t.Fatalf("stored=%+v node=%+v", stored, node)
+	}
+	recovered, err := scheduler.Resume(context.Background(), suspended.ID, suspended.Nodes["render"].ResumeKey, decision)
+	if err != nil || recovered.Status != RunStatusSucceeded || recovered.Nodes["render"].Outputs["asset"] != "fresh" || calls.Load() != 2 {
+		t.Fatalf("recovered=%+v calls=%d err=%v", recovered, calls.Load(), err)
+	}
+	keysMu.Lock()
+	defer keysMu.Unlock()
+	if len(keys) != 2 || keys[0] != "guard-heartbeat:render:1" || keys[1] != keys[0] {
+		t.Fatalf("keys=%v", keys)
+	}
+}
+
 func TestExecutionClaimHeartbeatLossDiscardsWholeWave(t *testing.T) {
 	base := NewMemoryRunStore()
 	heartbeatErr := errors.New("heartbeat failed")

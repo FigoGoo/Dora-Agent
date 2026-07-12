@@ -56,6 +56,13 @@ type NodeRun struct {
 	ResumeKey      string                 `json:"resume_key,omitempty"`
 	Resumed        bool                   `json:"resumed,omitempty"`
 	ResumeDecision map[string]any         `json:"resume_decision"`
+	GuardApproval  *GuardApprovalReceipt  `json:"guard_approval,omitempty"`
+}
+
+type GuardApprovalReceipt struct {
+	Fingerprint string `json:"fingerprint"`
+	Attempt     int    `json:"attempt"`
+	Status      string `json:"status"` // pending | approved | rejected
 }
 
 type PlanRun struct {

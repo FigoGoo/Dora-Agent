@@ -2,6 +2,9 @@ package orchestration
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -289,12 +292,15 @@ func (s *Scheduler) releaseRunGate(runID string, gate *runGate, held bool) {
 }
 
 type nodeOutcome struct {
-	step       PlanStep
-	claim      executionClaim
-	invoked    bool
-	result     vocabulary.Result
-	toolErr    error
-	resolveErr error
+	step          PlanStep
+	claim         executionClaim
+	invoked       bool
+	result        vocabulary.Result
+	toolErr       error
+	resolveErr    error
+	guardChecked  bool
+	guardApproved bool
+	guardReceipt  *GuardApprovalReceipt
 }
 
 type inputResolutionError struct{ error }
@@ -416,7 +422,21 @@ func executeOutcome(ctx context.Context, registry *vocabulary.Registry, guard vo
 		Inputs:         inputs,
 	}
 	if guard != nil && tool.Descriptor().Category == "media" {
-		outcome.result = normalizeToolResult(guard.Check(ctx, call))
+		fingerprint, err := mediaGuardFingerprint(call)
+		if err != nil {
+			outcome.toolErr = err
+			return
+		}
+		receipt := run.Nodes[outcome.step.ID].GuardApproval
+		if receipt != nil && receipt.Status == guardApprovalApproved && receipt.Attempt == call.Attempt && receipt.Fingerprint == fingerprint {
+			outcome.guardApproved = true
+		} else {
+			outcome.guardChecked = true
+			outcome.result = normalizeToolResult(guard.Check(ctx, call))
+			if outcome.result.Suspension != nil && outcome.result.Suspension.Reason == SuspendWaitingUser {
+				outcome.guardReceipt = &GuardApprovalReceipt{Fingerprint: fingerprint, Attempt: call.Attempt, Status: guardApprovalPending}
+			}
+		}
 		if outcome.result.Fail != nil || outcome.result.Suspension != nil {
 			return
 		}
@@ -429,6 +449,22 @@ func executeOutcome(ctx context.Context, registry *vocabulary.Registry, guard vo
 	if outcome.toolErr == nil {
 		outcome.result = normalizeToolResult(outcome.result)
 	}
+}
+
+func mediaGuardFingerprint(call vocabulary.Call) (string, error) {
+	payload := struct {
+		Version   string         `json:"version"`
+		PlanRunID string         `json:"plan_run_id"`
+		NodeID    string         `json:"node_id"`
+		Attempt   int            `json:"attempt"`
+		Inputs    map[string]any `json:"inputs,omitempty"`
+	}{Version: "media_guard_v1", PlanRunID: call.PlanRunID, NodeID: call.NodeID, Attempt: call.Attempt, Inputs: call.Inputs}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("media guard fingerprint: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func normalizeToolResult(result vocabulary.Result) vocabulary.Result {
@@ -468,6 +504,9 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 				if !claimMatches(node, outcome.claim) {
 					continue
 				}
+				if outcome.guardChecked {
+					node.GuardApproval = outcome.guardReceipt
+				}
 				if !outcome.invoked || outcome.toolErr != nil {
 					node.Status = NodeStatusPending
 					clearExecutionClaim(node)
@@ -478,6 +517,9 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 					continue
 				}
 				applyOutcome(node, outcome)
+				if outcome.guardApproved && node.Suspension != nil {
+					node.GuardApproval = nil
+				}
 				clearExecutionClaim(node)
 				if outcome.resolveErr != nil && appliedResolveErr == nil {
 					appliedResolveErr = outcome.resolveErr
