@@ -66,9 +66,36 @@ type PlanStoryboardData struct {
 	ApprovalID string                        `json:"approval_id,omitempty"`
 }
 
+const (
+	MediaTargetStoryboard         = "storyboard"
+	MediaTargetSessionDeliverable = "session_deliverable"
+)
+
 type GenerateMediaIntent struct {
-	Phase  string `json:"phase"`
-	Policy string `json:"policy"`
+	Phase  string `json:"phase,omitempty"`
+	Policy string `json:"policy,omitempty"`
+	// 轻直出（session_deliverable 目标）字段；target 为空 = storyboard，
+	// 行为与旧版完全一致。
+	Target      string `json:"target,omitempty"`
+	MediaKind   string `json:"media_kind,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
+	Count       int    `json:"count,omitempty"`
+	AspectRatio string `json:"aspect_ratio,omitempty"`
+}
+
+func (intent GenerateMediaIntent) NormalizedTarget() string {
+	target := strings.TrimSpace(intent.Target)
+	if target == "" {
+		return MediaTargetStoryboard
+	}
+	return target
+}
+
+func (intent GenerateMediaIntent) NormalizedCount() int {
+	if intent.Count == 0 {
+		return 1
+	}
+	return intent.Count
 }
 
 type GenerateMediaData struct {
@@ -115,13 +142,29 @@ func (intent PlanStoryboardIntent) Validate() error {
 }
 
 func (intent GenerateMediaIntent) Validate() error {
-	if !slices.Contains([]string{"auto_next", "element_images", "keyframes", "videos", "audio"}, strings.TrimSpace(intent.Phase)) {
-		return fmt.Errorf("generate_media phase is invalid")
+	switch intent.NormalizedTarget() {
+	case MediaTargetStoryboard:
+		if !slices.Contains([]string{"auto_next", "element_images", "keyframes", "videos", "audio"}, strings.TrimSpace(intent.Phase)) {
+			return fmt.Errorf("generate_media phase is invalid")
+		}
+		if !slices.Contains([]string{"single_next", "all_eligible"}, strings.TrimSpace(intent.Policy)) {
+			return fmt.Errorf("generate_media policy is invalid")
+		}
+		return nil
+	case MediaTargetSessionDeliverable:
+		if !slices.Contains([]string{"image", "video", "music", "audio"}, strings.TrimSpace(intent.MediaKind)) {
+			return fmt.Errorf("generate_media media_kind must be image|video|music|audio for session_deliverable")
+		}
+		if strings.TrimSpace(intent.Prompt) == "" {
+			return fmt.Errorf("generate_media prompt is required for session_deliverable")
+		}
+		if count := intent.NormalizedCount(); count < 1 || count > 4 {
+			return fmt.Errorf("generate_media count must be between 1 and 4")
+		}
+		return nil
+	default:
+		return fmt.Errorf("generate_media target %q is not supported", intent.Target)
 	}
-	if !slices.Contains([]string{"single_next", "all_eligible"}, strings.TrimSpace(intent.Policy)) {
-		return fmt.Errorf("generate_media policy is invalid")
-	}
-	return nil
 }
 
 func (intent AssembleOutputIntent) Validate() error {

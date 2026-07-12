@@ -16,7 +16,7 @@ const (
 	analyzeMaterialsDescription = "Analyze the user's briefs and media, extract reusable subjects, brand constraints, visual references, and storyboard-ready findings. Persist a versioned analysis artifact and return only a compact summary and reusable asset references."
 	planCreationSpecDescription = "Create or revise the complete creation specification from the user's background, goal and confirmed material analysis. Produce a versioned candidate for review and report whether the active storyboard requires whole replanning."
 	planStoryboardDescription   = "Create a complete dynamic storyboard revision from the confirmed creation specification. Use only for initial planning or whole-storyboard replanning. Infer required modules, element counts, contents, prompts and dependencies. Never use for local target, prompt or asset edits."
-	generateMediaDescription    = "Advance normal production for the active storyboard. Deterministically select the next eligible production stage, prepare missing prompts internally, reuse compatible assets, and dispatch durable media jobs. Do not use for targeted UI regeneration."
+	generateMediaDescription    = "Generate media. Two targets: (1) storyboard (default) — advance normal production for the active storyboard, deterministically selecting the next eligible stage; requires phase+policy. (2) session_deliverable — lightweight direct generation without a storyboard for quick single-intent requests (one image / short video / music / narration); requires media_kind+prompt. Do not use for targeted UI regeneration."
 	assembleOutputDescription   = "Validate the active storyboard and confirmed assets, build a versioned assembly plan, report missing dependencies, and optionally dispatch a preview or final render for the requested output type."
 )
 
@@ -187,8 +187,13 @@ func planStoryboardParams() map[string]*schema.ParameterInfo {
 
 func generateMediaParams() map[string]*schema.ParameterInfo {
 	return map[string]*schema.ParameterInfo{
-		"phase":  {Type: schema.String, Desc: "Production phase selected at a high level; the graph selects concrete targets.", Enum: []string{"auto_next", "element_images", "keyframes", "videos", "audio"}, Required: true},
-		"policy": {Type: schema.String, Desc: "Dispatch one next stage or all currently eligible targets.", Enum: []string{"single_next", "all_eligible"}, Required: true},
+		"phase":        {Type: schema.String, Desc: "Storyboard target only: production phase selected at a high level; the graph selects concrete targets.", Enum: []string{"auto_next", "element_images", "keyframes", "videos", "audio"}},
+		"policy":       {Type: schema.String, Desc: "Storyboard target only: dispatch one next stage or all currently eligible targets.", Enum: []string{"single_next", "all_eligible"}},
+		"target":       {Type: schema.String, Desc: "Generation target. Omit for storyboard production; use session_deliverable for lightweight direct generation without a storyboard.", Enum: []string{"storyboard", "session_deliverable"}},
+		"media_kind":   {Type: schema.String, Desc: "session_deliverable only: modality direction.", Enum: []string{"image", "video", "music", "audio"}},
+		"prompt":       {Type: schema.String, Desc: "session_deliverable only: complete generation prompt."},
+		"count":        {Type: schema.Integer, Desc: "session_deliverable only: number of variants (1-4, default 1)."},
+		"aspect_ratio": {Type: schema.String, Desc: "session_deliverable only: optional aspect ratio, e.g. 16:9."},
 	}
 }
 
