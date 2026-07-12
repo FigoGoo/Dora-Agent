@@ -2,6 +2,7 @@ package generationruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -15,6 +16,15 @@ import (
 )
 
 type memoryAssets struct{ values map[string]asset.Asset }
+
+type sourceAssets struct{ *memoryAssets }
+
+func (s sourceAssets) ListBySourceJob(context.Context, string) ([]asset.Asset, error) {
+	return []asset.Asset{
+		{ID: "asset-0", OutputIndex: 0, Availability: asset.AvailabilityPendingBilling},
+		{ID: "asset-1", OutputIndex: 1, Availability: asset.AvailabilityPendingBilling},
+	}, nil
+}
 
 type fixedConfirmedSpec struct{ version int }
 
@@ -32,6 +42,16 @@ func TestDefaultCostCalculatorDistinguishesReportedZeroUsage(t *testing.T) {
 	points, _, err = calculator.Calculate(context.Background(), job, generation.ProviderResult{})
 	if err != nil || points != 99 {
 		t.Fatalf("unreported usage fallback points=%d err=%v", points, err)
+	}
+}
+
+func TestPendingAssetRecoveryReadsPersistedJSONNumberCount(t *testing.T) {
+	store := PendingAssetStore{AssetStore: sourceAssets{memoryAssets: &memoryAssets{values: map[string]asset.Asset{}}}}
+	result, complete, err := store.RecoverProviderResult(context.Background(), generation.GenerationJob{
+		ID: "job-1", MediaKind: "image", Payload: map[string]any{"n": json.Number("2")},
+	})
+	if err != nil || !complete || len(result.AssetIDs) != 2 {
+		t.Fatalf("result=%+v complete=%t err=%v", result, complete, err)
 	}
 }
 

@@ -73,6 +73,9 @@ func (t *dispatchGenerationTool) Run(ctx context.Context, call Call) (Result, er
 	if !ok || len(targets) == 0 {
 		return invalidDispatchRequest("targets must be a non-empty array"), nil
 	}
+	if message := validateGenerationTargets(inputs, targets); message != "" {
+		return invalidDispatchRequest(message), nil
+	}
 	dispatched, err := t.dispatcher.Dispatch(ctx, GenerationDispatchRequest{
 		SessionID: call.SessionID, UserID: call.UserID, PlanRunID: call.PlanRunID,
 		NodeID: call.NodeID, Attempt: call.Attempt, IdempotencyKey: call.IdempotencyKey,
@@ -107,4 +110,56 @@ func validDispatchContext(call Call) bool {
 
 func invalidDispatchRequest(message string) Result {
 	return Result{Fail: &Failure{Code: "invalid_request", Message: message}}
+}
+
+func validateGenerationTargets(inputs map[string]any, targets []any) string {
+	globalKind, globalKindPresent, valid := optionalGenerationString(inputs, "media_kind")
+	if !valid || globalKindPresent && !knownGenerationMediaKind(globalKind) {
+		return "media_kind must be one of image, illustration, keyframe, video, audio, or music"
+	}
+	if _, present, valid := optionalGenerationString(inputs, "ratio"); present && !valid {
+		return "ratio must be a non-empty string when provided"
+	}
+	for index, raw := range targets {
+		target, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Sprintf("targets[%d] must be an object", index)
+		}
+		prompt, ok := target["prompt"].(string)
+		if !ok || strings.TrimSpace(prompt) == "" {
+			return fmt.Sprintf("targets[%d].prompt must be a non-empty string", index)
+		}
+		kind, present, valid := optionalGenerationString(target, "media_kind")
+		if !valid || present && !knownGenerationMediaKind(kind) {
+			return fmt.Sprintf("targets[%d].media_kind must be a supported string", index)
+		}
+		for _, field := range []string{"target_id", "asset_slot", "ratio"} {
+			if _, present, valid := optionalGenerationString(target, field); present && !valid {
+				return fmt.Sprintf("targets[%d].%s must be a non-empty string when provided", index, field)
+			}
+		}
+		if targetType, present, valid := optionalGenerationString(target, "target_type"); present && (!valid || targetType != "session_deliverable") {
+			return fmt.Sprintf("targets[%d].target_type must be session_deliverable", index)
+		}
+	}
+	return ""
+}
+
+func optionalGenerationString(values map[string]any, key string) (string, bool, bool) {
+	raw, present := values[key]
+	if !present {
+		return "", false, true
+	}
+	value, ok := raw.(string)
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value, true, ok && value != ""
+}
+
+func knownGenerationMediaKind(value string) bool {
+	switch value {
+	case "image", "illustration", "keyframe", "video", "audio", "music":
+		return true
+	default:
+		return false
+	}
 }

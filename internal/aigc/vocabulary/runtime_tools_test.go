@@ -373,6 +373,15 @@ func TestRuntimeToolsDispatchGenerationBoundaries(t *testing.T) {
 		"targets missing": func(call *Call) { call.Inputs = map[string]any{} },
 		"targets type":    func(call *Call) { call.Inputs = map[string]any{"targets": "one"} },
 		"targets empty":   func(call *Call) { call.Inputs = map[string]any{"targets": []any{}} },
+		"target type":     func(call *Call) { call.Inputs = map[string]any{"targets": []any{"not-an-object"}} },
+		"prompt missing":  func(call *Call) { call.Inputs = map[string]any{"targets": []any{map[string]any{}}} },
+		"prompt empty":    func(call *Call) { call.Inputs = map[string]any{"targets": []any{map[string]any{"prompt": " "}}} },
+		"media kind type": func(call *Call) {
+			call.Inputs = map[string]any{"targets": []any{map[string]any{"prompt": "x", "media_kind": 7}}}
+		},
+		"media kind value": func(call *Call) {
+			call.Inputs = map[string]any{"targets": []any{map[string]any{"prompt": "x", "media_kind": "hologram"}}}
+		},
 	}
 	for name, invalidate := range invalidCalls {
 		t.Run("invalid "+name, func(t *testing.T) {

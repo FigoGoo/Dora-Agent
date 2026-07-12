@@ -241,13 +241,13 @@ func toRecord(job GenerationJob) (jobRecord, error) {
 func fromRecord(rec jobRecord) (GenerationJob, error) {
 	var payload map[string]any
 	if len(rec.Payload) > 0 {
-		if err := json.Unmarshal(rec.Payload, &payload); err != nil {
+		if err := decodeGenerationJSON(rec.Payload, &payload); err != nil {
 			return GenerationJob{}, fmt.Errorf("unmarshal generation job payload: %w", err)
 		}
 	}
 	var result map[string]any
 	if len(rec.Result) > 0 {
-		if err := json.Unmarshal(rec.Result, &result); err != nil {
+		if err := decodeGenerationJSON(rec.Result, &result); err != nil {
 			return GenerationJob{}, fmt.Errorf("unmarshal generation job result: %w", err)
 		}
 	}

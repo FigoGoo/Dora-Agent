@@ -1,9 +1,11 @@
 package generation
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -939,8 +941,24 @@ func cloneMap(input map[string]any) map[string]any {
 		return out
 	}
 	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
+	_ = decodeGenerationJSON(raw, &out)
 	return out
+}
+
+func decodeGenerationJSON(raw []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("unexpected trailing JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 func cloneInt64Map(input map[string]int64) map[string]int64 {

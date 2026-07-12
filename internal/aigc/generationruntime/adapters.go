@@ -67,6 +67,10 @@ func (s PendingAssetStore) RecoverProviderResult(ctx context.Context, job genera
 			if value > 0 {
 				expected = int(value)
 			}
+		case json.Number:
+			if parsed, err := value.Int64(); err == nil && parsed > 0 {
+				expected = int(parsed)
+			}
 		}
 	}
 	byOutput := make(map[int]string, len(items))

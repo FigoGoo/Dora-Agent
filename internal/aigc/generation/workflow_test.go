@@ -113,7 +113,10 @@ func TestJobLifecycleTransitionsCommitImmutableOutboxSnapshots(t *testing.T) {
 		if event.EventType != EventJobLifecycleChanged {
 			continue
 		}
-		version := int(event.Payload["status_version"].(float64))
+		version, versionErr := boundedInteger(event.Payload["status_version"], 0)
+		if versionErr != nil {
+			t.Fatalf("status version: %v", versionErr)
+		}
 		snapshots[version] = event
 		if event.AggregateVersion != version || event.IdempotencyKey != fmt.Sprintf("job:job-progress:lifecycle:%d", version) {
 			t.Fatalf("lifecycle identity mismatch: %+v", event)
@@ -182,7 +185,8 @@ func TestSpecializedTerminalJobEventIsEnrichedWithoutDuplicateLifecycleEvent(t *
 			continue
 		}
 		terminalEvents++
-		if event.EventType != "job.failed" || event.AggregateVersion != 3 || event.Payload["status_version"] != float64(3) {
+		statusVersion, versionErr := boundedInteger(event.Payload["status_version"], 0)
+		if event.EventType != "job.failed" || event.AggregateVersion != 3 || versionErr != nil || statusVersion != 3 {
 			t.Fatalf("terminal event not enriched: %+v", event)
 		}
 	}

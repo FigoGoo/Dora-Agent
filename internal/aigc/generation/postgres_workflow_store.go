@@ -749,7 +749,7 @@ func encodeWorkflowOperation(value GenerationOperation) (workflowOperationRecord
 
 func decodeWorkflowOperation(record workflowOperationRecord) (GenerationOperation, error) {
 	var value GenerationOperation
-	if err := json.Unmarshal(record.Data, &value); err != nil {
+	if err := decodeGenerationJSON(record.Data, &value); err != nil {
 		return GenerationOperation{}, fmt.Errorf("unmarshal generation operation %s: %w", record.ID, err)
 	}
 	return value, nil
@@ -765,7 +765,7 @@ func encodeWorkflowBatch(value GenerationBatch) (workflowBatchRecord, error) {
 
 func decodeWorkflowBatch(record workflowBatchRecord) (GenerationBatch, error) {
 	var value GenerationBatch
-	if err := json.Unmarshal(record.Data, &value); err != nil {
+	if err := decodeGenerationJSON(record.Data, &value); err != nil {
 		return GenerationBatch{}, fmt.Errorf("unmarshal generation batch %s: %w", record.ID, err)
 	}
 	return value, nil
@@ -781,7 +781,7 @@ func encodeWorkflowJob(value GenerationJob) (workflowJobRecord, error) {
 
 func decodeWorkflowJob(record workflowJobRecord) (GenerationJob, error) {
 	var value GenerationJob
-	if err := json.Unmarshal(record.Data, &value); err != nil {
+	if err := decodeGenerationJSON(record.Data, &value); err != nil {
 		return GenerationJob{}, fmt.Errorf("unmarshal generation workflow job %s: %w", record.ID, err)
 	}
 	return value, nil
@@ -797,7 +797,7 @@ func encodeWorkflowOutbox(value OutboxEvent) (workflowOutboxRecord, error) {
 
 func decodeWorkflowOutbox(record workflowOutboxRecord) (OutboxEvent, error) {
 	var value OutboxEvent
-	if err := json.Unmarshal(record.Data, &value); err != nil {
+	if err := decodeGenerationJSON(record.Data, &value); err != nil {
 		return OutboxEvent{}, fmt.Errorf("unmarshal generation outbox %s: %w", record.ID, err)
 	}
 	value.Status = record.Status

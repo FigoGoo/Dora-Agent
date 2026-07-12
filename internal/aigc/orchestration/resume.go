@@ -92,11 +92,17 @@ func (s *Scheduler) CompleteJobsWait(ctx context.Context, runID, nodeID string, 
 			return s.continueJobsRun(ctx, committed)
 		}
 		if !errors.Is(mutateErr, ErrRunVersionConflict) && !errors.Is(mutateErr, errResumeAlreadyApplied) {
+			if callerErr := ctx.Err(); callerErr != nil {
+				return current, errors.Join(callerErr, mutateErr)
+			}
 			return current, mutateErr
 		}
 		current, err = s.store.GetRun(commitCtx, current.ID)
 		if err != nil {
-			return PlanRun{}, err
+			if callerErr := ctx.Err(); callerErr != nil {
+				return current, errors.Join(callerErr, err)
+			}
+			return current, err
 		}
 		if replayed, replayErr, handled := matchJobsOutcomeReceipt(current, nodeID, identity); handled {
 			if replayErr != nil {

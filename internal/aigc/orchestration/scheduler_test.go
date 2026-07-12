@@ -1993,3 +1993,110 @@ func TestCompleteJobsWaitReplayIgnoresNonIdentitySummary(t *testing.T) {
 		t.Fatalf("replayed=%+v err=%v", replayed, err)
 	}
 }
+
+type countingGenerationDispatcher struct{ calls atomic.Int32 }
+
+func (d *countingGenerationDispatcher) Dispatch(context.Context, vocabulary.GenerationDispatchRequest) (vocabulary.GenerationDispatchResult, error) {
+	d.calls.Add(1)
+	return vocabulary.GenerationDispatchResult{BatchID: "must-not-dispatch"}, nil
+}
+
+func TestSchedulerTreatsInvalidGenerationTargetAsBusinessFailure(t *testing.T) {
+	dispatcher := &countingGenerationDispatcher{}
+	tool := vocabulary.NewDispatchGenerationTool(dispatcher)
+	scheduler := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, tool), 1)
+	run, err := scheduler.Submit(context.Background(), "session-1", "user-1", ExecutionPlan{
+		PlanID: "invalid-generation", Source: "dynamic", Summary: "invalid", Direction: "image",
+		Steps: []PlanStep{{ID: "dispatch", Tool: "dispatch_generation", Params: map[string]any{
+			"targets": []any{map[string]any{"media_kind": "hologram"}},
+		}, Required: true}},
+	})
+	if err != nil || run.Status != RunStatusFailed || run.Nodes["dispatch"].Status != NodeStatusFailed || run.Nodes["dispatch"].Fail == nil || run.Nodes["dispatch"].Fail.Code != "invalid_request" {
+		t.Fatalf("run=%+v err=%v", run, err)
+	}
+	if dispatcher.calls.Load() != 0 {
+		t.Fatalf("dispatcher calls=%d", dispatcher.calls.Load())
+	}
+}
+
+type jobsCompletionErrorStore struct {
+	RunStore
+	entered chan struct{}
+	release chan struct{}
+	err     error
+}
+
+func (s *jobsCompletionErrorStore) MutateRun(context.Context, string, int, func(*PlanRun) error) (PlanRun, error) {
+	close(s.entered)
+	<-s.release
+	return PlanRun{}, s.err
+}
+
+func TestCompleteJobsWaitCancellationJoinsCommitErrorWithoutReceipt(t *testing.T) {
+	baseScheduler, suspended := runWaitingForBatch(t, true)
+	cause := errors.New("database write failed")
+	store := &jobsCompletionErrorStore{RunStore: baseScheduler.store, entered: make(chan struct{}), release: make(chan struct{}), err: cause}
+	scheduler := schedulerForTest(t, store, baseScheduler.vocabulary, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	type result struct {
+		run PlanRun
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		run, err := scheduler.CompleteJobsWait(ctx, suspended.ID, "dispatch", JobsOutcome{BatchID: "batch-1", Status: generation.BatchStatusCompleted})
+		done <- result{run: run, err: err}
+	}()
+	<-store.entered
+	cancel()
+	close(store.release)
+	got := <-done
+	if !errors.Is(got.err, context.Canceled) || !errors.Is(got.err, cause) || got.run.Version != suspended.Version {
+		t.Fatalf("run=%+v err=%v", got.run, got.err)
+	}
+	stored, err := baseScheduler.store.GetRun(context.Background(), suspended.ID)
+	if err != nil || stored.Version != suspended.Version || stored.Nodes["dispatch"].Outputs[jobsOutcomeReceiptKey] != nil {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+}
+
+type jobsConflictReloadErrorStore struct {
+	RunStore
+	gets    atomic.Int32
+	entered chan struct{}
+	release chan struct{}
+	err     error
+}
+
+func (s *jobsConflictReloadErrorStore) GetRun(ctx context.Context, id string) (PlanRun, error) {
+	if s.gets.Add(1) == 1 {
+		return s.RunStore.GetRun(ctx, id)
+	}
+	return PlanRun{}, s.err
+}
+
+func (s *jobsConflictReloadErrorStore) MutateRun(context.Context, string, int, func(*PlanRun) error) (PlanRun, error) {
+	close(s.entered)
+	<-s.release
+	return PlanRun{}, ErrRunVersionConflict
+}
+
+func TestCompleteJobsWaitCancellationJoinsConflictReloadError(t *testing.T) {
+	baseScheduler, suspended := runWaitingForBatch(t, true)
+	cause := errors.New("database read failed")
+	store := &jobsConflictReloadErrorStore{RunStore: baseScheduler.store, entered: make(chan struct{}), release: make(chan struct{}), err: cause}
+	scheduler := schedulerForTest(t, store, baseScheduler.vocabulary, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := scheduler.CompleteJobsWait(ctx, suspended.ID, "dispatch", JobsOutcome{BatchID: "batch-1", Status: generation.BatchStatusCompleted})
+		done <- err
+	}()
+	<-store.entered
+	cancel()
+	close(store.release)
+	err := <-done
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, cause) {
+		t.Fatalf("err=%v", err)
+	}
+}
