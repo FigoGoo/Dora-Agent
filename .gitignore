@@ -17,6 +17,7 @@ build/
 tmp/
 coverage/
 .local/
+.worktrees/
 
 # Go
 bin/
