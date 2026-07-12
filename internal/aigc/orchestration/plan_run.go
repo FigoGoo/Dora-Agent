@@ -15,8 +15,10 @@ import (
 
 var (
 	ErrRunNotFound        = errors.New("plan run not found")
+	ErrRunAlreadyExists   = errors.New("plan run already exists")
 	ErrRunVersionConflict = errors.New("plan run version conflict")
 	ErrRunNotSerializable = errors.New("plan run is not serializable")
+	ErrRunRecordCorrupt   = errors.New("plan run record is corrupt")
 )
 
 const (
@@ -152,7 +154,7 @@ func (s *MemoryRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun, e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.runs[run.ID]; exists {
-		return PlanRun{}, fmt.Errorf("%w: run %q already exists", ErrRunVersionConflict, run.ID)
+		return PlanRun{}, fmt.Errorf("%w: run %q", ErrRunAlreadyExists, run.ID)
 	}
 	run.Version = 1
 	stored, err := clonePlanRun(run)

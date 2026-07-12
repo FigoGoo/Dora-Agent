@@ -40,21 +40,26 @@ type SchedulerConfig struct {
 	NewToken func() string
 }
 
+type authoritativeClock interface {
+	AuthoritativeNow(context.Context) (time.Time, error)
+}
+
 type Scheduler struct {
-	store             RunStore
-	vocabulary        *vocabulary.Registry
-	guard             vocabulary.Guard
-	maxParallel       int
-	jobBudget         int
-	commitTimeout     time.Duration
-	newID             func() string
-	ownerID           string
-	leaseTTL          time.Duration
-	heartbeatInterval time.Duration
-	now               func() time.Time
-	newToken          func() string
-	gateMu            sync.Mutex
-	gates             map[string]*runGate
+	store              RunStore
+	vocabulary         *vocabulary.Registry
+	guard              vocabulary.Guard
+	maxParallel        int
+	jobBudget          int
+	commitTimeout      time.Duration
+	newID              func() string
+	ownerID            string
+	leaseTTL           time.Duration
+	heartbeatInterval  time.Duration
+	now                func() time.Time
+	authoritativeClock authoritativeClock
+	newToken           func() string
+	gateMu             sync.Mutex
+	gates              map[string]*runGate
 }
 
 type runGate struct {
@@ -75,7 +80,8 @@ func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
 	if strings.TrimSpace(cfg.OwnerID) == "" {
 		return nil, errors.New("scheduler owner id is required")
 	}
-	if cfg.Now == nil {
+	sharedClock, hasSharedClock := cfg.Store.(authoritativeClock)
+	if cfg.Now == nil && !hasSharedClock {
 		return nil, errors.New("scheduler clock is required")
 	}
 	if cfg.NewToken == nil {
@@ -109,8 +115,16 @@ func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
 		jobBudget: cfg.JobBudget, commitTimeout: commitTimeout, newID: cfg.NewID,
 		ownerID: strings.TrimSpace(cfg.OwnerID), leaseTTL: leaseTTL,
 		heartbeatInterval: heartbeatInterval, now: cfg.Now, newToken: cfg.NewToken,
-		gates: make(map[string]*runGate),
+		authoritativeClock: sharedClock,
+		gates:              make(map[string]*runGate),
 	}, nil
+}
+
+func (s *Scheduler) authoritativeNow(ctx context.Context) (time.Time, error) {
+	if s.authoritativeClock != nil {
+		return s.authoritativeClock.AuthoritativeNow(ctx)
+	}
+	return s.now(), nil
 }
 
 func isNilGuard(guard vocabulary.Guard) bool {

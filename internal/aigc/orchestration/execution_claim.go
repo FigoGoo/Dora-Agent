@@ -26,7 +26,10 @@ type executionClaim struct {
 func (s *Scheduler) claimReady(ctx context.Context, run PlanRun) (PlanRun, []executionClaim, error) {
 	current := run
 	for range maxCASRetries {
-		now := s.now()
+		now, err := s.authoritativeNow(ctx)
+		if err != nil {
+			return current, nil, err
+		}
 		if !hasClaimableNode(current, now) {
 			return current, nil, nil
 		}
@@ -115,7 +118,10 @@ func nodeClaimable(run PlanRun, step PlanStep, node *NodeRun, now time.Time) boo
 }
 
 func (s *Scheduler) renewClaims(ctx context.Context, runID string, claims []executionClaim) error {
-	now := s.now()
+	now, err := s.authoritativeNow(ctx)
+	if err != nil {
+		return err
+	}
 	renewed, err := s.mutateMatchingClaims(ctx, runID, claims, func(node *NodeRun) bool {
 		return node.LeaseUntil != nil && node.LeaseUntil.After(now)
 	}, func(node *NodeRun) {
