@@ -13,6 +13,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const activeRunSessionIndex = "idx_aigc_plan_runs_one_active_session"
+
 type planRunRecord struct {
 	ID        string         `gorm:"primaryKey;size:128"`
 	SessionID string         `gorm:"index;size:128;not null"`
@@ -42,6 +44,11 @@ func (s *PostgresRunStore) AutoMigrate(ctx context.Context) error {
 	}
 	if err := s.db.WithContext(ctx).AutoMigrate(&planRunRecord{}); err != nil {
 		return fmt.Errorf("migrate plan runs: %w", err)
+	}
+	if err := s.db.WithContext(ctx).Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + activeRunSessionIndex + `
+		ON aigc_plan_runs (session_id)
+		WHERE status IN ('draft', 'running', 'suspended')`).Error; err != nil {
+		return fmt.Errorf("create active plan run session index: %w", err)
 	}
 	return nil
 }
@@ -80,12 +87,34 @@ func (s *PostgresRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun,
 	if err != nil {
 		return PlanRun{}, err
 	}
-	created := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
-	if created.Error != nil {
-		return PlanRun{}, fmt.Errorf("create plan run %q: %w", run.ID, created.Error)
-	}
-	if created.RowsAffected != 1 {
-		return PlanRun{}, fmt.Errorf("%w: run %q", ErrRunAlreadyExists, run.ID)
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", run.SessionID).Error; err != nil {
+			return fmt.Errorf("lock plan run session: %w", err)
+		}
+		var duplicate int64
+		if err := tx.Model(&planRunRecord{}).Where("id = ?", run.ID).Count(&duplicate).Error; err != nil {
+			return fmt.Errorf("check plan run %q: %w", run.ID, err)
+		}
+		if duplicate != 0 {
+			return fmt.Errorf("%w: run %q", ErrRunAlreadyExists, run.ID)
+		}
+		if isActiveRunStatus(run.Status) {
+			var active planRunRecord
+			query := tx.Select("id").Where("session_id = ? AND status IN ?", run.SessionID, activeRunStatuses()).Limit(1).Find(&active)
+			if query.Error != nil {
+				return fmt.Errorf("check active plan run: %w", query.Error)
+			}
+			if query.RowsAffected != 0 {
+				return &SessionActiveRunError{ActiveRunID: active.ID}
+			}
+		}
+		if err := tx.Create(&record).Error; err != nil {
+			return fmt.Errorf("create plan run %q: %w", run.ID, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return PlanRun{}, err
 	}
 	return result, nil
 }
@@ -106,6 +135,31 @@ func (s *PostgresRunStore) GetRun(ctx context.Context, id string) (PlanRun, erro
 		return PlanRun{}, fmt.Errorf("%w: %q", ErrRunNotFound, id)
 	}
 	return decodePlanRunRecord(record)
+}
+
+func (s *PostgresRunStore) GetActiveRun(ctx context.Context, sessionID string) (PlanRun, error) {
+	if s == nil || s.db == nil {
+		return PlanRun{}, errors.New("postgres run store db is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return PlanRun{}, err
+	}
+	var records []planRunRecord
+	query := s.db.WithContext(ctx).Where("session_id = ? AND status IN ?", sessionID, activeRunStatuses()).Limit(2).Find(&records)
+	if query.Error != nil {
+		return PlanRun{}, fmt.Errorf("get active plan run for session %q: %w", sessionID, query.Error)
+	}
+	if len(records) == 0 {
+		return PlanRun{}, fmt.Errorf("%w: active run for session %q", ErrRunNotFound, sessionID)
+	}
+	if len(records) > 1 {
+		return PlanRun{}, fmt.Errorf("%w: session %q has multiple active runs", ErrRunRecordCorrupt, sessionID)
+	}
+	return decodePlanRunRecord(records[0])
+}
+
+func activeRunStatuses() []string {
+	return []string{RunStatusDraft, RunStatusRunning, RunStatusSuspended}
 }
 
 func (s *PostgresRunStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {

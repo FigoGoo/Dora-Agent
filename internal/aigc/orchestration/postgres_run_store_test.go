@@ -113,6 +113,228 @@ func TestPostgresRunStoreRoundTripAndCAS(t *testing.T) {
 	}
 }
 
+func TestPostgresRunStoreEnforcesSingleActiveRunPerSession(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	sessionID := postgresRunID(t) + "-session"
+	ids := []string{postgresRunID(t), postgresRunID(t), postgresRunID(t)}
+	t.Cleanup(func() {
+		db.WithContext(context.Background()).Where("session_id = ?", sessionID).Delete(&planRunRecord{})
+	})
+	runs := []PlanRun{
+		{ID: ids[0], SessionID: sessionID, UserID: "user", Status: RunStatusRunning, Nodes: map[string]*NodeRun{}},
+		{ID: ids[1], SessionID: sessionID, UserID: "user", Status: RunStatusSuspended, Nodes: map[string]*NodeRun{}},
+	}
+	start := make(chan struct{})
+	type result struct {
+		run PlanRun
+		err error
+	}
+	results := make(chan result, len(runs))
+	for _, run := range runs {
+		run := run
+		go func() {
+			<-start
+			created, err := store.CreateRun(ctx, run)
+			results <- result{run: created, err: err}
+		}()
+	}
+	close(start)
+	var created PlanRun
+	var successes, conflicts int
+	for range runs {
+		result := <-results
+		if result.err == nil {
+			successes++
+			created = result.run
+		} else if errors.Is(result.err, ErrSessionActiveRun) {
+			conflicts++
+		} else {
+			t.Fatalf("CreateRun() error = %v", result.err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("successes=%d conflicts=%d", successes, conflicts)
+	}
+	active, err := store.GetActiveRun(ctx, sessionID)
+	if err != nil || active.ID != created.ID {
+		t.Fatalf("GetActiveRun() = %+v, %v", active, err)
+	}
+	if _, err := store.MutateRun(ctx, created.ID, created.Version, func(run *PlanRun) error {
+		run.Status = RunStatusCancelled
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateRun(ctx, PlanRun{ID: ids[2], SessionID: sessionID, UserID: "user", Status: RunStatusDraft, Nodes: map[string]*NodeRun{}}); err != nil {
+		t.Fatalf("terminal status did not release session slot: %v", err)
+	}
+}
+
+func TestPostgresSchedulersConvergeIdenticalConcurrentSubmit(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	sessionID := postgresRunID(t) + "-scheduler-session"
+	t.Cleanup(func() {
+		db.WithContext(context.Background()).Where("session_id = ?", sessionID).Delete(&planRunRecord{})
+	})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	var calls atomic.Int32
+	tool := schedulerTool{key: "block", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return vocabulary.Result{}, nil
+	}}
+	registry := schedulerRegistry(t, tool)
+	leftCfg := schedulerConfigForTest(store, registry, func() string { return postgresRunID(t) })
+	rightCfg := schedulerConfigForTest(store, registry, func() string { return postgresRunID(t) })
+	left, _ := NewScheduler(leftCfg)
+	right, _ := NewScheduler(rightCfg)
+	plan := activeTestPlan("same", "block")
+	type result struct {
+		run PlanRun
+		err error
+	}
+	leftResult := make(chan result, 1)
+	go func() {
+		run, err := left.Submit(context.Background(), sessionID, "user", plan)
+		leftResult <- result{run: run, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first scheduler did not start tool")
+	}
+	rightRun, rightErr := right.Submit(context.Background(), sessionID, "user", plan)
+	if rightErr != nil || rightRun.ID == "" {
+		t.Fatalf("right Submit() = %+v, %v", rightRun, rightErr)
+	}
+	releaseOnce.Do(func() { close(release) })
+	leftDone := <-leftResult
+	if leftDone.err != nil || leftDone.run.ID != rightRun.ID || leftDone.run.Status != RunStatusSucceeded || calls.Load() != 1 {
+		t.Fatalf("left=%+v right=%+v calls=%d", leftDone, rightRun, calls.Load())
+	}
+}
+
+func TestPostgresSchedulersRejectDifferentConcurrentSubmit(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	sessionID := postgresRunID(t) + "-different-session"
+	t.Cleanup(func() {
+		db.WithContext(context.Background()).Where("session_id = ?", sessionID).Delete(&planRunRecord{})
+	})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	var calls atomic.Int32
+	tool := schedulerTool{key: "block-different", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return vocabulary.Result{}, nil
+	}}
+	registry := schedulerRegistry(t, tool)
+	leftCfg := schedulerConfigForTest(store, registry, func() string { return postgresRunID(t) })
+	rightCfg := schedulerConfigForTest(store, registry, func() string { return postgresRunID(t) })
+	left, _ := NewScheduler(leftCfg)
+	right, _ := NewScheduler(rightCfg)
+	type result struct {
+		run PlanRun
+		err error
+	}
+	leftResult := make(chan result, 1)
+	go func() {
+		run, err := left.Submit(context.Background(), sessionID, "user", activeTestPlan("left", "block-different"))
+		leftResult <- result{run: run, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first scheduler did not start tool")
+	}
+	if _, err := right.Submit(context.Background(), sessionID, "user", activeTestPlan("right", "block-different")); !errors.Is(err, ErrSessionActiveRun) {
+		t.Fatalf("right Submit() error = %v", err)
+	}
+	releaseOnce.Do(func() { close(release) })
+	leftDone := <-leftResult
+	if leftDone.err != nil || leftDone.run.Status != RunStatusSucceeded || calls.Load() != 1 {
+		t.Fatalf("left=%+v calls=%d", leftDone, calls.Load())
+	}
+	var count int64
+	if err := db.Model(&planRunRecord{}).Where("session_id = ?", sessionID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("persisted runs=%d err=%v", count, err)
+	}
+}
+
+func TestPostgresRunStoreRejectsIdentityMutation(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	id := postgresRunID(t)
+	sessionID := id + "-session"
+	t.Cleanup(func() {
+		db.WithContext(context.Background()).Where("session_id = ?", sessionID).Delete(&planRunRecord{})
+	})
+	created, err := store.CreateRun(ctx, PlanRun{ID: id, SessionID: sessionID, Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, timed := range []bool{false, true} {
+		var mutateErr error
+		if timed {
+			_, mutateErr = store.MutateRunAtAuthoritativeNow(ctx, id, created.Version, func(run *PlanRun, _ time.Time) error {
+				run.ID = "changed"
+				return nil
+			})
+		} else {
+			_, mutateErr = store.MutateRun(ctx, id, created.Version, func(run *PlanRun) error {
+				run.ID = "changed"
+				return nil
+			})
+		}
+		if !errors.Is(mutateErr, ErrRunRecordCorrupt) {
+			t.Fatalf("timed=%v error=%v", timed, mutateErr)
+		}
+		stored, getErr := store.GetRun(ctx, id)
+		if getErr != nil || stored.ID != id || stored.Version != created.Version {
+			t.Fatalf("timed=%v stored=%+v err=%v", timed, stored, getErr)
+		}
+	}
+}
+
+func TestPostgresRunStoreAutoMigrateRejectsExistingDuplicateActiveSessions(t *testing.T) {
+	_, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	rollback := errors.New("rollback migration fixture")
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS idx_aigc_plan_runs_one_active_session").Error; err != nil {
+			return err
+		}
+		sessionID := postgresRunID(t) + "-duplicate-session"
+		for index := range 2 {
+			run := PlanRun{ID: fmt.Sprintf("%s-%d", sessionID, index), SessionID: sessionID, Status: RunStatusRunning, Version: 1, Nodes: map[string]*NodeRun{}}
+			record, _, encodeErr := encodePlanRunRecord(run)
+			if encodeErr != nil {
+				return encodeErr
+			}
+			if err := tx.Create(&record).Error; err != nil {
+				return err
+			}
+		}
+		if migrateErr := NewPostgresRunStore(tx).AutoMigrate(ctx); migrateErr == nil {
+			t.Fatal("AutoMigrate() unexpectedly accepted duplicate active sessions")
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("fixture transaction error = %v", err)
+	}
+}
+
 func TestPostgresRunStorePersistsCancellationIntent(t *testing.T) {
 	store, db := openPostgresRunStore(t)
 	ctx := context.Background()

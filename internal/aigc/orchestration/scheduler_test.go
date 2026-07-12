@@ -504,13 +504,17 @@ func TestMediaGuardFingerprintCoversAllDecisionInputsAndCanonicalNumbers(t *test
 }
 
 func createPendingSchedulerRun(t *testing.T, store RunStore, id string, plan ExecutionPlan) PlanRun {
+	return createPendingSchedulerRunForSession(t, store, id, "s1", plan)
+}
+
+func createPendingSchedulerRunForSession(t *testing.T, store RunStore, id, sessionID string, plan ExecutionPlan) PlanRun {
 	t.Helper()
 	nodes := make(map[string]*NodeRun, len(plan.Steps))
 	for _, step := range plan.Steps {
 		nodes[step.ID] = &NodeRun{StepID: step.ID, Status: NodeStatusPending}
 	}
 	run, err := store.CreateRun(context.Background(), PlanRun{
-		ID: id, SessionID: "s1", UserID: "u1", Plan: plan, Status: RunStatusRunning, Nodes: nodes,
+		ID: id, SessionID: sessionID, UserID: "u1", Plan: plan, Status: RunStatusRunning, Nodes: nodes,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -744,7 +748,7 @@ func TestSchedulerRunGateAllowsDifferentRunsToAdvanceConcurrently(t *testing.T) 
 	plan := ExecutionPlan{PlanID: "different-runs", Source: "dynamic", Summary: "different-runs", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}}}
 	store := NewMemoryRunStore()
 	createPendingSchedulerRun(t, store, "run-a", plan)
-	createPendingSchedulerRun(t, store, "run-b", plan)
+	createPendingSchedulerRunForSession(t, store, "run-b", "s2", plan)
 	scheduler := schedulerForTest(t, store, schedulerRegistry(t, tool), 1)
 	results := make(chan error, 2)
 	for _, runID := range []string{"run-a", "run-b"} {

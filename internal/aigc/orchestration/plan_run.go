@@ -19,7 +19,21 @@ var (
 	ErrRunVersionConflict = errors.New("plan run version conflict")
 	ErrRunNotSerializable = errors.New("plan run is not serializable")
 	ErrRunRecordCorrupt   = errors.New("plan run record is corrupt")
+	ErrSessionActiveRun   = errors.New("session already has an active plan run")
 )
+
+type SessionActiveRunError struct {
+	ActiveRunID string
+}
+
+func (e *SessionActiveRunError) Error() string {
+	if e == nil || e.ActiveRunID == "" {
+		return ErrSessionActiveRun.Error()
+	}
+	return fmt.Sprintf("%s: active run %q", ErrSessionActiveRun, e.ActiveRunID)
+}
+
+func (e *SessionActiveRunError) Unwrap() error { return ErrSessionActiveRun }
 
 const (
 	RunStatusDraft            = "draft"
@@ -98,6 +112,7 @@ type PlanRun struct {
 type RunStore interface {
 	CreateRun(ctx context.Context, run PlanRun) (PlanRun, error)
 	GetRun(ctx context.Context, id string) (PlanRun, error)
+	GetActiveRun(ctx context.Context, sessionID string) (PlanRun, error)
 	MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error)
 	MutateRunAtAuthoritativeNow(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun, time.Time) error) (PlanRun, error)
 }
@@ -144,6 +159,15 @@ func knownRunStatus(status string) bool {
 	}
 }
 
+func isActiveRunStatus(status string) bool {
+	switch status {
+	case RunStatusDraft, RunStatusRunning, RunStatusSuspended:
+		return true
+	default:
+		return false
+	}
+}
+
 type MemoryRunStore struct {
 	mu    sync.Mutex
 	runs  map[string]PlanRun
@@ -184,6 +208,13 @@ func (s *MemoryRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun, e
 	if _, exists := s.runs[run.ID]; exists {
 		return PlanRun{}, fmt.Errorf("%w: run %q", ErrRunAlreadyExists, run.ID)
 	}
+	if isActiveRunStatus(run.Status) {
+		for _, existing := range s.runs {
+			if existing.SessionID == run.SessionID && isActiveRunStatus(existing.Status) {
+				return PlanRun{}, &SessionActiveRunError{ActiveRunID: existing.ID}
+			}
+		}
+	}
 	run.Version = 1
 	stored, err := clonePlanRun(run)
 	if err != nil {
@@ -214,6 +245,30 @@ func (s *MemoryRunStore) GetRun(ctx context.Context, id string) (PlanRun, error)
 	return cloned, nil
 }
 
+func (s *MemoryRunStore) GetActiveRun(ctx context.Context, sessionID string) (PlanRun, error) {
+	if err := ctx.Err(); err != nil {
+		return PlanRun{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var active PlanRun
+	found := false
+	for _, run := range s.runs {
+		if run.SessionID != sessionID || !isActiveRunStatus(run.Status) {
+			continue
+		}
+		if found {
+			return PlanRun{}, fmt.Errorf("%w: session %q has multiple active runs", ErrRunRecordCorrupt, sessionID)
+		}
+		active = run
+		found = true
+	}
+	if !found {
+		return PlanRun{}, fmt.Errorf("%w: active run for session %q", ErrRunNotFound, sessionID)
+	}
+	return clonePlanRun(active)
+}
+
 func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
 	if err := ctx.Err(); err != nil {
 		return PlanRun{}, err
@@ -238,6 +293,9 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 	}
 	if err := mutate(&next); err != nil {
 		return PlanRun{}, err
+	}
+	if next.ID != current.ID {
+		return PlanRun{}, fmt.Errorf("%w: mutation changed id from %q to %q", ErrRunRecordCorrupt, current.ID, next.ID)
 	}
 	if err := ValidateRunTransition(current.Status, next.Status); err != nil {
 		return PlanRun{}, err

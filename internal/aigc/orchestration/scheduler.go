@@ -173,19 +173,73 @@ func (s *Scheduler) Submit(ctx context.Context, sessionID, userID string, plan E
 		resumeKey = fmt.Sprintf("%s:preview:resume", runID)
 		resumeDecisionSchema = "approved_bool_v1"
 	}
-	created, err := s.store.CreateRun(ctx, PlanRun{
+	requested := PlanRun{
 		ID: runID, SessionID: sessionID, UserID: userID, Plan: plan,
 		Status: initialStatus, SuspendReason: suspendReason,
 		PreviewRequired: previewRequired, ResumeKey: resumeKey, Nodes: nodes,
 		ResumeDecisionSchema: resumeDecisionSchema,
-	})
+	}
+	created, err := s.store.CreateRun(ctx, requested)
 	if err != nil {
-		return PlanRun{}, err
+		created, err = s.recoverCreate(ctx, requested, err)
+		if err != nil {
+			return PlanRun{}, err
+		}
 	}
 	if created.Status == RunStatusSuspended {
 		return created, nil
 	}
 	return s.Advance(ctx, created.ID)
+}
+
+func (s *Scheduler) recoverCreate(ctx context.Context, requested PlanRun, createErr error) (PlanRun, error) {
+	byID, getErr := s.store.GetRun(ctx, requested.ID)
+	if getErr == nil {
+		if sameSubmitRequest(byID, requested) {
+			return byID, nil
+		}
+		return PlanRun{}, errors.Join(createErr, fmt.Errorf("%w: created run %q does not match submit request", ErrRunRecordCorrupt, requested.ID))
+	}
+	if !errors.Is(getErr, ErrRunNotFound) {
+		return PlanRun{}, errors.Join(createErr, getErr)
+	}
+	if !errors.Is(createErr, ErrSessionActiveRun) {
+		return PlanRun{}, createErr
+	}
+	active, activeErr := s.store.GetActiveRun(ctx, requested.SessionID)
+	if activeErr != nil {
+		return PlanRun{}, errors.Join(createErr, activeErr)
+	}
+	if !sameSubmitRequest(active, requested) {
+		return PlanRun{}, createErr
+	}
+	return active, nil
+}
+
+func sameSubmitRequest(authoritative, requested PlanRun) bool {
+	if authoritative.SessionID != requested.SessionID || authoritative.UserID != requested.UserID ||
+		authoritative.PreviewRequired != requested.PreviewRequired ||
+		authoritative.ResumeDecisionSchema != requested.ResumeDecisionSchema {
+		return false
+	}
+	authoritativePlan, err := canonicalJSON(authoritative.Plan)
+	if err != nil {
+		return false
+	}
+	requestedPlan, err := canonicalJSON(requested.Plan)
+	return err == nil && string(authoritativePlan) == string(requestedPlan)
+}
+
+func canonicalJSON(value any) ([]byte, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var canonical any
+	if err := decodeSingleJSONValue(data, &canonical); err != nil {
+		return nil, err
+	}
+	return json.Marshal(canonical)
 }
 
 func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error) {
