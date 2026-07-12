@@ -59,6 +59,33 @@ type failHeartbeatStore struct {
 	err      error
 }
 
+type queuedMutationErrorStore struct {
+	RunStore
+	mu     sync.Mutex
+	errors []error
+	failed chan struct{}
+	once   sync.Once
+}
+
+func (s *queuedMutationErrorStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
+	s.mu.Lock()
+	if len(s.errors) > 0 {
+		err := s.errors[0]
+		s.errors = s.errors[1:]
+		s.mu.Unlock()
+		s.once.Do(func() { close(s.failed) })
+		return PlanRun{}, err
+	}
+	s.mu.Unlock()
+	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
+}
+
+func (s *queuedMutationErrorStore) failNext(errs ...error) {
+	s.mu.Lock()
+	s.errors = append(s.errors, errs...)
+	s.mu.Unlock()
+}
+
 func (s *failHeartbeatStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
 	if s.failNext.CompareAndSwap(true, false) {
 		return PlanRun{}, s.err
@@ -570,7 +597,7 @@ func TestExecutionClaimHeartbeatFailureCancelsWaveAndReleasesClaim(t *testing.T)
 	<-started
 	store.failNext.Store(true)
 	result := <-done
-	if !errors.Is(result.err, heartbeatErr) || !errors.Is(result.err, context.Canceled) {
+	if !errors.Is(result.err, heartbeatErr) {
 		t.Fatalf("err=%v", result.err)
 	}
 	if firstCalls.Load() != 1 || secondCalls.Load() != 0 {
@@ -579,6 +606,185 @@ func TestExecutionClaimHeartbeatFailureCancelsWaveAndReleasesClaim(t *testing.T)
 	stored, _ := store.GetRun(context.Background(), run.ID)
 	firstNode := stored.Nodes["first"]
 	if firstNode.Status != NodeStatusPending || firstNode.ExecutionToken != "" || firstNode.ExecutionEpoch != 1 || stored.Nodes["second"].Status != NodeStatusPending {
+		t.Fatalf("stored=%+v", stored)
+	}
+}
+
+func TestExecutionClaimHeartbeatLossDiscardsSuccessAndRetriesSameKey(t *testing.T) {
+	base := NewMemoryRunStore()
+	heartbeatErr := errors.New("heartbeat failed")
+	store := &queuedMutationErrorStore{RunStore: base, failed: make(chan struct{})}
+	clock := newClaimClock(time.Unix(1_700_000_000, 0))
+	started := make(chan struct{}, 1)
+	returnSuccess := make(chan struct{})
+	var keysMu sync.Mutex
+	var keys []string
+	tool := schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		started <- struct{}{}
+		<-returnSuccess
+		return vocabulary.Result{Outputs: map[string]any{"must": "discard"}}, nil
+	}}
+	scheduler, err := NewScheduler(SchedulerConfig{
+		Store: store, Vocabulary: schedulerRegistry(t, tool), MaxParallel: 1, CommitTimeout: 50 * time.Millisecond,
+		NewID: func() string { return "heartbeat-discard" }, OwnerID: "owner", LeaseTTL: time.Second,
+		HeartbeatInterval: time.Millisecond, Now: clock.Now, NewToken: func() string { return "token" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Record calls without making the first Tool honor wave cancellation.
+	scheduler.vocabulary = schedulerRegistry(t, schedulerTool{key: "work", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+		keysMu.Lock()
+		keys = append(keys, call.IdempotencyKey)
+		keysMu.Unlock()
+		started <- struct{}{}
+		<-returnSuccess
+		return vocabulary.Result{Outputs: map[string]any{"must": "discard"}}, nil
+	}})
+	run := createPendingSchedulerRun(t, store, "heartbeat-discard", oneClaimStep("work"))
+	done := advanceAsync(scheduler, run.ID)
+	<-started
+	store.failNext(heartbeatErr)
+	<-store.failed
+	close(returnSuccess)
+	result := <-done
+	if !errors.Is(result.err, heartbeatErr) {
+		t.Fatalf("err=%v", result.err)
+	}
+	node := result.run.Nodes["effect"]
+	if node.Status != NodeStatusPending || node.ExecutionToken != "" || node.Outputs != nil {
+		t.Fatalf("node=%+v", node)
+	}
+	retry := schedulerTool{key: "work", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+		keysMu.Lock()
+		keys = append(keys, call.IdempotencyKey)
+		keysMu.Unlock()
+		return vocabulary.Result{Outputs: map[string]any{"kept": true}}, nil
+	}}
+	scheduler.vocabulary = schedulerRegistry(t, retry)
+	recovered, err := scheduler.Advance(context.Background(), run.ID)
+	if err != nil || recovered.Status != RunStatusSucceeded {
+		t.Fatalf("recovered=%+v err=%v", recovered, err)
+	}
+	keysMu.Lock()
+	defer keysMu.Unlock()
+	if len(keys) != 2 || keys[0] != keys[1] {
+		t.Fatalf("keys=%v", keys)
+	}
+}
+
+func TestExecutionClaimHeartbeatLossDiscardsWholeWave(t *testing.T) {
+	base := NewMemoryRunStore()
+	heartbeatErr := errors.New("heartbeat failed")
+	store := &queuedMutationErrorStore{RunStore: base, failed: make(chan struct{})}
+	clock := newClaimClock(time.Unix(1_700_000_000, 0))
+	firstDone := make(chan struct{}, 1)
+	secondStarted := make(chan struct{}, 1)
+	var keysMu sync.Mutex
+	keys := make(map[string][]string)
+	registry := schedulerRegistry(t,
+		schedulerTool{key: "first", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			keysMu.Lock()
+			keys[call.NodeID] = append(keys[call.NodeID], call.IdempotencyKey)
+			keysMu.Unlock()
+			firstDone <- struct{}{}
+			return vocabulary.Result{Outputs: map[string]any{"must": "discard"}}, nil
+		}},
+		schedulerTool{key: "second", run: func(ctx context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			keysMu.Lock()
+			keys[call.NodeID] = append(keys[call.NodeID], call.IdempotencyKey)
+			keysMu.Unlock()
+			secondStarted <- struct{}{}
+			<-ctx.Done()
+			return vocabulary.Result{}, ctx.Err()
+		}},
+	)
+	scheduler, err := NewScheduler(SchedulerConfig{
+		Store: store, Vocabulary: registry, MaxParallel: 2, CommitTimeout: 50 * time.Millisecond,
+		NewID: func() string { return "heartbeat-wave" }, OwnerID: "owner", LeaseTTL: time.Second,
+		HeartbeatInterval: time.Millisecond, Now: clock.Now, NewToken: func() string { return "token" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := ExecutionPlan{PlanID: "heartbeat-wave", Source: "dynamic", Summary: "heartbeat-wave", Direction: "image", Steps: []PlanStep{
+		{ID: "first", Tool: "first", Required: true}, {ID: "second", Tool: "second", Required: true},
+	}}
+	run := createPendingSchedulerRun(t, store, "heartbeat-wave", plan)
+	done := advanceAsync(scheduler, run.ID)
+	<-firstDone
+	<-secondStarted
+	store.failNext(heartbeatErr)
+	result := <-done
+	if !errors.Is(result.err, heartbeatErr) {
+		t.Fatalf("err=%v", result.err)
+	}
+	for _, id := range []string{"first", "second"} {
+		node := result.run.Nodes[id]
+		if node.Status != NodeStatusPending || node.ExecutionToken != "" || node.Outputs != nil {
+			t.Fatalf("%s=%+v", id, node)
+		}
+	}
+	retryRegistry := schedulerRegistry(t,
+		schedulerTool{key: "first", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			keysMu.Lock()
+			keys[call.NodeID] = append(keys[call.NodeID], call.IdempotencyKey)
+			keysMu.Unlock()
+			return vocabulary.Result{}, nil
+		}},
+		schedulerTool{key: "second", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+			keysMu.Lock()
+			keys[call.NodeID] = append(keys[call.NodeID], call.IdempotencyKey)
+			keysMu.Unlock()
+			return vocabulary.Result{}, nil
+		}},
+	)
+	scheduler.vocabulary = retryRegistry
+	recovered, err := scheduler.Advance(context.Background(), run.ID)
+	if err != nil || recovered.Status != RunStatusSucceeded {
+		t.Fatalf("recovered=%+v err=%v", recovered, err)
+	}
+	keysMu.Lock()
+	defer keysMu.Unlock()
+	for _, id := range []string{"first", "second"} {
+		if len(keys[id]) != 2 || keys[id][0] != keys[id][1] {
+			t.Fatalf("%s keys=%v", id, keys[id])
+		}
+	}
+}
+
+func TestExecutionClaimHeartbeatLossJoinsReleaseError(t *testing.T) {
+	base := NewMemoryRunStore()
+	heartbeatErr := errors.New("heartbeat failed")
+	releaseErr := errors.New("release failed")
+	store := &queuedMutationErrorStore{RunStore: base, failed: make(chan struct{})}
+	clock := newClaimClock(time.Unix(1_700_000_000, 0))
+	started := make(chan struct{}, 1)
+	returnSuccess := make(chan struct{})
+	scheduler, err := NewScheduler(SchedulerConfig{
+		Store: store, Vocabulary: schedulerRegistry(t, schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			started <- struct{}{}
+			<-returnSuccess
+			return vocabulary.Result{}, nil
+		}}), MaxParallel: 1, CommitTimeout: 50 * time.Millisecond,
+		NewID: func() string { return "heartbeat-release-error" }, OwnerID: "owner", LeaseTTL: time.Second,
+		HeartbeatInterval: time.Millisecond, Now: clock.Now, NewToken: func() string { return "token" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := createPendingSchedulerRun(t, store, "heartbeat-release-error", oneClaimStep("work"))
+	done := advanceAsync(scheduler, run.ID)
+	<-started
+	store.failNext(heartbeatErr, releaseErr)
+	<-store.failed
+	close(returnSuccess)
+	result := <-done
+	if !errors.Is(result.err, heartbeatErr) || !errors.Is(result.err, releaseErr) {
+		t.Fatalf("err=%v", result.err)
+	}
+	stored, _ := base.GetRun(context.Background(), run.ID)
+	if stored.Nodes["effect"].Status != NodeStatusRunning || stored.Nodes["effect"].ExecutionToken == "" {
 		t.Fatalf("stored=%+v", stored)
 	}
 }

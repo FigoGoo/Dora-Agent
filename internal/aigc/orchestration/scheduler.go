@@ -189,11 +189,19 @@ func (s *Scheduler) advance(ctx context.Context, runID string) (PlanRun, error) 
 		outcomes, heartbeatErr := s.executeClaims(ctx, claimedRun, claims)
 		executionErr := ctx.Err()
 		persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), s.commitTimeout)
+		if heartbeatErr != nil {
+			released, releaseErr := s.releaseClaims(persistCtx, claimedRun.ID, claims)
+			cancelPersist()
+			if executionErr == nil {
+				executionErr = ctx.Err()
+			}
+			if released.ID == "" {
+				released = claimedRun
+			}
+			return released, errors.Join(heartbeatErr, executionErr, releaseErr)
+		}
 		merged, mergeErr := s.mergeOutcomes(persistCtx, claimedRun, outcomes)
 		cancelPersist()
-		if heartbeatErr != nil {
-			mergeErr = errors.Join(mergeErr, heartbeatErr)
-		}
 		if executionErr == nil {
 			executionErr = ctx.Err()
 		}
