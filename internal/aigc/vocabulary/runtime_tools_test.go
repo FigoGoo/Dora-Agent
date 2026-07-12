@@ -16,6 +16,17 @@ type fakePromptWriter struct {
 	invoked int
 }
 
+type scriptedPromptWriter struct {
+	prompts []string
+	calls   int
+}
+
+func (f *scriptedPromptWriter) WritePrompt(context.Context, map[string]any) (string, error) {
+	prompt := f.prompts[f.calls]
+	f.calls++
+	return prompt, nil
+}
+
 func (f *fakePromptWriter) WritePrompt(_ context.Context, inputs map[string]any) (string, error) {
 	f.invoked++
 	f.inputs = inputs
@@ -119,6 +130,14 @@ func TestRuntimeToolsExposeStableContracts(t *testing.T) {
 		}
 	}
 
+	mutated := prompt.Descriptor()
+	mutated.Inputs["target_desc"] = ParamSpec{Type: "bool", Desc: "mutated"}
+	mutated.Outputs["prompt"] = ParamSpec{Type: "object", Desc: "mutated"}
+	fresh := prompt.Descriptor()
+	if fresh.Inputs["target_desc"].Type != "string" || fresh.Outputs["prompt"].Type != "string" {
+		t.Fatalf("descriptor aliases caller mutation: %+v", fresh)
+	}
+
 	confirmation, err := confirm.Run(context.Background(), Call{Inputs: map[string]any{"question": "continue?"}})
 	if err != nil || confirmation.Suspension == nil || confirmation.Suspension.Reason != "waiting_user" {
 		t.Fatalf("confirmation=%+v err=%v", confirmation, err)
@@ -173,11 +192,25 @@ func TestRuntimeToolsWriteMediaPromptBoundaries(t *testing.T) {
 		})
 	}
 
-	t.Run("empty prompt is retryable business failure", func(t *testing.T) {
+	t.Run("empty prompt is an invalid infrastructure receipt", func(t *testing.T) {
 		result, err := NewWriteMediaPromptTool(&fakePromptWriter{prompt: " \n"}).Run(
 			context.Background(), Call{Inputs: map[string]any{"target_desc": "rain"}})
-		if err != nil || result.Fail == nil || result.Fail.Code != "empty_prompt" || !result.Fail.Retryable {
+		if err == nil || !strings.Contains(err.Error(), "write_media_prompt") || !strings.Contains(err.Error(), "empty prompt") || !reflect.DeepEqual(result, Result{}) {
 			t.Fatalf("result=%+v err=%v", result, err)
+		}
+	})
+
+	t.Run("invalid receipt does not cache failure for the same call", func(t *testing.T) {
+		writer := &scriptedPromptWriter{prompts: []string{" ", "cinematic rain"}}
+		tool := NewWriteMediaPromptTool(writer)
+		call := Call{Inputs: map[string]any{"target_desc": "rain"}}
+		first, firstErr := tool.Run(context.Background(), call)
+		second, secondErr := tool.Run(context.Background(), call)
+		if firstErr == nil || !reflect.DeepEqual(first, Result{}) {
+			t.Fatalf("first=%+v err=%v", first, firstErr)
+		}
+		if secondErr != nil || second.Outputs["prompt"] != "cinematic rain" || writer.calls != 2 {
+			t.Fatalf("second=%+v err=%v calls=%d", second, secondErr, writer.calls)
 		}
 	})
 

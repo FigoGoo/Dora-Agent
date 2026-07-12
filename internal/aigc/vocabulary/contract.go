@@ -46,10 +46,11 @@ type Suspension struct {
 	Payload map[string]any `json:"payload,omitempty"`
 }
 
-// Result 是工具调用的一等结果。三者语义互斥地承载不同结局：
-//   - Outputs：正常产出。
-//   - Fail：业务失败（编排层据此决策，不当作 error 抛出）。
-//   - Suspension：工具声明挂起（等待用户交互或异步任务）。
+// Result 是工具调用的一等结果：
+//   - 仅 Outputs：同步成功。
+//   - Fail：业务失败（编排层据此决策，不当作 error 抛出），与 Outputs、Suspension 互斥。
+//   - Suspension：工具声明挂起（等待用户交互或异步任务），可同时携带 Outputs，
+//     例如异步派发先产出 batch receipt 再进入 waiting_jobs。
 //
 // 与 Run 返回的 error 区分：error 表示基础设施故障（通常可重试），
 // 不是业务语义。

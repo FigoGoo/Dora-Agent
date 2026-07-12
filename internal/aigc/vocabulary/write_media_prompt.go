@@ -1,13 +1,9 @@
 package vocabulary
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"reflect"
 	"strings"
 )
 
@@ -61,44 +57,7 @@ func (t *writeMediaPromptTool) Run(ctx context.Context, call Call) (Result, erro
 		return Result{}, fmt.Errorf("write_media_prompt: %w", err)
 	}
 	if strings.TrimSpace(prompt) == "" {
-		return Result{Fail: &Failure{Code: "empty_prompt", Message: "prompt writer returned an empty prompt", Retryable: true}}, nil
+		return Result{}, errors.New("write_media_prompt: prompt writer returned an empty prompt")
 	}
 	return Result{Outputs: map[string]any{"prompt": prompt}}, nil
-}
-
-func isNilDependency(value any) bool {
-	if value == nil {
-		return true
-	}
-	rv := reflect.ValueOf(value)
-	switch rv.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return rv.IsNil()
-	default:
-		return false
-	}
-}
-
-func cloneJSONMap(value map[string]any) (map[string]any, error) {
-	if value == nil {
-		return nil, nil
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("value is not JSON-compatible: %w", err)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-	var cloned map[string]any
-	if err := decoder.Decode(&cloned); err != nil {
-		return nil, fmt.Errorf("decode JSON-compatible value: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return nil, errors.New("decode JSON-compatible value: unexpected trailing value")
-		}
-		return nil, fmt.Errorf("decode JSON-compatible value: %w", err)
-	}
-	return cloned, nil
 }
