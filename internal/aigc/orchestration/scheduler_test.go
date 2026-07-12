@@ -17,13 +17,18 @@ import (
 )
 
 type schedulerTool struct {
-	key    string
-	inputs map[string]vocabulary.ParamSpec
-	run    func(context.Context, vocabulary.Call) (vocabulary.Result, error)
+	key      string
+	category string
+	inputs   map[string]vocabulary.ParamSpec
+	run      func(context.Context, vocabulary.Call) (vocabulary.Result, error)
 }
 
 func (t schedulerTool) Descriptor() vocabulary.Descriptor {
-	return vocabulary.Descriptor{Key: t.key, Name: t.key, Description: "scheduler test", Category: "cognition", Inputs: t.inputs}
+	category := t.category
+	if category == "" {
+		category = "cognition"
+	}
+	return vocabulary.Descriptor{Key: t.key, Name: t.key, Description: "scheduler test", Category: category, Inputs: t.inputs}
 }
 
 func (t schedulerTool) Run(ctx context.Context, call vocabulary.Call) (vocabulary.Result, error) {
@@ -62,6 +67,88 @@ func schedulerConfigForTest(store RunStore, registry *vocabulary.Registry, newID
 	return SchedulerConfig{
 		Store: store, Vocabulary: registry, NewID: newID, OwnerID: owner,
 		Now: time.Now, NewToken: func() string { return fmt.Sprintf("token-%d", schedulerTestSequence.Add(1)) },
+	}
+}
+
+type countingGuard struct {
+	calls atomic.Int32
+	check func(context.Context, vocabulary.Call) vocabulary.Result
+}
+
+func (g *countingGuard) Check(ctx context.Context, call vocabulary.Call) vocabulary.Result {
+	g.calls.Add(1)
+	if g.check != nil {
+		return g.check(ctx, call)
+	}
+	return vocabulary.Result{}
+}
+
+func TestSchedulerGuardsOnlyMediaToolsAndSkipsRunOnBlock(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		guardResult vocabulary.Result
+		wantStatus  string
+		wantNode    string
+		wantCode    string
+	}{
+		{name: "hard block", guardResult: vocabulary.Result{Fail: &vocabulary.Failure{Code: "compliance_hard_block", Message: "blocked"}}, wantStatus: RunStatusFailed, wantNode: NodeStatusFailed, wantCode: "compliance_hard_block"},
+		{name: "soft block", guardResult: vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser, Payload: map[string]any{"message": "confirm"}}}, wantStatus: RunStatusSuspended, wantNode: NodeStatusRunning},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var toolCalls atomic.Int32
+			tool := schedulerTool{key: "render", category: "media", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+				toolCalls.Add(1)
+				return vocabulary.Result{Outputs: map[string]any{"asset": "unexpected"}}, nil
+			}}
+			guard := &countingGuard{check: func(context.Context, vocabulary.Call) vocabulary.Result { return test.guardResult }}
+			cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, tool), func() string { return "guarded-run" })
+			cfg.Guard = guard
+			scheduler, err := NewScheduler(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{PlanID: "guarded", Source: "dynamic", Summary: "guarded", Direction: "image", Steps: []PlanStep{{ID: "render", Tool: "render", Params: map[string]any{"prompt": "risk"}, Required: true}}})
+			if err != nil || run.Status != test.wantStatus || run.Nodes["render"].Status != test.wantNode || toolCalls.Load() != 0 || guard.calls.Load() != 1 {
+				t.Fatalf("run=%+v err=%v tool_calls=%d guard_calls=%d", run, err, toolCalls.Load(), guard.calls.Load())
+			}
+			if test.wantCode != "" && (run.Nodes["render"].Fail == nil || run.Nodes["render"].Fail.Code != test.wantCode) {
+				t.Fatalf("failure=%+v", run.Nodes["render"].Fail)
+			}
+		})
+	}
+}
+
+func TestSchedulerGuardsMediaPassAndIgnoresOtherCategories(t *testing.T) {
+	var toolCalls atomic.Int32
+	guard := &countingGuard{}
+	tools := []vocabulary.Tool{
+		schedulerTool{key: "render", category: "media", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			toolCalls.Add(1)
+			return vocabulary.Result{}, nil
+		}},
+		schedulerTool{key: "read", category: "data", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			toolCalls.Add(1)
+			return vocabulary.Result{}, nil
+		}},
+		schedulerTool{key: "think", category: "cognition", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			toolCalls.Add(1)
+			return vocabulary.Result{}, nil
+		}},
+		schedulerTool{key: "ask", category: "interaction", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			toolCalls.Add(1)
+			return vocabulary.Result{}, nil
+		}},
+	}
+	cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, tools...), func() string { return "category-run" })
+	cfg.Guard = guard
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := []PlanStep{{ID: "render", Tool: "render", Required: true}, {ID: "read", Tool: "read", Required: true}, {ID: "think", Tool: "think", Required: true}, {ID: "ask", Tool: "ask", Required: true}}
+	run, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{PlanID: "categories", Source: "dynamic", Summary: "categories", Direction: "image", Steps: steps})
+	if err != nil || run.Status != RunStatusSucceeded || toolCalls.Load() != 4 || guard.calls.Load() != 1 {
+		t.Fatalf("status=%s err=%v tool_calls=%d guard_calls=%d", run.Status, err, toolCalls.Load(), guard.calls.Load())
 	}
 }
 

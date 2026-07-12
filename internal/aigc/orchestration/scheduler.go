@@ -21,6 +21,7 @@ const (
 type SchedulerConfig struct {
 	Store             RunStore
 	Vocabulary        *vocabulary.Registry
+	Guard             vocabulary.Guard
 	MaxParallel       int
 	JobBudget         int
 	CommitTimeout     time.Duration
@@ -37,6 +38,7 @@ type SchedulerConfig struct {
 type Scheduler struct {
 	store             RunStore
 	vocabulary        *vocabulary.Registry
+	guard             vocabulary.Guard
 	maxParallel       int
 	jobBudget         int
 	commitTimeout     time.Duration
@@ -94,7 +96,7 @@ func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
 		}
 	}
 	return &Scheduler{
-		store: cfg.Store, vocabulary: cfg.Vocabulary, maxParallel: maxParallel,
+		store: cfg.Store, vocabulary: cfg.Vocabulary, guard: cfg.Guard, maxParallel: maxParallel,
 		jobBudget: cfg.JobBudget, commitTimeout: commitTimeout, newID: cfg.NewID,
 		ownerID: strings.TrimSpace(cfg.OwnerID), leaseTTL: leaseTTL,
 		heartbeatInterval: heartbeatInterval, now: cfg.Now, newToken: cfg.NewToken,
@@ -342,7 +344,7 @@ func (s *Scheduler) executeClaims(ctx context.Context, run PlanRun, claims []exe
 					if waveCtx.Err() != nil {
 						return
 					}
-					executeOutcome(waveCtx, s.vocabulary, run, &outcomes[next.index])
+					executeOutcome(waveCtx, s.vocabulary, s.guard, run, &outcomes[next.index])
 				}
 			}
 		}()
@@ -373,7 +375,7 @@ func (s *Scheduler) heartbeatClaims(runID string, claims []executionClaim, stop 
 	}
 }
 
-func executeOutcome(ctx context.Context, registry *vocabulary.Registry, run PlanRun, outcome *nodeOutcome) {
+func executeOutcome(ctx context.Context, registry *vocabulary.Registry, guard vocabulary.Guard, run PlanRun, outcome *nodeOutcome) {
 	outcome.invoked = true
 	inputs, err := resolveInputs(outcome.step.Params, run.Nodes)
 	if err != nil {
@@ -389,12 +391,23 @@ func executeOutcome(ctx context.Context, registry *vocabulary.Registry, run Plan
 		outcome.resolveErr = fmt.Errorf("tool %q is no longer registered", outcome.step.Tool)
 		return
 	}
-	outcome.result, outcome.toolErr = tool.Run(ctx, vocabulary.Call{
+	call := vocabulary.Call{
 		SessionID: run.SessionID, UserID: run.UserID, PlanRunID: run.ID,
 		NodeID: outcome.step.ID, Attempt: outcome.claim.Attempt,
 		IdempotencyKey: fmt.Sprintf("%s:%s:%d", run.ID, outcome.step.ID, outcome.claim.Attempt),
 		Inputs:         inputs,
-	})
+	}
+	if guard != nil && tool.Descriptor().Category == "media" {
+		outcome.result = normalizeToolResult(guard.Check(ctx, call))
+		if outcome.result.Fail != nil || outcome.result.Suspension != nil {
+			return
+		}
+	}
+	if ctx.Err() != nil {
+		outcome.invoked = false
+		return
+	}
+	outcome.result, outcome.toolErr = tool.Run(ctx, call)
 	if outcome.toolErr == nil {
 		outcome.result = normalizeToolResult(outcome.result)
 	}
