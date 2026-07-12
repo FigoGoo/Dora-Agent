@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -786,5 +787,94 @@ func TestExecutionClaimHeartbeatLossJoinsReleaseError(t *testing.T) {
 	stored, _ := base.GetRun(context.Background(), run.ID)
 	if stored.Nodes["effect"].Status != NodeStatusRunning || stored.Nodes["effect"].ExecutionToken == "" {
 		t.Fatalf("stored=%+v", stored)
+	}
+}
+
+func TestExecutionClaimAdvancesEpochAfterReleaseWithTokenCollision(t *testing.T) {
+	store := NewMemoryRunStore()
+	clock := newClaimClock(time.Unix(1_700_000_000, 0))
+	scheduler, err := NewScheduler(SchedulerConfig{
+		Store: store, Vocabulary: schedulerRegistry(t, schedulerTool{key: "work"}), MaxParallel: 1,
+		NewID: func() string { return "epoch-release" }, OwnerID: "same-owner", LeaseTTL: time.Minute,
+		HeartbeatInterval: time.Hour, Now: clock.Now, NewToken: func() string { return "same-token" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := createPendingSchedulerRun(t, store, "epoch-release", oneClaimStep("work"))
+	firstRun, firstClaims, err := scheduler.claimReady(context.Background(), run)
+	if err != nil || len(firstClaims) != 1 || firstClaims[0].Epoch != 1 {
+		t.Fatalf("first=%+v claims=%+v err=%v", firstRun, firstClaims, err)
+	}
+	released, err := scheduler.releaseClaims(context.Background(), run.ID, firstClaims)
+	if err != nil || released.Nodes["effect"].Status != NodeStatusPending {
+		t.Fatalf("released=%+v err=%v", released, err)
+	}
+	secondRun, secondClaims, err := scheduler.claimReady(context.Background(), released)
+	if err != nil || len(secondClaims) != 1 || secondClaims[0].Epoch != 2 || secondClaims[0].Token != firstClaims[0].Token {
+		t.Fatalf("second=%+v claims=%+v err=%v", secondRun, secondClaims, err)
+	}
+	version := secondRun.Version
+	if err := scheduler.renewClaims(context.Background(), run.ID, firstClaims); !errors.Is(err, ErrExecutionClaimLost) {
+		t.Fatalf("stale renew err=%v", err)
+	}
+	staleRelease, err := scheduler.releaseClaims(context.Background(), run.ID, firstClaims)
+	if err != nil || staleRelease.Version != version {
+		t.Fatalf("stale release=%+v err=%v", staleRelease, err)
+	}
+	staleMerge, err := scheduler.mergeOutcomes(context.Background(), staleRelease, []nodeOutcome{{
+		step: secondRun.Plan.Steps[0], claim: firstClaims[0], invoked: true,
+		result: vocabulary.Result{Outputs: map[string]any{"winner": "stale"}},
+	}})
+	if err != nil || staleMerge.Version != version {
+		t.Fatalf("stale merge=%+v err=%v", staleMerge, err)
+	}
+	fresh, err := scheduler.mergeOutcomes(context.Background(), staleMerge, []nodeOutcome{{
+		step: secondRun.Plan.Steps[0], claim: secondClaims[0], invoked: true,
+		result: vocabulary.Result{Outputs: map[string]any{"winner": "fresh"}},
+	}})
+	if err != nil || fresh.Nodes["effect"].Status != NodeStatusSucceeded || fresh.Nodes["effect"].Outputs["winner"] != "fresh" {
+		t.Fatalf("fresh=%+v err=%v", fresh, err)
+	}
+}
+
+func TestExecutionClaimRejectsExhaustedEpochAtomically(t *testing.T) {
+	for _, status := range []string{NodeStatusPending, NodeStatusRunning} {
+		t.Run(status, func(t *testing.T) {
+			store := NewMemoryRunStore()
+			clock := newClaimClock(time.Unix(1_700_000_000, 0))
+			var calls atomic.Int32
+			var tokenCalls atomic.Int32
+			scheduler := claimScheduler(t, store, "owner", clock, time.Hour, schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+				calls.Add(1)
+				return vocabulary.Result{}, nil
+			}})
+			scheduler.newToken = func() string {
+				tokenCalls.Add(1)
+				return "must-not-be-used"
+			}
+			node := &NodeRun{StepID: "effect", Status: status, Attempt: 1, ExecutionEpoch: math.MaxInt64}
+			if status == NodeStatusRunning {
+				expired := clock.Now().Add(-time.Second)
+				node.ExecutionOwner = "old-owner"
+				node.ExecutionToken = "old-owner:token"
+				node.LeaseUntil = &expired
+			}
+			created, err := store.CreateRun(context.Background(), PlanRun{
+				ID: "epoch-exhausted-" + status, SessionID: "s", UserID: "u", Plan: oneClaimStep("work"),
+				Status: RunStatusRunning, Nodes: map[string]*NodeRun{"effect": node},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := scheduler.Advance(context.Background(), created.ID)
+			if !errors.Is(err, ErrExecutionFenceExhausted) || got.Version != created.Version || calls.Load() != 0 || tokenCalls.Load() != 0 {
+				t.Fatalf("run=%+v calls=%d tokenCalls=%d err=%v", got, calls.Load(), tokenCalls.Load(), err)
+			}
+			stored, _ := store.GetRun(context.Background(), created.ID)
+			if stored.Version != created.Version || stored.Nodes["effect"].ExecutionEpoch != math.MaxInt64 || stored.Nodes["effect"].Status != status {
+				t.Fatalf("stored=%+v", stored)
+			}
+		})
 	}
 }

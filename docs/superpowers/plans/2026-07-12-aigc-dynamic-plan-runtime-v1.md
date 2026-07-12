@@ -486,7 +486,7 @@ type SchedulerConfig struct {
 }
 ```
 
-`OwnerID`、`Now`、`NewToken` 必填；LeaseTTL 默认 30 秒。首次 claim 把 pending -> running、Attempt 0 -> 1、ExecutionEpoch -> 1；过期接管保持 Attempt 不变，ExecutionEpoch 单调 +1，并替换 owner/token/lease。Tool Call 使用 NodeRun 中已冻结的 Attempt。heartbeat、merge、release 必须同时匹配 owner/token/attempt/epoch；heartbeat 还必须确认旧 lease 在单次权威 `Now()` 读数下尚未过期，过期 heartbeat 不得复活 claim。
+`OwnerID`、`Now`、`NewToken` 必填；LeaseTTL 默认 30 秒。每次 claim acquisition 都把 ExecutionEpoch 单调 +1（首次 0 -> 1）；pending 首次 claim 还把 pending -> running、Attempt 0 -> 1，tool error/cancel/heartbeat release 后的 pending 重 claim 与过期 running 接管都保持 Attempt 不变。ExecutionEpoch 已为 `math.MaxInt64` 时必须以可 `errors.Is` 的 fence exhausted 错误原子失败，不得溢出、增加 Version 或调用 Tool。Tool Call 使用 NodeRun 中已冻结的 Attempt。heartbeat、merge、release 必须同时匹配 owner/token/attempt/epoch；heartbeat 还必须确认旧 lease 在单次权威 `Now()` 读数下尚未过期，过期 heartbeat 不得复活 claim。
 
 `Now` 的强契约是：所有 Scheduler 实例必须使用同一权威时钟。Task 4A 只以 Memory Store + fake clock 完成 fencing Gate，不宣称已解决生产 clock skew；Task 8 的 Postgres 装配必须注入 `SELECT now()` 等价语义的共享 DB clock，禁止以各进程 `time.Now` 作为生产 Scheduler clock。若该共享时钟未接入，Task 8 恢复 Gate 不得通过。
 

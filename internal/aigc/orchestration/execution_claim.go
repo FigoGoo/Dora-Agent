@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
 
 var (
-	errNoClaimMutation    = errors.New("no execution claim mutation applied")
-	ErrExecutionClaimLost = errors.New("execution claim lost")
+	errNoClaimMutation         = errors.New("no execution claim mutation applied")
+	ErrExecutionClaimLost      = errors.New("execution claim lost")
+	ErrExecutionFenceExhausted = errors.New("execution fence exhausted")
 )
 
 type executionClaim struct {
@@ -38,20 +40,19 @@ func (s *Scheduler) claimReady(ctx context.Context, run PlanRun) (PlanRun, []exe
 				if node == nil || !nodeClaimable(*next, step, node, now) {
 					continue
 				}
+				if node.ExecutionEpoch == math.MaxInt64 {
+					return fmt.Errorf("%w: run %q step %q", ErrExecutionFenceExhausted, next.ID, step.ID)
+				}
 				rawToken := strings.TrimSpace(s.newToken())
 				if rawToken == "" {
 					return errors.New("scheduler generated an empty execution token")
 				}
+				node.ExecutionEpoch++
 				if node.Status == NodeStatusPending {
 					node.Status = NodeStatusRunning
 					if node.Attempt == 0 {
 						node.Attempt = 1
 					}
-					if node.ExecutionEpoch == 0 {
-						node.ExecutionEpoch = 1
-					}
-				} else {
-					node.ExecutionEpoch++
 				}
 				leaseUntil := now.Add(s.leaseTTL)
 				node.ExecutionOwner = s.ownerID
