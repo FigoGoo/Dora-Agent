@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -162,6 +163,69 @@ func TestSchedulerHonorsMaxParallel(t *testing.T) {
 	}
 }
 
+func TestSchedulerCancellationStopsUnstartedToolsAndPersistsCompletedResults(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	tool := schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		callNumber := calls.Add(1)
+		if callNumber <= 2 {
+			started <- struct{}{}
+			<-release
+		}
+		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+	}}
+	steps := make([]PlanStep, 10)
+	for index := range steps {
+		steps[index] = PlanStep{ID: fmt.Sprintf("n%d", index), Tool: "work", Required: true}
+	}
+	scheduler := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, tool), 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	type outcome struct {
+		run PlanRun
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		run, err := scheduler.Submit(ctx, "s1", "u1", ExecutionPlan{
+			PlanID: "cancel", Source: "dynamic", Summary: "cancel", Direction: "image", Steps: steps,
+		})
+		done <- outcome{run: run, err: err}
+	}()
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("workers did not start")
+		}
+	}
+	cancel()
+	close(release)
+	result := <-done
+	if !errors.Is(result.err, context.Canceled) || calls.Load() != 2 {
+		t.Fatalf("calls=%d err=%v", calls.Load(), result.err)
+	}
+	if result.run.Status != RunStatusRunning {
+		t.Fatalf("status=%s", result.run.Status)
+	}
+	var succeeded, pending int
+	for id, node := range result.run.Nodes {
+		switch node.Status {
+		case NodeStatusSucceeded:
+			succeeded++
+		case NodeStatusPending:
+			pending++
+		case NodeStatusRunning:
+			t.Fatalf("node %s left running", id)
+		default:
+			t.Fatalf("node %s status=%s", id, node.Status)
+		}
+	}
+	if succeeded != 2 || pending != 8 {
+		t.Fatalf("succeeded=%d pending=%d", succeeded, pending)
+	}
+}
+
 func TestSchedulerResolvesRecursiveReferencesAndCopiesInputs(t *testing.T) {
 	var received map[string]any
 	source := schedulerTool{key: "source", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
@@ -314,7 +378,7 @@ func TestSchedulerBudgetPreviewDoesNotExecute(t *testing.T) {
 		PlanID: "preview", Source: "dynamic", Summary: "preview", Direction: "image", EstimatedJobs: 3,
 		Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
 	})
-	if err != nil || run.Status != RunStatusSuspended || run.SuspendReason != SuspendWaitingUser || !run.PreviewRequired || calls.Load() != 0 {
+	if err != nil || run.Status != RunStatusSuspended || run.Version != 1 || run.SuspendReason != SuspendWaitingUser || !run.PreviewRequired || calls.Load() != 0 {
 		t.Fatalf("run=%+v calls=%d err=%v", run, calls.Load(), err)
 	}
 	version := run.Version
@@ -348,9 +412,6 @@ func TestSchedulerToolErrorAndFailureFailNodes(t *testing.T) {
 		name string
 		tool schedulerTool
 	}{
-		{name: "error", tool: schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
-			return vocabulary.Result{}, errors.New("offline")
-		}}},
 		{name: "failure", tool: schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
 			return vocabulary.Result{Fail: &vocabulary.Failure{Code: "bad", Message: "bad input"}}, nil
 		}}},
@@ -366,11 +427,93 @@ func TestSchedulerToolErrorAndFailureFailNodes(t *testing.T) {
 	}
 }
 
+func TestSchedulerToolInfrastructureErrorRemainsPendingAndRetriesSameKey(t *testing.T) {
+	toolErr := errors.New("provider offline")
+	var flakyCalls atomic.Int32
+	var siblingCalls atomic.Int32
+	var keysMu sync.Mutex
+	var flakyKeys []string
+	tool := schedulerTool{key: "work", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+		if call.NodeID == "sibling" {
+			siblingCalls.Add(1)
+			return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+		}
+		attempt := flakyCalls.Add(1)
+		keysMu.Lock()
+		flakyKeys = append(flakyKeys, call.IdempotencyKey)
+		keysMu.Unlock()
+		if attempt == 1 {
+			return vocabulary.Result{}, toolErr
+		}
+		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+	}}
+	scheduler := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, tool), 1)
+	run, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "retry-tool", Source: "dynamic", Summary: "retry-tool", Direction: "image", Steps: []PlanStep{
+			{ID: "a", Tool: "work", Required: true}, {ID: "sibling", Tool: "work", Required: true},
+		},
+	})
+	if !errors.Is(err, toolErr) || run.Status != RunStatusRunning {
+		t.Fatalf("status=%s err=%v", run.Status, err)
+	}
+	node := run.Nodes["a"]
+	if node.Status != NodeStatusPending || node.Attempt != 0 || node.Fail != nil {
+		t.Fatalf("node=%+v", node)
+	}
+	if run.Nodes["sibling"].Status != NodeStatusSucceeded || siblingCalls.Load() != 1 {
+		t.Fatalf("sibling=%+v calls=%d", run.Nodes["sibling"], siblingCalls.Load())
+	}
+	recovered, err := scheduler.Advance(context.Background(), run.ID)
+	if err != nil || recovered.Status != RunStatusSucceeded || flakyCalls.Load() != 2 || siblingCalls.Load() != 1 {
+		t.Fatalf("status=%s flaky=%d sibling=%d err=%v", recovered.Status, flakyCalls.Load(), siblingCalls.Load(), err)
+	}
+	keysMu.Lock()
+	defer keysMu.Unlock()
+	if len(flakyKeys) != 2 || flakyKeys[0] != "run-1:a:1" || flakyKeys[1] != flakyKeys[0] {
+		t.Fatalf("keys=%v", flakyKeys)
+	}
+}
+
+func TestSchedulerInvalidToolResultsFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result vocabulary.Result
+	}{
+		{name: "empty_suspension_reason", result: vocabulary.Result{Suspension: &vocabulary.Suspension{}}},
+		{name: "unknown_suspension_reason", result: vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: "waiting_magic"}}},
+		{name: "fail_and_suspension", result: vocabulary.Result{
+			Fail: &vocabulary.Failure{Code: "original"}, Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser},
+		}},
+		{name: "fail_and_outputs", result: vocabulary.Result{
+			Fail: &vocabulary.Failure{Code: "original"}, Outputs: map[string]any{"value": true},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tool := schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+				return tc.result, nil
+			}}
+			run, err := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, tool), 1).Submit(context.Background(), "s1", "u1", ExecutionPlan{
+				PlanID: tc.name, Source: "dynamic", Summary: tc.name, Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			node := run.Nodes["a"]
+			if run.Status != RunStatusFailed || node.Status != NodeStatusFailed || node.Fail == nil || node.Fail.Code != "invalid_tool_result" || node.Outputs != nil || node.Suspension != nil {
+				t.Fatalf("run status=%s node=%+v", run.Status, node)
+			}
+		})
+	}
+}
+
 func TestSchedulerSuspensionStopsDownstream(t *testing.T) {
 	var downstream atomic.Int32
 	registry := schedulerRegistry(t,
 		schedulerTool{key: "pause", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
-			return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser, Payload: map[string]any{"question": "continue?"}}}, nil
+			return vocabulary.Result{
+				Outputs:    map[string]any{"batch_id": "batch-1"},
+				Suspension: &vocabulary.Suspension{Reason: SuspendWaitingUser, Payload: map[string]any{"question": "continue?"}},
+			}, nil
 		}},
 		schedulerTool{key: "next", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
 			downstream.Add(1)
@@ -383,7 +526,7 @@ func TestSchedulerSuspensionStopsDownstream(t *testing.T) {
 			{ID: "pause", Tool: "pause", Required: true}, {ID: "next", Tool: "next", DependsOn: []string{"pause"}, Required: true},
 		},
 	})
-	if err != nil || run.Status != RunStatusSuspended || run.SuspendedNodeID != "pause" || run.Nodes["pause"].Suspension == nil || downstream.Load() != 0 {
+	if err != nil || run.Status != RunStatusSuspended || run.SuspendedNodeID != "pause" || run.Nodes["pause"].Suspension == nil || run.Nodes["pause"].Outputs["batch_id"] != "batch-1" || downstream.Load() != 0 {
 		t.Fatalf("run=%+v downstream=%d err=%v", run, downstream.Load(), err)
 	}
 	version := run.Version
@@ -438,11 +581,126 @@ type conflictOnceStore struct {
 	conflict int32
 }
 
+type failFirstMutationStore struct {
+	RunStore
+	err    error
+	failed atomic.Bool
+}
+
+func (s *failFirstMutationStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
+	if s.failed.CompareAndSwap(false, true) {
+		return PlanRun{}, s.err
+	}
+	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
+}
+
+func TestSchedulerSubmitMergeFailureLeavesRecoverableRunningRun(t *testing.T) {
+	mergeErr := errors.New("store unavailable")
+	store := &failFirstMutationStore{RunStore: NewMemoryRunStore(), err: mergeErr}
+	var calls atomic.Int32
+	var keysMu sync.Mutex
+	var keys []string
+	tool := schedulerTool{key: "work", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+		calls.Add(1)
+		keysMu.Lock()
+		keys = append(keys, call.IdempotencyKey)
+		keysMu.Unlock()
+		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+	}}
+	scheduler := schedulerForTest(t, store, schedulerRegistry(t, tool), 1)
+	run, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "recoverable", Source: "dynamic", Summary: "recoverable", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
+	})
+	if !errors.Is(err, mergeErr) || run.ID != "run-1" {
+		t.Fatalf("run=%+v err=%v", run, err)
+	}
+	stored, getErr := store.GetRun(context.Background(), run.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if stored.Status != RunStatusRunning || stored.Version != 1 || stored.Nodes["a"].Status != NodeStatusPending || stored.Nodes["a"].Attempt != 0 {
+		t.Fatalf("stored=%+v node=%+v", stored, stored.Nodes["a"])
+	}
+	recovered, err := scheduler.Advance(context.Background(), run.ID)
+	if err != nil || recovered.Status != RunStatusSucceeded || calls.Load() != 2 {
+		t.Fatalf("status=%s calls=%d err=%v", recovered.Status, calls.Load(), err)
+	}
+	keysMu.Lock()
+	defer keysMu.Unlock()
+	if len(keys) != 2 || keys[0] != "run-1:a:1" || keys[1] != keys[0] {
+		t.Fatalf("keys=%v", keys)
+	}
+}
+
+func TestSchedulerUnserializableReceiptRemainsPendingAndRecoverable(t *testing.T) {
+	for _, kind := range []string{"outputs", "suspension"} {
+		t.Run(kind, func(t *testing.T) {
+			var invalid atomic.Bool
+			invalid.Store(true)
+			var keysMu sync.Mutex
+			var keys []string
+			tool := schedulerTool{key: "work", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+				keysMu.Lock()
+				keys = append(keys, call.IdempotencyKey)
+				keysMu.Unlock()
+				if !invalid.Load() {
+					return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+				}
+				if kind == "outputs" {
+					return vocabulary.Result{Outputs: map[string]any{"bad": make(chan struct{})}}, nil
+				}
+				return vocabulary.Result{Suspension: &vocabulary.Suspension{
+					Reason: SuspendWaitingUser, Payload: map[string]any{"bad": make(chan struct{})},
+				}}, nil
+			}}
+			scheduler := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, tool), 1)
+			run, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
+				PlanID: "bad-receipt", Source: "dynamic", Summary: "bad-receipt", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
+			})
+			if !errors.Is(err, ErrRunNotSerializable) || run.ID != "run-1" {
+				t.Fatalf("run=%+v err=%v", run, err)
+			}
+			node := run.Nodes["a"]
+			if run.Status != RunStatusRunning || node.Status != NodeStatusPending || node.Attempt != 0 || node.Outputs != nil || node.Suspension != nil {
+				t.Fatalf("run=%+v node=%+v", run, node)
+			}
+			invalid.Store(false)
+			recovered, err := scheduler.Advance(context.Background(), run.ID)
+			if err != nil || recovered.Status != RunStatusSucceeded {
+				t.Fatalf("status=%s err=%v", recovered.Status, err)
+			}
+			keysMu.Lock()
+			defer keysMu.Unlock()
+			if len(keys) != 2 || keys[0] != "run-1:a:1" || keys[1] != keys[0] {
+				t.Fatalf("keys=%v", keys)
+			}
+		})
+	}
+}
+
 type conflictRangeStore struct {
 	RunStore
 	mutation atomic.Int32
 	from     int32
 	through  int32
+}
+
+type advancingConflictStore struct {
+	RunStore
+	conflicted atomic.Bool
+}
+
+func (s *advancingConflictStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
+	if s.conflicted.CompareAndSwap(false, true) {
+		if _, err := s.RunStore.MutateRun(ctx, id, expectedVersion, func(run *PlanRun) error {
+			run.UserID = "concurrent-update"
+			return nil
+		}); err != nil {
+			return PlanRun{}, err
+		}
+		return PlanRun{}, ErrRunVersionConflict
+	}
+	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
 }
 
 func (s *conflictRangeStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
@@ -466,7 +724,7 @@ func TestSchedulerCASConflictDoesNotRepeatTool(t *testing.T) {
 		calls.Add(1)
 		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
 	}}
-	store := &conflictOnceStore{RunStore: NewMemoryRunStore(), conflict: 3}
+	store := &conflictOnceStore{RunStore: NewMemoryRunStore(), conflict: 1}
 	run, err := schedulerForTest(t, store, schedulerRegistry(t, tool), 1).Submit(context.Background(), "s1", "u1", ExecutionPlan{
 		PlanID: "cas", Source: "dynamic", Summary: "cas", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
 	})
@@ -475,18 +733,48 @@ func TestSchedulerCASConflictDoesNotRepeatTool(t *testing.T) {
 	}
 }
 
-func TestSchedulerStopsAfterCASConflictLimit(t *testing.T) {
+func TestSchedulerCASConflictRereadsAndPreservesConcurrentUpdate(t *testing.T) {
 	var calls atomic.Int32
 	tool := schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
 		calls.Add(1)
+		return vocabulary.Result{Outputs: map[string]any{"ok": true}}, nil
+	}}
+	store := &advancingConflictStore{RunStore: NewMemoryRunStore()}
+	run, err := schedulerForTest(t, store, schedulerRegistry(t, tool), 1).Submit(context.Background(), "s1", "u1", ExecutionPlan{
+		PlanID: "cas-reread", Source: "dynamic", Summary: "cas-reread", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
+	})
+	if err != nil || run.Status != RunStatusSucceeded || run.UserID != "concurrent-update" || calls.Load() != 1 {
+		t.Fatalf("status=%s user=%s calls=%d err=%v", run.Status, run.UserID, calls.Load(), err)
+	}
+}
+
+func TestSchedulerStopsAfterCASConflictLimit(t *testing.T) {
+	var calls atomic.Int32
+	var keysMu sync.Mutex
+	var keys []string
+	tool := schedulerTool{key: "work", run: func(_ context.Context, call vocabulary.Call) (vocabulary.Result, error) {
+		calls.Add(1)
+		keysMu.Lock()
+		keys = append(keys, call.IdempotencyKey)
+		keysMu.Unlock()
 		return vocabulary.Result{}, nil
 	}}
-	store := &conflictRangeStore{RunStore: NewMemoryRunStore(), from: 2, through: 10}
-	_, err := schedulerForTest(t, store, schedulerRegistry(t, tool), 1).Submit(context.Background(), "s1", "u1", ExecutionPlan{
+	store := &conflictRangeStore{RunStore: NewMemoryRunStore(), from: 1, through: maxCASRetries}
+	scheduler := schedulerForTest(t, store, schedulerRegistry(t, tool), 1)
+	run, err := scheduler.Submit(context.Background(), "s1", "u1", ExecutionPlan{
 		PlanID: "cas-limit", Source: "dynamic", Summary: "cas-limit", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
 	})
-	if !errors.Is(err, ErrRunVersionConflict) || calls.Load() != 0 {
+	if !errors.Is(err, ErrRunVersionConflict) || calls.Load() != 1 || run.Nodes["a"].Status != NodeStatusPending || run.Nodes["a"].Attempt != 0 {
 		t.Fatalf("calls=%d err=%v", calls.Load(), err)
+	}
+	recovered, err := scheduler.Advance(context.Background(), run.ID)
+	if err != nil || recovered.Status != RunStatusSucceeded || calls.Load() != 2 {
+		t.Fatalf("recovered=%s calls=%d err=%v", recovered.Status, calls.Load(), err)
+	}
+	keysMu.Lock()
+	defer keysMu.Unlock()
+	if len(keys) != 2 || keys[0] != "run-1:a:1" || keys[1] != keys[0] {
+		t.Fatalf("keys=%v", keys)
 	}
 }
 

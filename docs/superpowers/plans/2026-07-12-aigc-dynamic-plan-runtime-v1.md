@@ -295,7 +295,11 @@ func (s *Scheduler) Submit(ctx context.Context, sessionID, userID string, plan E
 func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error)
 ```
 
-`Submit` 顺序固定为：`plan.Validate` -> 初始化全部 NodeRun 为 pending -> 创建 Run -> 预算判定；超预算时按终版 §3.6 从 `draft` 直接进入 `suspended(waiting_user)`（Task 2 实现时发现并修正 Task 1 状态表的一致性缺口），否则 `draft->running` -> `Advance`。`Advance` 每轮读取快照，只选择“自身 pending 且全部依赖 succeeded/skipped”的节点；用容量为 `MaxParallel` 的 semaphore 并发执行；每个节点的幂等键固定为 `planRunID:stepID:attempt`。
+`Submit` 顺序固定为：校验 config/input 与 `plan.Validate` -> 初始化全部 NodeRun 为 pending -> **直接创建最终提交初态**。超预算时 Create `suspended(waiting_user)+PreviewRequired@v1` 并返回；普通计划 Create `running@v1` 后进入 `Advance`。Scheduler 不持久化 draft 中转，避免初态 mutation 失败遗留不可推进的 draft；Task 1 保留 `draft -> suspended` 作为状态机合法边，但 Scheduler 不依赖它。
+
+`Advance` 每轮读取快照，只选择“自身 pending 且全部依赖 succeeded/skipped”的节点。ready 节点仅在当轮局部工作集内视为 executing，不在调用 Tool 前持久化 running；固定 worker pool 大小为 `min(MaxParallel, len(ready))`，取消后不再领取/调用未开始节点。Tool 结果可提交时，才按计划顺序以单次 CAS 将节点从 pending 原子落为 succeeded/failed/suspension；`Tool.Run` Go error 属基础设施错误，节点保持 pending，同 wave 其他 receipt 仍尽力以 `context.WithoutCancel` 落库，然后返回 error。进程崩溃或 merge 失败时 durable 节点仍 pending，下一次 `Advance` 用相同 `Attempt`/`IdempotencyKey`（`planRunID:stepID:attempt`）重放，正确性依赖原子 Tool 的幂等契约；这是明确的 at-least-once crash window，不宣称 exactly-once，Task 8 前不引入 lease/owner。
+
+Tool Result 在持久化前 fail closed 校验：Suspension reason 仅允许 `waiting_user|waiting_agent|waiting_jobs`；Fail 与 Suspension 互斥；Fail 不得同时携带 Outputs；Suspension 可以携带 Outputs（如 `batch_id`）。同一 ready wave 多个 Suspension 是非法歧义恢复点，相关节点以 `multiple_suspensions` 失败、Run 直接 failed、未执行节点 skipped。
 
 - [ ] **Step 6: 运行 GREEN、race 和包回归**
 

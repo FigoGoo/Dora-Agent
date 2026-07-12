@@ -72,29 +72,26 @@ func (s *Scheduler) Submit(ctx context.Context, sessionID, userID string, plan E
 	for _, step := range plan.Steps {
 		nodes[step.ID] = &NodeRun{StepID: step.ID, Status: NodeStatusPending}
 	}
+	initialStatus := RunStatusRunning
+	suspendReason := ""
+	previewRequired := false
+	if plan.ExceedsJobBudget(s.jobBudget) {
+		initialStatus = RunStatusSuspended
+		suspendReason = SuspendWaitingUser
+		previewRequired = true
+	}
 	created, err := s.store.CreateRun(ctx, PlanRun{
 		ID: runID, SessionID: sessionID, UserID: userID, Plan: plan,
-		Status: RunStatusDraft, Nodes: nodes,
+		Status: initialStatus, SuspendReason: suspendReason,
+		PreviewRequired: previewRequired, Nodes: nodes,
 	})
 	if err != nil {
 		return PlanRun{}, err
 	}
-	if plan.ExceedsJobBudget(s.jobBudget) {
-		return s.store.MutateRun(ctx, created.ID, created.Version, func(run *PlanRun) error {
-			run.Status = RunStatusSuspended
-			run.SuspendReason = SuspendWaitingUser
-			run.PreviewRequired = true
-			return nil
-		})
+	if created.Status == RunStatusSuspended {
+		return created, nil
 	}
-	running, err := s.store.MutateRun(ctx, created.ID, created.Version, func(run *PlanRun) error {
-		run.Status = RunStatusRunning
-		return nil
-	})
-	if err != nil {
-		return PlanRun{}, err
-	}
-	return s.Advance(ctx, running.ID)
+	return s.Advance(ctx, created.ID)
 }
 
 func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error) {
@@ -104,7 +101,6 @@ func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error) 
 	if strings.TrimSpace(runID) == "" {
 		return PlanRun{}, errors.New("plan run id is required")
 	}
-	markConflicts := 0
 	for {
 		run, err := s.store.GetRun(ctx, runID)
 		if err != nil {
@@ -119,28 +115,22 @@ func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error) 
 
 		ready := readySteps(run)
 		if len(ready) == 0 {
-			if hasRunningNode(run) {
-				return run, nil
-			}
 			return s.finalize(ctx, run)
 		}
 
-		marked, err := s.markRunning(ctx, run, ready)
-		if errors.Is(err, ErrRunVersionConflict) {
-			markConflicts++
-			if markConflicts >= maxCASRetries {
-				return run, fmt.Errorf("%w: mark ready nodes exceeded retry limit", ErrRunVersionConflict)
-			}
-			continue
+		outcomes := s.executeReady(ctx, run, ready)
+		executionErr := ctx.Err()
+		persistCtx := context.WithoutCancel(ctx)
+		merged, mergeErr := s.mergeOutcomes(persistCtx, run, outcomes)
+		if executionErr == nil {
+			executionErr = ctx.Err()
 		}
-		if err != nil {
-			return PlanRun{}, err
-		}
-		markConflicts = 0
-		outcomes := s.executeReady(ctx, marked, ready)
-		merged, mergeErr := s.mergeOutcomes(ctx, marked, outcomes)
 		if mergeErr != nil {
-			if merged.ID != "" {
+			if executionErr != nil {
+				return merged, errors.Join(executionErr, mergeErr)
+			}
+			var resolutionErr *inputResolutionError
+			if errors.As(mergeErr, &resolutionErr) && merged.ID != "" {
 				finalized, advanceErr := s.Advance(ctx, merged.ID)
 				if advanceErr != nil {
 					return finalized, errors.Join(mergeErr, advanceErr)
@@ -148,6 +138,9 @@ func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error) 
 				return finalized, mergeErr
 			}
 			return merged, mergeErr
+		}
+		if executionErr != nil {
+			return merged, executionErr
 		}
 		if merged.Status == RunStatusSuspended {
 			return merged, nil
@@ -158,10 +151,13 @@ func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error) 
 type nodeOutcome struct {
 	step       PlanStep
 	attempt    int
+	invoked    bool
 	result     vocabulary.Result
 	toolErr    error
 	resolveErr error
 }
+
+type inputResolutionError struct{ error }
 
 func readySteps(run PlanRun) []PlanStep {
 	ready := make([]PlanStep, 0)
@@ -185,68 +181,114 @@ func readySteps(run PlanRun) []PlanStep {
 	return ready
 }
 
-func (s *Scheduler) markRunning(ctx context.Context, run PlanRun, ready []PlanStep) (PlanRun, error) {
-	return s.store.MutateRun(ctx, run.ID, run.Version, func(next *PlanRun) error {
-		for _, step := range ready {
-			node := next.Nodes[step.ID]
-			if node == nil || node.Status != NodeStatusPending {
-				return fmt.Errorf("node %q is no longer pending", step.ID)
-			}
-			node.Status = NodeStatusRunning
-			node.Attempt++
-		}
-		return nil
-	})
-}
-
 func (s *Scheduler) executeReady(ctx context.Context, run PlanRun, ready []PlanStep) []nodeOutcome {
 	outcomes := make([]nodeOutcome, len(ready))
-	semaphore := make(chan struct{}, s.maxParallel)
-	var wait sync.WaitGroup
 	for index, step := range ready {
-		index, step := index, step
+		outcomes[index] = nodeOutcome{step: step, attempt: run.Nodes[step.ID].Attempt + 1}
+	}
+	type task struct {
+		index int
+		step  PlanStep
+	}
+	tasks := make(chan task, len(ready))
+	for index, step := range ready {
+		tasks <- task{index: index, step: step}
+	}
+	close(tasks)
+	workerCount := min(s.maxParallel, len(ready))
+	var wait sync.WaitGroup
+	for range workerCount {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-			node := run.Nodes[step.ID]
-			outcome := nodeOutcome{step: step, attempt: node.Attempt}
-			inputs, err := resolveInputs(step.Params, run.Nodes)
-			if err != nil {
-				outcome.resolveErr = err
-				outcomes[index] = outcome
-				return
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case next, ok := <-tasks:
+					if !ok {
+						return
+					}
+					if ctx.Err() != nil {
+						return
+					}
+					executeOutcome(ctx, s.vocabulary, run, next.step, &outcomes[next.index])
+				}
 			}
-			tool, ok := s.vocabulary.Get(step.Tool)
-			if !ok {
-				outcome.resolveErr = fmt.Errorf("tool %q is no longer registered", step.Tool)
-				outcomes[index] = outcome
-				return
-			}
-			outcome.result, outcome.toolErr = tool.Run(ctx, vocabulary.Call{
-				SessionID: run.SessionID, UserID: run.UserID, PlanRunID: run.ID,
-				NodeID: step.ID, Attempt: node.Attempt,
-				IdempotencyKey: fmt.Sprintf("%s:%s:%d", run.ID, step.ID, node.Attempt),
-				Inputs:         inputs,
-			})
-			outcomes[index] = outcome
 		}()
 	}
 	wait.Wait()
 	return outcomes
 }
 
+func executeOutcome(ctx context.Context, registry *vocabulary.Registry, run PlanRun, step PlanStep, outcome *nodeOutcome) {
+	outcome.invoked = true
+	inputs, err := resolveInputs(step.Params, run.Nodes)
+	if err != nil {
+		outcome.resolveErr = err
+		return
+	}
+	if ctx.Err() != nil {
+		outcome.invoked = false
+		return
+	}
+	tool, ok := registry.Get(step.Tool)
+	if !ok {
+		outcome.resolveErr = fmt.Errorf("tool %q is no longer registered", step.Tool)
+		return
+	}
+	outcome.result, outcome.toolErr = tool.Run(ctx, vocabulary.Call{
+		SessionID: run.SessionID, UserID: run.UserID, PlanRunID: run.ID,
+		NodeID: step.ID, Attempt: outcome.attempt,
+		IdempotencyKey: fmt.Sprintf("%s:%s:%d", run.ID, step.ID, outcome.attempt),
+		Inputs:         inputs,
+	})
+	if outcome.toolErr == nil {
+		outcome.result = normalizeToolResult(outcome.result)
+	}
+}
+
+func normalizeToolResult(result vocabulary.Result) vocabulary.Result {
+	invalid := result.Fail != nil && (result.Suspension != nil || result.Outputs != nil)
+	if result.Suspension != nil && !knownSuspensionReason(result.Suspension.Reason) {
+		invalid = true
+	}
+	if !invalid {
+		return result
+	}
+	return vocabulary.Result{Fail: &vocabulary.Failure{
+		Code: "invalid_tool_result", Message: "tool returned conflicting fields or an unknown suspension reason",
+	}}
+}
+
+func knownSuspensionReason(reason string) bool {
+	switch reason {
+	case SuspendWaitingUser, SuspendWaitingAgent, SuspendWaitingJobs:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []nodeOutcome) (PlanRun, error) {
+	if !hasCommittableOutcome(outcomes) {
+		return run, firstToolError(outcomes)
+	}
 	current := run
 	for range maxCASRetries {
 		merged, err := s.store.MutateRun(ctx, current.ID, current.Version, func(next *PlanRun) error {
 			for _, outcome := range outcomes {
+				if !outcome.invoked || outcome.toolErr != nil {
+					continue
+				}
 				node := next.Nodes[outcome.step.ID]
 				if node == nil {
 					return fmt.Errorf("node %q is missing", outcome.step.ID)
 				}
-				if node.Status != NodeStatusRunning || node.Attempt != outcome.attempt {
+				if node.Status != NodeStatusPending || node.Attempt+1 != outcome.attempt {
 					continue
 				}
 				applyOutcome(node, outcome)
@@ -286,13 +328,13 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 		if err == nil {
 			for _, outcome := range outcomes {
 				if outcome.resolveErr != nil {
-					return merged, outcome.resolveErr
+					return merged, &inputResolutionError{error: outcome.resolveErr}
 				}
 			}
-			return merged, nil
+			return merged, firstToolError(outcomes)
 		}
 		if !errors.Is(err, ErrRunVersionConflict) {
-			return PlanRun{}, err
+			return current, err
 		}
 		current, err = s.store.GetRun(ctx, current.ID)
 		if err != nil {
@@ -302,7 +344,26 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 	return current, fmt.Errorf("%w: merge outcomes exceeded retry limit", ErrRunVersionConflict)
 }
 
+func hasCommittableOutcome(outcomes []nodeOutcome) bool {
+	for _, outcome := range outcomes {
+		if outcome.invoked && outcome.toolErr == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func firstToolError(outcomes []nodeOutcome) error {
+	for _, outcome := range outcomes {
+		if outcome.invoked && outcome.toolErr != nil {
+			return outcome.toolErr
+		}
+	}
+	return nil
+}
+
 func applyOutcome(node *NodeRun, outcome nodeOutcome) {
+	node.Attempt = outcome.attempt
 	node.Outputs = nil
 	node.Fail = nil
 	node.Suspension = nil
@@ -310,14 +371,12 @@ func applyOutcome(node *NodeRun, outcome nodeOutcome) {
 	case outcome.resolveErr != nil:
 		node.Status = NodeStatusFailed
 		node.Fail = &vocabulary.Failure{Code: "input_resolution_error", Message: outcome.resolveErr.Error()}
-	case outcome.toolErr != nil:
-		node.Status = NodeStatusFailed
-		node.Fail = &vocabulary.Failure{Code: "tool_error", Message: outcome.toolErr.Error(), Retryable: true}
 	case outcome.result.Fail != nil:
 		node.Status = NodeStatusFailed
 		node.Fail = outcome.result.Fail
 	case outcome.result.Suspension != nil:
 		node.Status = NodeStatusRunning
+		node.Outputs = outcome.result.Outputs
 		node.Suspension = outcome.result.Suspension
 	default:
 		node.Status = NodeStatusSucceeded
@@ -351,7 +410,7 @@ func (s *Scheduler) finalize(ctx context.Context, run PlanRun) (PlanRun, error) 
 		if isTerminalRun(current.Status) || current.Status == RunStatusSuspended {
 			return current, nil
 		}
-		if hasRunningNode(current) || len(readySteps(current)) > 0 {
+		if len(readySteps(current)) > 0 {
 			return current, nil
 		}
 	}
@@ -459,15 +518,6 @@ func parseOutputReference(value string) (stepID, outputKey string, ok bool) {
 		return "", "", false
 	}
 	return parts[0], parts[1], true
-}
-
-func hasRunningNode(run PlanRun) bool {
-	for _, node := range run.Nodes {
-		if node != nil && node.Status == NodeStatusRunning {
-			return true
-		}
-	}
-	return false
 }
 
 func isTerminalRun(status string) bool {
