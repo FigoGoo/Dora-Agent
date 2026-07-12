@@ -201,6 +201,24 @@ func TestMemoryRunStoreConcurrentCAS(t *testing.T) {
 	}
 }
 
+func TestMemoryRunStoreTimedMutationUsesInjectedClock(t *testing.T) {
+	wantNow := time.Unix(1_700_000_000, 123)
+	store := NewMemoryRunStore(WithMemoryRunStoreClock(func() time.Time { return wantNow }))
+	created, err := store.CreateRun(context.Background(), PlanRun{ID: "run-timed", Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotNow time.Time
+	updated, err := store.MutateRunAtAuthoritativeNow(context.Background(), created.ID, created.Version, func(run *PlanRun, now time.Time) error {
+		gotNow = now
+		run.Status = RunStatusRunning
+		return nil
+	})
+	if err != nil || updated.Version != 2 || !gotNow.Equal(wantNow) {
+		t.Fatalf("updated=%+v now=%v err=%v", updated, gotNow, err)
+	}
+}
+
 func TestMemoryRunStoreDuplicateAndNotFound(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryRunStore()

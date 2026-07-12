@@ -34,7 +34,7 @@ func claimScheduler(t *testing.T, store RunStore, owner string, clock *claimCloc
 	t.Helper()
 	var token atomic.Int64
 	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: store, Vocabulary: schedulerRegistry(t, tool), MaxParallel: 1,
+		Store: withDeterministicStoreClock(store, clock.Now), Vocabulary: schedulerRegistry(t, tool), MaxParallel: 1,
 		CommitTimeout: time.Second, NewID: func() string { return owner + "-run" },
 		OwnerID: owner, LeaseTTL: 30 * time.Second, HeartbeatInterval: heartbeat,
 		Now: clock.Now, NewToken: func() string { return fmt.Sprintf("token-%d", token.Add(1)) },
@@ -43,6 +43,21 @@ func claimScheduler(t *testing.T, store RunStore, owner string, clock *claimCloc
 		t.Fatal(err)
 	}
 	return scheduler
+}
+
+type deterministicClockRunStore struct {
+	RunStore
+	now func() time.Time
+}
+
+func withDeterministicStoreClock(store RunStore, now func() time.Time) RunStore {
+	return &deterministicClockRunStore{RunStore: store, now: now}
+}
+
+func (s *deterministicClockRunStore) MutateRunAtAuthoritativeNow(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun, time.Time) error) (PlanRun, error) {
+	return s.RunStore.MutateRun(ctx, id, expectedVersion, func(run *PlanRun) error {
+		return mutate(run, s.now())
+	})
 }
 
 func oneClaimStep(tool string) ExecutionPlan {
@@ -313,7 +328,7 @@ func TestExecutionClaimRejectsEmptyTokenAtomically(t *testing.T) {
 	store := NewMemoryRunStore()
 	clock := newClaimClock(time.Unix(1_700_000_000, 0))
 	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: store, Vocabulary: schedulerRegistry(t, schedulerTool{key: "work"}), MaxParallel: 1,
+		Store: withDeterministicStoreClock(store, clock.Now), Vocabulary: schedulerRegistry(t, schedulerTool{key: "work"}), MaxParallel: 1,
 		NewID: func() string { return "empty-token" }, OwnerID: "owner", LeaseTTL: time.Second,
 		Now: clock.Now, NewToken: func() string { return "" },
 	})
@@ -505,7 +520,7 @@ func TestExecutionClaimEpochFencesSameOwnerAndTokenCollision(t *testing.T) {
 	secondRelease := make(chan struct{})
 	newScheduler := func(tool schedulerTool) *Scheduler {
 		scheduler, err := NewScheduler(SchedulerConfig{
-			Store: store, Vocabulary: schedulerRegistry(t, tool), MaxParallel: 1,
+			Store: withDeterministicStoreClock(store, clock.Now), Vocabulary: schedulerRegistry(t, tool), MaxParallel: 1,
 			CommitTimeout: time.Second, NewID: func() string { return "collision" },
 			OwnerID: "same-owner", LeaseTTL: 30 * time.Second, HeartbeatInterval: time.Hour,
 			Now: clock.Now, NewToken: func() string { return "same-token" },
@@ -583,7 +598,7 @@ func TestExecutionClaimHeartbeatFailureCancelsWaveAndReleasesClaim(t *testing.T)
 		}},
 	)
 	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: store, Vocabulary: registry, MaxParallel: 1, CommitTimeout: 50 * time.Millisecond,
+		Store: withDeterministicStoreClock(store, clock.Now), Vocabulary: registry, MaxParallel: 1, CommitTimeout: 50 * time.Millisecond,
 		NewID: func() string { return "heartbeat-failure" }, OwnerID: "owner", LeaseTTL: time.Second,
 		HeartbeatInterval: time.Millisecond, Now: clock.Now, NewToken: func() string { return "token" },
 	})
@@ -626,7 +641,7 @@ func TestExecutionClaimHeartbeatLossDiscardsSuccessAndRetriesSameKey(t *testing.
 		return vocabulary.Result{Outputs: map[string]any{"must": "discard"}}, nil
 	}}
 	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: store, Vocabulary: schedulerRegistry(t, tool), MaxParallel: 1, CommitTimeout: 50 * time.Millisecond,
+		Store: withDeterministicStoreClock(store, clock.Now), Vocabulary: schedulerRegistry(t, tool), MaxParallel: 1, CommitTimeout: 50 * time.Millisecond,
 		NewID: func() string { return "heartbeat-discard" }, OwnerID: "owner", LeaseTTL: time.Second,
 		HeartbeatInterval: time.Millisecond, Now: clock.Now, NewToken: func() string { return "token" },
 	})
@@ -697,7 +712,7 @@ func TestSchedulerGuardsApprovedMediaHeartbeatLossDiscardsOutcome(t *testing.T) 
 		return vocabulary.Result{Outputs: map[string]any{"asset": "fresh"}}, nil
 	}}
 	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: store, Vocabulary: schedulerRegistry(t, tool), Guard: vocabulary.NewGuardChain(vocabulary.GuardConfig{SoftTerms: []string{"soft-risk"}}),
+		Store: withDeterministicStoreClock(store, clock.Now), Vocabulary: schedulerRegistry(t, tool), Guard: vocabulary.NewGuardChain(vocabulary.GuardConfig{SoftTerms: []string{"soft-risk"}}),
 		MaxParallel: 1, CommitTimeout: 50 * time.Millisecond, NewID: func() string { return "guard-heartbeat" },
 		OwnerID: "owner", LeaseTTL: time.Second, HeartbeatInterval: time.Millisecond, Now: clock.Now, NewToken: func() string { return "token" },
 	})
@@ -775,7 +790,7 @@ func TestExecutionClaimHeartbeatLossDiscardsWholeWave(t *testing.T) {
 		}},
 	)
 	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: store, Vocabulary: registry, MaxParallel: 2, CommitTimeout: 50 * time.Millisecond,
+		Store: withDeterministicStoreClock(store, clock.Now), Vocabulary: registry, MaxParallel: 2, CommitTimeout: 50 * time.Millisecond,
 		NewID: func() string { return "heartbeat-wave" }, OwnerID: "owner", LeaseTTL: time.Second,
 		HeartbeatInterval: time.Millisecond, Now: clock.Now, NewToken: func() string { return "token" },
 	})
@@ -837,7 +852,7 @@ func TestExecutionClaimHeartbeatLossJoinsReleaseError(t *testing.T) {
 	started := make(chan struct{}, 1)
 	returnSuccess := make(chan struct{})
 	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: store, Vocabulary: schedulerRegistry(t, schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		Store: withDeterministicStoreClock(store, clock.Now), Vocabulary: schedulerRegistry(t, schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
 			started <- struct{}{}
 			<-returnSuccess
 			return vocabulary.Result{}, nil
@@ -868,7 +883,7 @@ func TestExecutionClaimAdvancesEpochAfterReleaseWithTokenCollision(t *testing.T)
 	store := NewMemoryRunStore()
 	clock := newClaimClock(time.Unix(1_700_000_000, 0))
 	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: store, Vocabulary: schedulerRegistry(t, schedulerTool{key: "work"}), MaxParallel: 1,
+		Store: withDeterministicStoreClock(store, clock.Now), Vocabulary: schedulerRegistry(t, schedulerTool{key: "work"}), MaxParallel: 1,
 		NewID: func() string { return "epoch-release" }, OwnerID: "same-owner", LeaseTTL: time.Minute,
 		HeartbeatInterval: time.Hour, Now: clock.Now, NewToken: func() string { return "same-token" },
 	})

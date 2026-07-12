@@ -1957,6 +1957,7 @@ func TestSchedulerReceiptCommitTimeoutBoundsCancelledSubmit(t *testing.T) {
 	cfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { return "timeout-run" })
 	cfg.MaxParallel, cfg.CommitTimeout = 1, 50*time.Millisecond
 	cfg.Now, cfg.LeaseTTL, cfg.HeartbeatInterval = clock.Now, time.Second, time.Hour
+	cfg.Store = withDeterministicStoreClock(store, clock.Now)
 	scheduler, err := NewScheduler(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -2007,6 +2008,13 @@ func (s *failFirstMutationStore) MutateRun(ctx context.Context, id string, expec
 		return PlanRun{}, s.err
 	}
 	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
+}
+
+func (s *failFirstMutationStore) MutateRunAtAuthoritativeNow(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun, time.Time) error) (PlanRun, error) {
+	if s.failed.CompareAndSwap(false, true) {
+		return PlanRun{}, s.err
+	}
+	return s.RunStore.MutateRunAtAuthoritativeNow(ctx, id, expectedVersion, mutate)
 }
 
 func TestSchedulerSubmitMergeFailureLeavesRecoverableRunningRun(t *testing.T) {
@@ -2117,6 +2125,19 @@ func (s *advancingConflictStore) MutateRun(ctx context.Context, id string, expec
 	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
 }
 
+func (s *advancingConflictStore) MutateRunAtAuthoritativeNow(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun, time.Time) error) (PlanRun, error) {
+	if s.conflicted.CompareAndSwap(false, true) {
+		if _, err := s.RunStore.MutateRun(ctx, id, expectedVersion, func(run *PlanRun) error {
+			run.UserID = "concurrent-update"
+			return nil
+		}); err != nil {
+			return PlanRun{}, err
+		}
+		return PlanRun{}, ErrRunVersionConflict
+	}
+	return s.RunStore.MutateRunAtAuthoritativeNow(ctx, id, expectedVersion, mutate)
+}
+
 func (s *advancingConflictRangeStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
 	mutation := s.mutation.Add(1)
 	if mutation <= s.conflicts {
@@ -2131,11 +2152,32 @@ func (s *advancingConflictRangeStore) MutateRun(ctx context.Context, id string, 
 	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
 }
 
+func (s *advancingConflictRangeStore) MutateRunAtAuthoritativeNow(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun, time.Time) error) (PlanRun, error) {
+	mutation := s.mutation.Add(1)
+	if mutation <= s.conflicts {
+		if _, err := s.RunStore.MutateRun(ctx, id, expectedVersion, func(run *PlanRun) error {
+			run.Plan.Summary += fmt.Sprintf("|conflict-%d", mutation)
+			return nil
+		}); err != nil {
+			return PlanRun{}, err
+		}
+		return PlanRun{}, ErrRunVersionConflict
+	}
+	return s.RunStore.MutateRunAtAuthoritativeNow(ctx, id, expectedVersion, mutate)
+}
+
 func (s *conflictOnceStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
 	if s.mutation.Add(1) == s.conflict {
 		return PlanRun{}, ErrRunVersionConflict
 	}
 	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
+}
+
+func (s *conflictOnceStore) MutateRunAtAuthoritativeNow(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun, time.Time) error) (PlanRun, error) {
+	if s.mutation.Add(1) == s.conflict {
+		return PlanRun{}, ErrRunVersionConflict
+	}
+	return s.RunStore.MutateRunAtAuthoritativeNow(ctx, id, expectedVersion, mutate)
 }
 
 func TestSchedulerCASConflictDoesNotRepeatTool(t *testing.T) {
@@ -2239,6 +2281,13 @@ func TestSchedulerRejectsInvalidConfigAndInputs(t *testing.T) {
 	validConfig := schedulerConfigForTest(NewMemoryRunStore(), registry, newID)
 	nilStore := validConfig
 	nilStore.Store = nil
+	var typedNilMemoryStore *MemoryRunStore
+	typedNilStore := validConfig
+	typedNilStore.Store = typedNilMemoryStore
+	var typedNilPostgresStore *PostgresRunStore
+	typedNilClockStore := validConfig
+	typedNilClockStore.Store = typedNilPostgresStore
+	typedNilClockStore.Now = nil
 	nilVocabulary := validConfig
 	nilVocabulary.Vocabulary = nil
 	nilNewID := validConfig
@@ -2251,6 +2300,7 @@ func TestSchedulerRejectsInvalidConfigAndInputs(t *testing.T) {
 	nilToken.NewToken = nil
 	for name, cfg := range map[string]SchedulerConfig{
 		"nil_store": nilStore, "nil_vocabulary": nilVocabulary, "nil_new_id": nilNewID,
+		"typed_nil_store": typedNilStore, "typed_nil_clock_store": typedNilClockStore,
 		"nil_owner": nilOwner, "nil_clock": nilClock, "nil_token": nilToken,
 	} {
 		t.Run(name, func(t *testing.T) {

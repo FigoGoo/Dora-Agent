@@ -26,6 +26,20 @@ func openPostgresRunStore(t *testing.T) (*PostgresRunStore, *gorm.DB) {
 	if err != nil {
 		t.Skipf("agent postgres unavailable: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		if closer, ok := db.ConnPool.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+		t.Fatalf("load agent postgres pool: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(4)
+	sqlDB.SetMaxIdleConns(2)
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Errorf("close agent postgres pool: %v", err)
+		}
+	})
 	store := NewPostgresRunStore(db)
 	if err := store.AutoMigrate(ctx); err != nil {
 		t.Fatalf("AutoMigrate() error = %v", err)
@@ -486,6 +500,41 @@ func TestPostgresReclaimChecksExpiryAfterWaitingForRowLock(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("reclaim did not return after releasing row lock")
+	}
+}
+
+func TestSchedulerWrappedPostgresRunStoreKeepsAtomicLeaseClock(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	id := postgresRunID(t)
+	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
+	run := postgresStoreRun(t, id)
+	run.Status = RunStatusRunning
+	run.Nodes["first"] = &NodeRun{StepID: "first", Status: NodeStatusPending, ResumeDecision: map[string]any{}}
+	created, err := store.CreateRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wrapped := struct{ RunStore }{RunStore: store}
+	cfg := schedulerConfigForTest(wrapped, schedulerRegistry(t, schedulerTool{key: "persist-test"}), func() string { return "unused" })
+	cfg.Now = func() time.Time { return time.Now().Add(-24 * time.Hour) }
+	cfg.LeaseTTL = time.Second
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, claims, err := scheduler.claimReady(ctx, created)
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claimReady() run=%+v claims=%+v err=%v", claimed, claims, err)
+	}
+	databaseNow, err := store.AuthoritativeNow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := claimed.Nodes["first"].LeaseUntil
+	if lease == nil || !lease.After(databaseNow.Add(700*time.Millisecond)) {
+		t.Fatalf("wrapped store used non-atomic fallback clock: lease=%v database_now=%v", lease, databaseNow)
 	}
 }
 

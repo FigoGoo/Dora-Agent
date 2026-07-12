@@ -423,7 +423,7 @@ func TestReviseReplacementResumesOnNewSchedulerToPartialSucceeded(t *testing.T) 
 		t.Helper()
 		var token atomic.Int64
 		scheduler, err := NewScheduler(SchedulerConfig{
-			Store: store, Vocabulary: registry, MaxParallel: 1,
+			Store: withDeterministicStoreClock(store, clock.Now), Vocabulary: registry, MaxParallel: 1,
 			CommitTimeout: time.Second, NewID: func() string { return owner + "-run" },
 			OwnerID: owner, LeaseTTL: 30 * time.Second, HeartbeatInterval: time.Hour,
 			Now: clock.Now, NewToken: func() string { return fmt.Sprintf("%s-token-%d", owner, token.Add(1)) },
@@ -606,6 +606,10 @@ func (s *blockingRevisionStore) MutateRun(ctx context.Context, id string, expect
 	return s.base.MutateRun(ctx, id, expectedVersion, mutate)
 }
 
+func (s *blockingRevisionStore) MutateRunAtAuthoritativeNow(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun, time.Time) error) (PlanRun, error) {
+	return s.base.MutateRunAtAuthoritativeNow(ctx, id, expectedVersion, mutate)
+}
+
 func TestReviseConcurrentCallsOnSameSchedulerAreGateSerialized(t *testing.T) {
 	store := &blockingRevisionStore{
 		base: NewMemoryRunStore(), entered: make(chan struct{}, 1), release: make(chan struct{}),
@@ -786,6 +790,10 @@ func (s *revisionConflictStore) MutateRun(ctx context.Context, id string, expect
 		}
 		return advanced, fmt.Errorf("%w: injected real concurrent progress", ErrRunVersionConflict)
 	}
+}
+
+func (s *revisionConflictStore) MutateRunAtAuthoritativeNow(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun, time.Time) error) (PlanRun, error) {
+	return s.base.MutateRunAtAuthoritativeNow(ctx, id, expectedVersion, mutate)
 }
 
 func TestReviseRetriesCASAgainstLatestRunAndPreservesConcurrentFields(t *testing.T) {

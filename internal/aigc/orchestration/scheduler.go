@@ -34,36 +34,26 @@ type SchedulerConfig struct {
 	OwnerID           string
 	LeaseTTL          time.Duration
 	HeartbeatInterval time.Duration
-	// Now must use one authoritative clock across Scheduler instances. Production
-	// persistence must inject a shared database clock, never process-local time.Now.
+	// Now remains required for process-local scheduler behavior. Lease eligibility
+	// and deadlines come exclusively from RunStore.MutateRunAtAuthoritativeNow.
 	Now      func() time.Time
 	NewToken func() string
 }
 
-type authoritativeClock interface {
-	AuthoritativeNow(context.Context) (time.Time, error)
-}
-
-type authoritativeTimedRunStore interface {
-	MutateRunAtAuthoritativeNow(context.Context, string, int, func(*PlanRun, time.Time) error) (PlanRun, error)
-}
-
 type Scheduler struct {
-	store              RunStore
-	vocabulary         *vocabulary.Registry
-	guard              vocabulary.Guard
-	maxParallel        int
-	jobBudget          int
-	commitTimeout      time.Duration
-	newID              func() string
-	ownerID            string
-	leaseTTL           time.Duration
-	heartbeatInterval  time.Duration
-	now                func() time.Time
-	authoritativeClock authoritativeClock
-	newToken           func() string
-	gateMu             sync.Mutex
-	gates              map[string]*runGate
+	store             RunStore
+	vocabulary        *vocabulary.Registry
+	guard             vocabulary.Guard
+	maxParallel       int
+	jobBudget         int
+	commitTimeout     time.Duration
+	newID             func() string
+	ownerID           string
+	leaseTTL          time.Duration
+	heartbeatInterval time.Duration
+	newToken          func() string
+	gateMu            sync.Mutex
+	gates             map[string]*runGate
 }
 
 type runGate struct {
@@ -72,7 +62,7 @@ type runGate struct {
 }
 
 func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
-	if cfg.Store == nil {
+	if isNilInterface(cfg.Store) {
 		return nil, errors.New("scheduler run store is required")
 	}
 	if cfg.Vocabulary == nil {
@@ -84,8 +74,7 @@ func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
 	if strings.TrimSpace(cfg.OwnerID) == "" {
 		return nil, errors.New("scheduler owner id is required")
 	}
-	sharedClock, hasSharedClock := cfg.Store.(authoritativeClock)
-	if cfg.Now == nil && !hasSharedClock {
+	if cfg.Now == nil {
 		return nil, errors.New("scheduler clock is required")
 	}
 	if cfg.NewToken == nil {
@@ -118,17 +107,9 @@ func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
 		store: cfg.Store, vocabulary: cfg.Vocabulary, guard: guard, maxParallel: maxParallel,
 		jobBudget: cfg.JobBudget, commitTimeout: commitTimeout, newID: cfg.NewID,
 		ownerID: strings.TrimSpace(cfg.OwnerID), leaseTTL: leaseTTL,
-		heartbeatInterval: heartbeatInterval, now: cfg.Now, newToken: cfg.NewToken,
-		authoritativeClock: sharedClock,
-		gates:              make(map[string]*runGate),
+		heartbeatInterval: heartbeatInterval, newToken: cfg.NewToken,
+		gates: make(map[string]*runGate),
 	}, nil
-}
-
-func (s *Scheduler) authoritativeNow(ctx context.Context) (time.Time, error) {
-	if s.authoritativeClock != nil {
-		return s.authoritativeClock.AuthoritativeNow(ctx)
-	}
-	return s.now(), nil
 }
 
 func (s *Scheduler) mutateRunAtAuthoritativeNow(
@@ -137,26 +118,21 @@ func (s *Scheduler) mutateRunAtAuthoritativeNow(
 	expectedVersion int,
 	mutate func(*PlanRun, time.Time) error,
 ) (PlanRun, error) {
-	if store, ok := s.store.(authoritativeTimedRunStore); ok {
-		return store.MutateRunAtAuthoritativeNow(ctx, runID, expectedVersion, mutate)
-	}
-	now, err := s.authoritativeNow(ctx)
-	if err != nil {
-		return PlanRun{}, err
-	}
-	return s.store.MutateRun(ctx, runID, expectedVersion, func(run *PlanRun) error {
-		return mutate(run, now)
-	})
+	return s.store.MutateRunAtAuthoritativeNow(ctx, runID, expectedVersion, mutate)
 }
 
 func isNilGuard(guard vocabulary.Guard) bool {
-	if guard == nil {
+	return isNilInterface(guard)
+}
+
+func isNilInterface(value any) bool {
+	if value == nil {
 		return true
 	}
-	value := reflect.ValueOf(guard)
-	switch value.Kind() {
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
+		return reflected.IsNil()
 	default:
 		return false
 	}

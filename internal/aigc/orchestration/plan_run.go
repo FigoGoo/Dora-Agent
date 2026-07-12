@@ -88,6 +88,7 @@ type RunStore interface {
 	CreateRun(ctx context.Context, run PlanRun) (PlanRun, error)
 	GetRun(ctx context.Context, id string) (PlanRun, error)
 	MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error)
+	MutateRunAtAuthoritativeNow(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun, time.Time) error) (PlanRun, error)
 }
 
 func ValidateRunTransition(from, to string) error {
@@ -132,12 +133,27 @@ func knownRunStatus(status string) bool {
 }
 
 type MemoryRunStore struct {
-	mu   sync.Mutex
-	runs map[string]PlanRun
+	mu    sync.Mutex
+	runs  map[string]PlanRun
+	clock func() time.Time
 }
 
-func NewMemoryRunStore() *MemoryRunStore {
-	return &MemoryRunStore{runs: make(map[string]PlanRun)}
+type MemoryRunStoreOption func(*MemoryRunStore)
+
+func WithMemoryRunStoreClock(clock func() time.Time) MemoryRunStoreOption {
+	return func(store *MemoryRunStore) {
+		if clock != nil {
+			store.clock = clock
+		}
+	}
+}
+
+func NewMemoryRunStore(options ...MemoryRunStoreOption) *MemoryRunStore {
+	store := &MemoryRunStore{runs: make(map[string]PlanRun), clock: time.Now}
+	for _, option := range options {
+		option(store)
+	}
+	return store
 }
 
 func (s *MemoryRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun, error) {
@@ -225,6 +241,20 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 	}
 	s.runs[id] = stored
 	return result, nil
+}
+
+func (s *MemoryRunStore) MutateRunAtAuthoritativeNow(
+	ctx context.Context,
+	id string,
+	expectedVersion int,
+	mutate func(*PlanRun, time.Time) error,
+) (PlanRun, error) {
+	if mutate == nil {
+		return PlanRun{}, errors.New("plan run timed mutation callback is required")
+	}
+	return s.MutateRun(ctx, id, expectedVersion, func(run *PlanRun) error {
+		return mutate(run, s.clock())
+	})
 }
 
 func clonePlanRun(run PlanRun) (PlanRun, error) {
