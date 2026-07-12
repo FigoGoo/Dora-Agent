@@ -91,15 +91,17 @@ func (s *Scheduler) Submit(ctx context.Context, sessionID, userID string, plan E
 	initialStatus := RunStatusRunning
 	suspendReason := ""
 	previewRequired := false
+	resumeKey := ""
 	if plan.ExceedsJobBudget(s.jobBudget) {
 		initialStatus = RunStatusSuspended
 		suspendReason = SuspendWaitingUser
 		previewRequired = true
+		resumeKey = fmt.Sprintf("%s:preview:resume", runID)
 	}
 	created, err := s.store.CreateRun(ctx, PlanRun{
 		ID: runID, SessionID: sessionID, UserID: userID, Plan: plan,
 		Status: initialStatus, SuspendReason: suspendReason,
-		PreviewRequired: previewRequired, Nodes: nodes,
+		PreviewRequired: previewRequired, ResumeKey: resumeKey, Nodes: nodes,
 	})
 	if err != nil {
 		return PlanRun{}, err
@@ -358,6 +360,14 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 					continue
 				}
 				applyOutcome(node, outcome)
+				if node.Suspension == nil && outcome.step.Evaluate && node.Status == NodeStatusSucceeded {
+					node.Suspension = &vocabulary.Suspension{Reason: SuspendWaitingAgent}
+				}
+				if node.Suspension != nil {
+					node.ResumeKey = fmt.Sprintf("%s:%s:%d:resume", next.ID, outcome.step.ID, outcome.attempt)
+					node.Resumed = false
+					node.ResumeDecision = nil
+				}
 			}
 			suspendedNodeIDs := make([]string, 0, 1)
 			for _, outcome := range outcomes {
@@ -371,6 +381,7 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 					node := next.Nodes[nodeID]
 					node.Status = NodeStatusFailed
 					node.Suspension = nil
+					node.ResumeKey = ""
 					node.Fail = &vocabulary.Failure{
 						Code: "multiple_suspensions", Message: "a ready wave produced multiple suspension points",
 					}

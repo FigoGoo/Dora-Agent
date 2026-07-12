@@ -37,14 +37,15 @@ const (
 )
 
 type NodeRun struct {
-	StepID     string                 `json:"step_id"`
-	Status     string                 `json:"status"`
-	Attempt    int                    `json:"attempt"`
-	Outputs    map[string]any         `json:"outputs,omitempty"`
-	Fail       *vocabulary.Failure    `json:"fail,omitempty"`
-	Suspension *vocabulary.Suspension `json:"suspension,omitempty"`
-	ResumeKey  string                 `json:"resume_key,omitempty"`
-	Resumed    bool                   `json:"resumed,omitempty"`
+	StepID         string                 `json:"step_id"`
+	Status         string                 `json:"status"`
+	Attempt        int                    `json:"attempt"`
+	Outputs        map[string]any         `json:"outputs,omitempty"`
+	Fail           *vocabulary.Failure    `json:"fail,omitempty"`
+	Suspension     *vocabulary.Suspension `json:"suspension,omitempty"`
+	ResumeKey      string                 `json:"resume_key,omitempty"`
+	Resumed        bool                   `json:"resumed,omitempty"`
+	ResumeDecision map[string]any         `json:"resume_decision,omitempty"`
 }
 
 type PlanRun struct {
@@ -56,6 +57,9 @@ type PlanRun struct {
 	SuspendReason   string              `json:"suspend_reason,omitempty"`
 	SuspendedNodeID string              `json:"suspended_node_id,omitempty"`
 	PreviewRequired bool                `json:"preview_required,omitempty"`
+	ResumeKey       string              `json:"resume_key,omitempty"`
+	Resumed         bool                `json:"resumed,omitempty"`
+	ResumeDecision  map[string]any      `json:"resume_decision,omitempty"`
 	Nodes           map[string]*NodeRun `json:"nodes"`
 	Version         int                 `json:"version"`
 }
