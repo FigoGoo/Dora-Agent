@@ -8,11 +8,15 @@ import (
 	"time"
 )
 
-var errNoClaimMutation = errors.New("no execution claim mutation applied")
+var (
+	errNoClaimMutation    = errors.New("no execution claim mutation applied")
+	ErrExecutionClaimLost = errors.New("execution claim lost")
+)
 
 type executionClaim struct {
 	StepID  string
 	Attempt int
+	Epoch   int64
 	Owner   string
 	Token   string
 }
@@ -43,12 +47,17 @@ func (s *Scheduler) claimReady(ctx context.Context, run PlanRun) (PlanRun, []exe
 					if node.Attempt == 0 {
 						node.Attempt = 1
 					}
+					if node.ExecutionEpoch == 0 {
+						node.ExecutionEpoch = 1
+					}
+				} else {
+					node.ExecutionEpoch++
 				}
 				leaseUntil := now.Add(s.leaseTTL)
 				node.ExecutionOwner = s.ownerID
 				node.ExecutionToken = s.ownerID + ":" + rawToken
 				node.LeaseUntil = &leaseUntil
-				claims = append(claims, executionClaim{StepID: step.ID, Attempt: node.Attempt, Owner: s.ownerID, Token: node.ExecutionToken})
+				claims = append(claims, executionClaim{StepID: step.ID, Attempt: node.Attempt, Epoch: node.ExecutionEpoch, Owner: s.ownerID, Token: node.ExecutionToken})
 			}
 			if len(claims) == 0 {
 				return errNoClaimMutation
@@ -105,21 +114,33 @@ func nodeClaimable(run PlanRun, step PlanStep, node *NodeRun, now time.Time) boo
 }
 
 func (s *Scheduler) renewClaims(ctx context.Context, runID string, claims []executionClaim) error {
-	_, err := s.mutateMatchingClaims(ctx, runID, claims, func(node *NodeRun) {
-		leaseUntil := s.now().Add(s.leaseTTL)
+	now := s.now()
+	renewed, err := s.mutateMatchingClaims(ctx, runID, claims, func(node *NodeRun) bool {
+		return node.LeaseUntil != nil && node.LeaseUntil.After(now)
+	}, func(node *NodeRun) {
+		leaseUntil := now.Add(s.leaseTTL)
 		node.LeaseUntil = &leaseUntil
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	for _, claim := range claims {
+		node := renewed.Nodes[claim.StepID]
+		if !claimMatches(node, claim) || node.LeaseUntil == nil || !node.LeaseUntil.After(now) {
+			return fmt.Errorf("%w: run %q step %q epoch %d", ErrExecutionClaimLost, runID, claim.StepID, claim.Epoch)
+		}
+	}
+	return nil
 }
 
 func (s *Scheduler) releaseClaims(ctx context.Context, runID string, claims []executionClaim) (PlanRun, error) {
-	return s.mutateMatchingClaims(ctx, runID, claims, func(node *NodeRun) {
+	return s.mutateMatchingClaims(ctx, runID, claims, nil, func(node *NodeRun) {
 		node.Status = NodeStatusPending
 		clearExecutionClaim(node)
 	})
 }
 
-func (s *Scheduler) mutateMatchingClaims(ctx context.Context, runID string, claims []executionClaim, mutate func(*NodeRun)) (PlanRun, error) {
+func (s *Scheduler) mutateMatchingClaims(ctx context.Context, runID string, claims []executionClaim, eligible func(*NodeRun) bool, mutate func(*NodeRun)) (PlanRun, error) {
 	current, err := s.store.GetRun(ctx, runID)
 	if err != nil {
 		return PlanRun{}, err
@@ -129,7 +150,7 @@ func (s *Scheduler) mutateMatchingClaims(ctx context.Context, runID string, clai
 			applied := 0
 			for _, claim := range claims {
 				node := next.Nodes[claim.StepID]
-				if !claimMatches(node, claim) {
+				if !claimMatches(node, claim) || (eligible != nil && !eligible(node)) {
 					continue
 				}
 				mutate(node)
@@ -158,7 +179,7 @@ func (s *Scheduler) mutateMatchingClaims(ctx context.Context, runID string, clai
 }
 
 func claimMatches(node *NodeRun, claim executionClaim) bool {
-	return node != nil && node.Status == NodeStatusRunning && node.Attempt == claim.Attempt &&
+	return node != nil && node.Status == NodeStatusRunning && node.Attempt == claim.Attempt && node.ExecutionEpoch == claim.Epoch &&
 		node.ExecutionOwner == claim.Owner && node.ExecutionToken == claim.Token && claim.Token != ""
 }
 

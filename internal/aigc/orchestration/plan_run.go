@@ -41,6 +41,7 @@ type NodeRun struct {
 	StepID         string                 `json:"step_id"`
 	Status         string                 `json:"status"`
 	Attempt        int                    `json:"attempt"`
+	ExecutionEpoch int64                  `json:"execution_epoch,omitempty"`
 	ExecutionOwner string                 `json:"execution_owner,omitempty"`
 	ExecutionToken string                 `json:"execution_token,omitempty"`
 	LeaseUntil     *time.Time             `json:"lease_until,omitempty"`

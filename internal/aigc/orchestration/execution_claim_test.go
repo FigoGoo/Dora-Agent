@@ -53,6 +53,19 @@ type advanceResult struct {
 	err error
 }
 
+type failHeartbeatStore struct {
+	RunStore
+	failNext atomic.Bool
+	err      error
+}
+
+func (s *failHeartbeatStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
+	if s.failNext.CompareAndSwap(true, false) {
+		return PlanRun{}, s.err
+	}
+	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
+}
+
 func advanceAsync(s *Scheduler, runID string) <-chan advanceResult {
 	done := make(chan advanceResult, 1)
 	go func() {
@@ -183,7 +196,7 @@ func TestExecutionClaimHeartbeatPreventsExpiredTakeover(t *testing.T) {
 	done := advanceAsync(first, run.ID)
 	<-started
 	initial, _ := store.GetRun(context.Background(), run.ID)
-	clock.Advance(31 * time.Second)
+	clock.Advance(20 * time.Second)
 	deadline := time.After(time.Second)
 	for {
 		current, _ := store.GetRun(context.Background(), run.ID)
@@ -197,6 +210,7 @@ func TestExecutionClaimHeartbeatPreventsExpiredTakeover(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
+	clock.Advance(11 * time.Second)
 	contender, err := second.Advance(context.Background(), run.ID)
 	if err != nil || contender.Status != RunStatusRunning || calls.Load() != 1 {
 		t.Fatalf("contender=%+v calls=%d err=%v", contender, calls.Load(), err)
@@ -306,8 +320,8 @@ func TestExecutionClaimStaleHeartbeatMergeAndReleaseAreReadOnly(t *testing.T) {
 	}
 	scheduler := claimScheduler(t, store, "owner-a", clock, time.Hour, schedulerTool{key: "work"})
 	stale := executionClaim{StepID: "effect", Attempt: 1, Owner: "owner-a", Token: "owner-a:stale"}
-	if err := scheduler.renewClaims(context.Background(), created.ID, []executionClaim{stale}); err != nil {
-		t.Fatal(err)
+	if err := scheduler.renewClaims(context.Background(), created.ID, []executionClaim{stale}); !errors.Is(err, ErrExecutionClaimLost) {
+		t.Fatalf("renew err=%v", err)
 	}
 	released, err := scheduler.releaseClaims(context.Background(), created.ID, []executionClaim{stale})
 	if err != nil {
@@ -341,5 +355,230 @@ func TestExecutionClaimRetriesRealCASConflictBeforeCallingTool(t *testing.T) {
 	got, err := scheduler.Advance(context.Background(), run.ID)
 	if err != nil || got.Status != RunStatusSucceeded || calls.Load() != 1 || got.Nodes["effect"].Attempt != 1 {
 		t.Fatalf("run=%+v calls=%d err=%v", got, calls.Load(), err)
+	}
+}
+
+func TestExecutionClaimExpiredHeartbeatCannotReviveLease(t *testing.T) {
+	for _, order := range []string{"renew_then_reclaim", "reclaim_then_renew"} {
+		t.Run(order, func(t *testing.T) {
+			store := NewMemoryRunStore()
+			clock := newClaimClock(time.Unix(1_700_000_000, 0))
+			plan := oneClaimStep("work")
+			lease := clock.Now().Add(30 * time.Second)
+			created, err := store.CreateRun(context.Background(), PlanRun{
+				ID: "expired-heartbeat-" + order, SessionID: "s", UserID: "u", Plan: plan, Status: RunStatusRunning,
+				Nodes: map[string]*NodeRun{"effect": {
+					StepID: "effect", Status: NodeStatusRunning, Attempt: 1, ExecutionEpoch: 1,
+					ExecutionOwner: "owner-a", ExecutionToken: "owner-a:same", LeaseUntil: &lease,
+				}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			old := executionClaim{StepID: "effect", Attempt: 1, Epoch: 1, Owner: "owner-a", Token: "owner-a:same"}
+			reclaimer := claimScheduler(t, store, "owner-b", clock, time.Hour, schedulerTool{key: "work"})
+			clock.Advance(30 * time.Second)
+
+			renew := func() {
+				before, _ := store.GetRun(context.Background(), created.ID)
+				if err := reclaimer.renewClaims(context.Background(), created.ID, []executionClaim{old}); !errors.Is(err, ErrExecutionClaimLost) {
+					t.Fatalf("renew err=%v", err)
+				}
+				after, _ := store.GetRun(context.Background(), created.ID)
+				if after.Version != before.Version {
+					t.Fatalf("expired heartbeat changed version %d -> %d", before.Version, after.Version)
+				}
+			}
+			reclaim := func() PlanRun {
+				current, _ := store.GetRun(context.Background(), created.ID)
+				claimed, claims, claimErr := reclaimer.claimReady(context.Background(), current)
+				if claimErr != nil || len(claims) != 1 {
+					t.Fatalf("claimed=%+v claims=%+v err=%v", claimed, claims, claimErr)
+				}
+				return claimed
+			}
+			var claimed PlanRun
+			if order == "renew_then_reclaim" {
+				renew()
+				claimed = reclaim()
+			} else {
+				claimed = reclaim()
+				renew()
+			}
+			node := claimed.Nodes["effect"]
+			if node.ExecutionOwner != "owner-b" || node.ExecutionEpoch != 2 || node.Attempt != 1 {
+				t.Fatalf("node=%+v", node)
+			}
+		})
+	}
+
+	t.Run("concurrent_barrier", func(t *testing.T) {
+		store := NewMemoryRunStore()
+		clock := newClaimClock(time.Unix(1_700_000_000, 0))
+		plan := oneClaimStep("work")
+		lease := clock.Now().Add(30 * time.Second)
+		created, err := store.CreateRun(context.Background(), PlanRun{
+			ID: "expired-heartbeat-concurrent", SessionID: "s", UserID: "u", Plan: plan, Status: RunStatusRunning,
+			Nodes: map[string]*NodeRun{"effect": {
+				StepID: "effect", Status: NodeStatusRunning, Attempt: 1, ExecutionEpoch: 1,
+				ExecutionOwner: "owner-a", ExecutionToken: "owner-a:same", LeaseUntil: &lease,
+			}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		old := executionClaim{StepID: "effect", Attempt: 1, Epoch: 1, Owner: "owner-a", Token: "owner-a:same"}
+		reclaimer := claimScheduler(t, store, "owner-b", clock, time.Hour, schedulerTool{key: "work"})
+		clock.Advance(30 * time.Second)
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		go func() {
+			<-start
+			err := reclaimer.renewClaims(context.Background(), created.ID, []executionClaim{old})
+			if !errors.Is(err, ErrExecutionClaimLost) {
+				errs <- fmt.Errorf("renew err=%v", err)
+				return
+			}
+			errs <- nil
+		}()
+		go func() {
+			<-start
+			current, getErr := store.GetRun(context.Background(), created.ID)
+			if getErr != nil {
+				errs <- getErr
+				return
+			}
+			_, claims, claimErr := reclaimer.claimReady(context.Background(), current)
+			if claimErr != nil || len(claims) != 1 {
+				errs <- fmt.Errorf("claims=%+v err=%v", claims, claimErr)
+				return
+			}
+			errs <- nil
+		}()
+		close(start)
+		for range 2 {
+			if err := <-errs; err != nil {
+				t.Fatal(err)
+			}
+		}
+		stored, _ := store.GetRun(context.Background(), created.ID)
+		if stored.Version != created.Version+1 || stored.Nodes["effect"].ExecutionOwner != "owner-b" || stored.Nodes["effect"].ExecutionEpoch != 2 {
+			t.Fatalf("stored=%+v", stored)
+		}
+	})
+}
+
+func TestExecutionClaimEpochFencesSameOwnerAndTokenCollision(t *testing.T) {
+	store := NewMemoryRunStore()
+	clock := newClaimClock(time.Unix(1_700_000_000, 0))
+	firstStarted := make(chan struct{}, 1)
+	firstRelease := make(chan struct{})
+	secondStarted := make(chan struct{}, 1)
+	secondRelease := make(chan struct{})
+	newScheduler := func(tool schedulerTool) *Scheduler {
+		scheduler, err := NewScheduler(SchedulerConfig{
+			Store: store, Vocabulary: schedulerRegistry(t, tool), MaxParallel: 1,
+			CommitTimeout: time.Second, NewID: func() string { return "collision" },
+			OwnerID: "same-owner", LeaseTTL: 30 * time.Second, HeartbeatInterval: time.Hour,
+			Now: clock.Now, NewToken: func() string { return "same-token" },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return scheduler
+	}
+	first := newScheduler(schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		firstStarted <- struct{}{}
+		<-firstRelease
+		return vocabulary.Result{Outputs: map[string]any{"winner": "stale"}}, nil
+	}})
+	second := newScheduler(schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		secondStarted <- struct{}{}
+		<-secondRelease
+		return vocabulary.Result{Outputs: map[string]any{"winner": "fresh"}}, nil
+	}})
+	run := createPendingSchedulerRun(t, store, "claim-collision", oneClaimStep("work"))
+	firstDone := advanceAsync(first, run.ID)
+	<-firstStarted
+	firstClaim, _ := store.GetRun(context.Background(), run.ID)
+	if firstClaim.Nodes["effect"].ExecutionEpoch != 1 {
+		t.Fatalf("first=%+v", firstClaim.Nodes["effect"])
+	}
+	clock.Advance(31 * time.Second)
+	secondDone := advanceAsync(second, run.ID)
+	<-secondStarted
+	reclaimed, _ := store.GetRun(context.Background(), run.ID)
+	old := executionClaim{
+		StepID: "effect", Attempt: 1, Epoch: firstClaim.Nodes["effect"].ExecutionEpoch,
+		Owner: firstClaim.Nodes["effect"].ExecutionOwner, Token: firstClaim.Nodes["effect"].ExecutionToken,
+	}
+	version := reclaimed.Version
+	if err := first.renewClaims(context.Background(), run.ID, []executionClaim{old}); !errors.Is(err, ErrExecutionClaimLost) {
+		t.Fatalf("old renew err=%v", err)
+	}
+	released, err := first.releaseClaims(context.Background(), run.ID, []executionClaim{old})
+	if err != nil || released.Version != version {
+		t.Fatalf("old release=%+v err=%v", released, err)
+	}
+	close(secondRelease)
+	freshResult := <-secondDone
+	fresh, err := freshResult.run, freshResult.err
+	if err != nil || fresh.Status != RunStatusSucceeded || fresh.Nodes["effect"].ExecutionEpoch != 2 || fresh.Nodes["effect"].Outputs["winner"] != "fresh" {
+		t.Fatalf("fresh=%+v err=%v", fresh, err)
+	}
+	version = fresh.Version
+	close(firstRelease)
+	stale := <-firstDone
+	if stale.err != nil || stale.run.Version != version || stale.run.Nodes["effect"].Outputs["winner"] != "fresh" {
+		t.Fatalf("stale=%+v err=%v", stale.run, stale.err)
+	}
+}
+
+func TestExecutionClaimHeartbeatFailureCancelsWaveAndReleasesClaim(t *testing.T) {
+	base := NewMemoryRunStore()
+	heartbeatErr := errors.New("heartbeat store unavailable")
+	store := &failHeartbeatStore{RunStore: base, err: heartbeatErr}
+	clock := newClaimClock(time.Unix(1_700_000_000, 0))
+	started := make(chan struct{}, 1)
+	var firstCalls atomic.Int32
+	var secondCalls atomic.Int32
+	registry := schedulerRegistry(t,
+		schedulerTool{key: "block", run: func(ctx context.Context, _ vocabulary.Call) (vocabulary.Result, error) {
+			firstCalls.Add(1)
+			started <- struct{}{}
+			<-ctx.Done()
+			return vocabulary.Result{}, ctx.Err()
+		}},
+		schedulerTool{key: "later", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			secondCalls.Add(1)
+			return vocabulary.Result{}, nil
+		}},
+	)
+	scheduler, err := NewScheduler(SchedulerConfig{
+		Store: store, Vocabulary: registry, MaxParallel: 1, CommitTimeout: 50 * time.Millisecond,
+		NewID: func() string { return "heartbeat-failure" }, OwnerID: "owner", LeaseTTL: time.Second,
+		HeartbeatInterval: time.Millisecond, Now: clock.Now, NewToken: func() string { return "token" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := ExecutionPlan{PlanID: "heartbeat-failure", Source: "dynamic", Summary: "heartbeat-failure", Direction: "image", Steps: []PlanStep{
+		{ID: "first", Tool: "block", Required: true}, {ID: "second", Tool: "later", DependsOn: []string{"first"}, Required: true},
+	}}
+	run := createPendingSchedulerRun(t, store, "heartbeat-failure", plan)
+	done := advanceAsync(scheduler, run.ID)
+	<-started
+	store.failNext.Store(true)
+	result := <-done
+	if !errors.Is(result.err, heartbeatErr) || !errors.Is(result.err, context.Canceled) {
+		t.Fatalf("err=%v", result.err)
+	}
+	if firstCalls.Load() != 1 || secondCalls.Load() != 0 {
+		t.Fatalf("first=%d second=%d", firstCalls.Load(), secondCalls.Load())
+	}
+	stored, _ := store.GetRun(context.Background(), run.ID)
+	firstNode := stored.Nodes["first"]
+	if firstNode.Status != NodeStatusPending || firstNode.ExecutionToken != "" || firstNode.ExecutionEpoch != 1 || stored.Nodes["second"].Status != NodeStatusPending {
+		t.Fatalf("stored=%+v", stored)
 	}
 }

@@ -28,8 +28,10 @@ type SchedulerConfig struct {
 	OwnerID           string
 	LeaseTTL          time.Duration
 	HeartbeatInterval time.Duration
-	Now               func() time.Time
-	NewToken          func() string
+	// Now must use one authoritative clock across Scheduler instances. Production
+	// persistence must inject a shared database clock, never process-local time.Now.
+	Now      func() time.Time
+	NewToken func() string
 }
 
 type Scheduler struct {
@@ -294,6 +296,8 @@ func readySteps(run PlanRun) []PlanStep {
 }
 
 func (s *Scheduler) executeClaims(ctx context.Context, run PlanRun, claims []executionClaim) ([]nodeOutcome, error) {
+	waveCtx, cancelWave := context.WithCancel(ctx)
+	defer cancelWave()
 	outcomes := make([]nodeOutcome, len(claims))
 	for index, claim := range claims {
 		step, _ := findPlanStep(run.Plan.Steps, claim.StepID)
@@ -309,7 +313,7 @@ func (s *Scheduler) executeClaims(ctx context.Context, run PlanRun, claims []exe
 	close(tasks)
 	stopHeartbeat := make(chan struct{})
 	heartbeatDone := make(chan error, 1)
-	go s.heartbeatClaims(run.ID, claims, stopHeartbeat, heartbeatDone)
+	go s.heartbeatClaims(run.ID, claims, stopHeartbeat, cancelWave, heartbeatDone)
 	workerCount := min(s.maxParallel, len(claims))
 	var wait sync.WaitGroup
 	for range workerCount {
@@ -317,20 +321,20 @@ func (s *Scheduler) executeClaims(ctx context.Context, run PlanRun, claims []exe
 		go func() {
 			defer wait.Done()
 			for {
-				if ctx.Err() != nil {
+				if waveCtx.Err() != nil {
 					return
 				}
 				select {
-				case <-ctx.Done():
+				case <-waveCtx.Done():
 					return
 				case next, ok := <-tasks:
 					if !ok {
 						return
 					}
-					if ctx.Err() != nil {
+					if waveCtx.Err() != nil {
 						return
 					}
-					executeOutcome(ctx, s.vocabulary, run, &outcomes[next.index])
+					executeOutcome(waveCtx, s.vocabulary, run, &outcomes[next.index])
 				}
 			}
 		}()
@@ -340,7 +344,7 @@ func (s *Scheduler) executeClaims(ctx context.Context, run PlanRun, claims []exe
 	return outcomes, <-heartbeatDone
 }
 
-func (s *Scheduler) heartbeatClaims(runID string, claims []executionClaim, stop <-chan struct{}, done chan<- error) {
+func (s *Scheduler) heartbeatClaims(runID string, claims []executionClaim, stop <-chan struct{}, cancelWave context.CancelFunc, done chan<- error) {
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
 	for {
@@ -353,6 +357,7 @@ func (s *Scheduler) heartbeatClaims(runID string, claims []executionClaim, stop 
 			err := s.renewClaims(ctx, runID, claims)
 			cancel()
 			if err != nil {
+				cancelWave()
 				done <- err
 				return
 			}
