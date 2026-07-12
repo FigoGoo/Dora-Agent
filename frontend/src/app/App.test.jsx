@@ -703,6 +703,51 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getAllByText('生成中').length).toBeGreaterThan(0);
   });
 
+  it('renders session deliverables when a deliverables surface update arrives', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const deliverableAsset = (url) => ({
+      id: 'asset-d1',
+      url,
+      kind: 'image',
+      mime_type: 'image/png',
+      target_id: 'deliverable:img-1',
+      availability: 'available',
+      metadata: { target_kind: 'session_deliverable' }
+    });
+    const fetchMock = mockAigcFetch({
+      messageEvents: [
+        updateCardEvent('deliverables', 'deliverables', { assets: [deliverableAsset('https://cdn/x.png')] })
+      ],
+      // 消息完成后的全量资产刷新与 DB 事实源一致（含 deliverable 资产）。
+      assetsAfterMessage: [deliverableAsset('https://cdn/x.png')]
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('竹林归隐');
+    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '来一张雨中柴犬');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    const panel = await screen.findByTestId('deliverables-panel');
+    await waitFor(() => {
+      expect(within(panel).getAllByRole('img')[0]).toHaveAttribute('src', 'https://cdn/x.png');
+    });
+
+    // 刷新完成后再来一条同 id 增量：必须按 id 合并去重，后到覆盖先到。
+    act(() => {
+      DefaultMockEventSource.instances.forEach((source) =>
+        source.emit(updateCardEvent('deliverables', 'deliverables', { assets: [deliverableAsset('https://cdn/y.png')] }))
+      );
+    });
+    await waitFor(() => {
+      const images = within(panel).getAllByRole('img');
+      expect(images).toHaveLength(1);
+      expect(images[0]).toHaveAttribute('src', 'https://cdn/y.png');
+    });
+  });
+
   it('renders tool runs and storyboard patches from A2UI update actions', async () => {
     window.history.pushState({}, '', '/workspace');
     const user = userEvent.setup();

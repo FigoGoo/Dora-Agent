@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { BrandLogo } from '../../components/brand/BrandLogo.jsx';
 import { StoryboardPanel } from './StoryboardPanel.jsx';
+import DeliverablesPanel from './DeliverablesPanel.jsx';
 import {
   A2UI_ACTIONS,
   A2UI_COMPONENTS,
@@ -151,6 +152,17 @@ export function AigcWorkspacePage() {
       return map;
     }, new Map());
   }, [assets]);
+
+  // deliverableAssets 是轻直出交付物（session_deliverable）的可见子集。
+  const deliverableAssets = useMemo(
+    () =>
+      assets.filter(
+        (item) =>
+          item?.metadata?.target_kind === 'session_deliverable' &&
+          (item.availability || 'available') === 'available'
+      ),
+    [assets]
+  );
 
   // refreshAssets 刷新当前会话素材，通常在生成任务完成后调用。
   const refreshAssets = useCallback(async (id) => {
@@ -965,24 +977,27 @@ export function AigcWorkspacePage() {
       ) : null}
 
       <main className="aigc-workspace-main">
-        <StoryboardPanel
-          storyboard={storyboard}
-          selectedTarget={selectedTarget}
-          onSelectTarget={setSelectedTarget}
-          editing={editing}
-          onStartEdit={setEditing}
-          onChangeEdit={setEditing}
-          onSaveEdit={saveEdit}
-          onRegenerateTarget={regenerateTarget}
-          onActivateCandidate={activateCandidate}
-          candidateApprovalReview={candidateApprovalReview}
-          onConfirmCandidateAssets={confirmCandidateAssets}
-          candidateApprovalBusy={busy}
-          onBindAsset={bindExistingAsset}
-          onUploadAsset={uploadAndBindAsset}
-          assetMap={assetMap}
-          statusLabel={statusLabel}
-        />
+        <div className="aigc-left-pane">
+          <StoryboardPanel
+            storyboard={storyboard}
+            selectedTarget={selectedTarget}
+            onSelectTarget={setSelectedTarget}
+            editing={editing}
+            onStartEdit={setEditing}
+            onChangeEdit={setEditing}
+            onSaveEdit={saveEdit}
+            onRegenerateTarget={regenerateTarget}
+            onActivateCandidate={activateCandidate}
+            candidateApprovalReview={candidateApprovalReview}
+            onConfirmCandidateAssets={confirmCandidateAssets}
+            candidateApprovalBusy={busy}
+            onBindAsset={bindExistingAsset}
+            onUploadAsset={uploadAndBindAsset}
+            assetMap={assetMap}
+            statusLabel={statusLabel}
+          />
+          <DeliverablesPanel assets={deliverableAssets} />
+        </div>
 
         <section className="aigc-chat-pane" aria-label="对话">
           <div className="aigc-pane-header">
@@ -2549,7 +2564,24 @@ function updateA2UICard(action, context) {
   const target = action.target || {};
   const targetSurface = target.surface || action.surface;
   const payloadPatch = action.payload?.patch;
-  // storyboard/tool_runs 是工作区状态更新，其余 surface 按卡片 patch 更新。
+  // storyboard/tool_runs/deliverables 是工作区状态更新，其余 surface 按卡片 patch 更新。
+  if (targetSurface === 'deliverables') {
+    const incoming = Array.isArray(action.payload?.assets) ? action.payload.assets : [];
+    if (incoming.length > 0) {
+      context.markResourceMutation?.('assets');
+      // 增量事件按 asset id 合并进会话资产单一事实源；断线兜底靠全量刷新。
+      context.setAssets((current) => {
+        const byId = new Map((current || []).map((item) => [item.id, item]));
+        incoming.forEach((item) => {
+          if (item && item.id) {
+            byId.set(item.id, { ...byId.get(item.id), ...item });
+          }
+        });
+        return Array.from(byId.values());
+      });
+    }
+    return;
+  }
   if (targetSurface === 'storyboard') {
     if (action.payload?.storyboard) {
       context.markResourceMutation?.('storyboard');
