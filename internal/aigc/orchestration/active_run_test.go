@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -292,6 +293,116 @@ func TestSameSubmitRequestUsesCanonicalPlanNumbers(t *testing.T) {
 	if sameSubmitRequest(authoritative, requested) {
 		t.Fatal("different user matched submit request")
 	}
+}
+
+func TestSchedulerReplaysApprovedPreviewUsingImmutableRequestOnly(t *testing.T) {
+	store := NewMemoryRunStore()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	var calls atomic.Int32
+	tool := schedulerTool{key: "preview-work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return vocabulary.Result{}, nil
+	}}
+	registry := schedulerRegistry(t, tool)
+	firstCfg := schedulerConfigForTest(store, registry, func() string { return "preview-active" })
+	firstCfg.JobBudget = 1
+	secondCfg := schedulerConfigForTest(store, registry, func() string { return "preview-replay" })
+	secondCfg.JobBudget = 1
+	first, _ := NewScheduler(firstCfg)
+	second, _ := NewScheduler(secondCfg)
+	plan := activeTestPlan("preview", "preview-work")
+	plan.EstimatedJobs = 2
+	suspended, err := first.Submit(context.Background(), "session", "user", plan)
+	if err != nil || !suspended.PreviewRequired {
+		t.Fatalf("initial Submit() = %+v, %v", suspended, err)
+	}
+	type result struct {
+		run PlanRun
+		err error
+	}
+	resumeResult := make(chan result, 1)
+	go func() {
+		run, resumeErr := first.Resume(context.Background(), suspended.ID, suspended.ResumeKey, map[string]any{"approved": true})
+		resumeResult <- result{run: run, err: resumeErr}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approved preview did not start downstream tool")
+	}
+	authoritative, err := store.GetRun(context.Background(), suspended.ID)
+	if err != nil || authoritative.PreviewRequired || authoritative.Status != RunStatusRunning {
+		t.Fatalf("approved active run = %+v, %v", authoritative, err)
+	}
+	replayed, err := second.Submit(context.Background(), "session", "user", plan)
+	if err != nil || replayed.ID != suspended.ID {
+		t.Fatalf("same-plan replay = %+v, %v", replayed, err)
+	}
+	different := plan
+	different.PlanID = "different"
+	if _, err := second.Submit(context.Background(), "session", "user", different); !errors.Is(err, ErrSessionActiveRun) {
+		t.Fatalf("different-plan Submit() error = %v", err)
+	}
+	releaseOnce.Do(func() { close(release) })
+	completed := <-resumeResult
+	if completed.err != nil || completed.run.Status != RunStatusSucceeded || calls.Load() != 1 {
+		t.Fatalf("resume=%+v calls=%d", completed, calls.Load())
+	}
+}
+
+func TestMemoryRunStoreSessionMigrationEnforcesActiveSlotAtomically(t *testing.T) {
+	for _, timed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("timed_%v", timed), func(t *testing.T) {
+			store := NewMemoryRunStore()
+			occupied, err := store.CreateRun(context.Background(), PlanRun{ID: "occupied", SessionID: "target", Status: RunStatusRunning, Nodes: map[string]*NodeRun{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			moving, err := store.CreateRun(context.Background(), PlanRun{ID: "moving", SessionID: "source", Status: RunStatusRunning, Nodes: map[string]*NodeRun{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, mutateErr := mutateSessionForTest(store, timed, moving, "target", RunStatusRunning)
+			if !errors.Is(mutateErr, ErrSessionActiveRun) {
+				t.Fatalf("occupied migration error = %v", mutateErr)
+			}
+			for _, before := range []PlanRun{occupied, moving} {
+				after, getErr := store.GetRun(context.Background(), before.ID)
+				if getErr != nil || !reflect.DeepEqual(after, before) {
+					t.Fatalf("rollback run %s = %+v, %v", before.ID, after, getErr)
+				}
+			}
+			migrated, err := mutateSessionForTest(store, timed, moving, "free", RunStatusRunning)
+			if err != nil || migrated.SessionID != "free" {
+				t.Fatalf("free migration = %+v, %v", migrated, err)
+			}
+			terminal, err := mutateSessionForTest(store, timed, migrated, "target", RunStatusCancelled)
+			if err != nil || terminal.SessionID != "target" || terminal.Status != RunStatusCancelled {
+				t.Fatalf("terminal migration = %+v, %v", terminal, err)
+			}
+		})
+	}
+}
+
+func mutateSessionForTest(store RunStore, timed bool, run PlanRun, sessionID, status string) (PlanRun, error) {
+	if timed {
+		return store.MutateRunAtAuthoritativeNow(context.Background(), run.ID, run.Version, func(next *PlanRun, _ time.Time) error {
+			next.SessionID = sessionID
+			next.Status = status
+			return nil
+		})
+	}
+	return store.MutateRun(context.Background(), run.ID, run.Version, func(next *PlanRun) error {
+		next.SessionID = sessionID
+		next.Status = status
+		return nil
+	})
 }
 
 func activeTestPlan(id, tool string) ExecutionPlan {

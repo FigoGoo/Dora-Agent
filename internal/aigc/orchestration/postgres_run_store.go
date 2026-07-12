@@ -8,12 +8,29 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-const activeRunSessionIndex = "idx_aigc_plan_runs_one_active_session"
+const (
+	activeRunSessionIndex       = "idx_aigc_plan_runs_one_active_session"
+	planRunPrimaryKeyConstraint = "aigc_plan_runs_pkey"
+)
+
+type runAlreadyExistsConstraintError struct {
+	runID string
+	cause error
+}
+
+func (e *runAlreadyExistsConstraintError) Error() string {
+	return fmt.Sprintf("%s: run %q", ErrRunAlreadyExists, e.runID)
+}
+
+func (e *runAlreadyExistsConstraintError) Unwrap() []error {
+	return []error{ErrRunAlreadyExists, e.cause}
+}
 
 type planRunRecord struct {
 	ID        string         `gorm:"primaryKey;size:128"`
@@ -114,7 +131,7 @@ func (s *PostgresRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun,
 		return nil
 	})
 	if err != nil {
-		return PlanRun{}, err
+		return PlanRun{}, mapPlanRunConstraintError(err, run.ID)
 	}
 	return result, nil
 }
@@ -260,9 +277,24 @@ func (s *PostgresRunStore) mutateRunLocked(
 		return nil
 	})
 	if err != nil {
-		return PlanRun{}, err
+		return PlanRun{}, mapPlanRunConstraintError(err, id)
 	}
 	return result, nil
+}
+
+func mapPlanRunConstraintError(err error, runID string) error {
+	var postgresErr *pgconn.PgError
+	if !errors.As(err, &postgresErr) || postgresErr.Code != "23505" {
+		return err
+	}
+	switch postgresErr.ConstraintName {
+	case planRunPrimaryKeyConstraint:
+		return &runAlreadyExistsConstraintError{runID: runID, cause: err}
+	case activeRunSessionIndex:
+		return &SessionActiveRunError{cause: err}
+	default:
+		return err
+	}
 }
 
 func encodePlanRunRecord(run PlanRun) (planRunRecord, PlanRun, error) {

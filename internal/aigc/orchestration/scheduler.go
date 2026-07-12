@@ -217,9 +217,7 @@ func (s *Scheduler) recoverCreate(ctx context.Context, requested PlanRun, create
 }
 
 func sameSubmitRequest(authoritative, requested PlanRun) bool {
-	if authoritative.SessionID != requested.SessionID || authoritative.UserID != requested.UserID ||
-		authoritative.PreviewRequired != requested.PreviewRequired ||
-		authoritative.ResumeDecisionSchema != requested.ResumeDecisionSchema {
+	if authoritative.SessionID != requested.SessionID || authoritative.UserID != requested.UserID {
 		return false
 	}
 	authoritativePlan, err := canonicalJSON(authoritative.Plan)

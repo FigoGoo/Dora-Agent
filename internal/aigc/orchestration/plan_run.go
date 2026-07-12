@@ -24,6 +24,7 @@ var (
 
 type SessionActiveRunError struct {
 	ActiveRunID string
+	cause       error
 }
 
 func (e *SessionActiveRunError) Error() string {
@@ -33,7 +34,12 @@ func (e *SessionActiveRunError) Error() string {
 	return fmt.Sprintf("%s: active run %q", ErrSessionActiveRun, e.ActiveRunID)
 }
 
-func (e *SessionActiveRunError) Unwrap() error { return ErrSessionActiveRun }
+func (e *SessionActiveRunError) Unwrap() []error {
+	if e == nil || e.cause == nil {
+		return []error{ErrSessionActiveRun}
+	}
+	return []error{ErrSessionActiveRun, e.cause}
+}
 
 const (
 	RunStatusDraft            = "draft"
@@ -299,6 +305,13 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 	}
 	if err := ValidateRunTransition(current.Status, next.Status); err != nil {
 		return PlanRun{}, err
+	}
+	if isActiveRunStatus(next.Status) {
+		for _, existing := range s.runs {
+			if existing.ID != current.ID && existing.SessionID == next.SessionID && isActiveRunStatus(existing.Status) {
+				return PlanRun{}, &SessionActiveRunError{ActiveRunID: existing.ID}
+			}
+		}
 	}
 	next.Version = current.Version + 1
 	stored, err := clonePlanRun(next)

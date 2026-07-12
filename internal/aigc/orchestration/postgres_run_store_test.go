@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	aigcconfig "github.com/FigoGoo/Dora-Agent/internal/aigc/config"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/storage"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -302,6 +305,105 @@ func TestPostgresRunStoreRejectsIdentityMutation(t *testing.T) {
 		stored, getErr := store.GetRun(ctx, id)
 		if getErr != nil || stored.ID != id || stored.Version != created.Version {
 			t.Fatalf("timed=%v stored=%+v err=%v", timed, stored, getErr)
+		}
+	}
+}
+
+func TestPostgresRunStoreSessionMigrationEnforcesActiveSlotAtomically(t *testing.T) {
+	for _, timed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("timed_%v", timed), func(t *testing.T) {
+			store, db := openPostgresRunStore(t)
+			prefix := postgresRunID(t)
+			source, target, free := prefix+"-source", prefix+"-target", prefix+"-free"
+			t.Cleanup(func() {
+				db.WithContext(context.Background()).Where("session_id IN ?", []string{source, target, free}).Delete(&planRunRecord{})
+			})
+			occupied, err := store.CreateRun(context.Background(), PlanRun{ID: prefix + "-occupied", SessionID: target, Status: RunStatusRunning, Nodes: map[string]*NodeRun{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			moving, err := store.CreateRun(context.Background(), PlanRun{ID: prefix + "-moving", SessionID: source, Status: RunStatusRunning, Nodes: map[string]*NodeRun{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, mutateErr := mutateSessionForTest(store, timed, moving, target, RunStatusRunning)
+			if !errors.Is(mutateErr, ErrSessionActiveRun) {
+				t.Fatalf("occupied migration error = %v", mutateErr)
+			}
+			for _, before := range []PlanRun{occupied, moving} {
+				after, getErr := store.GetRun(context.Background(), before.ID)
+				if getErr != nil || !reflect.DeepEqual(after, before) {
+					t.Fatalf("rollback run %s = %+v, %v", before.ID, after, getErr)
+				}
+			}
+			migrated, err := mutateSessionForTest(store, timed, moving, free, RunStatusRunning)
+			if err != nil || migrated.SessionID != free {
+				t.Fatalf("free migration = %+v, %v", migrated, err)
+			}
+			terminal, err := mutateSessionForTest(store, timed, migrated, target, RunStatusCancelled)
+			if err != nil || terminal.SessionID != target || terminal.Status != RunStatusCancelled {
+				t.Fatalf("terminal migration = %+v, %v", terminal, err)
+			}
+		})
+	}
+}
+
+func TestPostgresRunStoreConcurrentSameIDDifferentSessionsReturnsDuplicateSentinel(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	for iteration := range 10 {
+		id := postgresRunID(t)
+		t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
+		const callers = 16
+		start := make(chan struct{})
+		results := make(chan error, callers)
+		for caller := range callers {
+			caller := caller
+			go func() {
+				<-start
+				_, err := store.CreateRun(context.Background(), PlanRun{
+					ID: id, SessionID: fmt.Sprintf("%s-session-%d-%d", id, iteration, caller), Status: RunStatusRunning, Nodes: map[string]*NodeRun{},
+				})
+				results <- err
+			}()
+		}
+		close(start)
+		var successes, duplicates int
+		for range callers {
+			err := <-results
+			switch {
+			case err == nil:
+				successes++
+			case errors.Is(err, ErrRunAlreadyExists):
+				duplicates++
+			default:
+				t.Fatalf("iteration %d unexpected CreateRun error = %v", iteration, err)
+			}
+		}
+		if successes != 1 || duplicates != callers-1 {
+			t.Fatalf("iteration %d successes=%d duplicates=%d", iteration, successes, duplicates)
+		}
+	}
+}
+
+func TestPostgresRunConstraintMappingPreservesCauseBehindDomainError(t *testing.T) {
+	for _, test := range []struct {
+		constraint string
+		want       error
+	}{
+		{constraint: planRunPrimaryKeyConstraint, want: ErrRunAlreadyExists},
+		{constraint: activeRunSessionIndex, want: ErrSessionActiveRun},
+	} {
+		raw := &pgconn.PgError{Code: "23505", ConstraintName: test.constraint, Message: "raw duplicate detail"}
+		mapped := mapPlanRunConstraintError(raw, "run")
+		if !errors.Is(mapped, test.want) {
+			t.Fatalf("constraint %s mapped error = %v", test.constraint, mapped)
+		}
+		var retained *pgconn.PgError
+		if !errors.As(mapped, &retained) || retained != raw {
+			t.Fatalf("constraint %s lost pg cause", test.constraint)
+		}
+		if strings.Contains(mapped.Error(), raw.Message) {
+			t.Fatalf("constraint %s leaked raw detail: %v", test.constraint, mapped)
 		}
 	}
 }
