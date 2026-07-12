@@ -42,21 +42,22 @@ const (
 )
 
 type NodeRun struct {
-	StepID         string                 `json:"step_id"`
-	Status         string                 `json:"status"`
-	SkipReason     string                 `json:"skip_reason,omitempty"`
-	Attempt        int                    `json:"attempt"`
-	ExecutionEpoch int64                  `json:"execution_epoch,omitempty"`
-	ExecutionOwner string                 `json:"execution_owner,omitempty"`
-	ExecutionToken string                 `json:"execution_token,omitempty"`
-	LeaseUntil     *time.Time             `json:"lease_until,omitempty"`
-	Outputs        map[string]any         `json:"outputs,omitempty"`
-	Fail           *vocabulary.Failure    `json:"fail,omitempty"`
-	Suspension     *vocabulary.Suspension `json:"suspension,omitempty"`
-	ResumeKey      string                 `json:"resume_key,omitempty"`
-	Resumed        bool                   `json:"resumed,omitempty"`
-	ResumeDecision map[string]any         `json:"resume_decision"`
-	GuardApproval  *GuardApprovalReceipt  `json:"guard_approval,omitempty"`
+	StepID               string                 `json:"step_id"`
+	Status               string                 `json:"status"`
+	SkipReason           string                 `json:"skip_reason,omitempty"`
+	Attempt              int                    `json:"attempt"`
+	ExecutionEpoch       int64                  `json:"execution_epoch,omitempty"`
+	ExecutionOwner       string                 `json:"execution_owner,omitempty"`
+	ExecutionToken       string                 `json:"execution_token,omitempty"`
+	LeaseUntil           *time.Time             `json:"lease_until,omitempty"`
+	Outputs              map[string]any         `json:"outputs,omitempty"`
+	Fail                 *vocabulary.Failure    `json:"fail,omitempty"`
+	Suspension           *vocabulary.Suspension `json:"suspension,omitempty"`
+	ResumeKey            string                 `json:"resume_key,omitempty"`
+	SuspensionGeneration int64                  `json:"suspension_generation,omitempty"`
+	Resumed              bool                   `json:"resumed,omitempty"`
+	ResumeDecision       map[string]any         `json:"resume_decision"`
+	GuardApproval        *GuardApprovalReceipt  `json:"guard_approval,omitempty"`
 }
 
 type GuardApprovalReceipt struct {

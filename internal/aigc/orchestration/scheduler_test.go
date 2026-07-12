@@ -358,16 +358,26 @@ func TestSchedulerGuardsMediaToolCanStartOrdinaryWaitingUserAfterApproval(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	toolWait, err := scheduler.Resume(context.Background(), guardWait.ID, guardWait.Nodes["render"].ResumeKey, map[string]any{"approved": true})
+	guardKey := guardWait.Nodes["render"].ResumeKey
+	toolWait, err := scheduler.Resume(context.Background(), guardWait.ID, guardKey, map[string]any{"approved": true})
 	if err != nil || toolWait.Status != RunStatusSuspended || mediaCalls.Load() != 1 || toolWait.Nodes["render"].Suspension.Payload["question"] != "use this asset?" {
 		t.Fatalf("toolWait=%+v calls=%d err=%v", toolWait, mediaCalls.Load(), err)
 	}
+	toolKey := toolWait.Nodes["render"].ResumeKey
+	if toolKey == guardKey {
+		t.Fatalf("guard and tool suspensions reused key %q", guardKey)
+	}
+	version := toolWait.Version
+	stale, err := scheduler.Resume(context.Background(), toolWait.ID, guardKey, map[string]any{"approved": true})
+	if !errors.Is(err, ErrResumeKeyMismatch) || stale.Version != version || stale.Status != RunStatusSuspended || mediaCalls.Load() != 1 {
+		t.Fatalf("stale=%+v calls=%d err=%v", stale, mediaCalls.Load(), err)
+	}
 	ordinaryDecision := map[string]any{"choice": "yes"}
-	completed, err := scheduler.Resume(context.Background(), toolWait.ID, toolWait.Nodes["render"].ResumeKey, ordinaryDecision)
+	completed, err := scheduler.Resume(context.Background(), toolWait.ID, toolKey, ordinaryDecision)
 	if err != nil || completed.Status != RunStatusSucceeded || mediaCalls.Load() != 1 {
 		t.Fatalf("completed=%+v calls=%d err=%v", completed, mediaCalls.Load(), err)
 	}
-	replayed, err := scheduler.Resume(context.Background(), completed.ID, toolWait.Nodes["render"].ResumeKey, ordinaryDecision)
+	replayed, err := scheduler.Resume(context.Background(), completed.ID, toolKey, ordinaryDecision)
 	if err != nil || replayed.Version != completed.Version || mediaCalls.Load() != 1 {
 		t.Fatalf("replayed=%+v calls=%d err=%v", replayed, mediaCalls.Load(), err)
 	}
@@ -405,6 +415,7 @@ func TestSchedulerGuardsApprovalDoesNotSurviveIdentityChange(t *testing.T) {
 				t.Fatal(err)
 			}
 			oldFingerprint := suspended.Nodes["render"].GuardApproval.Fingerprint
+			oldKey := suspended.Nodes["render"].ResumeKey
 			store.block.Store(true)
 			ctx, cancel := context.WithCancel(context.Background())
 			type resumeResult struct {
@@ -444,6 +455,21 @@ func TestSchedulerGuardsApprovalDoesNotSurviveIdentityChange(t *testing.T) {
 			}
 			if test.wantStatus == RunStatusSuspended && got.Nodes["render"].GuardApproval.Fingerprint == oldFingerprint {
 				t.Fatalf("identity change reused fingerprint %q", oldFingerprint)
+			}
+			if test.wantStatus == RunStatusSuspended {
+				newKey := got.Nodes["render"].ResumeKey
+				if newKey == oldKey {
+					t.Fatalf("distinct guard suspensions reused key %q", oldKey)
+				}
+				version := got.Version
+				stale, staleErr := scheduler.Resume(context.Background(), got.ID, oldKey, map[string]any{"approved": true})
+				if !errors.Is(staleErr, ErrResumeKeyMismatch) || stale.Version != version || stale.Status != RunStatusSuspended || toolCalls.Load() != 0 {
+					t.Fatalf("stale=%+v calls=%d err=%v", stale, toolCalls.Load(), staleErr)
+				}
+				approved, approveErr := scheduler.Resume(context.Background(), got.ID, newKey, map[string]any{"approved": true})
+				if approveErr != nil || approved.Status != RunStatusSucceeded || toolCalls.Load() != 1 || approved.Nodes["render"].Attempt != 1 {
+					t.Fatalf("approved=%+v calls=%d err=%v", approved, toolCalls.Load(), approveErr)
+				}
 			}
 		})
 	}
@@ -1119,7 +1145,7 @@ func TestSchedulerSuspendsAndStopsDownstream(t *testing.T) {
 	if err != nil || run.Status != RunStatusSuspended || run.SuspendedNodeID != "pause" || run.Nodes["pause"].Suspension == nil || run.Nodes["pause"].Outputs["batch_id"] != "batch-1" || downstream.Load() != 0 {
 		t.Fatalf("run=%+v downstream=%d err=%v", run, downstream.Load(), err)
 	}
-	if run.Nodes["pause"].ResumeKey != "run-1:pause:1:resume" {
+	if run.Nodes["pause"].ResumeKey != "run-1:pause:1:suspension:1:resume" {
 		t.Fatalf("resume key=%q", run.Nodes["pause"].ResumeKey)
 	}
 	version := run.Version

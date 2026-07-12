@@ -78,7 +78,7 @@ func TestMemoryRunStoreCASAndIsolation(t *testing.T) {
 		Plan: validPlan(), Status: RunStatusDraft,
 		Nodes: map[string]*NodeRun{
 			"prompt": {
-				StepID: "prompt", Status: NodeStatusPending,
+				StepID: "prompt", Status: NodeStatusPending, SuspensionGeneration: 7,
 				Outputs: map[string]any{"nested": map[string]any{"value": "stored"}},
 				Fail:    &vocabulary.Failure{Code: "original"},
 				Suspension: &vocabulary.Suspension{
@@ -111,6 +111,9 @@ func TestMemoryRunStoreCASAndIsolation(t *testing.T) {
 	}
 	if got.Nodes["prompt"].Suspension.Payload["options"].([]any)[0] != "yes" {
 		t.Fatal("create aliases nested suspension payload")
+	}
+	if got.Nodes["prompt"].SuspensionGeneration != 7 {
+		t.Fatalf("suspension generation=%d", got.Nodes["prompt"].SuspensionGeneration)
 	}
 
 	updated, err := store.MutateRun(ctx, created.ID, 1, func(run *PlanRun) error {

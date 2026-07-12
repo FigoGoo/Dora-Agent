@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"sync"
@@ -533,7 +534,11 @@ func (s *Scheduler) mergeOutcomes(ctx context.Context, run PlanRun, outcomes []n
 					node.Suspension = &vocabulary.Suspension{Reason: SuspendWaitingAgent}
 				}
 				if node.Suspension != nil {
-					node.ResumeKey = fmt.Sprintf("%s:%s:%d:resume", next.ID, outcome.step.ID, outcome.claim.Attempt)
+					if node.SuspensionGeneration == math.MaxInt64 {
+						return fmt.Errorf("suspension generation exhausted for run %q step %q", next.ID, outcome.step.ID)
+					}
+					node.SuspensionGeneration++
+					node.ResumeKey = fmt.Sprintf("%s:%s:%d:suspension:%d:resume", next.ID, outcome.step.ID, outcome.claim.Attempt, node.SuspensionGeneration)
 					node.Resumed = false
 					node.ResumeDecision = nil
 				}
