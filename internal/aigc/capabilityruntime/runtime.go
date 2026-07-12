@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -797,6 +798,9 @@ func (r *Runtime) generateMedia(ctx context.Context, request capability.Request[
 	} else if found {
 		return replay, nil
 	}
+	if request.Intent.NormalizedTarget() == capability.MediaTargetSessionDeliverable {
+		return r.generateDeliverableMedia(ctx, request)
+	}
 	aggregate, err := r.cfg.Storyboards.GetAggregateBySession(ctx, request.Command.SessionID)
 	if err != nil {
 		return capability.CapabilityResult[capability.GenerateMediaData]{}, err
@@ -890,6 +894,68 @@ func (r *Runtime) generateMedia(ctx context.Context, request capability.Request[
 	result := capability.CapabilityResult[capability.GenerateMediaData]{
 		Status: capability.StatusAccepted, OperationID: workflow.Operation.ID, BatchID: workflow.Batch.ID,
 		StoryboardID: aggregate.ID, StoryboardVersion: aggregate.Version,
+		Data: capability.GenerateMediaData{SelectedTargets: selected, JobCount: len(workflow.Jobs)},
+	}
+	if estimatedPoints > 0 {
+		result.Cost = &capability.CostSummary{Currency: "points", EstimatedMinor: estimatedPoints}
+	}
+	return result, nil
+}
+
+// generateDeliverableMedia 是轻直出路径：无 storyboard 闸门，目标为
+// session 级交付物（终版 §5 两态之二、§6.1 第 2 步）。审批链不介入
+// （active+auto_approve），完成后由 batch 终结唤醒 Agent 解释结果。
+func (r *Runtime) generateDeliverableMedia(ctx context.Context, request capability.Request[capability.GenerateMediaIntent]) (capability.CapabilityResult[capability.GenerateMediaData], error) {
+	kind := strings.TrimSpace(request.Intent.MediaKind)
+	provider := providerFor(kind)
+	if provider == "" {
+		return capability.CapabilityResult[capability.GenerateMediaData]{}, fmt.Errorf("no provider registered for media_kind %s", kind)
+	}
+	prompt := strings.TrimSpace(request.Intent.Prompt)
+	ratio := strings.TrimSpace(request.Intent.AspectRatio)
+	policy := generation.DeliveryPolicy{BindingMode: generation.BindingModeActive, ApprovalPolicy: generation.ApprovalAutoApprove, ChargePolicy: generation.ChargePostpaidNoReservation}
+	count := request.Intent.NormalizedCount()
+	operationID, batchID := r.cfg.NewID(), r.cfg.NewID()
+	jobs := make([]generation.GenerationJob, 0, count)
+	selected := make([]string, 0, count)
+	for index := 0; index < count; index++ {
+		targetID := "deliverable:" + r.cfg.NewID()
+		digest := sha256.Sum256([]byte(strings.Join([]string{prompt, kind, ratio, strconv.Itoa(index)}, "\x00")))
+		payload := map[string]any{"prompt": prompt, "media_kind": kind, "user_id": request.Command.UserID}
+		if ratio != "" {
+			payload["ratio"] = ratio
+		}
+		jobs = append(jobs, generation.GenerationJob{
+			ID: r.cfg.NewID(), SessionID: request.Command.SessionID, UserID: request.Command.UserID,
+			ToolCallID:     request.Command.ToolCallID,
+			IdempotencyKey: request.Command.IdempotencyKey + ":" + targetID,
+			Provider:       provider, MediaKind: kind,
+			TargetType: "session_deliverable", TargetID: targetID, AssetSlot: "primary",
+			Required: true,
+			BindingToken: generation.BindingToken{
+				TargetKind: generation.TargetKindSessionDeliverable,
+				TargetID:   targetID, AssetSlot: "primary",
+				TargetRevision: 1, InputFingerprint: hex.EncodeToString(digest[:]),
+			},
+			DeliveryPolicy: policy, MaxAttempts: 4,
+			Payload: payload,
+		})
+		selected = append(selected, targetID+":primary")
+	}
+	estimatedPoints, err := r.runGenerationPreflight(ctx, request.Command.UserID, jobs)
+	if err != nil {
+		return capability.CapabilityResult[capability.GenerateMediaData]{}, err
+	}
+	workflow, _, err := r.cfg.GenerationCommands.Create(ctx, generation.CreateWorkflowCommand{
+		Operation: generation.GenerationOperation{ID: operationID, SessionID: request.Command.SessionID, UserID: request.Command.UserID, WorkflowRunID: valueOr(request.Command.WorkflowID, request.Command.RunID), StageRunID: request.Command.StageRunID, ToolCallID: request.Command.ToolCallID, IdempotencyKey: request.Command.IdempotencyKey, Kind: "generate_media", Status: generation.OperationStatusAccepted, BatchID: batchID, Result: map[string]any{"estimated_points": estimatedPoints}},
+		Batch:     generation.GenerationBatch{ID: batchID, SessionID: request.Command.SessionID, UserID: request.Command.UserID, WorkflowRunID: valueOr(request.Command.WorkflowID, request.Command.RunID), StageRunID: request.Command.StageRunID, ToolCallID: request.Command.ToolCallID, OperationID: operationID, Kind: "session_deliverable", CompletionPolicy: generation.CompletionAllowPartial, WakePolicy: generation.WakeOnTerminal, DeliveryPolicy: policy},
+		Jobs:      jobs,
+	})
+	if err != nil {
+		return capability.CapabilityResult[capability.GenerateMediaData]{}, err
+	}
+	result := capability.CapabilityResult[capability.GenerateMediaData]{
+		Status: capability.StatusAccepted, OperationID: workflow.Operation.ID, BatchID: workflow.Batch.ID,
 		Data: capability.GenerateMediaData{SelectedTargets: selected, JobCount: len(workflow.Jobs)},
 	}
 	if estimatedPoints > 0 {
