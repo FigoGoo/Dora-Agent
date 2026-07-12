@@ -454,11 +454,16 @@ func executeOutcome(ctx context.Context, registry *vocabulary.Registry, guard vo
 func mediaGuardFingerprint(call vocabulary.Call) (string, error) {
 	payload := struct {
 		Version   string         `json:"version"`
+		SessionID string         `json:"session_id"`
+		UserID    string         `json:"user_id"`
 		PlanRunID string         `json:"plan_run_id"`
 		NodeID    string         `json:"node_id"`
 		Attempt   int            `json:"attempt"`
 		Inputs    map[string]any `json:"inputs,omitempty"`
-	}{Version: "media_guard_v1", PlanRunID: call.PlanRunID, NodeID: call.NodeID, Attempt: call.Attempt, Inputs: call.Inputs}
+	}{
+		Version: "media_guard_v1", SessionID: call.SessionID, UserID: call.UserID,
+		PlanRunID: call.PlanRunID, NodeID: call.NodeID, Attempt: call.Attempt, Inputs: call.Inputs,
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("media guard fingerprint: %w", err)

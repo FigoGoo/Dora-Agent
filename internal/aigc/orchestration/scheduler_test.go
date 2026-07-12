@@ -373,6 +373,108 @@ func TestSchedulerGuardsMediaToolCanStartOrdinaryWaitingUserAfterApproval(t *tes
 	}
 }
 
+func TestSchedulerGuardsApprovalDoesNotSurviveIdentityChange(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		mutate     func(*PlanRun)
+		wantStatus string
+		wantCode   string
+	}{
+		{name: "missing_user_rechecks_permission", mutate: func(run *PlanRun) { run.UserID = "" }, wantStatus: RunStatusFailed, wantCode: "permission_denied"},
+		{name: "changed_session_rechecks_compliance", mutate: func(run *PlanRun) { run.SessionID = "session-2" }, wantStatus: RunStatusSuspended},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := NewMemoryRunStore()
+			store := &resumeCommitStore{RunStore: base, entered: make(chan struct{}, 1), release: make(chan struct{})}
+			var toolCalls atomic.Int32
+			media := schedulerTool{key: "render", category: "media", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+				toolCalls.Add(1)
+				return vocabulary.Result{Outputs: map[string]any{"asset": "must-not-run"}}, nil
+			}}
+			cfg := schedulerConfigForTest(store, schedulerRegistry(t, media), func() string { return "identity-" + test.name })
+			cfg.Guard = vocabulary.NewGuardChain(vocabulary.GuardConfig{SoftTerms: []string{"soft-risk"}})
+			scheduler, err := NewScheduler(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			suspended, err := scheduler.Submit(context.Background(), "session-1", "user-1", ExecutionPlan{
+				PlanID: "identity-change", Source: "dynamic", Summary: "identity change", Direction: "image",
+				Steps: []PlanStep{{ID: "render", Tool: "render", Params: map[string]any{"prompt": "soft-risk"}, Required: true}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldFingerprint := suspended.Nodes["render"].GuardApproval.Fingerprint
+			store.block.Store(true)
+			ctx, cancel := context.WithCancel(context.Background())
+			type resumeResult struct {
+				run PlanRun
+				err error
+			}
+			done := make(chan resumeResult, 1)
+			go func() {
+				run, resumeErr := scheduler.Resume(ctx, suspended.ID, suspended.Nodes["render"].ResumeKey, map[string]any{"approved": true})
+				done <- resumeResult{run: run, err: resumeErr}
+			}()
+			<-store.entered
+			cancel()
+			close(store.release)
+			approved := <-done
+			if !errors.Is(approved.err, context.Canceled) || approved.run.Status != RunStatusRunning || approved.run.Nodes["render"].Status != NodeStatusPending {
+				t.Fatalf("approved=%+v err=%v", approved.run, approved.err)
+			}
+			store.block.Store(false)
+			stored, err := base.GetRun(context.Background(), suspended.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = base.MutateRun(context.Background(), stored.ID, stored.Version, func(run *PlanRun) error {
+				test.mutate(run)
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := scheduler.Advance(context.Background(), suspended.ID)
+			if err != nil || got.Status != test.wantStatus || toolCalls.Load() != 0 || got.Nodes["render"].Attempt != 1 {
+				t.Fatalf("run=%+v calls=%d err=%v", got, toolCalls.Load(), err)
+			}
+			if test.wantCode != "" && (got.Nodes["render"].Fail == nil || got.Nodes["render"].Fail.Code != test.wantCode) {
+				t.Fatalf("failure=%+v", got.Nodes["render"].Fail)
+			}
+			if test.wantStatus == RunStatusSuspended && got.Nodes["render"].GuardApproval.Fingerprint == oldFingerprint {
+				t.Fatalf("identity change reused fingerprint %q", oldFingerprint)
+			}
+		})
+	}
+}
+
+func TestMediaGuardFingerprintCoversAllDecisionInputsAndCanonicalNumbers(t *testing.T) {
+	base := vocabulary.Call{
+		SessionID: "session-1", UserID: "user-1", PlanRunID: "run-1", NodeID: "render", Attempt: 1,
+		Inputs: map[string]any{"z": json.Number("9007199254740993"), "nested": map[string]any{"b": true, "a": "value"}},
+	}
+	same := base
+	same.Inputs = map[string]any{"nested": map[string]any{"a": "value", "b": true}, "z": json.Number("9007199254740993")}
+	baseFingerprint, err := mediaGuardFingerprint(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameFingerprint, err := mediaGuardFingerprint(same)
+	if err != nil || sameFingerprint != baseFingerprint {
+		t.Fatalf("same=%q base=%q err=%v", sameFingerprint, baseFingerprint, err)
+	}
+	for _, changed := range []vocabulary.Call{
+		func() vocabulary.Call { next := base; next.SessionID = "session-2"; return next }(),
+		func() vocabulary.Call { next := base; next.UserID = "user-2"; return next }(),
+	} {
+		fingerprint, err := mediaGuardFingerprint(changed)
+		if err != nil || fingerprint == baseFingerprint {
+			t.Fatalf("changed=%+v fingerprint=%q base=%q err=%v", changed, fingerprint, baseFingerprint, err)
+		}
+	}
+}
+
 func createPendingSchedulerRun(t *testing.T, store RunStore, id string, plan ExecutionPlan) PlanRun {
 	t.Helper()
 	nodes := make(map[string]*NodeRun, len(plan.Steps))
