@@ -114,6 +114,15 @@ func TestPlanValidate(t *testing.T) {
 		t.Fatalf("reference to unknown step must be rejected: %v", err)
 	}
 
+	// 畸形引用（非"指向未知 step"，而是引用语法本身不合法）：单段无点、首段空、尾段空。
+	malformedRef := validPlan()
+	for _, ref := range []string{"$prompt", "$.", "$prompt."} {
+		malformedRef.Steps[2].Params["targets"] = ref
+		if err := malformedRef.Validate(registry, 20); err == nil || !strings.Contains(err.Error(), "malformed reference") {
+			t.Fatalf("malformed reference %q must be rejected: %v", ref, err)
+		}
+	}
+
 	// 所有校验错误必须可被 errors.Is(err, ErrPlanInvalid) 识别（修复循环的结构化错误约定）。
 	if err := cyclic.Validate(registry, 20); !errors.Is(err, ErrPlanInvalid) {
 		t.Fatalf("validation errors must wrap ErrPlanInvalid: %v", err)
