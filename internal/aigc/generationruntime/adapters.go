@@ -319,6 +319,13 @@ func (a StoryboardBindingAdapter) commit(ctx context.Context, input generation.F
 			return err
 		}
 		stored.Availability = asset.AvailabilityAvailable
+		if isDeliverable {
+			if stored.Metadata == nil {
+				stored.Metadata = map[string]any{}
+			}
+			stored.Metadata["target_kind"] = generation.TargetKindSessionDeliverable
+			stored.Metadata["deliverable_target_id"] = input.BindingToken.TargetID
+		}
 		if _, err := a.Assets.Save(ctx, stored); err != nil {
 			return err
 		}
@@ -379,6 +386,33 @@ func (a StoryboardBindingAdapter) commit(ctx context.Context, input generation.F
 	return nil
 }
 
+// publishDeliverable 把已落库的 deliverable 资产投影为 deliverables
+// surface 的增量事件（前端按 asset id 合并；断线兜底靠全量资产刷新）。
+// 发布失败传播给 outbox 重试，与 storyboard 投影同语义。
+func (a StoryboardBindingAdapter) publishDeliverable(ctx context.Context, input generation.FinalizationCommit) error {
+	if a.Events == nil || a.Assets == nil || len(input.AssetIDs) == 0 {
+		return nil
+	}
+	views := make([]map[string]any, 0, len(input.AssetIDs))
+	for _, assetID := range input.AssetIDs {
+		stored, err := a.Assets.Get(ctx, assetID)
+		if err != nil {
+			return err
+		}
+		views = append(views, map[string]any{
+			"id": stored.ID, "url": stored.URL, "kind": stored.Kind,
+			"mime_type": stored.MIMEType, "filename": stored.Filename,
+			"target_id": input.BindingToken.TargetID,
+		})
+	}
+	envelope := a2ui.ActionEnvelope{Version: a2ui.Version1, Actions: []a2ui.Action{{
+		Type: a2ui.ActionUpdateCard, Surface: "deliverables",
+		Target:  &a2ui.ActionTarget{Surface: "deliverables", CardID: "deliverables"},
+		Payload: map[string]any{"assets": views},
+	}}}
+	return a.Events.Publish(ctx, a2ui.SSEEvent{ID: "deliverable:" + input.Job.ID, SessionID: input.Job.SessionID, Event: a2ui.EventAction, Payload: envelope, CreatedAt: time.Now()})
+}
+
 func (a StoryboardBindingAdapter) specMatchesStoryboard(ctx context.Context, aggregate storyboard.StoryboardAggregate) (bool, error) {
 	if a.Specs == nil {
 		return true, nil
@@ -395,10 +429,10 @@ func (a StoryboardBindingAdapter) specMatchesStoryboard(ctx context.Context, agg
 }
 
 func (a StoryboardBindingAdapter) publishChanges(ctx context.Context, input generation.FinalizationCommit) error {
-	if a.Events == nil || strings.HasPrefix(input.BindingToken.TargetID, "assembly:") ||
-		input.BindingToken.NormalizedKind() == generation.TargetKindSessionDeliverable {
-		// deliverable 目标没有 storyboard 可投影；其 UI 事件形态在 Step 2
-		// 轻交付物视图中定义。
+	if input.BindingToken.NormalizedKind() == generation.TargetKindSessionDeliverable {
+		return a.publishDeliverable(ctx, input)
+	}
+	if a.Events == nil || strings.HasPrefix(input.BindingToken.TargetID, "assembly:") {
 		return nil
 	}
 	aggregate, err := a.Repository.GetAggregate(ctx, input.BindingToken.StoryboardID)

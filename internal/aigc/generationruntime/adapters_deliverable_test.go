@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/FigoGoo/Dora-Agent/internal/aigc/a2ui"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/asset"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/generation"
 )
@@ -67,17 +68,69 @@ func TestCommitSessionDeliverableOnlyPublishesAssets(t *testing.T) {
 	if stored.Availability != asset.AvailabilityAvailable {
 		t.Fatalf("asset must be available after commit, got %s", stored.Availability)
 	}
+	if stored.Metadata["target_kind"] != generation.TargetKindSessionDeliverable {
+		t.Fatalf("deliverable asset must be tagged, metadata=%v", stored.Metadata)
+	}
 
 	committed, err := adapter.IsCommitted(context.Background(), job, []string{"asset-1"})
 	if err != nil || !committed {
 		t.Fatalf("IsCommitted must be true after deliverable commit: %v %v", committed, err)
 	}
 
-	// outbox 对 finalized job 调 PublishFinalized：deliverable 无 storyboard
-	// 可投影，必须短路成功（Events 非 nil 且必失败 + Repository nil，
-	// 不短路则报错或 panic）。
+	// outbox 对 finalized job 调 PublishFinalized：deliverable 投影为
+	// deliverables surface 事件；发布失败必须传播（outbox 重试语义），
+	// 本测试的 Events 必失败，因此这里断言报错。仍不得触碰 storyboard
+	// （Repository nil，触碰即 panic）。
+	if err := adapter.PublishFinalized(context.Background(), job); err == nil {
+		t.Fatal("PublishFinalized must propagate publish failures for outbox retry")
+	}
+}
+
+type recordingEventPublisher struct{ events []a2ui.SSEEvent }
+
+func (p *recordingEventPublisher) Publish(_ context.Context, event a2ui.SSEEvent) error {
+	p.events = append(p.events, event)
+	return nil
+}
+
+func TestPublishFinalizedEmitsDeliverablesSurface(t *testing.T) {
+	assets := &memoryAssets{values: map[string]asset.Asset{
+		"asset-1": {ID: "asset-1", SessionID: "sess-1", Availability: asset.AvailabilityAvailable, Kind: "image", MIMEType: "image/png", URL: "https://cdn/x.png"},
+	}}
+	publisher := &recordingEventPublisher{}
+	adapter := StoryboardBindingAdapter{Assets: assets, Events: publisher}
+	job := generation.GenerationJob{
+		ID: "job-1", SessionID: "sess-1", ResultAssetIDs: []string{"asset-1"},
+		BindingToken: generation.BindingToken{TargetKind: generation.TargetKindSessionDeliverable, TargetID: "deliverable:img-1", AssetSlot: "primary", InputFingerprint: "fp"},
+	}
 	if err := adapter.PublishFinalized(context.Background(), job); err != nil {
-		t.Fatalf("PublishFinalized must skip storyboard projection for deliverable: %v", err)
+		t.Fatalf("PublishFinalized: %v", err)
+	}
+	if len(publisher.events) != 1 {
+		t.Fatalf("expected one deliverables event, got %d", len(publisher.events))
+	}
+	if publisher.events[0].SessionID != "sess-1" {
+		t.Fatalf("event session = %s", publisher.events[0].SessionID)
+	}
+	envelope, ok := publisher.events[0].Payload.(a2ui.ActionEnvelope)
+	if !ok || len(envelope.Actions) != 1 {
+		t.Fatalf("payload = %#v", publisher.events[0].Payload)
+	}
+	action := envelope.Actions[0]
+	if action.Type != a2ui.ActionUpdateCard || action.Surface != "deliverables" || action.Target == nil || action.Target.CardID != "deliverables" {
+		t.Fatalf("action = %#v", action)
+	}
+	payload, ok := action.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("action payload = %#v", action.Payload)
+	}
+	views, ok := payload["assets"].([]map[string]any)
+	if !ok || len(views) != 1 {
+		t.Fatalf("assets view = %#v", payload["assets"])
+	}
+	view := views[0]
+	if view["id"] != "asset-1" || view["url"] != "https://cdn/x.png" || view["kind"] != "image" || view["mime_type"] != "image/png" || view["target_id"] != "deliverable:img-1" {
+		t.Fatalf("view = %#v", view)
 	}
 }
 
