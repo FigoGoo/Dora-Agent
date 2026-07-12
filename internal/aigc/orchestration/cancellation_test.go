@@ -3,10 +3,10 @@ package orchestration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/generation"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
@@ -24,10 +24,10 @@ type blockingBatchCanceller struct {
 	calls   atomic.Int32
 }
 
-func (c *blockingBatchCanceller) CancelBatch(ctx context.Context, batchID string) error {
+func (c *blockingBatchCanceller) CancelBatch(ctx context.Context, request BatchCancelRequest) error {
 	c.calls.Add(1)
 	select {
-	case c.started <- batchID:
+	case c.started <- request.BatchID:
 	default:
 	}
 	select {
@@ -49,6 +49,26 @@ type cancellationAckLossStore struct {
 	err       error
 }
 
+type blockingCreateWorkflowStore struct {
+	generation.WorkflowStore
+	created chan generation.WorkflowAggregate
+	release chan struct{}
+}
+
+func (s *blockingCreateWorkflowStore) CreateWorkflow(ctx context.Context, command generation.CreateWorkflowCommand) (generation.WorkflowAggregate, bool, error) {
+	aggregate, created, err := s.WorkflowStore.CreateWorkflow(ctx, command)
+	if err != nil {
+		return aggregate, created, err
+	}
+	s.created <- aggregate
+	select {
+	case <-ctx.Done():
+		return generation.WorkflowAggregate{}, false, ctx.Err()
+	case <-s.release:
+		return aggregate, created, nil
+	}
+}
+
 func (s *cancellationAckLossStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
 	if s.mutations.Add(1) == 2 {
 		if _, err := s.RunStore.MutateRun(ctx, id, expectedVersion, mutate); err != nil {
@@ -63,6 +83,7 @@ func (s *switchBatchOnConflictStore) MutateRun(ctx context.Context, id string, e
 	if s.switched.CompareAndSwap(false, true) {
 		if _, err := s.RunStore.MutateRun(ctx, id, expectedVersion, func(run *PlanRun) error {
 			run.Nodes[run.SuspendedNodeID].Suspension.Payload["batch_id"] = "batch-2"
+			run.Nodes[run.SuspendedNodeID].Outputs["batch_id"] = "batch-2"
 			return nil
 		}); err != nil {
 			return PlanRun{}, err
@@ -72,10 +93,10 @@ func (s *switchBatchOnConflictStore) MutateRun(ctx context.Context, id string, e
 	return s.RunStore.MutateRun(ctx, id, expectedVersion, mutate)
 }
 
-func (c *recordingBatchCanceller) CancelBatch(_ context.Context, batchID string) error {
+func (c *recordingBatchCanceller) CancelBatch(_ context.Context, request BatchCancelRequest) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.batches = append(c.batches, batchID)
+	c.batches = append(c.batches, request.BatchID)
 	return c.err
 }
 
@@ -222,11 +243,10 @@ func TestCustomWaitingUserDecisionRemainsOpenSchema(t *testing.T) {
 func TestCancelIsIdempotentFencesClaimsAndFreezesReason(t *testing.T) {
 	store := NewMemoryRunStore()
 	scheduler := schedulerForTest(t, store, schedulerRegistry(t, schedulerTool{key: "work"}), 1)
-	lease := time.Now().Add(10 * time.Second)
 	created, err := store.CreateRun(context.Background(), PlanRun{
 		ID: "cancel-running", SessionID: "s1", UserID: "u1", Status: RunStatusRunning,
 		Plan:  ExecutionPlan{PlanID: "cancel", Source: "dynamic", Summary: "cancel", Direction: "image", Steps: []PlanStep{{ID: "work", Tool: "work", Required: true}}},
-		Nodes: map[string]*NodeRun{"work": {StepID: "work", Status: NodeStatusRunning, Attempt: 1, ExecutionEpoch: 3, ExecutionOwner: "old", ExecutionToken: "old:token", LeaseUntil: &lease}},
+		Nodes: map[string]*NodeRun{"work": {StepID: "work", Status: NodeStatusPending, Attempt: 1, ExecutionEpoch: 3}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -255,6 +275,103 @@ func TestCancelIsIdempotentFencesClaimsAndFreezesReason(t *testing.T) {
 	}})
 	if err != nil || late.Status != RunStatusCancelled || late.Version != version {
 		t.Fatalf("late=%+v err=%v", late, err)
+	}
+}
+
+func TestCancelRejectsOrdinaryActiveExecutionClaimWithoutMutation(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	work := schedulerTool{key: "work", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		started <- struct{}{}
+		<-release
+		return vocabulary.Result{}, nil
+	}}
+	store := NewMemoryRunStore()
+	registry := schedulerRegistry(t, work)
+	running := schedulerForTest(t, store, registry, 1)
+	cancelling := schedulerForTest(t, store, registry, 1)
+	done := make(chan PlanRun, 1)
+	go func() {
+		run, _ := running.Submit(context.Background(), "s", "u", ExecutionPlan{
+			PlanID: "busy", Source: "dynamic", Summary: "busy", Direction: "image", Steps: []PlanStep{{ID: "work", Tool: "work", Required: true}},
+		})
+		done <- run
+	}()
+	<-started
+	claimed, err := store.GetRun(context.Background(), "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := cancelling.Cancel(context.Background(), claimed.ID, "stop")
+	if !errors.Is(err, ErrRunCancellationBusy) || got.Version != claimed.Version || got.CancelRequested || got.Nodes["work"].ExecutionToken != claimed.Nodes["work"].ExecutionToken {
+		t.Fatalf("run=%+v err=%v", got, err)
+	}
+	close(release)
+	if completed := <-done; completed.Status != RunStatusSucceeded {
+		t.Fatalf("completed=%+v", completed)
+	}
+}
+
+func TestCancelWaitsForRealGenerationDispatchReceiptBeforeOwningBatch(t *testing.T) {
+	generationStore := &blockingCreateWorkflowStore{
+		WorkflowStore: generation.NewMemoryStore(), created: make(chan generation.WorkflowAggregate, 1), release: make(chan struct{}),
+	}
+	var ids atomic.Int32
+	commands := generation.NewCommandService(generation.CommandServiceConfig{Store: generationStore, NewID: func() string {
+		return fmt.Sprintf("generation-%d", ids.Add(1))
+	}})
+	bridge := NewGenerationBridge(commands)
+	dispatch := vocabulary.NewDispatchGenerationTool(bridge)
+	runStore := NewMemoryRunStore()
+	registry := schedulerRegistry(t, dispatch)
+	runCfg := schedulerConfigForTest(runStore, registry, func() string { return "real-dispatch-run" })
+	running, err := NewScheduler(runCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelCfg := schedulerConfigForTest(runStore, registry, func() string { return "unused" })
+	cancelCfg.BatchCanceller = bridge
+	cancelling, err := NewScheduler(cancelCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type submitResult struct {
+		run PlanRun
+		err error
+	}
+	done := make(chan submitResult, 1)
+	go func() {
+		run, submitErr := running.Submit(context.Background(), "session-1", "user-1", ExecutionPlan{
+			PlanID: "dispatch", Source: "dynamic", Summary: "dispatch", Direction: "image",
+			Steps: []PlanStep{{ID: "dispatch", Tool: "dispatch_generation", Params: map[string]any{"targets": []any{map[string]any{"prompt": "rain"}}}, Required: true}},
+		})
+		done <- submitResult{run: run, err: submitErr}
+	}()
+	aggregate := <-generationStore.created
+	claimed, err := runStore.GetRun(context.Background(), "real-dispatch-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	busy, err := cancelling.Cancel(context.Background(), claimed.ID, "stop")
+	if !errors.Is(err, ErrRunCancellationBusy) || busy.Version != claimed.Version || busy.CancelRequested {
+		t.Fatalf("busy=%+v err=%v", busy, err)
+	}
+	batch, err := generationStore.GetBatch(context.Background(), aggregate.Batch.ID)
+	if err != nil || batch.CancelRequested {
+		t.Fatalf("escaped batch before receipt=%+v err=%v", batch, err)
+	}
+	close(generationStore.release)
+	submitted := <-done
+	if submitted.err != nil || submitted.run.Status != RunStatusSuspended || submitted.run.Nodes["dispatch"].Outputs["batch_id"] != aggregate.Batch.ID {
+		t.Fatalf("submitted=%+v err=%v", submitted.run, submitted.err)
+	}
+	cancelled, err := cancelling.Cancel(context.Background(), submitted.run.ID, "stop")
+	if err != nil || cancelled.Status != RunStatusCancelled {
+		t.Fatalf("cancelled=%+v err=%v", cancelled, err)
+	}
+	batch, err = generationStore.GetBatch(context.Background(), aggregate.Batch.ID)
+	if err != nil || !batch.CancelRequested {
+		t.Fatalf("owned batch=%+v err=%v", batch, err)
 	}
 }
 
@@ -334,7 +451,7 @@ func TestConcurrentCancelSameReasonConvergesToOneVersion(t *testing.T) {
 		if err := <-errs; err != nil {
 			t.Fatal(err)
 		}
-		if run := <-results; run.Status != RunStatusCancelled || run.Version != created.Version+2 {
+		if run := <-results; run.Status != RunStatusCancelled || run.Version != created.Version+1 {
 			t.Fatalf("run=%+v", run)
 		}
 	}
@@ -344,7 +461,7 @@ func TestCancelWaitingJobsFailsClosedAndCancelsBatchBeforeRun(t *testing.T) {
 	newSuspended := func(t *testing.T, canceller BatchCanceller) (*Scheduler, PlanRun) {
 		t.Helper()
 		jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
-			return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1"}}}, nil
+			return waitingJobsResult("batch-1"), nil
 		}}
 		cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, jobs), func() string { return "jobs-cancel" })
 		cfg.BatchCanceller = canceller
@@ -383,7 +500,7 @@ func TestCancelWaitingJobsFailsClosedAndCancelsBatchBeforeRun(t *testing.T) {
 		t.Fatalf("resume=%+v err=%v", blockedResume, err)
 	}
 	blockedAdvance, err := failing.Advance(context.Background(), suspended.ID)
-	if !errors.Is(err, ErrCancellationPending) || blockedAdvance.Version != intentVersion {
+	if !errors.Is(err, cancelFailure) || blockedAdvance.Version != intentVersion {
 		t.Fatalf("advance=%+v err=%v", blockedAdvance, err)
 	}
 	conflicted, err := failing.Cancel(context.Background(), suspended.ID, "different")
@@ -392,7 +509,7 @@ func TestCancelWaitingJobsFailsClosedAndCancelsBatchBeforeRun(t *testing.T) {
 	}
 	failingCanceller.err = nil
 	retried, err := failing.Cancel(context.Background(), suspended.ID, "stop")
-	if err != nil || retried.Status != RunStatusCancelled || len(failingCanceller.calls()) != 2 {
+	if err != nil || retried.Status != RunStatusCancelled || len(failingCanceller.calls()) != 3 {
 		t.Fatalf("retry=%+v calls=%v err=%v", retried, failingCanceller.calls(), err)
 	}
 
@@ -413,9 +530,34 @@ func TestCancelWaitingJobsFailsClosedAndCancelsBatchBeforeRun(t *testing.T) {
 	}
 }
 
+func TestCancelRejectsSuspensionWithoutMatchingNodeReceipt(t *testing.T) {
+	jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		result := waitingJobsResult("batch-1")
+		result.Outputs["batch_id"] = "other-batch"
+		return result, nil
+	}}
+	canceller := &recordingBatchCanceller{}
+	cfg := schedulerConfigForTest(NewMemoryRunStore(), schedulerRegistry(t, jobs), func() string { return "receipt-mismatch" })
+	cfg.BatchCanceller = canceller
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suspended, err := scheduler.Submit(context.Background(), "s", "u", ExecutionPlan{
+		PlanID: "jobs", Source: "dynamic", Summary: "jobs", Direction: "image", Steps: []PlanStep{{ID: "jobs", Tool: "jobs", Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := scheduler.Cancel(context.Background(), suspended.ID, "stop")
+	if !errors.Is(err, ErrBatchCancellationInvalid) || got.Version != suspended.Version || got.CancelRequested || len(canceller.calls()) != 0 {
+		t.Fatalf("run=%+v calls=%v err=%v", got, canceller.calls(), err)
+	}
+}
+
 func TestCancelIntentWinsCompleteJobsWaitAcrossSchedulers(t *testing.T) {
 	jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
-		return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1"}}}, nil
+		return waitingJobsResult("batch-1"), nil
 	}}
 	store := NewMemoryRunStore()
 	registry := schedulerRegistry(t, jobs)
@@ -450,6 +592,10 @@ func TestCancelIntentWinsCompleteJobsWaitAcrossSchedulers(t *testing.T) {
 	if err != nil || !intent.CancelRequested || intent.CancelReason != "user stop" || intent.CancelBatchID != "batch-1" || intent.Status != RunStatusSuspended {
 		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
+	revised, err := completing.Revise(context.Background(), suspended.ID, PlanRevision{SkipStepIDs: []string{"jobs"}})
+	if !errors.Is(err, ErrCancellationPending) || revised.Version != intent.Version {
+		t.Fatalf("revised=%+v err=%v", revised, err)
+	}
 	completed, err := completing.CompleteJobsWait(context.Background(), suspended.ID, "jobs", JobsOutcome{BatchID: "batch-1", Status: "cancelled"})
 	if err != nil || completed.Status != RunStatusCancelled || completed.CancelReason != "user stop" {
 		t.Fatalf("completed=%+v err=%v", completed, err)
@@ -466,11 +612,54 @@ func TestCancelIntentWinsCompleteJobsWaitAcrossSchedulers(t *testing.T) {
 	}
 }
 
+func TestAdvanceRecoversPersistedJobsCancellationIntent(t *testing.T) {
+	jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		return waitingJobsResult("batch-1"), nil
+	}}
+	store := NewMemoryRunStore()
+	registry := schedulerRegistry(t, jobs)
+	failingCanceller := &recordingBatchCanceller{err: context.Canceled}
+	firstCfg := schedulerConfigForTest(store, registry, func() string { return "recover-intent" })
+	firstCfg.BatchCanceller = failingCanceller
+	first, err := NewScheduler(firstCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suspended, err := first.Submit(context.Background(), "s", "u", ExecutionPlan{
+		PlanID: "jobs", Source: "dynamic", Summary: "jobs", Direction: "image", Steps: []PlanStep{{ID: "jobs", Tool: "jobs", Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := first.Cancel(context.Background(), suspended.ID, "stop")
+	if err == nil || !intent.CancelRequested || intent.Status != RunStatusSuspended {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+
+	withoutDependency := schedulerForTest(t, store, registry, 1)
+	blocked, err := withoutDependency.Advance(context.Background(), suspended.ID)
+	if !errors.Is(err, ErrCancellationDependency) || blocked.Version != intent.Version {
+		t.Fatalf("blocked=%+v err=%v", blocked, err)
+	}
+
+	recoveryCanceller := &recordingBatchCanceller{}
+	recoveryCfg := schedulerConfigForTest(store, registry, func() string { return "unused" })
+	recoveryCfg.BatchCanceller = recoveryCanceller
+	recovery, err := NewScheduler(recoveryCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := recovery.Advance(context.Background(), suspended.ID)
+	if err != nil || cancelled.Status != RunStatusCancelled || len(recoveryCanceller.calls()) != 1 || recoveryCanceller.calls()[0] != "batch-1" {
+		t.Fatalf("cancelled=%+v calls=%v err=%v", cancelled, recoveryCanceller.calls(), err)
+	}
+}
+
 func TestCancelIntentDominatesEveryTerminalJobsOutcome(t *testing.T) {
 	for _, status := range []string{generation.BatchStatusCompleted, generation.BatchStatusFailed, generation.BatchStatusCancelled} {
 		t.Run(status, func(t *testing.T) {
 			jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
-				return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1"}}}, nil
+				return waitingJobsResult("batch-1"), nil
 			}}
 			store := NewMemoryRunStore()
 			registry := schedulerRegistry(t, jobs)
@@ -515,7 +704,7 @@ func TestCancelIntentDominatesEveryTerminalJobsOutcome(t *testing.T) {
 
 func TestCancelWaitingJobsRetriesCASWithoutRepeatingExternalIntent(t *testing.T) {
 	jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
-		return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1"}}}, nil
+		return waitingJobsResult("batch-1"), nil
 	}}
 	base := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, jobs), 1)
 	suspended, err := base.Submit(context.Background(), "s", "u", ExecutionPlan{
@@ -539,7 +728,7 @@ func TestCancelWaitingJobsRetriesCASWithoutRepeatingExternalIntent(t *testing.T)
 
 func TestCancelWaitingJobsBindsIntentToAuthoritativeBatchAfterConflict(t *testing.T) {
 	jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
-		return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1"}}}, nil
+		return waitingJobsResult("batch-1"), nil
 	}}
 	base := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, jobs), 1)
 	suspended, err := base.Submit(context.Background(), "s", "u", ExecutionPlan{
@@ -564,7 +753,7 @@ func TestCancelWaitingJobsBindsIntentToAuthoritativeBatchAfterConflict(t *testin
 
 func TestCancelRetryConvergesAfterFinalizeAckLoss(t *testing.T) {
 	jobs := schedulerTool{key: "jobs", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
-		return vocabulary.Result{Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": "batch-1"}}}, nil
+		return waitingJobsResult("batch-1"), nil
 	}}
 	baseStore := NewMemoryRunStore()
 	registry := schedulerRegistry(t, jobs)
@@ -602,6 +791,13 @@ func confirmationPlan() ExecutionPlan {
 		{ID: "confirm", Tool: "request_confirmation", Params: map[string]any{"question": "continue?"}, Required: true},
 		{ID: "dispatch", Tool: "dispatch", DependsOn: []string{"confirm"}, Required: true},
 	}}
+}
+
+func waitingJobsResult(batchID string) vocabulary.Result {
+	return vocabulary.Result{
+		Outputs:    map[string]any{"operation_id": "operation-1", "batch_id": batchID, "job_ids": []any{"job-1"}},
+		Suspension: &vocabulary.Suspension{Reason: SuspendWaitingJobs, Payload: map[string]any{"batch_id": batchID}},
+	}
 }
 
 func assertCancelledNodes(t *testing.T, run PlanRun) {

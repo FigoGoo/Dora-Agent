@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -110,15 +111,57 @@ func TestGenerationBridgeCancelsExistingBatchIdempotently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := bridge.CancelBatch(context.Background(), result.BatchID); err != nil {
+	request := BatchCancelRequest{BatchID: result.BatchID, SessionID: "session-1", UserID: "user-1", PlanRunID: "run-1", NodeID: "dispatch"}
+	if err := bridge.CancelBatch(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
-	if err := bridge.CancelBatch(context.Background(), result.BatchID); err != nil {
+	if err := bridge.CancelBatch(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
 	batch, err := store.GetBatch(context.Background(), result.BatchID)
 	if err != nil || !batch.CancelRequested || batch.Status != generation.BatchStatusCancelling {
 		t.Fatalf("batch=%+v err=%v", batch, err)
+	}
+}
+
+func TestGenerationBridgeRejectsBatchOwnershipMismatchWithoutMutation(t *testing.T) {
+	store := generation.NewMemoryStore()
+	commands := generation.NewCommandService(generation.CommandServiceConfig{Store: store})
+	bridge := NewGenerationBridge(commands)
+	result, err := bridge.Dispatch(context.Background(), vocabulary.GenerationDispatchRequest{
+		SessionID: "session-1", UserID: "user-1", PlanRunID: "run-1", NodeID: "dispatch", Attempt: 1,
+		IdempotencyKey: "plan:run-1:dispatch:1",
+		Inputs:         map[string]any{"targets": []any{map[string]any{"prompt": "cinematic rain"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeOutbox, err := store.ListOutbox(context.Background(), generation.OutboxPending, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := BatchCancelRequest{BatchID: result.BatchID, SessionID: "session-1", UserID: "user-1", PlanRunID: "run-1", NodeID: "dispatch"}
+	for name, mutate := range map[string]func(*BatchCancelRequest){
+		"session": func(request *BatchCancelRequest) { request.SessionID = "other-session" },
+		"user":    func(request *BatchCancelRequest) { request.UserID = "other-user" },
+		"run":     func(request *BatchCancelRequest) { request.PlanRunID = "other-run" },
+		"node":    func(request *BatchCancelRequest) { request.NodeID = "other-node" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := base
+			mutate(&request)
+			if err := bridge.CancelBatch(context.Background(), request); !errors.Is(err, generation.ErrBatchOwnershipMismatch) {
+				t.Fatalf("err=%v", err)
+			}
+			batch, err := store.GetBatch(context.Background(), result.BatchID)
+			if err != nil || batch.CancelRequested {
+				t.Fatalf("batch=%+v err=%v", batch, err)
+			}
+			afterOutbox, err := store.ListOutbox(context.Background(), generation.OutboxPending, 100)
+			if err != nil || len(afterOutbox) != len(beforeOutbox) {
+				t.Fatalf("outbox before=%d after=%d err=%v", len(beforeOutbox), len(afterOutbox), err)
+			}
+		})
 	}
 }
 

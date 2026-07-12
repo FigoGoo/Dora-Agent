@@ -47,6 +47,9 @@ func (s *Scheduler) Revise(ctx context.Context, runID string, revision PlanRevis
 		return PlanRun{}, err
 	}
 	for range maxCASRetries {
+		if current.CancelRequested {
+			return current, ErrCancellationPending
+		}
 		if err := ensureRunRevisable(current); err != nil {
 			return current, err
 		}
@@ -58,6 +61,9 @@ func (s *Scheduler) Revise(ctx context.Context, runID string, revision PlanRevis
 		}
 
 		revised, mutateErr := s.store.MutateRun(ctx, current.ID, current.Version, func(next *PlanRun) error {
+			if next.CancelRequested {
+				return ErrCancellationPending
+			}
 			if err := ensureRunRevisable(*next); err != nil {
 				return err
 			}

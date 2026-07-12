@@ -996,12 +996,14 @@ scheduler.Revise(ctx, runID, revision)
 scheduler.Cancel(ctx, runID, reason)
 ```
 
-`Cancel` 是用户主动终止和明确否决的唯一 Runtime 入口：先以 CAS 冻结 durable
-`CancelRequested + CancelReason`（`waiting_jobs` 同时绑定 Batch/Node），再通过现有
-generation command 写入幂等 Batch cancel intent，最后 CAS 收敛 `cancelled`。外部取消
-失败时 Run 保留 intent 且所有推进入口 fail closed；首次 reason 永久冻结，intent 字段在
-`cancelled` 终态保留用于审计和 jobs outcome 重放。未装配 canceller 时不得写 intent，
-也不得只取消本地 Run。
+`Cancel` 是用户主动终止和明确否决的唯一 Runtime 入口。存在 active execution claim 时
+必须返回 busy 且不写 intent，避免 Tool 的迟到外部效果逃逸；非 `waiting_jobs` 直接单 CAS
+收敛 `cancelled`。`waiting_jobs` 才使用两阶段协议：CAS 冻结 durable
+`CancelRequested + CancelReason + Batch/Node`，用 session/user/run/node owner tuple 调现有
+generation command 写入幂等 Batch cancel intent，最后 CAS 收敛 `cancelled`。外部取消失败
+时 Run 保留 intent，`Resume/Revise` fail closed，`Advance` 负责跨实例重发 owned cancel 并
+自治恢复；首次 reason 永久冻结，intent 字段在 `cancelled` 终态保留用于审计和 jobs outcome
+重放。未装配 canceller 时不得写新 intent，也不得只取消本地 Run。
 
 Plan 2 负责：
 

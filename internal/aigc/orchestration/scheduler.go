@@ -210,7 +210,7 @@ func (s *Scheduler) advance(ctx context.Context, runID string) (PlanRun, error) 
 			return PlanRun{}, err
 		}
 		if run.CancelRequested && run.Status != RunStatusCancelled {
-			return run, ErrCancellationPending
+			return s.continueCancellation(ctx, run)
 		}
 		if isTerminalRun(run.Status) || run.Status == RunStatusSuspended {
 			return run, nil

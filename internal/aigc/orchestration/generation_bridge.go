@@ -27,11 +27,14 @@ func NewGenerationBridge(commands *generation.CommandService) *GenerationBridge 
 
 // CancelBatch adapts the durable generation cancellation command to the
 // scheduler's narrow cancellation dependency.
-func (b *GenerationBridge) CancelBatch(ctx context.Context, batchID string) error {
+func (b *GenerationBridge) CancelBatch(ctx context.Context, request BatchCancelRequest) error {
 	if b == nil || b.commands == nil {
 		return errors.New("generation bridge command service is required")
 	}
-	_, err := b.commands.CancelBatch(ctx, batchID)
+	_, err := b.commands.CancelBatchOwned(ctx, generation.CancelBatchOwnedRequest{
+		BatchID: request.BatchID, SessionID: request.SessionID, UserID: request.UserID,
+		WorkflowRunID: request.PlanRunID, StageRunID: request.NodeID,
+	})
 	return err
 }
 

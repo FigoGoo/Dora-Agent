@@ -2,10 +2,21 @@ package generation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
+
+var ErrBatchOwnershipMismatch = errors.New("generation batch ownership mismatch")
+
+type CancelBatchOwnedRequest struct {
+	BatchID       string
+	SessionID     string
+	UserID        string
+	WorkflowRunID string
+	StageRunID    string
+}
 
 type CommandServiceConfig struct {
 	Store WorkflowStore
@@ -61,48 +72,73 @@ func (s *CommandService) CancelBatch(ctx context.Context, batchID string) (Workf
 		return WorkflowAggregate{}, fmt.Errorf("generation command store is required")
 	}
 	return s.store.TransactBatch(ctx, batchID, func(operation *GenerationOperation, batch *GenerationBatch, jobs []*GenerationJob) ([]OutboxEvent, error) {
-		if IsTerminalBatchStatus(batch.Status) {
-			return nil, nil
-		}
-		if batch.CancelRequested {
-			return nil, nil
-		}
-		now := s.clock()
-		batch.CancelRequested = true
-		batch.CancelRequestedAt = &now
-		batch.Status = BatchStatusCancelling
-		events := []OutboxEvent{{
-			IdempotencyKey: "operation:" + operation.ID + ":cancel-requested",
-			EventType:      EventOperationCancelRequested,
-			Destination:    DestinationSessionSignal,
-			Payload:        map[string]any{"batch_id": batch.ID},
-		}}
-		for _, job := range jobs {
-			if IsTerminalJobStatus(job.Status) {
-				continue
-			}
-			job.CancelRequested = true
-			events = append(events, OutboxEvent{
-				IdempotencyKey: "job:" + job.ID + ":cancel-requested",
-				EventType:      EventJobCancelRequested,
-				Destination:    DestinationMediaJobs,
-				AggregateType:  "job",
-				AggregateID:    job.ID,
-				JobID:          job.ID,
-				Payload:        map[string]any{"job_id": job.ID},
-			})
-			if job.Status == StatusQueued && strings.TrimSpace(job.ProviderTaskID) == "" {
-				job.Status = StatusCancelled
-				job.ErrorCode = "cancelled_by_user"
-				job.ErrorMessage = "generation was cancelled before provider submission"
-			}
-		}
-		events = append(events, OutboxEvent{
-			IdempotencyKey: "batch:" + batch.ID + ":finalize-requested:cancel",
-			EventType:      EventBatchFinalizeRequested,
-			Destination:    DestinationSessionSignal,
-			Payload:        map[string]any{"batch_id": batch.ID},
-		})
-		return events, nil
+		return s.applyBatchCancellation(operation, batch, jobs)
 	})
+}
+
+// CancelBatchOwned validates the full workflow owner tuple in the same
+// transaction that freezes cancellation intent.
+func (s *CommandService) CancelBatchOwned(ctx context.Context, request CancelBatchOwnedRequest) (WorkflowAggregate, error) {
+	if s == nil || s.store == nil {
+		return WorkflowAggregate{}, fmt.Errorf("generation command store is required")
+	}
+	if strings.TrimSpace(request.BatchID) == "" || strings.TrimSpace(request.SessionID) == "" ||
+		strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.WorkflowRunID) == "" || strings.TrimSpace(request.StageRunID) == "" {
+		return WorkflowAggregate{}, ErrBatchOwnershipMismatch
+	}
+	return s.store.TransactBatch(ctx, request.BatchID, func(operation *GenerationOperation, batch *GenerationBatch, jobs []*GenerationJob) ([]OutboxEvent, error) {
+		if operation.SessionID != request.SessionID || batch.SessionID != request.SessionID ||
+			operation.UserID != request.UserID || batch.UserID != request.UserID ||
+			operation.WorkflowRunID != request.WorkflowRunID || batch.WorkflowRunID != request.WorkflowRunID ||
+			operation.StageRunID != request.StageRunID || batch.StageRunID != request.StageRunID {
+			return nil, ErrBatchOwnershipMismatch
+		}
+		return s.applyBatchCancellation(operation, batch, jobs)
+	})
+}
+
+func (s *CommandService) applyBatchCancellation(operation *GenerationOperation, batch *GenerationBatch, jobs []*GenerationJob) ([]OutboxEvent, error) {
+	if IsTerminalBatchStatus(batch.Status) {
+		return nil, nil
+	}
+	if batch.CancelRequested {
+		return nil, nil
+	}
+	now := s.clock()
+	batch.CancelRequested = true
+	batch.CancelRequestedAt = &now
+	batch.Status = BatchStatusCancelling
+	events := []OutboxEvent{{
+		IdempotencyKey: "operation:" + operation.ID + ":cancel-requested",
+		EventType:      EventOperationCancelRequested,
+		Destination:    DestinationSessionSignal,
+		Payload:        map[string]any{"batch_id": batch.ID},
+	}}
+	for _, job := range jobs {
+		if IsTerminalJobStatus(job.Status) {
+			continue
+		}
+		job.CancelRequested = true
+		events = append(events, OutboxEvent{
+			IdempotencyKey: "job:" + job.ID + ":cancel-requested",
+			EventType:      EventJobCancelRequested,
+			Destination:    DestinationMediaJobs,
+			AggregateType:  "job",
+			AggregateID:    job.ID,
+			JobID:          job.ID,
+			Payload:        map[string]any{"job_id": job.ID},
+		})
+		if job.Status == StatusQueued && strings.TrimSpace(job.ProviderTaskID) == "" {
+			job.Status = StatusCancelled
+			job.ErrorCode = "cancelled_by_user"
+			job.ErrorMessage = "generation was cancelled before provider submission"
+		}
+	}
+	events = append(events, OutboxEvent{
+		IdempotencyKey: "batch:" + batch.ID + ":finalize-requested:cancel",
+		EventType:      EventBatchFinalizeRequested,
+		Destination:    DestinationSessionSignal,
+		Payload:        map[string]any{"batch_id": batch.ID},
+	})
+	return events, nil
 }
