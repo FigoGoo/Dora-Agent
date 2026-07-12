@@ -53,7 +53,7 @@ func (s *PostgresRunStore) AuthoritativeNow(ctx context.Context) (time.Time, err
 		return time.Time{}, errors.New("postgres run store db is required")
 	}
 	var now time.Time
-	if err := s.db.WithContext(ctx).Raw("SELECT CURRENT_TIMESTAMP").Scan(&now).Error; err != nil {
+	if err := s.db.WithContext(ctx).Raw("SELECT clock_timestamp()").Scan(&now).Error; err != nil {
 		return time.Time{}, fmt.Errorf("read postgres plan run clock: %w", err)
 	}
 	if now.IsZero() {
@@ -109,14 +109,41 @@ func (s *PostgresRunStore) GetRun(ctx context.Context, id string) (PlanRun, erro
 }
 
 func (s *PostgresRunStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
+	if mutate == nil {
+		return PlanRun{}, errors.New("plan run mutation callback is required")
+	}
+	return s.mutateRunLocked(ctx, id, expectedVersion, func(run *PlanRun, _ time.Time) error {
+		return mutate(run)
+	}, false)
+}
+
+// MutateRunAtAuthoritativeNow locks the aggregate before sampling PostgreSQL's
+// wall clock. Lease eligibility and deadline calculation therefore share the
+// same lock and time boundary as the persisted mutation.
+func (s *PostgresRunStore) MutateRunAtAuthoritativeNow(
+	ctx context.Context,
+	id string,
+	expectedVersion int,
+	mutate func(*PlanRun, time.Time) error,
+) (PlanRun, error) {
+	if mutate == nil {
+		return PlanRun{}, errors.New("plan run timed mutation callback is required")
+	}
+	return s.mutateRunLocked(ctx, id, expectedVersion, mutate, true)
+}
+
+func (s *PostgresRunStore) mutateRunLocked(
+	ctx context.Context,
+	id string,
+	expectedVersion int,
+	mutate func(*PlanRun, time.Time) error,
+	readClock bool,
+) (PlanRun, error) {
 	if s == nil || s.db == nil {
 		return PlanRun{}, errors.New("postgres run store db is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return PlanRun{}, err
-	}
-	if mutate == nil {
-		return PlanRun{}, errors.New("plan run mutation callback is required")
 	}
 	var result PlanRun
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -135,11 +162,20 @@ func (s *PostgresRunStore) MutateRun(ctx context.Context, id string, expectedVer
 		if current.Version != expectedVersion {
 			return fmt.Errorf("%w: run %q expected version %d, got %d", ErrRunVersionConflict, id, expectedVersion, current.Version)
 		}
+		var now time.Time
+		if readClock {
+			if err := tx.Raw("SELECT clock_timestamp()").Scan(&now).Error; err != nil {
+				return fmt.Errorf("read locked postgres plan run clock: %w", err)
+			}
+			if now.IsZero() {
+				return errors.New("locked postgres plan run clock returned zero time")
+			}
+		}
 		next, err := clonePlanRun(current)
 		if err != nil {
 			return err
 		}
-		if err := mutate(&next); err != nil {
+		if err := mutate(&next, now); err != nil {
 			return err
 		}
 		if next.ID != current.ID {
@@ -159,8 +195,12 @@ func (s *PostgresRunStore) MutateRun(ctx context.Context, id string, expectedVer
 			"version":    updatedRecord.Version,
 			"payload":    updatedRecord.Payload,
 		}
-		if err := tx.Model(&planRunRecord{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-			return fmt.Errorf("update plan run %q: %w", id, err)
+		updated := tx.Model(&planRunRecord{}).Where("id = ?", id).Updates(updates)
+		if updated.Error != nil {
+			return fmt.Errorf("update plan run %q: %w", id, updated.Error)
+		}
+		if updated.RowsAffected != 1 {
+			return fmt.Errorf("%w: update run %q affected %d rows", ErrRunRecordCorrupt, id, updated.RowsAffected)
 		}
 		result = cloned
 		return nil

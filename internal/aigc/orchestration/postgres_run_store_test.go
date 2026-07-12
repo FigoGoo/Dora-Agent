@@ -14,6 +14,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/storage"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var postgresRunTestSequence atomic.Int64
@@ -312,5 +313,219 @@ func TestSchedulerPostgresLeaseUsesDatabaseClockDespiteProcessSkew(t *testing.T)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("first scheduler did not finish")
+	}
+}
+
+func TestPostgresHeartbeatCannotRenewLeaseThatExpiresWhileWaitingForRowLock(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	id := postgresRunID(t)
+	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
+	now, err := store.AuthoritativeNow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaseUntil := now.Add(800 * time.Millisecond)
+	run := postgresStoreRun(t, id)
+	run.Status = RunStatusRunning
+	run.Nodes["first"] = &NodeRun{
+		StepID: "first", Status: NodeStatusRunning, Attempt: 1, ExecutionEpoch: 1,
+		ExecutionOwner: "owner-a", ExecutionToken: "owner-a:token-a", LeaseUntil: &leaseUntil,
+		ResumeDecision: map[string]any{},
+	}
+	created, err := store.CreateRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lockTx := lockPostgresPlanRun(t, db, id)
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, schedulerTool{key: "persist-test"}), func() string { return "unused" })
+	cfg.OwnerID = "owner-a"
+	cfg.LeaseTTL = 3 * time.Second
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := executionClaim{StepID: "first", Attempt: 1, Epoch: 1, Owner: "owner-a", Token: "owner-a:token-a"}
+	renewed := make(chan error, 1)
+	go func() { renewed <- scheduler.renewClaims(ctx, id, []executionClaim{claim}) }()
+	assertStillBlocked(t, renewed)
+	waitForPostgresTimeAfter(t, store, leaseUntil.Add(100*time.Millisecond))
+	if err := lockTx.Commit().Error; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-renewed:
+		if !errors.Is(err, ErrExecutionClaimLost) {
+			t.Fatalf("renewClaims() error = %v, want ErrExecutionClaimLost", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("renewClaims did not return after releasing row lock")
+	}
+	persisted, err := store.GetRun(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Version != created.Version || !persisted.Nodes["first"].LeaseUntil.Equal(leaseUntil) {
+		t.Fatalf("expired heartbeat changed run: version=%d lease=%v", persisted.Version, persisted.Nodes["first"].LeaseUntil)
+	}
+}
+
+func TestPostgresClaimLeaseStartsAfterWaitingForRowLock(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	id := postgresRunID(t)
+	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
+	run := postgresStoreRun(t, id)
+	run.Status = RunStatusRunning
+	run.Nodes["first"] = &NodeRun{StepID: "first", Status: NodeStatusPending, ResumeDecision: map[string]any{}}
+	created, err := store.CreateRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeWait, err := store.AuthoritativeNow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lockTx := lockPostgresPlanRun(t, db, id)
+	leaseTTL := time.Second
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, schedulerTool{key: "persist-test"}), func() string { return "unused" })
+	cfg.LeaseTTL = leaseTTL
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type claimResult struct {
+		run    PlanRun
+		claims []executionClaim
+		err    error
+	}
+	result := make(chan claimResult, 1)
+	go func() {
+		claimed, claims, claimErr := scheduler.claimReady(ctx, created)
+		result <- claimResult{run: claimed, claims: claims, err: claimErr}
+	}()
+	assertStillBlocked(t, result)
+	waitForPostgresTimeAfter(t, store, beforeWait.Add(leaseTTL+300*time.Millisecond))
+	if err := lockTx.Commit().Error; err != nil {
+		t.Fatal(err)
+	}
+	var got claimResult
+	select {
+	case got = <-result:
+	case <-time.After(5 * time.Second):
+		t.Fatal("claimReady did not return after releasing row lock")
+	}
+	if got.err != nil || len(got.claims) != 1 {
+		t.Fatalf("claimReady() run=%+v claims=%+v err=%v", got.run, got.claims, got.err)
+	}
+	afterClaim, err := store.AuthoritativeNow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := got.run.Nodes["first"].LeaseUntil
+	if lease == nil || !lease.After(afterClaim.Add(700*time.Millisecond)) {
+		t.Fatalf("lease=%v database_now=%v; lease did not start after row lock", lease, afterClaim)
+	}
+}
+
+func TestPostgresReclaimChecksExpiryAfterWaitingForRowLock(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	id := postgresRunID(t)
+	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
+	now, err := store.AuthoritativeNow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldLease := now.Add(800 * time.Millisecond)
+	run := postgresStoreRun(t, id)
+	run.Status = RunStatusRunning
+	run.Nodes["first"] = &NodeRun{
+		StepID: "first", Status: NodeStatusRunning, Attempt: 1, ExecutionEpoch: 1,
+		ExecutionOwner: "owner-old", ExecutionToken: "owner-old:token-old", LeaseUntil: &oldLease,
+		ResumeDecision: map[string]any{},
+	}
+	created, err := store.CreateRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lockTx := lockPostgresPlanRun(t, db, id)
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, schedulerTool{key: "persist-test"}), func() string { return "unused" })
+	cfg.OwnerID = "owner-new"
+	cfg.LeaseTTL = time.Second
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type reclaimResult struct {
+		run    PlanRun
+		claims []executionClaim
+		err    error
+	}
+	result := make(chan reclaimResult, 1)
+	go func() {
+		claimed, claims, claimErr := scheduler.claimReady(ctx, created)
+		result <- reclaimResult{run: claimed, claims: claims, err: claimErr}
+	}()
+	assertStillBlocked(t, result)
+	waitForPostgresTimeAfter(t, store, oldLease.Add(100*time.Millisecond))
+	if err := lockTx.Commit().Error; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-result:
+		if got.err != nil || len(got.claims) != 1 {
+			t.Fatalf("reclaim run=%+v claims=%+v err=%v", got.run, got.claims, got.err)
+		}
+		node := got.run.Nodes["first"]
+		if node.ExecutionOwner != "owner-new" || node.ExecutionEpoch != 2 || node.Attempt != 1 {
+			t.Fatalf("reclaimed node = %+v", node)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("reclaim did not return after releasing row lock")
+	}
+}
+
+func lockPostgresPlanRun(t *testing.T, db *gorm.DB, id string) *gorm.DB {
+	t.Helper()
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	t.Cleanup(func() { _ = tx.Rollback().Error })
+	var record planRunRecord
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&record, "id = ?", id).Error; err != nil {
+		t.Fatal(err)
+	}
+	return tx
+}
+
+func waitForPostgresTimeAfter(t *testing.T, store *PostgresRunStore, target time.Time) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		now, err := store.AuthoritativeNow(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if now.After(target) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("database clock did not pass %v", target)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func assertStillBlocked[T any](t *testing.T, result <-chan T) {
+	t.Helper()
+	select {
+	case got := <-result:
+		t.Fatalf("operation returned before row lock release: %+v", got)
+	case <-time.After(150 * time.Millisecond):
 	}
 }

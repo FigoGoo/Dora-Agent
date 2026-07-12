@@ -44,6 +44,10 @@ type authoritativeClock interface {
 	AuthoritativeNow(context.Context) (time.Time, error)
 }
 
+type authoritativeTimedRunStore interface {
+	MutateRunAtAuthoritativeNow(context.Context, string, int, func(*PlanRun, time.Time) error) (PlanRun, error)
+}
+
 type Scheduler struct {
 	store              RunStore
 	vocabulary         *vocabulary.Registry
@@ -125,6 +129,24 @@ func (s *Scheduler) authoritativeNow(ctx context.Context) (time.Time, error) {
 		return s.authoritativeClock.AuthoritativeNow(ctx)
 	}
 	return s.now(), nil
+}
+
+func (s *Scheduler) mutateRunAtAuthoritativeNow(
+	ctx context.Context,
+	runID string,
+	expectedVersion int,
+	mutate func(*PlanRun, time.Time) error,
+) (PlanRun, error) {
+	if store, ok := s.store.(authoritativeTimedRunStore); ok {
+		return store.MutateRunAtAuthoritativeNow(ctx, runID, expectedVersion, mutate)
+	}
+	now, err := s.authoritativeNow(ctx)
+	if err != nil {
+		return PlanRun{}, err
+	}
+	return s.store.MutateRun(ctx, runID, expectedVersion, func(run *PlanRun) error {
+		return mutate(run, now)
+	})
 }
 
 func isNilGuard(guard vocabulary.Guard) bool {

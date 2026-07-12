@@ -26,15 +26,8 @@ type executionClaim struct {
 func (s *Scheduler) claimReady(ctx context.Context, run PlanRun) (PlanRun, []executionClaim, error) {
 	current := run
 	for range maxCASRetries {
-		now, err := s.authoritativeNow(ctx)
-		if err != nil {
-			return current, nil, err
-		}
-		if !hasClaimableNode(current, now) {
-			return current, nil, nil
-		}
 		var claims []executionClaim
-		claimed, err := s.store.MutateRun(ctx, current.ID, current.Version, func(next *PlanRun) error {
+		claimed, err := s.mutateRunAtAuthoritativeNow(ctx, current.ID, current.Version, func(next *PlanRun, now time.Time) error {
 			for _, step := range next.Plan.Steps {
 				if len(claims) == s.maxParallel {
 					break
@@ -89,15 +82,6 @@ func (s *Scheduler) claimReady(ctx context.Context, run PlanRun) (PlanRun, []exe
 	return current, nil, fmt.Errorf("%w: claim exceeded retry limit", ErrRunVersionConflict)
 }
 
-func hasClaimableNode(run PlanRun, now time.Time) bool {
-	for _, step := range run.Plan.Steps {
-		if nodeClaimable(run, step, run.Nodes[step.ID], now) {
-			return true
-		}
-	}
-	return false
-}
-
 func nodeClaimable(run PlanRun, step PlanStep, node *NodeRun, now time.Time) bool {
 	if node == nil {
 		return false
@@ -118,22 +102,51 @@ func nodeClaimable(run PlanRun, step PlanStep, node *NodeRun, now time.Time) boo
 }
 
 func (s *Scheduler) renewClaims(ctx context.Context, runID string, claims []executionClaim) error {
-	now, err := s.authoritativeNow(ctx)
+	current, err := s.store.GetRun(ctx, runID)
 	if err != nil {
 		return err
 	}
-	renewed, err := s.mutateMatchingClaims(ctx, runID, claims, func(node *NodeRun) bool {
-		return node.LeaseUntil != nil && node.LeaseUntil.After(now)
-	}, func(node *NodeRun) {
-		leaseUntil := now.Add(s.leaseTTL)
-		node.LeaseUntil = &leaseUntil
-	})
-	if err != nil {
-		return err
+	var renewed PlanRun
+	var checkedAt time.Time
+	for range maxCASRetries {
+		renewed, err = s.mutateRunAtAuthoritativeNow(ctx, runID, current.Version, func(next *PlanRun, now time.Time) error {
+			checkedAt = now
+			applied := 0
+			for _, claim := range claims {
+				node := next.Nodes[claim.StepID]
+				if !claimMatches(node, claim) || node.LeaseUntil == nil || !node.LeaseUntil.After(now) {
+					continue
+				}
+				leaseUntil := now.Add(s.leaseTTL)
+				node.LeaseUntil = &leaseUntil
+				applied++
+			}
+			if applied == 0 {
+				return errNoClaimMutation
+			}
+			return nil
+		})
+		if err == nil {
+			break
+		}
+		if errors.Is(err, errNoClaimMutation) {
+			renewed = current
+			break
+		}
+		if !errors.Is(err, ErrRunVersionConflict) {
+			return err
+		}
+		current, err = s.store.GetRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+	}
+	if err != nil && !errors.Is(err, errNoClaimMutation) {
+		return fmt.Errorf("%w: heartbeat exceeded retry limit", ErrRunVersionConflict)
 	}
 	for _, claim := range claims {
 		node := renewed.Nodes[claim.StepID]
-		if !claimMatches(node, claim) || node.LeaseUntil == nil || !node.LeaseUntil.After(now) {
+		if !claimMatches(node, claim) || node.LeaseUntil == nil || !node.LeaseUntil.After(checkedAt) {
 			return fmt.Errorf("%w: run %q step %q epoch %d", ErrExecutionClaimLost, runID, claim.StepID, claim.Epoch)
 		}
 	}
