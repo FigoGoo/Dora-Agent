@@ -256,7 +256,7 @@ func (s *MemoryStore) CreateWorkflow(_ context.Context, command CreateWorkflowCo
 		if job.AssetSlot == "" {
 			job.AssetSlot = job.BindingToken.AssetSlot
 		}
-		if strings.TrimSpace(job.StoryboardID) != "" {
+		if strings.TrimSpace(job.StoryboardID) != "" || job.BindingToken.NormalizedKind() == TargetKindSessionDeliverable {
 			if err := job.BindingToken.Validate(); err != nil {
 				return WorkflowAggregate{}, false, fmt.Errorf("job %s: %w", job.ID, err)
 			}
