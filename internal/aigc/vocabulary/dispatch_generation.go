@@ -82,7 +82,7 @@ func (t *dispatchGenerationTool) Run(ctx context.Context, call Call) (Result, er
 		return Result{}, fmt.Errorf("dispatch_generation: %w", err)
 	}
 	if strings.TrimSpace(dispatched.BatchID) == "" {
-		return Result{Fail: &Failure{Code: "invalid_dispatch_result", Message: "dispatcher returned an empty batch_id"}}, nil
+		return Result{}, errors.New("dispatch_generation: dispatcher returned an empty batch_id")
 	}
 	outputJobIDs := append([]string(nil), dispatched.JobIDs...)
 	payloadJobIDs := append([]string(nil), dispatched.JobIDs...)

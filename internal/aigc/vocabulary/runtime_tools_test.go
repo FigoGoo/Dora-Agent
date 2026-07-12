@@ -31,6 +31,17 @@ type fakeGenerationDispatcher struct {
 	mutate   bool
 }
 
+type scriptedGenerationDispatcher struct {
+	results []GenerationDispatchResult
+	calls   int
+}
+
+func (f *scriptedGenerationDispatcher) Dispatch(context.Context, GenerationDispatchRequest) (GenerationDispatchResult, error) {
+	result := f.results[f.calls]
+	f.calls++
+	return result, nil
+}
+
 func (f *fakeGenerationDispatcher) Dispatch(_ context.Context, request GenerationDispatchRequest) (GenerationDispatchResult, error) {
 	clonedInputs, cloneErr := cloneJSONMap(request.Inputs)
 	if cloneErr != nil {
@@ -350,11 +361,28 @@ func TestRuntimeToolsDispatchGenerationBoundaries(t *testing.T) {
 		}
 	})
 
-	t.Run("empty batch is invalid dispatcher result", func(t *testing.T) {
+	t.Run("empty batch is an invalid infrastructure receipt", func(t *testing.T) {
 		result, err := NewDispatchGenerationTool(&fakeGenerationDispatcher{result: GenerationDispatchResult{OperationID: "operation-1"}}).
 			Run(context.Background(), validDispatchCall())
-		if err != nil || result.Fail == nil || result.Fail.Code != "invalid_dispatch_result" || result.Suspension != nil {
+		if err == nil || !strings.Contains(err.Error(), "dispatch_generation") || !strings.Contains(err.Error(), "batch_id") || !reflect.DeepEqual(result, Result{}) {
 			t.Fatalf("result=%+v err=%v", result, err)
+		}
+	})
+
+	t.Run("invalid receipt does not cache failure for the same idempotency key", func(t *testing.T) {
+		dispatcher := &scriptedGenerationDispatcher{results: []GenerationDispatchResult{
+			{OperationID: "operation-1", BatchID: " "},
+			{OperationID: "operation-1", BatchID: "batch-recovered", JobIDs: []string{"job-1"}},
+		}}
+		tool := NewDispatchGenerationTool(dispatcher)
+		call := validDispatchCall()
+		first, firstErr := tool.Run(context.Background(), call)
+		second, secondErr := tool.Run(context.Background(), call)
+		if firstErr == nil || !reflect.DeepEqual(first, Result{}) {
+			t.Fatalf("first=%+v err=%v", first, firstErr)
+		}
+		if secondErr != nil || second.Outputs["batch_id"] != "batch-recovered" || dispatcher.calls != 2 {
+			t.Fatalf("second=%+v err=%v calls=%d", second, secondErr, dispatcher.calls)
 		}
 	})
 
