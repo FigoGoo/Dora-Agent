@@ -674,6 +674,80 @@ func TestPostgresRunStoreAutoMigrateRejectsNilDB(t *testing.T) {
 	}
 }
 
+func TestPostgresRunStoreAutoMigrateWaitsForGlobalMigrationLock(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	holder := db.WithContext(ctx).Begin()
+	if holder.Error != nil {
+		t.Fatal(holder.Error)
+	}
+	t.Cleanup(func() { _ = holder.Rollback().Error })
+	if err := holder.Exec("SELECT pg_advisory_xact_lock(?)", planRunMigrationAdvisoryKey).Error; err != nil {
+		t.Fatal(err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	err := store.AutoMigrate(waitCtx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("AutoMigrate() while lock held error = %v", err)
+	}
+	if err := holder.Rollback().Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AutoMigrate(ctx); err != nil {
+		t.Fatalf("AutoMigrate() after lock release error = %v", err)
+	}
+}
+
+func TestPostgresRunStoreAutoMigrateSerializesIndependentPools(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	const callers = 8
+	stores := make([]*PostgresRunStore, 0, callers)
+	for range callers {
+		db, err := storage.OpenAgentPostgres(ctx, aigcconfig.LoadFromEnv())
+		if err != nil {
+			if len(stores) == 0 {
+				t.Skipf("agent postgres unavailable: %v", err)
+			}
+			t.Fatal(err)
+		}
+		sqlDB, err := db.DB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+		t.Cleanup(func() { _ = sqlDB.Close() })
+		stores = append(stores, NewPostgresRunStore(db))
+	}
+	start := make(chan struct{})
+	results := make(chan error, len(stores))
+	for _, store := range stores {
+		store := store
+		go func() {
+			<-start
+			results <- store.AutoMigrate(ctx)
+		}()
+	}
+	close(start)
+	for range stores {
+		err := <-results
+		var postgresErr *pgconn.PgError
+		if errors.As(err, &postgresErr) && postgresErr.Code == "40P01" {
+			t.Fatalf("concurrent migration deadlocked: %v", err)
+		}
+		if err != nil {
+			t.Fatalf("concurrent migration error = %v", err)
+		}
+	}
+	var indexes int64
+	db := stores[0].db
+	if err := db.WithContext(ctx).Raw(`SELECT count(*) FROM pg_indexes WHERE tablename = 'aigc_plan_runs' AND indexname IN (?, ?)`, activeRunSessionIndex, requestKeySessionIndex).Scan(&indexes).Error; err != nil || indexes != 2 {
+		t.Fatalf("migration indexes=%d err=%v", indexes, err)
+	}
+}
+
 func TestSchedulerRecoversSuspendedRunFromPostgres(t *testing.T) {
 	store, db := openPostgresRunStore(t)
 	id := postgresRunID(t)

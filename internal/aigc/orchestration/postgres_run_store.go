@@ -18,6 +18,9 @@ const (
 	activeRunSessionIndex       = "idx_aigc_plan_runs_one_active_session"
 	requestKeySessionIndex      = "idx_aigc_plan_runs_session_request_key"
 	planRunPrimaryKeyConstraint = "aigc_plan_runs_pkey"
+	// Serialize every plan-run schema migration before any DDL. PostgreSQL can
+	// otherwise deadlock concurrent AutoMigrate transactions on catalog locks.
+	planRunMigrationAdvisoryKey int64 = 0x444f5241504c414e
 )
 
 type runAlreadyExistsConstraintError struct {
@@ -73,6 +76,9 @@ func (s *PostgresRunStore) AutoMigrate(ctx context.Context) error {
 		return errors.New("postgres run store db is required")
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", planRunMigrationAdvisoryKey).Error; err != nil {
+			return fmt.Errorf("lock plan run migrations: %w", err)
+		}
 		if err := tx.AutoMigrate(&planRunRecord{}); err != nil {
 			return fmt.Errorf("migrate plan runs: %w", err)
 		}
