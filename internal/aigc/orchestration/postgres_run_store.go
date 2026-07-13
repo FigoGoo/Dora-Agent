@@ -94,8 +94,8 @@ func (s *PostgresRunStore) AutoMigrate(ctx context.Context) error {
 				AND COALESCE(payload ->> 'submit_request_fingerprint', '') <> ''`).Error; err != nil {
 			return fmt.Errorf("promote plan run submit fingerprints: %w", err)
 		}
-		if err := tx.Exec(`ALTER TABLE aigc_plan_runs ALTER COLUMN request_key SET NOT NULL`).Error; err != nil {
-			return fmt.Errorf("require plan run request keys: %w", err)
+		if err := tx.Exec(`ALTER TABLE aigc_plan_runs ALTER COLUMN request_key DROP NOT NULL`).Error; err != nil {
+			return fmt.Errorf("allow rolling plan run request keys: %w", err)
 		}
 		if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + requestKeySessionIndex + `
 			ON aigc_plan_runs (session_id, request_key)`).Error; err != nil {
@@ -237,7 +237,9 @@ func (s *PostgresRunStore) GetRunByRequestKey(ctx context.Context, sessionID, re
 		return PlanRun{}, err
 	}
 	var records []planRunRecord
-	query := s.db.WithContext(ctx).Where("session_id = ? AND request_key = ?", sessionID, requestKey).Limit(2).Find(&records)
+	query := s.db.WithContext(ctx).
+		Where("session_id = ? AND (request_key = ? OR ((request_key IS NULL OR request_key = '') AND id = ?))", sessionID, requestKey, requestKey).
+		Limit(2).Find(&records)
 	if query.Error != nil {
 		return PlanRun{}, fmt.Errorf("get plan run by request key: %w", query.Error)
 	}
@@ -416,7 +418,11 @@ func decodePlanRunRecord(record planRunRecord) (PlanRun, error) {
 		return PlanRun{}, fmt.Errorf("%w: decode run %q payload: %v", ErrRunRecordCorrupt, record.ID, err)
 	}
 	if run.RequestKey == "" {
-		run.RequestKey = record.RequestKey
+		if record.RequestKey == "" {
+			run.RequestKey = record.ID
+		} else {
+			run.RequestKey = record.RequestKey
+		}
 	} else if run.RequestKey != record.RequestKey {
 		return PlanRun{}, fmt.Errorf("%w: run %q request key metadata does not match payload", ErrRunRecordCorrupt, record.ID)
 	}

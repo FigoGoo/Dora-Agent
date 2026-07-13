@@ -194,7 +194,7 @@ func TestSchedulerReturnsJoinedErrorWhenAmbiguousCreateReadFailsThenReplayRecove
 		t.Fatalf("tool calls after uncertain read = %d", calls.Load())
 	}
 	recovered, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "request-retry", plan)
-	if err != nil || recovered.ID != "ambiguous" || recovered.Status != RunStatusSucceeded || calls.Load() != 1 {
+	if err != nil || recovered.ID != "ambiguous" || recovered.Status != RunStatusRunning || calls.Load() != 0 {
 		t.Fatalf("replayed Submit() = %+v, calls=%d, err=%v", recovered, calls.Load(), err)
 	}
 }
@@ -427,9 +427,99 @@ func TestSchedulerSubmitWithKeyReplaysTerminalRunAndRejectsConflicts(t *testing.
 		t.Fatalf("same-key changed-user error = %v", err)
 	}
 	newRun, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "message-2", plan)
-	if err != nil || newRun.ID != "keyed-5" || calls.Load() != 2 {
+	if err != nil || newRun.ID != "keyed-2" || calls.Load() != 2 {
 		t.Fatalf("new keyed request = %+v calls=%d err=%v", newRun, calls.Load(), err)
 	}
+}
+
+func TestSchedulerSubmitWithKeyPreflightReplaysWithoutRegistryOrNewID(t *testing.T) {
+	store := NewMemoryRunStore()
+	tool := schedulerTool{key: "preflight"}
+	creatorCfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { return "preflight-run" })
+	creator, _ := NewScheduler(creatorCfg)
+	plan := activeTestPlan("preflight", "preflight")
+	created, err := creator.SubmitWithKey(context.Background(), "session", "user", "message-preflight", plan)
+	if err != nil || created.Status != RunStatusSucceeded {
+		t.Fatalf("create = %+v, %v", created, err)
+	}
+	emptyRegistry := vocabulary.NewRegistry()
+	replayCfg := schedulerConfigForTest(store, emptyRegistry, func() string { panic("NewID called during replay") })
+	replay, _ := NewScheduler(replayCfg)
+	replayed, err := replay.SubmitWithKey(context.Background(), "session", "user", "message-preflight", plan)
+	if err != nil || replayed.ID != created.ID || replayed.Version != created.Version {
+		t.Fatalf("replay = %+v, %v", replayed, err)
+	}
+	changed := plan
+	changed.PlanID = "changed"
+	if _, err := replay.SubmitWithKey(context.Background(), "session", "user", "message-preflight", changed); !errors.Is(err, ErrSubmitRequestConflict) {
+		t.Fatalf("changed replay error = %v", err)
+	}
+}
+
+func TestSchedulerSubmitWithKeyNewRequestValidatesBeforeNewID(t *testing.T) {
+	store := NewMemoryRunStore()
+	var idCalls atomic.Int32
+	cfg := schedulerConfigForTest(store, vocabulary.NewRegistry(), func() string { idCalls.Add(1); return "must-not-create" })
+	scheduler, _ := NewScheduler(cfg)
+	_, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "new-message", activeTestPlan("invalid", "missing"))
+	if !errors.Is(err, ErrPlanInvalid) || idCalls.Load() != 0 {
+		t.Fatalf("SubmitWithKey() error=%v idCalls=%d", err, idCalls.Load())
+	}
+}
+
+func TestSchedulerSubmitWithKeyPreflightReturnsSuspendedAndRunningSnapshotsReadOnly(t *testing.T) {
+	t.Run("suspended", func(t *testing.T) {
+		store := NewMemoryRunStore()
+		tool := schedulerTool{key: "preflight-state"}
+		creatorCfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { return "suspended-preflight" })
+		creatorCfg.JobBudget = 1
+		creator, _ := NewScheduler(creatorCfg)
+		plan := activeTestPlan("suspended", "preflight-state")
+		plan.EstimatedJobs = 2
+		created, err := creator.SubmitWithKey(context.Background(), "session", "user", "message-suspended", plan)
+		if err != nil || created.Status != RunStatusSuspended {
+			t.Fatalf("create = %+v, %v", created, err)
+		}
+		replayCfg := schedulerConfigForTest(store, vocabulary.NewRegistry(), func() string { panic("NewID called") })
+		replay, _ := NewScheduler(replayCfg)
+		got, err := replay.SubmitWithKey(context.Background(), "session", "user", "message-suspended", plan)
+		if err != nil || got.ID != created.ID || got.Version != created.Version || got.Status != RunStatusSuspended {
+			t.Fatalf("replay = %+v, %v", got, err)
+		}
+	})
+	t.Run("running", func(t *testing.T) {
+		store := NewMemoryRunStore()
+		started := make(chan struct{})
+		release := make(chan struct{})
+		var calls atomic.Int32
+		tool := schedulerTool{key: "preflight-running", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+			if calls.Add(1) == 1 {
+				close(started)
+			}
+			<-release
+			return vocabulary.Result{}, nil
+		}}
+		creatorCfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { return "running-preflight" })
+		creator, _ := NewScheduler(creatorCfg)
+		plan := activeTestPlan("running", "preflight-running")
+		done := make(chan error, 1)
+		go func() {
+			_, err := creator.SubmitWithKey(context.Background(), "session", "user", "message-running", plan)
+			done <- err
+		}()
+		<-started
+		replayCfg := schedulerConfigForTest(store, vocabulary.NewRegistry(), func() string { panic("NewID called") })
+		replay, _ := NewScheduler(replayCfg)
+		got, err := replay.SubmitWithKey(context.Background(), "session", "user", "message-running", plan)
+		if err != nil || got.ID != "running-preflight" || got.Status != RunStatusRunning || calls.Load() != 1 {
+			close(release)
+			t.Fatalf("replay = %+v calls=%d err=%v", got, calls.Load(), err)
+		}
+		close(release)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestSchedulerSubmitWithKeyValidatesKey(t *testing.T) {

@@ -499,6 +499,34 @@ func TestPostgresRunStoreAutoMigratePromotesExistingPayloadFingerprintToMetadata
 	}
 }
 
+func TestPostgresRunStoreMigrationAllowsOldWriterInsertWithoutIdentityColumns(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	id := postgresRunID(t)
+	sessionID := id + "-old-insert-session"
+	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
+	legacy := PlanRun{ID: id, SessionID: sessionID, UserID: "legacy-user", Status: RunStatusSucceeded, Version: 1, Nodes: map[string]*NodeRun{}}
+	payload, err := clonePlanRunJSON(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WithContext(ctx).Exec(`INSERT INTO aigc_plan_runs (id, session_id, status, version, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?::jsonb, now(), now())`, id, sessionID, RunStatusSucceeded, 1, string(payload)).Error; err != nil {
+		t.Fatalf("old writer insert error = %v", err)
+	}
+	loaded, err := store.GetRun(ctx, id)
+	if err != nil || loaded.RequestKey != id || loaded.SubmitRequestFingerprint != "" {
+		t.Fatalf("legacy GetRun() = %+v, %v", loaded, err)
+	}
+	byKey, err := store.GetRunByRequestKey(ctx, sessionID, id)
+	if err != nil || byKey.ID != id || byKey.SubmitRequestFingerprint != "" {
+		t.Fatalf("legacy key lookup = %+v, %v", byKey, err)
+	}
+	scheduler := schedulerForTest(t, store, schedulerRegistry(t, schedulerTool{key: "legacy-insert"}), 1)
+	if _, err := scheduler.SubmitWithKey(ctx, sessionID, "legacy-user", id, activeTestPlan("legacy", "legacy-insert")); !errors.Is(err, ErrSubmitRequestConflict) {
+		t.Fatalf("legacy SubmitWithKey error = %v", err)
+	}
+}
+
 func TestPostgresRunStoreHydratesIdentityFieldsDroppedByOldWriter(t *testing.T) {
 	store, db := openPostgresRunStore(t)
 	ctx := context.Background()

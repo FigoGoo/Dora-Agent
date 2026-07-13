@@ -162,6 +162,25 @@ func (s *Scheduler) submit(ctx context.Context, sessionID, userID, requestKey st
 	if explicitKey && !submitRequestKeyPattern.MatchString(requestKey) {
 		return PlanRun{}, fmt.Errorf("%w: key must be 1-128 characters using letters, digits, '.', '_', ':', or '-'", ErrSubmitRequestKeyInvalid)
 	}
+	var fingerprint string
+	if explicitKey {
+		var err error
+		fingerprint, err = computeSubmitRequestFingerprint(sessionID, userID, requestKey, plan)
+		if err != nil {
+			return PlanRun{}, fmt.Errorf("compute submit request fingerprint: %w", err)
+		}
+		existing, err := s.store.GetRunByRequestKey(ctx, sessionID, requestKey)
+		if err == nil {
+			requested := PlanRun{RequestKey: requestKey, SubmitRequestFingerprint: fingerprint, SessionID: sessionID, UserID: userID}
+			if !sameSubmitRequest(existing, requested) {
+				return PlanRun{}, fmt.Errorf("%w: request key %q", ErrSubmitRequestConflict, requestKey)
+			}
+			return existing, nil
+		}
+		if !errors.Is(err, ErrRunNotFound) {
+			return PlanRun{}, err
+		}
+	}
 	if err := plan.Validate(s.vocabulary, s.jobBudget); err != nil {
 		return PlanRun{}, err
 	}
@@ -175,6 +194,11 @@ func (s *Scheduler) submit(ctx context.Context, sessionID, userID, requestKey st
 	if !explicitKey {
 		digest := sha256.Sum256([]byte(runID))
 		requestKey = "one-shot:" + hex.EncodeToString(digest[:])
+		var err error
+		fingerprint, err = computeSubmitRequestFingerprint(sessionID, userID, requestKey, plan)
+		if err != nil {
+			return PlanRun{}, fmt.Errorf("compute submit request fingerprint: %w", err)
+		}
 	}
 	nodes := make(map[string]*NodeRun, len(plan.Steps))
 	for _, step := range plan.Steps {
@@ -198,16 +222,16 @@ func (s *Scheduler) submit(ctx context.Context, sessionID, userID, requestKey st
 		PreviewRequired: previewRequired, ResumeKey: resumeKey, Nodes: nodes,
 		ResumeDecisionSchema: resumeDecisionSchema,
 	}
-	fingerprint, err := computeSubmitRequestFingerprint(sessionID, userID, requestKey, plan)
-	if err != nil {
-		return PlanRun{}, fmt.Errorf("compute submit request fingerprint: %w", err)
-	}
 	requested.SubmitRequestFingerprint = fingerprint
 	created, err := s.store.CreateRun(ctx, requested)
 	if err != nil {
-		created, err = s.recoverCreate(ctx, requested, explicitKey, err)
+		var shouldAdvance bool
+		created, shouldAdvance, err = s.recoverCreate(ctx, requested, explicitKey, err)
 		if err != nil {
 			return PlanRun{}, err
+		}
+		if !shouldAdvance {
+			return created, nil
 		}
 	}
 	if created.Status == RunStatusSuspended {
@@ -216,54 +240,55 @@ func (s *Scheduler) submit(ctx context.Context, sessionID, userID, requestKey st
 	return s.Advance(ctx, created.ID)
 }
 
-func (s *Scheduler) recoverCreate(ctx context.Context, requested PlanRun, explicitKey bool, createErr error) (PlanRun, error) {
+func (s *Scheduler) recoverCreate(ctx context.Context, requested PlanRun, explicitKey bool, createErr error) (PlanRun, bool, error) {
 	if errors.Is(createErr, ErrRunAlreadyExists) {
 		if !explicitKey {
-			return PlanRun{}, createErr
+			return PlanRun{}, false, createErr
 		}
 		existing, requestErr := s.store.GetRunByRequestKey(ctx, requested.SessionID, requested.RequestKey)
 		if requestErr == nil {
 			if sameSubmitRequest(existing, requested) {
-				return existing, nil
+				return existing, false, nil
 			}
-			return PlanRun{}, errors.Join(fmt.Errorf("%w: request key %q", ErrSubmitRequestConflict, requested.RequestKey), createErr)
+			return PlanRun{}, false, errors.Join(fmt.Errorf("%w: request key %q", ErrSubmitRequestConflict, requested.RequestKey), createErr)
 		}
 		if !errors.Is(requestErr, ErrRunNotFound) {
-			return PlanRun{}, errors.Join(createErr, requestErr)
+			return PlanRun{}, false, errors.Join(createErr, requestErr)
 		}
-		return PlanRun{}, createErr
+		return PlanRun{}, false, createErr
 	}
 	byID, getErr := s.store.GetRun(ctx, requested.ID)
 	if getErr == nil {
 		if sameSubmitRequest(byID, requested) {
-			return byID, nil
+			return byID, true, nil
 		}
-		return PlanRun{}, errors.Join(createErr, fmt.Errorf("%w: created run %q does not match submit request", ErrRunRecordCorrupt, requested.ID))
+		return PlanRun{}, false, errors.Join(createErr, fmt.Errorf("%w: created run %q does not match submit request", ErrRunRecordCorrupt, requested.ID))
 	}
 	if !errors.Is(getErr, ErrRunNotFound) {
-		return PlanRun{}, errors.Join(createErr, getErr)
+		return PlanRun{}, false, errors.Join(createErr, getErr)
 	}
 	if errors.Is(createErr, ErrSubmitRequestKeyExists) {
 		existing, requestErr := s.store.GetRunByRequestKey(ctx, requested.SessionID, requested.RequestKey)
 		if requestErr != nil {
-			return PlanRun{}, errors.Join(createErr, requestErr)
+			return PlanRun{}, false, errors.Join(createErr, requestErr)
 		}
 		if !sameSubmitRequest(existing, requested) {
-			return PlanRun{}, errors.Join(
+			return PlanRun{}, false, errors.Join(
 				fmt.Errorf("%w: request key %q", ErrSubmitRequestConflict, requested.RequestKey),
 				createErr,
 			)
 		}
-		return existing, nil
+		return existing, false, nil
 	}
 	if !errors.Is(createErr, ErrSessionActiveRun) {
-		return PlanRun{}, createErr
+		return PlanRun{}, false, createErr
 	}
-	return PlanRun{}, createErr
+	return PlanRun{}, false, createErr
 }
 
 func sameSubmitRequest(authoritative, requested PlanRun) bool {
-	return authoritative.SubmitRequestFingerprint != "" &&
+	return authoritative.RequestKey == requested.RequestKey && authoritative.SessionID == requested.SessionID && authoritative.UserID == requested.UserID &&
+		authoritative.SubmitRequestFingerprint != "" &&
 		authoritative.SubmitRequestFingerprint == requested.SubmitRequestFingerprint
 }
 
