@@ -99,25 +99,26 @@ type GuardApprovalReceipt struct {
 }
 
 type PlanRun struct {
-	ID                   string              `json:"id"`
-	RequestKey           string              `json:"request_key"`
-	SessionID            string              `json:"session_id"`
-	UserID               string              `json:"user_id"`
-	Plan                 ExecutionPlan       `json:"plan"`
-	Status               string              `json:"status"`
-	SuspendReason        string              `json:"suspend_reason,omitempty"`
-	SuspendedNodeID      string              `json:"suspended_node_id,omitempty"`
-	PreviewRequired      bool                `json:"preview_required,omitempty"`
-	ResumeKey            string              `json:"resume_key,omitempty"`
-	Resumed              bool                `json:"resumed,omitempty"`
-	ResumeDecision       map[string]any      `json:"resume_decision"`
-	ResumeDecisionSchema string              `json:"resume_decision_schema,omitempty"`
-	CancelRequested      bool                `json:"cancel_requested,omitempty"`
-	CancelBatchID        string              `json:"cancel_batch_id,omitempty"`
-	CancelNodeID         string              `json:"cancel_node_id,omitempty"`
-	CancelReason         string              `json:"cancel_reason,omitempty"`
-	Nodes                map[string]*NodeRun `json:"nodes"`
-	Version              int                 `json:"version"`
+	ID                       string              `json:"id"`
+	RequestKey               string              `json:"request_key"`
+	SubmitRequestFingerprint string              `json:"submit_request_fingerprint"`
+	SessionID                string              `json:"session_id"`
+	UserID                   string              `json:"user_id"`
+	Plan                     ExecutionPlan       `json:"plan"`
+	Status                   string              `json:"status"`
+	SuspendReason            string              `json:"suspend_reason,omitempty"`
+	SuspendedNodeID          string              `json:"suspended_node_id,omitempty"`
+	PreviewRequired          bool                `json:"preview_required,omitempty"`
+	ResumeKey                string              `json:"resume_key,omitempty"`
+	Resumed                  bool                `json:"resumed,omitempty"`
+	ResumeDecision           map[string]any      `json:"resume_decision"`
+	ResumeDecisionSchema     string              `json:"resume_decision_schema,omitempty"`
+	CancelRequested          bool                `json:"cancel_requested,omitempty"`
+	CancelBatchID            string              `json:"cancel_batch_id,omitempty"`
+	CancelNodeID             string              `json:"cancel_node_id,omitempty"`
+	CancelReason             string              `json:"cancel_reason,omitempty"`
+	Nodes                    map[string]*NodeRun `json:"nodes"`
+	Version                  int                 `json:"version"`
 }
 
 type RunStore interface {
@@ -215,6 +216,9 @@ func (s *MemoryRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun, e
 	if strings.TrimSpace(run.RequestKey) == "" {
 		run.RequestKey = run.ID
 	}
+	if err := ensureInitialSubmitFingerprint(&run); err != nil {
+		return PlanRun{}, err
+	}
 	if err := ValidateRunTransition(run.Status, run.Status); err != nil {
 		return PlanRun{}, err
 	}
@@ -259,6 +263,9 @@ func (s *MemoryRunStore) GetRun(ctx context.Context, id string) (PlanRun, error)
 	if !exists {
 		return PlanRun{}, fmt.Errorf("%w: %q", ErrRunNotFound, id)
 	}
+	if err := validateStoredRunIdentity(run); err != nil {
+		return PlanRun{}, err
+	}
 	cloned, err := clonePlanRun(run)
 	if err != nil {
 		return PlanRun{}, err
@@ -277,6 +284,9 @@ func (s *MemoryRunStore) GetActiveRun(ctx context.Context, sessionID string) (Pl
 	for _, run := range s.runs {
 		if run.SessionID != sessionID || !isActiveRunStatus(run.Status) {
 			continue
+		}
+		if err := validateStoredRunIdentity(run); err != nil {
+			return PlanRun{}, err
 		}
 		if found {
 			return PlanRun{}, fmt.Errorf("%w: session %q has multiple active runs", ErrRunRecordCorrupt, sessionID)
@@ -304,6 +314,9 @@ func (s *MemoryRunStore) GetRunByRequestKey(ctx context.Context, sessionID, requ
 	if !exists || run.SessionID != sessionID || run.RequestKey != requestKey {
 		return PlanRun{}, fmt.Errorf("%w: request key index for session %q", ErrRunRecordCorrupt, sessionID)
 	}
+	if err := validateStoredRunIdentity(run); err != nil {
+		return PlanRun{}, err
+	}
 	return clonePlanRun(run)
 }
 
@@ -325,6 +338,9 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 	if !exists {
 		return PlanRun{}, fmt.Errorf("%w: %q", ErrRunNotFound, id)
 	}
+	if err := validateStoredRunIdentity(current); err != nil {
+		return PlanRun{}, err
+	}
 	if current.Version != expectedVersion {
 		return PlanRun{}, fmt.Errorf("%w: run %q expected version %d, got %d", ErrRunVersionConflict, id, expectedVersion, current.Version)
 	}
@@ -341,6 +357,9 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 	}
 	if next.RequestKey != current.RequestKey {
 		return PlanRun{}, fmt.Errorf("%w: mutation changed request key", ErrRunRecordCorrupt)
+	}
+	if next.SubmitRequestFingerprint != current.SubmitRequestFingerprint {
+		return PlanRun{}, fmt.Errorf("%w: mutation changed submit request fingerprint", ErrRunRecordCorrupt)
 	}
 	if err := ValidateRunTransition(current.Status, next.Status); err != nil {
 		return PlanRun{}, err
@@ -412,6 +431,13 @@ func decodeSingleJSONValue(data []byte, target any) error {
 			return errors.New("unexpected trailing JSON value")
 		}
 		return err
+	}
+	return nil
+}
+
+func validateStoredRunIdentity(run PlanRun) error {
+	if strings.TrimSpace(run.ID) == "" || strings.TrimSpace(run.RequestKey) == "" || strings.TrimSpace(run.SubmitRequestFingerprint) == "" {
+		return fmt.Errorf("%w: plan run is missing immutable submit identity", ErrRunRecordCorrupt)
 	}
 	return nil
 }

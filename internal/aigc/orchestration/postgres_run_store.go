@@ -80,6 +80,9 @@ func (s *PostgresRunStore) AutoMigrate(ctx context.Context) error {
 		WHERE request_key IS NULL OR request_key = ''`).Error; err != nil {
 		return fmt.Errorf("backfill plan run request keys: %w", err)
 	}
+	if err := backfillSubmitRequestFingerprints(s.db.WithContext(ctx)); err != nil {
+		return err
+	}
 	if err := s.db.WithContext(ctx).Exec(`ALTER TABLE aigc_plan_runs ALTER COLUMN request_key SET NOT NULL`).Error; err != nil {
 		return fmt.Errorf("require plan run request keys: %w", err)
 	}
@@ -123,6 +126,9 @@ func (s *PostgresRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun,
 	}
 	if strings.TrimSpace(run.RequestKey) == "" {
 		run.RequestKey = run.ID
+	}
+	if err := ensureInitialSubmitFingerprint(&run); err != nil {
+		return PlanRun{}, err
 	}
 	if err := ValidateRunTransition(run.Status, run.Status); err != nil {
 		return PlanRun{}, err
@@ -312,6 +318,9 @@ func (s *PostgresRunStore) mutateRunLocked(
 		if next.RequestKey != current.RequestKey {
 			return fmt.Errorf("%w: mutation changed request key", ErrRunRecordCorrupt)
 		}
+		if next.SubmitRequestFingerprint != current.SubmitRequestFingerprint {
+			return fmt.Errorf("%w: mutation changed submit request fingerprint", ErrRunRecordCorrupt)
+		}
 		if err := ValidateRunTransition(current.Status, next.Status); err != nil {
 			return err
 		}
@@ -375,6 +384,40 @@ func encodePlanRunRecord(run PlanRun) (planRunRecord, PlanRun, error) {
 	}, cloned, nil
 }
 
+func backfillSubmitRequestFingerprints(db *gorm.DB) error {
+	var records []planRunRecord
+	query := db.Where("COALESCE(payload ->> 'submit_request_fingerprint', '') = ''").Find(&records)
+	if query.Error != nil {
+		return fmt.Errorf("find legacy plan run fingerprints: %w", query.Error)
+	}
+	for _, record := range records {
+		var run PlanRun
+		if err := decodeSingleJSONValue(record.Payload, &run); err != nil {
+			return fmt.Errorf("%w: decode legacy run %q payload: %v", ErrRunRecordCorrupt, record.ID, err)
+		}
+		if run.ID != record.ID || run.SessionID != record.SessionID || run.RequestKey != record.RequestKey || run.Status != record.Status || run.Version != record.Version {
+			return fmt.Errorf("%w: legacy run %q metadata does not match payload", ErrRunRecordCorrupt, record.ID)
+		}
+		fingerprint, err := computeSubmitRequestFingerprint(run.SessionID, run.UserID, run.RequestKey, run.Plan)
+		if err != nil {
+			return fmt.Errorf("compute legacy run %q fingerprint: %w", record.ID, err)
+		}
+		run.SubmitRequestFingerprint = fingerprint
+		payload, err := clonePlanRunJSON(run)
+		if err != nil {
+			return err
+		}
+		updated := db.Model(&planRunRecord{}).Where("id = ?", record.ID).Update("payload", datatypes.JSON(payload))
+		if updated.Error != nil {
+			return fmt.Errorf("backfill plan run %q fingerprint: %w", record.ID, updated.Error)
+		}
+		if updated.RowsAffected != 1 {
+			return fmt.Errorf("%w: backfill run %q affected %d rows", ErrRunRecordCorrupt, record.ID, updated.RowsAffected)
+		}
+	}
+	return nil
+}
+
 func clonePlanRunJSON(run PlanRun) ([]byte, error) {
 	payload, err := json.Marshal(run)
 	if err != nil {
@@ -390,6 +433,9 @@ func decodePlanRunRecord(record planRunRecord) (PlanRun, error) {
 	}
 	if run.ID != record.ID || run.SessionID != record.SessionID || run.RequestKey != record.RequestKey || run.Status != record.Status || run.Version != record.Version {
 		return PlanRun{}, fmt.Errorf("%w: run %q metadata does not match payload", ErrRunRecordCorrupt, record.ID)
+	}
+	if err := validateStoredRunIdentity(run); err != nil {
+		return PlanRun{}, fmt.Errorf("%w: run %q immutable submit identity", err, record.ID)
 	}
 	cloned, err := clonePlanRun(run)
 	if err != nil {

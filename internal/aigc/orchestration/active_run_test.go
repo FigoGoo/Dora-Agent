@@ -49,7 +49,7 @@ func TestMemoryRunStoreEnforcesSingleActiveRunPerSession(t *testing.T) {
 
 func TestMemoryRunStoreGetActiveRunFailsClosedOnCorruptionAndClonesNumbers(t *testing.T) {
 	store := NewMemoryRunStore()
-	store.runs["one"] = PlanRun{ID: "one", SessionID: "session", Status: RunStatusRunning, Version: 1, ResumeDecision: map[string]any{"n": json.Number("9007199254740993")}}
+	store.runs["one"] = PlanRun{ID: "one", RequestKey: "one", SubmitRequestFingerprint: "sha256:one", SessionID: "session", Status: RunStatusRunning, Version: 1, ResumeDecision: map[string]any{"n": json.Number("9007199254740993")}}
 	active, err := store.GetActiveRun(context.Background(), "session")
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestMemoryRunStoreGetActiveRunFailsClosedOnCorruptionAndClonesNumbers(t *te
 	if err != nil || again.ResumeDecision["n"].(json.Number).String() != "9007199254740993" {
 		t.Fatalf("deep cloned active run = %+v, %v", again, err)
 	}
-	store.runs["two"] = PlanRun{ID: "two", SessionID: "session", Status: RunStatusSuspended, Version: 1}
+	store.runs["two"] = PlanRun{ID: "two", RequestKey: "two", SubmitRequestFingerprint: "sha256:two", SessionID: "session", Status: RunStatusSuspended, Version: 1}
 	if _, err := store.GetActiveRun(context.Background(), "session"); !errors.Is(err, ErrRunRecordCorrupt) {
 		t.Fatalf("corrupt active set error = %v", err)
 	}
@@ -112,6 +112,42 @@ func TestMemoryRunStoreRejectsRequestKeyMutationAtomically(t *testing.T) {
 	stored, err := store.GetRunByRequestKey(context.Background(), "session", "frozen-key")
 	if err != nil || stored.Version != created.Version || stored.RequestKey != created.RequestKey {
 		t.Fatalf("stored = %+v, %v", stored, err)
+	}
+}
+
+func TestMemoryRunStoreRejectsSubmitFingerprintMutationAtomically(t *testing.T) {
+	store := NewMemoryRunStore()
+	created, err := store.CreateRun(context.Background(), PlanRun{ID: "fingerprint-identity", RequestKey: "frozen-key", SessionID: "session", UserID: "user", Plan: activeTestPlan("fingerprint", "unused"), Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
+	if err != nil || created.SubmitRequestFingerprint == "" {
+		t.Fatalf("CreateRun() = %+v, %v", created, err)
+	}
+	if _, err := store.MutateRun(context.Background(), created.ID, created.Version, func(run *PlanRun) error {
+		run.SubmitRequestFingerprint = "changed"
+		return nil
+	}); !errors.Is(err, ErrRunRecordCorrupt) {
+		t.Fatalf("fingerprint mutation error = %v", err)
+	}
+	stored, err := store.GetRun(context.Background(), created.ID)
+	if err != nil || stored.Version != created.Version || stored.SubmitRequestFingerprint != created.SubmitRequestFingerprint {
+		t.Fatalf("stored = %+v, %v", stored, err)
+	}
+}
+
+func TestMemoryRunStoreGetRejectsMissingSubmitIdentity(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  PlanRun
+	}{
+		{name: "request_key", run: PlanRun{ID: "missing-key", SubmitRequestFingerprint: "sha256:value", Status: RunStatusSucceeded}},
+		{name: "fingerprint", run: PlanRun{ID: "missing-fingerprint", RequestKey: "request", Status: RunStatusSucceeded}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := NewMemoryRunStore()
+			store.runs[test.run.ID] = test.run
+			if _, err := store.GetRun(context.Background(), test.run.ID); !errors.Is(err, ErrRunRecordCorrupt) {
+				t.Fatalf("GetRun() error = %v", err)
+			}
+		})
 	}
 }
 
@@ -297,6 +333,9 @@ func TestSameSubmitRequestUsesCanonicalPlanNumbers(t *testing.T) {
 		RequestKey: "request-canonical", SessionID: "session", UserID: "user", PreviewRequired: true, ResumeDecisionSchema: "approved_bool_v1",
 		Plan: activeTestPlan("canonical", "tool"),
 	}
+	if err := ensureInitialSubmitFingerprint(&requested); err != nil {
+		t.Fatal(err)
+	}
 	authoritative, err := clonePlanRun(requested)
 	if err != nil {
 		t.Fatal(err)
@@ -306,17 +345,25 @@ func TestSameSubmitRequestUsesCanonicalPlanNumbers(t *testing.T) {
 		t.Fatal("equivalent canonical plans did not match")
 	}
 	authoritative.Plan.Steps[0].Params["large"] = json.Number("9007199254740992")
-	if sameSubmitRequest(authoritative, requested) {
-		t.Fatal("adjacent large integers collided")
+	if !sameSubmitRequest(authoritative, requested) {
+		t.Fatal("live plan mutation changed frozen submit identity")
 	}
-	authoritative = requested
-	authoritative.UserID = "other-user"
-	if sameSubmitRequest(authoritative, requested) {
+	otherUser := requested
+	otherUser.UserID = "other-user"
+	otherUser.SubmitRequestFingerprint = ""
+	if err := ensureInitialSubmitFingerprint(&otherUser); err != nil {
+		t.Fatal(err)
+	}
+	if sameSubmitRequest(otherUser, requested) {
 		t.Fatal("different user matched submit request")
 	}
-	authoritative = requested
-	authoritative.RequestKey = "other-request"
-	if sameSubmitRequest(authoritative, requested) {
+	otherRequest := requested
+	otherRequest.RequestKey = "other-request"
+	otherRequest.SubmitRequestFingerprint = ""
+	if err := ensureInitialSubmitFingerprint(&otherRequest); err != nil {
+		t.Fatal(err)
+	}
+	if sameSubmitRequest(otherRequest, requested) {
 		t.Fatal("different request key matched submit request")
 	}
 }
@@ -496,6 +543,92 @@ func TestSchedulerSubmitWithKeyIsScopedBySession(t *testing.T) {
 	right, rightErr := scheduler.SubmitWithKey(context.Background(), "session-right", "user", "same-key", plan)
 	if leftErr != nil || rightErr != nil || left.ID == right.ID {
 		t.Fatalf("left=%+v/%v right=%+v/%v", left, leftErr, right, rightErr)
+	}
+}
+
+func TestSchedulerSubmitWithKeyReplaysOriginalRequestAfterRevision(t *testing.T) {
+	store := NewMemoryRunStore()
+	tool := schedulerTool{key: "fingerprint"}
+	registry := schedulerRegistry(t, tool)
+	var next atomic.Int32
+	cfg := schedulerConfigForTest(store, registry, func() string { return fmt.Sprintf("fingerprint-%d", next.Add(1)) })
+	cfg.JobBudget = 1
+	scheduler, _ := NewScheduler(cfg)
+	original := activeTestPlan("original", "fingerprint")
+	original.EstimatedJobs = 2
+	suspended, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "message-revised", original)
+	if err != nil || suspended.SubmitRequestFingerprint == "" {
+		t.Fatalf("initial SubmitWithKey() = %+v, %v", suspended, err)
+	}
+	revised, err := scheduler.Revise(context.Background(), suspended.ID, PlanRevision{AppendSteps: []PlanStep{{ID: "extra", Tool: "fingerprint", Required: true}}})
+	if err != nil || len(revised.Plan.Steps) != 2 || revised.SubmitRequestFingerprint != suspended.SubmitRequestFingerprint {
+		t.Fatalf("Revise() = %+v, %v", revised, err)
+	}
+	replayed, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "message-revised", original)
+	if err != nil || replayed.ID != suspended.ID || replayed.Version != revised.Version {
+		t.Fatalf("original replay = %+v, %v", replayed, err)
+	}
+	if _, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "message-revised", revised.Plan); !errors.Is(err, ErrSubmitRequestConflict) {
+		t.Fatalf("live-plan replay error = %v", err)
+	}
+	completed, err := scheduler.Resume(context.Background(), suspended.ID, suspended.ResumeKey, map[string]any{"approved": true})
+	if err != nil || completed.Status != RunStatusSucceeded {
+		t.Fatalf("Resume() = %+v, %v", completed, err)
+	}
+	terminalReplay, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "message-revised", original)
+	if err != nil || terminalReplay.ID != suspended.ID || terminalReplay.Status != RunStatusSucceeded {
+		t.Fatalf("terminal replay = %+v, %v", terminalReplay, err)
+	}
+}
+
+func TestSubmitRequestFingerprintPreservesAdjacentLargeIntegers(t *testing.T) {
+	left := activeTestPlan("large", "unused")
+	right := activeTestPlan("large", "unused")
+	left.Steps[0].Params["large"] = json.Number("9007199254740992")
+	right.Steps[0].Params["large"] = json.Number("9007199254740993")
+	leftFingerprint, leftErr := computeSubmitRequestFingerprint("session", "user", "request", left)
+	rightFingerprint, rightErr := computeSubmitRequestFingerprint("session", "user", "request", right)
+	if leftErr != nil || rightErr != nil || leftFingerprint == rightFingerprint {
+		t.Fatalf("left=%q/%v right=%q/%v", leftFingerprint, leftErr, rightFingerprint, rightErr)
+	}
+}
+
+func TestSchedulerOrdinarySubmitRejectsNewIDCollision(t *testing.T) {
+	store := NewMemoryRunStore()
+	var calls atomic.Int32
+	tool := schedulerTool{key: "collision", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		calls.Add(1)
+		return vocabulary.Result{}, nil
+	}}
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { return "colliding-run" })
+	scheduler, _ := NewScheduler(cfg)
+	plan := activeTestPlan("collision", "collision")
+	first, err := scheduler.Submit(context.Background(), "session", "user", plan)
+	if err != nil || first.Status != RunStatusSucceeded {
+		t.Fatalf("first Submit() = %+v, %v", first, err)
+	}
+	if _, err := scheduler.Submit(context.Background(), "session", "user", plan); !errors.Is(err, ErrRunAlreadyExists) {
+		t.Fatalf("colliding Submit() error = %v", err)
+	}
+	stored, err := store.GetRun(context.Background(), first.ID)
+	if err != nil || stored.Version != first.Version || calls.Load() != 1 {
+		t.Fatalf("stored=%+v calls=%d err=%v", stored, calls.Load(), err)
+	}
+}
+
+func TestSchedulerSubmitWithKeyReplaysDespiteNewIDCollision(t *testing.T) {
+	store := NewMemoryRunStore()
+	tool := schedulerTool{key: "key-collision"}
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { return "same-run-id" })
+	scheduler, _ := NewScheduler(cfg)
+	plan := activeTestPlan("key-collision", "key-collision")
+	first, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "message-collision", plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "message-collision", plan)
+	if err != nil || replayed.ID != first.ID {
+		t.Fatalf("keyed collision replay = %+v, %v", replayed, err)
 	}
 }
 

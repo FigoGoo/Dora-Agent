@@ -84,7 +84,7 @@ func TestPostgresRunStoreRoundTripAndCAS(t *testing.T) {
 	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
 
 	created, err := store.CreateRun(ctx, postgresStoreRun(t, id))
-	if err != nil || created.Version != 1 || created.Status != RunStatusDraft || created.RequestKey != id {
+	if err != nil || created.Version != 1 || created.Status != RunStatusDraft || created.RequestKey != id || created.SubmitRequestFingerprint == "" {
 		t.Fatalf("CreateRun() = %+v, %v", created, err)
 	}
 	byRequest, err := store.GetRunByRequestKey(ctx, "session-1", id)
@@ -342,6 +342,12 @@ func TestPostgresRunStoreRejectsIdentityMutation(t *testing.T) {
 	}); !errors.Is(err, ErrRunRecordCorrupt) {
 		t.Fatalf("request key mutation error = %v", err)
 	}
+	if _, err := store.MutateRun(ctx, id, created.Version, func(run *PlanRun) error {
+		run.SubmitRequestFingerprint = "changed-fingerprint"
+		return nil
+	}); !errors.Is(err, ErrRunRecordCorrupt) {
+		t.Fatalf("fingerprint mutation error = %v", err)
+	}
 }
 
 func TestPostgresRunStoreSessionMigrationEnforcesActiveSlotAtomically(t *testing.T) {
@@ -490,7 +496,7 @@ func TestPostgresRunStoreAutoMigrateBackfillsLegacyRequestKeyAndPayload(t *testi
 		if err := tx.Exec("ALTER TABLE aigc_plan_runs ALTER COLUMN request_key DROP NOT NULL").Error; err != nil {
 			return err
 		}
-		if err := tx.Exec("UPDATE aigc_plan_runs SET request_key = NULL, payload = payload - 'request_key' WHERE id = ?", created.ID).Error; err != nil {
+		if err := tx.Exec("UPDATE aigc_plan_runs SET request_key = NULL, payload = payload - 'request_key' - 'submit_request_fingerprint' WHERE id = ?", created.ID).Error; err != nil {
 			return err
 		}
 		return NewPostgresRunStore(tx).AutoMigrate(ctx)
@@ -498,8 +504,9 @@ func TestPostgresRunStoreAutoMigrateBackfillsLegacyRequestKeyAndPayload(t *testi
 		t.Fatalf("legacy AutoMigrate() error = %v", err)
 	}
 	backfilled, err := store.GetRun(ctx, id)
-	if err != nil || backfilled.RequestKey != id {
-		t.Fatalf("backfilled run = %+v, %v", backfilled, err)
+	wantFingerprint, fingerprintErr := computeSubmitRequestFingerprint(backfilled.SessionID, backfilled.UserID, id, backfilled.Plan)
+	if fingerprintErr != nil || err != nil || backfilled.RequestKey != id || backfilled.SubmitRequestFingerprint != wantFingerprint {
+		t.Fatalf("backfilled run = %+v, get=%v fingerprint=%v", backfilled, err, fingerprintErr)
 	}
 }
 
@@ -619,6 +626,23 @@ func TestPostgresRunStoreRejectsMetadataPayloadDrift(t *testing.T) {
 	}
 	if _, err := store.GetRun(ctx, id); !errors.Is(err, ErrRunRecordCorrupt) {
 		t.Fatalf("drift error = %v", err)
+	}
+}
+
+func TestPostgresRunStoreRejectsSubmitFingerprintPayloadDrift(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	id := postgresRunID(t)
+	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
+	created, err := store.CreateRun(ctx, postgresStoreRun(t, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WithContext(ctx).Exec("UPDATE aigc_plan_runs SET payload = payload - 'submit_request_fingerprint' WHERE id = ?", created.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetRun(ctx, id); !errors.Is(err, ErrRunRecordCorrupt) {
+		t.Fatalf("fingerprint drift error = %v", err)
 	}
 }
 

@@ -998,10 +998,14 @@ scheduler.Revise(ctx, runID, revision)
 scheduler.Cancel(ctx, runID, reason)
 ```
 
-生产入口必须把稳定的消息 ID 或请求 ID 传给 `SubmitWithKey`。幂等身份是
-`sessionID + requestKey + userID + canonical ExecutionPlan`，不是计划内容本身；同 key 的
-重放返回原 RunID 和当前权威快照，哪怕该 Run 已终态。相同 session 下不同 key 的相同计划
-仍是两个独立请求，active Run 存在时后者返回 active-slot 冲突，终态释放后才可创建新 Run。
+生产入口必须把稳定的消息 ID 或请求 ID 传给 `SubmitWithKey`。首次 Create 前，Runtime 对
+versioned `sessionID + requestKey + userID + canonical ExecutionPlan` 计算并冻结原始提交
+fingerprint；后续 `Revise` 只改变 live Plan，不改变该身份。相同 key 的原始请求重放返回原
+RunID 和当前权威快照，哪怕 live Plan 已修订或 Run 已终态；同 key 携带修订后的 Plan 则是
+request conflict。相同 session 下不同 key 的相同计划仍是两个独立请求，active Run 存在时
+后者返回 active-slot 冲突，终态释放后才可创建新 Run。legacy Run 在迁移时只能按当时持久化
+的 current Plan 回填 fingerprint；其 key 同时回填为 RunID，因此只作为内部历史身份，不可
+等同于缺失的原始外部 request ID。
 
 `Cancel` 是用户主动终止和明确否决的唯一 Runtime 入口。存在 active execution claim 时
 必须返回 busy 且不写 intent，避免 Tool 的迟到外部效果逃逸；非 `waiting_jobs` 直接单 CAS
