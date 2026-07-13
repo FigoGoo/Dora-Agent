@@ -194,8 +194,218 @@ func TestSchedulerReturnsJoinedErrorWhenAmbiguousCreateReadFailsThenReplayRecove
 		t.Fatalf("tool calls after uncertain read = %d", calls.Load())
 	}
 	recovered, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "request-retry", plan)
-	if err != nil || recovered.ID != "ambiguous" || recovered.Status != RunStatusRunning || calls.Load() != 0 {
+	if err != nil || recovered.ID != "ambiguous" || recovered.Status != RunStatusSucceeded || calls.Load() != 1 {
 		t.Fatalf("replayed Submit() = %+v, calls=%d, err=%v", recovered, calls.Load(), err)
+	}
+}
+
+func createPristineKeyedRun(t *testing.T, store RunStore, id, requestKey, sessionID, userID string, plan ExecutionPlan) PlanRun {
+	t.Helper()
+	nodes := make(map[string]*NodeRun, len(plan.Steps))
+	for _, step := range plan.Steps {
+		nodes[step.ID] = &NodeRun{StepID: step.ID, Status: NodeStatusPending}
+	}
+	created, err := store.CreateRun(context.Background(), PlanRun{
+		ID: id, RequestKey: requestKey, SessionID: sessionID, UserID: userID,
+		Plan: plan, Status: RunStatusRunning, Nodes: nodes,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return created
+}
+
+func TestSchedulerSubmitWithKeyRecoversPristineCreateReceipt(t *testing.T) {
+	store := NewMemoryRunStore()
+	plan := activeTestPlan("crash-recovery", "recover-once")
+	created := createPristineKeyedRun(t, store, "crashed-run", "crashed-request", "session", "user", plan)
+	var calls atomic.Int32
+	tool := schedulerTool{key: "recover-once", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		calls.Add(1)
+		return vocabulary.Result{}, nil
+	}}
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { panic("NewID called during crash recovery") })
+	recoverer, _ := NewScheduler(cfg)
+	recovered, err := recoverer.SubmitWithKey(context.Background(), "session", "user", "crashed-request", plan)
+	if err != nil || recovered.ID != created.ID || recovered.Status != RunStatusSucceeded || calls.Load() != 1 {
+		t.Fatalf("recovered=%+v calls=%d err=%v", recovered, calls.Load(), err)
+	}
+}
+
+type keyedPreflightBarrierStore struct {
+	RunStore
+	arrivals atomic.Int32
+	release  chan struct{}
+}
+
+func (s *keyedPreflightBarrierStore) GetRunByRequestKey(ctx context.Context, sessionID, requestKey string) (PlanRun, error) {
+	run, err := s.RunStore.GetRunByRequestKey(ctx, sessionID, requestKey)
+	if err != nil {
+		return run, err
+	}
+	if s.arrivals.Add(1) == 2 {
+		close(s.release)
+	}
+	select {
+	case <-ctx.Done():
+		return PlanRun{}, ctx.Err()
+	case <-s.release:
+		return run, nil
+	}
+}
+
+func TestSchedulerSubmitWithKeyConcurrentCrashRecoverersInvokeToolOnce(t *testing.T) {
+	base := NewMemoryRunStore()
+	plan := activeTestPlan("concurrent-crash-recovery", "recover-concurrent")
+	created := createPristineKeyedRun(t, base, "concurrent-crashed-run", "concurrent-crashed-request", "session", "user", plan)
+	store := &keyedPreflightBarrierStore{RunStore: base, release: make(chan struct{})}
+	started := make(chan struct{})
+	releaseTool := make(chan struct{})
+	var startOnce sync.Once
+	var calls atomic.Int32
+	tool := schedulerTool{key: "recover-concurrent", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		calls.Add(1)
+		startOnce.Do(func() { close(started) })
+		<-releaseTool
+		return vocabulary.Result{}, nil
+	}}
+	registry := schedulerRegistry(t, tool)
+	leftCfg := schedulerConfigForTest(store, registry, func() string { panic("left NewID called") })
+	rightCfg := schedulerConfigForTest(store, registry, func() string { panic("right NewID called") })
+	left, _ := NewScheduler(leftCfg)
+	right, _ := NewScheduler(rightCfg)
+	type result struct {
+		run PlanRun
+		err error
+	}
+	results := make(chan result, 2)
+	for _, scheduler := range []*Scheduler{left, right} {
+		scheduler := scheduler
+		go func() {
+			run, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "concurrent-crashed-request", plan)
+			results <- result{run: run, err: err}
+		}()
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no crash recoverer invoked the tool")
+	}
+	close(releaseTool)
+	for range 2 {
+		result := <-results
+		if result.err != nil || result.run.ID != created.ID {
+			t.Fatalf("recoverer result=%+v err=%v", result.run, result.err)
+		}
+	}
+	stored, err := base.GetRun(context.Background(), created.ID)
+	if err != nil || stored.Status != RunStatusSucceeded || calls.Load() != 1 {
+		t.Fatalf("stored=%+v calls=%d err=%v", stored, calls.Load(), err)
+	}
+}
+
+type keyedCreateRaceStore struct {
+	RunStore
+	winnerID string
+	fired    atomic.Bool
+}
+
+func (s *keyedCreateRaceStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun, error) {
+	if !s.fired.CompareAndSwap(false, true) {
+		return s.RunStore.CreateRun(ctx, run)
+	}
+	winner := run
+	winner.ID = s.winnerID
+	if _, err := s.RunStore.CreateRun(ctx, winner); err != nil {
+		return PlanRun{}, err
+	}
+	return PlanRun{}, fmt.Errorf("%w: simulated create race", ErrSubmitRequestKeyExists)
+}
+
+func TestSchedulerSubmitWithKeyCreateRaceLoserRecoversPristineWinner(t *testing.T) {
+	base := NewMemoryRunStore()
+	store := &keyedCreateRaceStore{RunStore: base, winnerID: "race-winner"}
+	var calls atomic.Int32
+	tool := schedulerTool{key: "race-recover", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		calls.Add(1)
+		return vocabulary.Result{}, nil
+	}}
+	plan := activeTestPlan("race-recovery", "race-recover")
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { return "race-loser" })
+	scheduler, _ := NewScheduler(cfg)
+	recovered, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "race-request", plan)
+	if err != nil || recovered.ID != "race-winner" || recovered.Status != RunStatusSucceeded || calls.Load() != 1 {
+		t.Fatalf("recovered=%+v calls=%d err=%v", recovered, calls.Load(), err)
+	}
+}
+
+func TestSchedulerSubmitWithKeyPristineRecoveryUsesRuntimeMissingToolSemantics(t *testing.T) {
+	store := NewMemoryRunStore()
+	plan := activeTestPlan("missing-runtime-tool", "removed-tool")
+	created := createPristineKeyedRun(t, store, "missing-tool-run", "missing-tool-request", "session", "user", plan)
+	cfg := schedulerConfigForTest(store, vocabulary.NewRegistry(), func() string { panic("NewID called for missing runtime tool") })
+	scheduler, _ := NewScheduler(cfg)
+	recovered, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "missing-tool-request", plan)
+	if err == nil || !strings.Contains(err.Error(), "no longer registered") || recovered.ID != created.ID || recovered.Status != RunStatusFailed {
+		t.Fatalf("recovered=%+v err=%v", recovered, err)
+	}
+}
+
+func TestNeedsInitialAdvanceRequiresPristineReceipt(t *testing.T) {
+	base := PlanRun{
+		Status: RunStatusRunning, Version: 1,
+		Plan:  ExecutionPlan{Steps: []PlanStep{{ID: "step"}}},
+		Nodes: map[string]*NodeRun{"step": {StepID: "step", Status: NodeStatusPending}},
+	}
+	if !needsInitialAdvance(base) {
+		t.Fatal("initial running receipt was not recoverable")
+	}
+	lease := time.Now().Add(time.Minute)
+	mutations := map[string]func(*PlanRun){
+		"version":             func(run *PlanRun) { run.Version = 2 },
+		"draft":               func(run *PlanRun) { run.Status = RunStatusDraft },
+		"suspended":           func(run *PlanRun) { run.Status = RunStatusSuspended },
+		"cancel_requested":    func(run *PlanRun) { run.CancelRequested = true },
+		"cancel_receipt":      func(run *PlanRun) { run.CancelReason = "requested" },
+		"run_suspension":      func(run *PlanRun) { run.SuspendReason = SuspendWaitingUser },
+		"run_resume":          func(run *PlanRun) { run.ResumeKey = "resume" },
+		"run_resumed":         func(run *PlanRun) { run.Resumed = true },
+		"run_decision":        func(run *PlanRun) { run.ResumeDecision = map[string]any{"approved": true} },
+		"run_decision_schema": func(run *PlanRun) { run.ResumeDecisionSchema = "schema" },
+		"missing_node":        func(run *PlanRun) { delete(run.Nodes, "step") },
+		"extra_node":          func(run *PlanRun) { run.Nodes["extra"] = &NodeRun{StepID: "extra", Status: NodeStatusPending} },
+		"node_step":           func(run *PlanRun) { run.Nodes["step"].StepID = "other" },
+		"node_status":         func(run *PlanRun) { run.Nodes["step"].Status = NodeStatusRunning },
+		"node_skip":           func(run *PlanRun) { run.Nodes["step"].SkipReason = SkipReasonRevision },
+		"node_attempt":        func(run *PlanRun) { run.Nodes["step"].Attempt = 1 },
+		"node_epoch":          func(run *PlanRun) { run.Nodes["step"].ExecutionEpoch = 1 },
+		"node_owner":          func(run *PlanRun) { run.Nodes["step"].ExecutionOwner = "owner" },
+		"node_token":          func(run *PlanRun) { run.Nodes["step"].ExecutionToken = "token" },
+		"node_lease":          func(run *PlanRun) { run.Nodes["step"].LeaseUntil = &lease },
+		"node_outputs":        func(run *PlanRun) { run.Nodes["step"].Outputs = map[string]any{"value": true} },
+		"node_fail":           func(run *PlanRun) { run.Nodes["step"].Fail = &vocabulary.Failure{Code: "failed"} },
+		"node_suspension":     func(run *PlanRun) { run.Nodes["step"].Suspension = &vocabulary.Suspension{Reason: SuspendWaitingUser} },
+		"node_resume_key":     func(run *PlanRun) { run.Nodes["step"].ResumeKey = "resume" },
+		"node_generation":     func(run *PlanRun) { run.Nodes["step"].SuspensionGeneration = 1 },
+		"node_resumed":        func(run *PlanRun) { run.Nodes["step"].Resumed = true },
+		"node_decision":       func(run *PlanRun) { run.Nodes["step"].ResumeDecision = map[string]any{"approved": true} },
+		"node_origin":         func(run *PlanRun) { run.Nodes["step"].SuspensionOrigin = "tool" },
+		"node_schema":         func(run *PlanRun) { run.Nodes["step"].ResumeDecisionSchema = "schema" },
+		"node_guard": func(run *PlanRun) {
+			run.Nodes["step"].GuardApproval = &GuardApprovalReceipt{Status: guardApprovalPending}
+		},
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			run, err := clonePlanRun(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutate(&run)
+			if needsInitialAdvance(run) {
+				t.Fatalf("non-pristine receipt accepted: %+v", run)
+			}
+		})
 	}
 }
 

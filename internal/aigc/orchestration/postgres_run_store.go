@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	activeRunSessionIndex       = "idx_aigc_plan_runs_one_active_session"
-	requestKeySessionIndex      = "idx_aigc_plan_runs_session_request_key"
-	effectiveRequestKeySQL      = "COALESCE(NULLIF(request_key, ''), id)"
-	planRunPrimaryKeyConstraint = "aigc_plan_runs_pkey"
+	activeRunSessionIndex        = "idx_aigc_plan_runs_one_active_session"
+	legacyRequestKeySessionIndex = "idx_aigc_plan_runs_session_request_key"
+	requestKeySessionIndex       = "idx_aigc_plan_runs_session_effective_request_key_v2"
+	effectiveRequestKeySQL       = "COALESCE(NULLIF(request_key, ''), id)"
+	planRunPrimaryKeyConstraint  = "aigc_plan_runs_pkey"
 	// Serialize every plan-run schema migration before any DDL. PostgreSQL can
 	// otherwise deadlock concurrent AutoMigrate transactions on catalog locks.
 	planRunMigrationAdvisoryKey int64 = 0x444f5241504c414e
@@ -98,12 +99,11 @@ func (s *PostgresRunStore) AutoMigrate(ctx context.Context) error {
 		if err := tx.Exec(`ALTER TABLE aigc_plan_runs ALTER COLUMN request_key DROP NOT NULL`).Error; err != nil {
 			return fmt.Errorf("allow rolling plan run request keys: %w", err)
 		}
-		if err := tx.Exec(`DROP INDEX IF EXISTS ` + requestKeySessionIndex).Error; err != nil {
-			return fmt.Errorf("drop legacy plan run request key index: %w", err)
+		if err := ensureEffectiveRequestKeyIndex(tx); err != nil {
+			return err
 		}
-		if err := tx.Exec(`CREATE UNIQUE INDEX ` + requestKeySessionIndex + `
-			ON aigc_plan_runs (session_id, (` + effectiveRequestKeySQL + `))`).Error; err != nil {
-			return fmt.Errorf("create plan run request key index: %w", err)
+		if err := tx.Exec(`DROP INDEX IF EXISTS ` + legacyRequestKeySessionIndex).Error; err != nil {
+			return fmt.Errorf("drop legacy plan run request key index: %w", err)
 		}
 		if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + activeRunSessionIndex + `
 			ON aigc_plan_runs (session_id)
@@ -112,6 +112,53 @@ func (s *PostgresRunStore) AutoMigrate(ctx context.Context) error {
 		}
 		return nil
 	})
+}
+
+type requestKeyIndexDefinition struct {
+	Unique    bool   `gorm:"column:is_unique"`
+	KeyCount  int    `gorm:"column:key_count"`
+	FirstKey  string `gorm:"column:first_key"`
+	SecondKey string `gorm:"column:second_key"`
+}
+
+func ensureEffectiveRequestKeyIndex(tx *gorm.DB) error {
+	var definition requestKeyIndexDefinition
+	query := tx.Raw(`SELECT i.indisunique AS is_unique,
+			i.indnkeyatts AS key_count,
+			pg_get_indexdef(i.indexrelid, 1, true) AS first_key,
+			pg_get_indexdef(i.indexrelid, 2, true) AS second_key
+		FROM pg_index i
+		JOIN pg_class idx ON idx.oid = i.indexrelid
+		JOIN pg_class tbl ON tbl.oid = i.indrelid
+		JOIN pg_namespace ns ON ns.oid = idx.relnamespace
+		WHERE ns.nspname = current_schema()
+			AND tbl.relname = 'aigc_plan_runs'
+			AND idx.relname = ?`, requestKeySessionIndex).Scan(&definition)
+	if query.Error != nil {
+		return fmt.Errorf("inspect plan run request key index: %w", query.Error)
+	}
+	if query.RowsAffected != 0 {
+		if !validEffectiveRequestKeyIndex(definition) {
+			return fmt.Errorf("plan run request key index %q has an unexpected definition", requestKeySessionIndex)
+		}
+		return nil
+	}
+	if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + requestKeySessionIndex + `
+		ON aigc_plan_runs (session_id, (` + effectiveRequestKeySQL + `))`).Error; err != nil {
+		return fmt.Errorf("create plan run request key index: %w", err)
+	}
+	return nil
+}
+
+func validEffectiveRequestKeyIndex(definition requestKeyIndexDefinition) bool {
+	if !definition.Unique || definition.KeyCount != 2 || strings.TrimSpace(strings.ToLower(definition.FirstKey)) != "session_id" {
+		return false
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(definition.SecondKey), ""))
+	normalized = strings.ReplaceAll(normalized, "::text", "")
+	normalized = strings.ReplaceAll(normalized, "(request_key)", "request_key")
+	normalized = strings.ReplaceAll(normalized, "(id)", "id")
+	return normalized == "coalesce(nullif(request_key,''),id)"
 }
 
 // AuthoritativeNow implements the Scheduler's optional shared-clock contract.
@@ -386,7 +433,7 @@ func mapPlanRunConstraintError(err error, runID string) error {
 		return &runAlreadyExistsConstraintError{runID: runID, cause: err}
 	case activeRunSessionIndex:
 		return &SessionActiveRunError{cause: err}
-	case requestKeySessionIndex:
+	case requestKeySessionIndex, legacyRequestKeySessionIndex:
 		return &submitRequestKeyExistsConstraintError{cause: err}
 	default:
 		return err

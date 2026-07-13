@@ -23,6 +23,29 @@ import (
 
 var postgresRunTestSequence atomic.Int64
 
+const testEffectiveRequestKeyIndexV2 = "idx_aigc_plan_runs_session_effective_request_key_v2"
+
+type postgresIndexIdentity struct {
+	OID         int64 `gorm:"column:oid"`
+	RelFileNode int64 `gorm:"column:rel_file_node"`
+}
+
+func readPostgresIndexIdentity(t *testing.T, db *gorm.DB, name string) postgresIndexIdentity {
+	t.Helper()
+	var identity postgresIndexIdentity
+	query := db.Raw(`SELECT c.oid::bigint AS oid, c.relfilenode::bigint AS rel_file_node
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = current_schema() AND c.relname = ?`, name).Scan(&identity)
+	if query.Error != nil {
+		t.Fatal(query.Error)
+	}
+	if query.RowsAffected != 1 || identity.OID == 0 || identity.RelFileNode == 0 {
+		t.Fatalf("index %q identity = %+v rows=%d", name, identity, query.RowsAffected)
+	}
+	return identity
+}
+
 func openPostgresRunStore(t *testing.T) (*PostgresRunStore, *gorm.DB) {
 	t.Helper()
 	ctx := context.Background()
@@ -396,6 +419,7 @@ func TestPostgresRunConstraintMappingPreservesCauseBehindDomainError(t *testing.
 		{constraint: planRunPrimaryKeyConstraint, want: ErrRunAlreadyExists},
 		{constraint: activeRunSessionIndex, want: ErrSessionActiveRun},
 		{constraint: requestKeySessionIndex, want: ErrSubmitRequestKeyExists},
+		{constraint: legacyRequestKeySessionIndex, want: ErrSubmitRequestKeyExists},
 	} {
 		raw := &pgconn.PgError{Code: "23505", ConstraintName: test.constraint, Message: "raw duplicate detail"}
 		mapped := mapPlanRunConstraintError(raw, "run")
@@ -447,6 +471,9 @@ func TestPostgresRunStoreAutoMigrateRejectsExistingDuplicateEffectiveRequestKeys
 	rollback := errors.New("rollback effective request key fixture")
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("DROP INDEX IF EXISTS " + requestKeySessionIndex).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DROP INDEX IF EXISTS " + legacyRequestKeySessionIndex).Error; err != nil {
 			return err
 		}
 		requestKey := postgresRunID(t)
@@ -687,12 +714,12 @@ func TestPostgresRunStoreEffectiveRequestKeyScopesUniquenessBySession(t *testing
 }
 
 func TestPostgresRunStoreUsesEffectiveRequestKeyExpressionIndex(t *testing.T) {
-	_, db := openPostgresRunStore(t)
+	store, db := openPostgresRunStore(t)
 	ctx := context.Background()
 	var definition string
 	if err := db.WithContext(ctx).Raw(`SELECT indexdef FROM pg_indexes
 		WHERE schemaname = current_schema() AND tablename = 'aigc_plan_runs' AND indexname = ?`,
-		requestKeySessionIndex).Scan(&definition).Error; err != nil {
+		testEffectiveRequestKeyIndexV2).Scan(&definition).Error; err != nil {
 		t.Fatal(err)
 	}
 	normalized := strings.ToLower(strings.Join(strings.Fields(definition), ""))
@@ -700,6 +727,67 @@ func TestPostgresRunStoreUsesEffectiveRequestKeyExpressionIndex(t *testing.T) {
 		if !strings.Contains(normalized, fragment) {
 			t.Fatalf("request key index is not effective-key expression: %s", definition)
 		}
+	}
+	before := readPostgresIndexIdentity(t, db.WithContext(ctx), testEffectiveRequestKeyIndexV2)
+	if err := store.AutoMigrate(ctx); err != nil {
+		t.Fatalf("second AutoMigrate() error = %v", err)
+	}
+	after := readPostgresIndexIdentity(t, db.WithContext(ctx), testEffectiveRequestKeyIndexV2)
+	if after != before {
+		t.Fatalf("idempotent migration rebuilt v2 index: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestPostgresRunStoreAutoMigrateUpgradesLegacyRequestKeyIndexOnce(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS " + testEffectiveRequestKeyIndexV2).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DROP INDEX IF EXISTS " + legacyRequestKeySessionIndex).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`CREATE UNIQUE INDEX ` + legacyRequestKeySessionIndex + ` ON aigc_plan_runs (session_id, request_key)`).Error
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AutoMigrate(ctx); err != nil {
+		t.Fatalf("upgrade AutoMigrate() error = %v", err)
+	}
+	readPostgresIndexIdentity(t, db.WithContext(ctx), testEffectiveRequestKeyIndexV2)
+	var legacyIndexes int64
+	if err := db.WithContext(ctx).Raw(`SELECT count(*) FROM pg_indexes
+		WHERE schemaname = current_schema() AND tablename = 'aigc_plan_runs' AND indexname = ?`,
+		legacyRequestKeySessionIndex).Scan(&legacyIndexes).Error; err != nil || legacyIndexes != 0 {
+		t.Fatalf("legacy request key indexes=%d err=%v", legacyIndexes, err)
+	}
+}
+
+func TestPostgresRunStoreAutoMigrateRejectsIncorrectV2IndexDefinition(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		if err := db.WithContext(cleanupCtx).Exec("DROP INDEX IF EXISTS " + testEffectiveRequestKeyIndexV2).Error; err != nil {
+			t.Errorf("drop incorrect v2 index: %v", err)
+			return
+		}
+		if err := store.AutoMigrate(cleanupCtx); err != nil {
+			t.Errorf("restore effective request key index: %v", err)
+		}
+	})
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS " + testEffectiveRequestKeyIndexV2).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`CREATE UNIQUE INDEX ` + testEffectiveRequestKeyIndexV2 + ` ON aigc_plan_runs (session_id, request_key)`).Error
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := store.AutoMigrate(ctx)
+	if err == nil || !strings.Contains(err.Error(), "definition") {
+		t.Fatalf("incorrect v2 definition migration error = %v", err)
 	}
 }
 
@@ -925,6 +1013,10 @@ func TestPostgresRunStoreAutoMigrateSerializesIndependentPools(t *testing.T) {
 		t.Cleanup(func() { _ = sqlDB.Close() })
 		stores = append(stores, NewPostgresRunStore(db))
 	}
+	if err := stores[0].AutoMigrate(ctx); err != nil {
+		t.Fatalf("seed migration error = %v", err)
+	}
+	before := readPostgresIndexIdentity(t, stores[0].db.WithContext(ctx), testEffectiveRequestKeyIndexV2)
 	start := make(chan struct{})
 	results := make(chan error, len(stores))
 	for _, store := range stores {
@@ -947,8 +1039,12 @@ func TestPostgresRunStoreAutoMigrateSerializesIndependentPools(t *testing.T) {
 	}
 	var indexes int64
 	db := stores[0].db
-	if err := db.WithContext(ctx).Raw(`SELECT count(*) FROM pg_indexes WHERE tablename = 'aigc_plan_runs' AND indexname IN (?, ?)`, activeRunSessionIndex, requestKeySessionIndex).Scan(&indexes).Error; err != nil || indexes != 2 {
+	if err := db.WithContext(ctx).Raw(`SELECT count(*) FROM pg_indexes WHERE tablename = 'aigc_plan_runs' AND indexname IN (?, ?)`, activeRunSessionIndex, testEffectiveRequestKeyIndexV2).Scan(&indexes).Error; err != nil || indexes != 2 {
 		t.Fatalf("migration indexes=%d err=%v", indexes, err)
+	}
+	after := readPostgresIndexIdentity(t, db.WithContext(ctx), testEffectiveRequestKeyIndexV2)
+	if after != before {
+		t.Fatalf("concurrent migrations rebuilt v2 index: before=%+v after=%+v", before, after)
 	}
 }
 
