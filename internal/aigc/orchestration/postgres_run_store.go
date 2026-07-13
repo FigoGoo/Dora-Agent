@@ -17,6 +17,7 @@ import (
 const (
 	activeRunSessionIndex       = "idx_aigc_plan_runs_one_active_session"
 	requestKeySessionIndex      = "idx_aigc_plan_runs_session_request_key"
+	effectiveRequestKeySQL      = "COALESCE(NULLIF(request_key, ''), id)"
 	planRunPrimaryKeyConstraint = "aigc_plan_runs_pkey"
 	// Serialize every plan-run schema migration before any DDL. PostgreSQL can
 	// otherwise deadlock concurrent AutoMigrate transactions on catalog locks.
@@ -97,8 +98,11 @@ func (s *PostgresRunStore) AutoMigrate(ctx context.Context) error {
 		if err := tx.Exec(`ALTER TABLE aigc_plan_runs ALTER COLUMN request_key DROP NOT NULL`).Error; err != nil {
 			return fmt.Errorf("allow rolling plan run request keys: %w", err)
 		}
-		if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + requestKeySessionIndex + `
-			ON aigc_plan_runs (session_id, request_key)`).Error; err != nil {
+		if err := tx.Exec(`DROP INDEX IF EXISTS ` + requestKeySessionIndex).Error; err != nil {
+			return fmt.Errorf("drop legacy plan run request key index: %w", err)
+		}
+		if err := tx.Exec(`CREATE UNIQUE INDEX ` + requestKeySessionIndex + `
+			ON aigc_plan_runs (session_id, (` + effectiveRequestKeySQL + `))`).Error; err != nil {
 			return fmt.Errorf("create plan run request key index: %w", err)
 		}
 		if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + activeRunSessionIndex + `
@@ -162,7 +166,7 @@ func (s *PostgresRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun,
 			return fmt.Errorf("%w: run %q", ErrRunAlreadyExists, run.ID)
 		}
 		var keyed planRunRecord
-		keyQuery := tx.Select("id").Where("session_id = ? AND request_key = ?", run.SessionID, run.RequestKey).Limit(1).Find(&keyed)
+		keyQuery := tx.Select("id").Where("session_id = ? AND "+effectiveRequestKeySQL+" = ?", run.SessionID, run.RequestKey).Limit(1).Find(&keyed)
 		if keyQuery.Error != nil {
 			return fmt.Errorf("check plan run request key: %w", keyQuery.Error)
 		}
@@ -238,7 +242,7 @@ func (s *PostgresRunStore) GetRunByRequestKey(ctx context.Context, sessionID, re
 	}
 	var records []planRunRecord
 	query := s.db.WithContext(ctx).
-		Where("session_id = ? AND (request_key = ? OR ((request_key IS NULL OR request_key = '') AND id = ?))", sessionID, requestKey, requestKey).
+		Where("session_id = ? AND "+effectiveRequestKeySQL+" = ?", sessionID, requestKey).
 		Limit(2).Find(&records)
 	if query.Error != nil {
 		return PlanRun{}, fmt.Errorf("get plan run by request key: %w", query.Error)

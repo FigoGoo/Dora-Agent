@@ -78,6 +78,17 @@ func postgresStoreRun(t *testing.T, id string) PlanRun {
 	}
 }
 
+func insertLegacyPlanRun(ctx context.Context, db *gorm.DB, run PlanRun) error {
+	payload, err := clonePlanRunJSON(run)
+	if err != nil {
+		return err
+	}
+	return db.WithContext(ctx).Exec(`INSERT INTO aigc_plan_runs
+		(id, session_id, status, version, payload, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?::jsonb, now(), now())`,
+		run.ID, run.SessionID, run.Status, run.Version, string(payload)).Error
+}
+
 func TestPostgresRunStoreRoundTripAndCAS(t *testing.T) {
 	store, db := openPostgresRunStore(t)
 	ctx := context.Background()
@@ -430,6 +441,44 @@ func TestPostgresRunStoreAutoMigrateRejectsExistingDuplicateActiveSessions(t *te
 	}
 }
 
+func TestPostgresRunStoreAutoMigrateRejectsExistingDuplicateEffectiveRequestKeys(t *testing.T) {
+	_, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	rollback := errors.New("rollback effective request key fixture")
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS " + requestKeySessionIndex).Error; err != nil {
+			return err
+		}
+		requestKey := postgresRunID(t)
+		sessionID := requestKey + "-duplicate-effective-session"
+		legacy := PlanRun{
+			ID: requestKey, SessionID: sessionID, Status: RunStatusSucceeded,
+			Version: 1, Nodes: map[string]*NodeRun{},
+		}
+		if err := insertLegacyPlanRun(ctx, tx, legacy); err != nil {
+			return err
+		}
+		explicit := PlanRun{
+			ID: requestKey + "-explicit", RequestKey: requestKey, SessionID: sessionID,
+			Status: RunStatusSucceeded, Version: 1, Nodes: map[string]*NodeRun{},
+		}
+		record, _, err := encodePlanRunRecord(explicit)
+		if err != nil {
+			return err
+		}
+		if err := tx.Create(&record).Error; err != nil {
+			return err
+		}
+		if migrateErr := NewPostgresRunStore(tx).AutoMigrate(ctx); migrateErr == nil {
+			t.Fatal("AutoMigrate() unexpectedly accepted duplicate effective request keys")
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("fixture transaction error = %v", err)
+	}
+}
+
 func TestPostgresRunStoreAutoMigrateHydratesLegacyIdentityWithoutRewritingPayload(t *testing.T) {
 	store, db := openPostgresRunStore(t)
 	ctx := context.Background()
@@ -506,11 +555,7 @@ func TestPostgresRunStoreMigrationAllowsOldWriterInsertWithoutIdentityColumns(t 
 	sessionID := id + "-old-insert-session"
 	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
 	legacy := PlanRun{ID: id, SessionID: sessionID, UserID: "legacy-user", Status: RunStatusSucceeded, Version: 1, Nodes: map[string]*NodeRun{}}
-	payload, err := clonePlanRunJSON(legacy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.WithContext(ctx).Exec(`INSERT INTO aigc_plan_runs (id, session_id, status, version, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?::jsonb, now(), now())`, id, sessionID, RunStatusSucceeded, 1, string(payload)).Error; err != nil {
+	if err := insertLegacyPlanRun(ctx, db, legacy); err != nil {
 		t.Fatalf("old writer insert error = %v", err)
 	}
 	loaded, err := store.GetRun(ctx, id)
@@ -521,9 +566,140 @@ func TestPostgresRunStoreMigrationAllowsOldWriterInsertWithoutIdentityColumns(t 
 	if err != nil || byKey.ID != id || byKey.SubmitRequestFingerprint != "" {
 		t.Fatalf("legacy key lookup = %+v, %v", byKey, err)
 	}
-	scheduler := schedulerForTest(t, store, schedulerRegistry(t, schedulerTool{key: "legacy-insert"}), 1)
+	var newIDCalls atomic.Int32
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, schedulerTool{key: "legacy-insert"}), func() string {
+		newIDCalls.Add(1)
+		return postgresRunID(t)
+	})
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := scheduler.SubmitWithKey(ctx, sessionID, "legacy-user", id, activeTestPlan("legacy", "legacy-insert")); !errors.Is(err, ErrSubmitRequestConflict) {
 		t.Fatalf("legacy SubmitWithKey error = %v", err)
+	}
+	if newIDCalls.Load() != 0 {
+		t.Fatalf("legacy preflight called NewID %d times", newIDCalls.Load())
+	}
+	var rows int64
+	if err := db.WithContext(ctx).Model(&planRunRecord{}).Where("session_id = ?", sessionID).Count(&rows).Error; err != nil || rows != 1 {
+		t.Fatalf("legacy preflight rows=%d err=%v", rows, err)
+	}
+}
+
+func TestPostgresRunStoreEffectiveRequestKeyFencesOldWriterCreateRace(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	requestKey := postgresRunID(t)
+	sessionID := requestKey + "-effective-race-session"
+	newID := requestKey + "-new"
+	t.Cleanup(func() {
+		db.WithContext(context.Background()).Where("session_id = ?", sessionID).Delete(&planRunRecord{})
+	})
+
+	preflightDone := make(chan struct{})
+	legacyInserted := make(chan struct{})
+	callbackName := "test:effective-request-key-race:" + newID
+	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		record, ok := tx.Statement.Dest.(*planRunRecord)
+		if !ok || record.ID != newID {
+			return
+		}
+		close(preflightDone)
+		<-legacyInserted
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Callback().Create().Remove(callbackName); err != nil {
+			t.Errorf("remove create barrier: %v", err)
+		}
+	})
+
+	createResult := make(chan error, 1)
+	go func() {
+		_, err := store.CreateRun(ctx, PlanRun{
+			ID: newID, RequestKey: requestKey, SessionID: sessionID, UserID: "new-user",
+			Status: RunStatusSucceeded, Nodes: map[string]*NodeRun{},
+		})
+		createResult <- err
+	}()
+	select {
+	case <-preflightDone:
+	case <-ctx.Done():
+		t.Fatalf("new Store never reached post-preflight create barrier: %v", ctx.Err())
+	}
+	legacy := PlanRun{
+		ID: requestKey, SessionID: sessionID, UserID: "legacy-user",
+		Status: RunStatusSucceeded, Version: 1, Nodes: map[string]*NodeRun{},
+	}
+	if err := insertLegacyPlanRun(ctx, db, legacy); err != nil {
+		close(legacyInserted)
+		t.Fatalf("legacy writer insert error = %v", err)
+	}
+	close(legacyInserted)
+	if err := <-createResult; !errors.Is(err, ErrSubmitRequestKeyExists) {
+		t.Fatalf("racing CreateRun error = %v", err)
+	}
+
+	var rows int64
+	if err := db.WithContext(ctx).Model(&planRunRecord{}).Where("session_id = ?", sessionID).Count(&rows).Error; err != nil || rows != 1 {
+		t.Fatalf("effective request key race rows=%d err=%v", rows, err)
+	}
+	byKey, err := store.GetRunByRequestKey(ctx, sessionID, requestKey)
+	if err != nil || byKey.ID != requestKey || byKey.RequestKey != requestKey || byKey.SubmitRequestFingerprint != "" {
+		t.Fatalf("legacy effective key lookup = %+v, %v", byKey, err)
+	}
+}
+
+func TestPostgresRunStoreEffectiveRequestKeyScopesUniquenessBySession(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	requestKey := postgresRunID(t)
+	sessionA := requestKey + "-scope-a"
+	sessionB := requestKey + "-scope-b"
+	t.Cleanup(func() {
+		db.WithContext(context.Background()).Where("session_id IN ?", []string{sessionA, sessionB}).Delete(&planRunRecord{})
+	})
+	legacy := PlanRun{ID: requestKey, SessionID: sessionA, Status: RunStatusSucceeded, Version: 1, Nodes: map[string]*NodeRun{}}
+	if err := insertLegacyPlanRun(ctx, db, legacy); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+	if _, err := store.CreateRun(ctx, PlanRun{
+		ID: requestKey + "-explicit-other-session", RequestKey: requestKey,
+		SessionID: sessionB, Status: RunStatusSucceeded, Nodes: map[string]*NodeRun{},
+	}); err != nil {
+		t.Fatalf("different session same effective key: %v", err)
+	}
+	if _, err := store.CreateRun(ctx, PlanRun{
+		ID: requestKey + "-duplicate-other-session", RequestKey: requestKey,
+		SessionID: sessionB, Status: RunStatusSucceeded, Nodes: map[string]*NodeRun{},
+	}); !errors.Is(err, ErrSubmitRequestKeyExists) {
+		t.Fatalf("same-session effective duplicate error = %v", err)
+	}
+	if _, err := store.CreateRun(ctx, PlanRun{
+		ID: requestKey + "-different-key", RequestKey: requestKey + "-different",
+		SessionID: sessionA, Status: RunStatusSucceeded, Nodes: map[string]*NodeRun{},
+	}); err != nil {
+		t.Fatalf("same session different effective key: %v", err)
+	}
+}
+
+func TestPostgresRunStoreUsesEffectiveRequestKeyExpressionIndex(t *testing.T) {
+	_, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	var definition string
+	if err := db.WithContext(ctx).Raw(`SELECT indexdef FROM pg_indexes
+		WHERE schemaname = current_schema() AND tablename = 'aigc_plan_runs' AND indexname = ?`,
+		requestKeySessionIndex).Scan(&definition).Error; err != nil {
+		t.Fatal(err)
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(definition), ""))
+	for _, fragment := range []string{"coalesce(", "nullif(", "request_key", "id"} {
+		if !strings.Contains(normalized, fragment) {
+			t.Fatalf("request key index is not effective-key expression: %s", definition)
+		}
 	}
 }
 
