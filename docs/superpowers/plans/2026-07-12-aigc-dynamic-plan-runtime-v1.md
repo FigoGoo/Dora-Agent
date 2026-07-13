@@ -1015,6 +1015,12 @@ payload；只有真正缺失 fingerprint 的 legacy Run 才保持空值。
 写入继续强制非空 key/fingerprint。`request_key NOT NULL` 只能在旧 pod 全部下线后的后续
 contract migration 中启用，不属于本计划。
 
+`SubmitWithKey` 的 keyed replay 只返回持久化 receipt，不隐式恢复执行，也不依赖当前 Registry。
+Plan 2 的消息入口拿到返回值后，只要 Run 尚未 terminal，就必须对该 RunID 幂等调用公开
+`Advance`，无论本次调用是 creator 还是 replay。这样首次 creator 的正常推进、并发 caller 和
+“Create 已提交但进程在内部 Advance 前崩溃”使用同一恢复入口；execution claim 负责跨实例防重，
+而 terminal/suspended/已有进展的 receipt 查询本身始终保持只读。
+
 `Cancel` 是用户主动终止和明确否决的唯一 Runtime 入口。存在 active execution claim 时
 必须返回 busy 且不写 intent，避免 Tool 的迟到外部效果逃逸；非 `waiting_jobs` 直接单 CAS
 收敛 `cancelled`。`waiting_jobs` 才使用两阶段协议：CAS 冻结 durable

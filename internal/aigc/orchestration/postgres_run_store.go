@@ -115,43 +115,68 @@ func (s *PostgresRunStore) AutoMigrate(ctx context.Context) error {
 }
 
 type requestKeyIndexDefinition struct {
-	Unique    bool   `gorm:"column:is_unique"`
-	KeyCount  int    `gorm:"column:key_count"`
-	FirstKey  string `gorm:"column:first_key"`
-	SecondKey string `gorm:"column:second_key"`
+	RelationKind string `gorm:"column:relation_kind"`
+	TableName    string `gorm:"column:table_name"`
+	Unique       bool   `gorm:"column:is_unique"`
+	Valid        bool   `gorm:"column:is_valid"`
+	Ready        bool   `gorm:"column:is_ready"`
+	NoPredicate  bool   `gorm:"column:no_predicate"`
+	KeyCount     int    `gorm:"column:key_count"`
+	FirstKey     string `gorm:"column:first_key"`
+	SecondKey    string `gorm:"column:second_key"`
 }
 
 func ensureEffectiveRequestKeyIndex(tx *gorm.DB) error {
-	var definition requestKeyIndexDefinition
-	query := tx.Raw(`SELECT i.indisunique AS is_unique,
-			i.indnkeyatts AS key_count,
-			pg_get_indexdef(i.indexrelid, 1, true) AS first_key,
-			pg_get_indexdef(i.indexrelid, 2, true) AS second_key
-		FROM pg_index i
-		JOIN pg_class idx ON idx.oid = i.indexrelid
-		JOIN pg_class tbl ON tbl.oid = i.indrelid
-		JOIN pg_namespace ns ON ns.oid = idx.relnamespace
-		WHERE ns.nspname = current_schema()
-			AND tbl.relname = 'aigc_plan_runs'
-			AND idx.relname = ?`, requestKeySessionIndex).Scan(&definition)
-	if query.Error != nil {
-		return fmt.Errorf("inspect plan run request key index: %w", query.Error)
+	definition, exists, err := loadRequestKeyIndexDefinition(tx)
+	if err != nil {
+		return err
 	}
-	if query.RowsAffected != 0 {
+	if exists {
 		if !validEffectiveRequestKeyIndex(definition) {
 			return fmt.Errorf("plan run request key index %q has an unexpected definition", requestKeySessionIndex)
 		}
 		return nil
 	}
-	if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + requestKeySessionIndex + `
+	if err := tx.Exec(`CREATE UNIQUE INDEX ` + requestKeySessionIndex + `
 		ON aigc_plan_runs (session_id, (` + effectiveRequestKeySQL + `))`).Error; err != nil {
 		return fmt.Errorf("create plan run request key index: %w", err)
+	}
+	definition, exists, err = loadRequestKeyIndexDefinition(tx)
+	if err != nil {
+		return err
+	}
+	if !exists || !validEffectiveRequestKeyIndex(definition) {
+		return fmt.Errorf("plan run request key index %q has an unexpected definition after create", requestKeySessionIndex)
 	}
 	return nil
 }
 
+func loadRequestKeyIndexDefinition(tx *gorm.DB) (requestKeyIndexDefinition, bool, error) {
+	var definition requestKeyIndexDefinition
+	query := tx.Raw(`SELECT idx.relkind::text AS relation_kind,
+			COALESCE(tbl.relname, '') AS table_name,
+			COALESCE(i.indisunique, false) AS is_unique,
+			COALESCE(i.indisvalid, false) AS is_valid,
+			COALESCE(i.indisready, false) AS is_ready,
+			(i.indexrelid IS NOT NULL AND i.indpred IS NULL) AS no_predicate,
+			COALESCE(i.indnkeyatts, 0) AS key_count,
+			COALESCE(pg_get_indexdef(i.indexrelid, 1, true), '') AS first_key,
+			COALESCE(pg_get_indexdef(i.indexrelid, 2, true), '') AS second_key
+		FROM pg_class idx
+		JOIN pg_namespace ns ON ns.oid = idx.relnamespace
+		LEFT JOIN pg_index i ON i.indexrelid = idx.oid
+		LEFT JOIN pg_class tbl ON tbl.oid = i.indrelid
+		WHERE ns.nspname = current_schema() AND idx.relname = ?`, requestKeySessionIndex).Scan(&definition)
+	if query.Error != nil {
+		return requestKeyIndexDefinition{}, false, fmt.Errorf("inspect plan run request key index: %w", query.Error)
+	}
+	return definition, query.RowsAffected != 0, nil
+}
+
 func validEffectiveRequestKeyIndex(definition requestKeyIndexDefinition) bool {
-	if !definition.Unique || definition.KeyCount != 2 || strings.TrimSpace(strings.ToLower(definition.FirstKey)) != "session_id" {
+	if definition.RelationKind != "i" || definition.TableName != (planRunRecord{}).TableName() ||
+		!definition.Unique || !definition.Valid || !definition.Ready || !definition.NoPredicate ||
+		definition.KeyCount != 2 || strings.TrimSpace(strings.ToLower(definition.FirstKey)) != "session_id" {
 		return false
 	}
 	normalized := strings.ToLower(strings.Join(strings.Fields(definition.SecondKey), ""))

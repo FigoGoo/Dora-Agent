@@ -781,6 +781,12 @@ func TestPostgresRunStoreAutoMigrateRejectsIncorrectV2IndexDefinition(t *testing
 		if err := tx.Exec("DROP INDEX IF EXISTS " + testEffectiveRequestKeyIndexV2).Error; err != nil {
 			return err
 		}
+		if err := tx.Exec("DROP INDEX IF EXISTS " + legacyRequestKeySessionIndex).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`CREATE UNIQUE INDEX ` + legacyRequestKeySessionIndex + ` ON aigc_plan_runs (session_id, request_key)`).Error; err != nil {
+			return err
+		}
 		return tx.Exec(`CREATE UNIQUE INDEX ` + testEffectiveRequestKeyIndexV2 + ` ON aigc_plan_runs (session_id, request_key)`).Error
 	}); err != nil {
 		t.Fatal(err)
@@ -788,6 +794,109 @@ func TestPostgresRunStoreAutoMigrateRejectsIncorrectV2IndexDefinition(t *testing
 	err := store.AutoMigrate(ctx)
 	if err == nil || !strings.Contains(err.Error(), "definition") {
 		t.Fatalf("incorrect v2 definition migration error = %v", err)
+	}
+	assertPostgresIndexExists(t, db.WithContext(ctx), legacyRequestKeySessionIndex)
+}
+
+func assertPostgresIndexExists(t *testing.T, db *gorm.DB, name string) {
+	t.Helper()
+	var count int64
+	if err := db.Raw(`SELECT count(*) FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?`, name).Scan(&count).Error; err != nil || count != 1 {
+		t.Fatalf("index %q count=%d err=%v", name, count, err)
+	}
+}
+
+func TestPostgresRunStoreAutoMigrateRejectsPartialV2AndPreservesLegacy(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		_ = db.WithContext(cleanupCtx).Exec("DROP INDEX IF EXISTS " + testEffectiveRequestKeyIndexV2).Error
+		if err := store.AutoMigrate(cleanupCtx); err != nil {
+			t.Errorf("restore effective request key index: %v", err)
+		}
+	})
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS " + testEffectiveRequestKeyIndexV2).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DROP INDEX IF EXISTS " + legacyRequestKeySessionIndex).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`CREATE UNIQUE INDEX ` + legacyRequestKeySessionIndex + ` ON aigc_plan_runs (session_id, request_key)`).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`CREATE UNIQUE INDEX ` + testEffectiveRequestKeyIndexV2 + `
+			ON aigc_plan_runs (session_id, (` + effectiveRequestKeySQL + `)) WHERE status = 'succeeded'`).Error
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := store.AutoMigrate(ctx)
+	if err == nil || !strings.Contains(err.Error(), "definition") {
+		t.Fatalf("partial v2 migration error = %v", err)
+	}
+	assertPostgresIndexExists(t, db.WithContext(ctx), legacyRequestKeySessionIndex)
+}
+
+func TestPostgresRunStoreAutoMigrateRejectsV2NameOwnedByOtherTable(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	tableName := fmt.Sprintf("test_effective_index_collision_%d", postgresRunTestSequence.Add(1))
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		_ = db.WithContext(cleanupCtx).Exec("DROP TABLE IF EXISTS " + tableName).Error
+		if err := store.AutoMigrate(cleanupCtx); err != nil {
+			t.Errorf("restore effective request key index: %v", err)
+		}
+	})
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS " + testEffectiveRequestKeyIndexV2).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DROP INDEX IF EXISTS " + legacyRequestKeySessionIndex).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`CREATE UNIQUE INDEX ` + legacyRequestKeySessionIndex + ` ON aigc_plan_runs (session_id, request_key)`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("CREATE TABLE " + tableName + " (id text PRIMARY KEY)").Error; err != nil {
+			return err
+		}
+		return tx.Exec("CREATE INDEX " + testEffectiveRequestKeyIndexV2 + " ON " + tableName + " (id)").Error
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := store.AutoMigrate(ctx)
+	if err == nil || !strings.Contains(err.Error(), "definition") {
+		t.Fatalf("cross-table v2 name migration error = %v", err)
+	}
+	assertPostgresIndexExists(t, db.WithContext(ctx), legacyRequestKeySessionIndex)
+}
+
+func TestValidEffectiveRequestKeyIndexRequiresSafeCatalogState(t *testing.T) {
+	base := requestKeyIndexDefinition{
+		RelationKind: "i", TableName: "aigc_plan_runs", Unique: true, Valid: true, Ready: true, NoPredicate: true,
+		KeyCount: 2, FirstKey: "session_id", SecondKey: "COALESCE(NULLIF(request_key::text, ''::text), id::text)",
+	}
+	if !validEffectiveRequestKeyIndex(base) {
+		t.Fatal("valid v2 catalog definition rejected")
+	}
+	mutations := map[string]func(*requestKeyIndexDefinition){
+		"relation_kind": func(definition *requestKeyIndexDefinition) { definition.RelationKind = "r" },
+		"table":         func(definition *requestKeyIndexDefinition) { definition.TableName = "other" },
+		"unique":        func(definition *requestKeyIndexDefinition) { definition.Unique = false },
+		"valid":         func(definition *requestKeyIndexDefinition) { definition.Valid = false },
+		"ready":         func(definition *requestKeyIndexDefinition) { definition.Ready = false },
+		"predicate":     func(definition *requestKeyIndexDefinition) { definition.NoPredicate = false },
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			definition := base
+			mutate(&definition)
+			if validEffectiveRequestKeyIndex(definition) {
+				t.Fatalf("unsafe catalog definition accepted: %+v", definition)
+			}
+		})
 	}
 }
 

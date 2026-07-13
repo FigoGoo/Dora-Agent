@@ -175,9 +175,6 @@ func (s *Scheduler) submit(ctx context.Context, sessionID, userID, requestKey st
 			if !sameSubmitRequest(existing, requested) {
 				return PlanRun{}, fmt.Errorf("%w: request key %q", ErrSubmitRequestConflict, requestKey)
 			}
-			if needsInitialAdvance(existing) {
-				return s.Advance(ctx, existing.ID)
-			}
 			return existing, nil
 		}
 		if !errors.Is(err, ErrRunNotFound) {
@@ -251,7 +248,7 @@ func (s *Scheduler) recoverCreate(ctx context.Context, requested PlanRun, explic
 		existing, requestErr := s.store.GetRunByRequestKey(ctx, requested.SessionID, requested.RequestKey)
 		if requestErr == nil {
 			if sameSubmitRequest(existing, requested) {
-				return existing, needsInitialAdvance(existing), nil
+				return existing, false, nil
 			}
 			return PlanRun{}, false, errors.Join(fmt.Errorf("%w: request key %q", ErrSubmitRequestConflict, requested.RequestKey), createErr)
 		}
@@ -260,19 +257,12 @@ func (s *Scheduler) recoverCreate(ctx context.Context, requested PlanRun, explic
 		}
 		return PlanRun{}, false, createErr
 	}
-	byID, getErr := s.store.GetRun(ctx, requested.ID)
-	if getErr == nil {
-		if sameSubmitRequest(byID, requested) {
-			return byID, needsInitialAdvance(byID), nil
-		}
-		return PlanRun{}, false, errors.Join(createErr, fmt.Errorf("%w: created run %q does not match submit request", ErrRunRecordCorrupt, requested.ID))
-	}
-	if !errors.Is(getErr, ErrRunNotFound) {
-		return PlanRun{}, false, errors.Join(createErr, getErr)
-	}
-	if errors.Is(createErr, ErrSubmitRequestKeyExists) {
+	if errors.Is(createErr, ErrSubmitRequestKeyExists) || errors.Is(createErr, ErrSessionActiveRun) {
 		existing, requestErr := s.store.GetRunByRequestKey(ctx, requested.SessionID, requested.RequestKey)
 		if requestErr != nil {
+			if errors.Is(requestErr, ErrRunNotFound) {
+				return PlanRun{}, false, createErr
+			}
 			return PlanRun{}, false, errors.Join(createErr, requestErr)
 		}
 		if !sameSubmitRequest(existing, requested) {
@@ -281,10 +271,17 @@ func (s *Scheduler) recoverCreate(ctx context.Context, requested PlanRun, explic
 				createErr,
 			)
 		}
-		return existing, needsInitialAdvance(existing), nil
+		return existing, false, nil
 	}
-	if !errors.Is(createErr, ErrSessionActiveRun) {
-		return PlanRun{}, false, createErr
+	byID, getErr := s.store.GetRun(ctx, requested.ID)
+	if getErr == nil {
+		if sameSubmitRequest(byID, requested) {
+			return byID, true, nil
+		}
+		return PlanRun{}, false, errors.Join(createErr, fmt.Errorf("%w: created run %q does not match submit request", ErrRunRecordCorrupt, requested.ID))
+	}
+	if !errors.Is(getErr, ErrRunNotFound) {
+		return PlanRun{}, false, errors.Join(createErr, getErr)
 	}
 	return PlanRun{}, false, createErr
 }
@@ -293,27 +290,6 @@ func sameSubmitRequest(authoritative, requested PlanRun) bool {
 	return authoritative.RequestKey == requested.RequestKey && authoritative.SessionID == requested.SessionID && authoritative.UserID == requested.UserID &&
 		authoritative.SubmitRequestFingerprint != "" &&
 		authoritative.SubmitRequestFingerprint == requested.SubmitRequestFingerprint
-}
-
-func needsInitialAdvance(run PlanRun) bool {
-	if run.Status != RunStatusRunning || run.Version != 1 || run.CancelRequested ||
-		run.SuspendReason != "" || run.SuspendedNodeID != "" || run.PreviewRequired ||
-		run.ResumeKey != "" || run.Resumed || len(run.ResumeDecision) != 0 || run.ResumeDecisionSchema != "" ||
-		run.CancelBatchID != "" || run.CancelNodeID != "" || run.CancelReason != "" ||
-		len(run.Plan.Steps) == 0 || len(run.Nodes) != len(run.Plan.Steps) {
-		return false
-	}
-	for _, step := range run.Plan.Steps {
-		node := run.Nodes[step.ID]
-		if node == nil || node.StepID != step.ID || node.Status != NodeStatusPending || node.SkipReason != "" || node.Attempt != 0 ||
-			node.ExecutionEpoch != 0 || node.ExecutionOwner != "" || node.ExecutionToken != "" || node.LeaseUntil != nil ||
-			len(node.Outputs) != 0 || node.Fail != nil || node.Suspension != nil || node.ResumeKey != "" ||
-			node.SuspensionGeneration != 0 || node.Resumed || len(node.ResumeDecision) != 0 ||
-			node.SuspensionOrigin != "" || node.ResumeDecisionSchema != "" || node.GuardApproval != nil {
-			return false
-		}
-	}
-	return true
 }
 
 func computeSubmitRequestFingerprint(sessionID, userID, requestKey string, plan ExecutionPlan) (string, error) {
