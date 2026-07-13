@@ -594,6 +594,10 @@ func (s *blockingRevisionStore) GetActiveRun(ctx context.Context, sessionID stri
 	return s.base.GetActiveRun(ctx, sessionID)
 }
 
+func (s *blockingRevisionStore) GetRunByRequestKey(ctx context.Context, sessionID, requestKey string) (PlanRun, error) {
+	return s.base.GetRunByRequestKey(ctx, sessionID, requestKey)
+}
+
 func (s *blockingRevisionStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
 	active := s.active.Add(1)
 	defer s.active.Add(-1)
@@ -774,6 +778,10 @@ func (s *revisionConflictStore) GetRun(ctx context.Context, id string) (PlanRun,
 
 func (s *revisionConflictStore) GetActiveRun(ctx context.Context, sessionID string) (PlanRun, error) {
 	return s.base.GetActiveRun(ctx, sessionID)
+}
+
+func (s *revisionConflictStore) GetRunByRequestKey(ctx context.Context, sessionID, requestKey string) (PlanRun, error) {
+	return s.base.GetRunByRequestKey(ctx, sessionID, requestKey)
 }
 
 func (s *revisionConflictStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {

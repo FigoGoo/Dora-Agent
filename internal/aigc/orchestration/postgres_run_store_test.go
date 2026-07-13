@@ -84,8 +84,12 @@ func TestPostgresRunStoreRoundTripAndCAS(t *testing.T) {
 	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
 
 	created, err := store.CreateRun(ctx, postgresStoreRun(t, id))
-	if err != nil || created.Version != 1 || created.Status != RunStatusDraft {
+	if err != nil || created.Version != 1 || created.Status != RunStatusDraft || created.RequestKey != id {
 		t.Fatalf("CreateRun() = %+v, %v", created, err)
+	}
+	byRequest, err := store.GetRunByRequestKey(ctx, "session-1", id)
+	if err != nil || byRequest.ID != id {
+		t.Fatalf("GetRunByRequestKey() = %+v, %v", byRequest, err)
 	}
 	large, ok := created.ResumeDecision["large"].(json.Number)
 	if !ok || large.String() != "9007199254740993" {
@@ -204,7 +208,7 @@ func TestPostgresSchedulersConvergeIdenticalConcurrentSubmit(t *testing.T) {
 	}
 	leftResult := make(chan result, 1)
 	go func() {
-		run, err := left.Submit(context.Background(), sessionID, "user", plan)
+		run, err := left.SubmitWithKey(context.Background(), sessionID, "user", "postgres-message", plan)
 		leftResult <- result{run: run, err: err}
 	}()
 	select {
@@ -212,7 +216,7 @@ func TestPostgresSchedulersConvergeIdenticalConcurrentSubmit(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("first scheduler did not start tool")
 	}
-	rightRun, rightErr := right.Submit(context.Background(), sessionID, "user", plan)
+	rightRun, rightErr := right.SubmitWithKey(context.Background(), sessionID, "user", "postgres-message", plan)
 	if rightErr != nil || rightRun.ID == "" {
 		t.Fatalf("right Submit() = %+v, %v", rightRun, rightErr)
 	}
@@ -220,6 +224,31 @@ func TestPostgresSchedulersConvergeIdenticalConcurrentSubmit(t *testing.T) {
 	leftDone := <-leftResult
 	if leftDone.err != nil || leftDone.run.ID != rightRun.ID || leftDone.run.Status != RunStatusSucceeded || calls.Load() != 1 {
 		t.Fatalf("left=%+v right=%+v calls=%d", leftDone, rightRun, calls.Load())
+	}
+}
+
+func TestPostgresSchedulerReplaysTerminalSubmitWithKey(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	sessionID := postgresRunID(t) + "-terminal-key-session"
+	t.Cleanup(func() {
+		db.WithContext(context.Background()).Where("session_id = ?", sessionID).Delete(&planRunRecord{})
+	})
+	var calls atomic.Int32
+	tool := schedulerTool{key: "terminal-key", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		calls.Add(1)
+		return vocabulary.Result{}, nil
+	}}
+	var ids atomic.Int32
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { return fmt.Sprintf("%s-%d", sessionID, ids.Add(1)) })
+	scheduler, _ := NewScheduler(cfg)
+	plan := activeTestPlan("terminal-key", "terminal-key")
+	first, err := scheduler.SubmitWithKey(context.Background(), sessionID, "user", "message-terminal", plan)
+	if err != nil || first.Status != RunStatusSucceeded {
+		t.Fatalf("first SubmitWithKey() = %+v, %v", first, err)
+	}
+	replayed, err := scheduler.SubmitWithKey(context.Background(), sessionID, "user", "message-terminal", plan)
+	if err != nil || replayed.ID != first.ID || calls.Load() != 1 {
+		t.Fatalf("terminal replay = %+v calls=%d err=%v", replayed, calls.Load(), err)
 	}
 }
 
@@ -307,6 +336,12 @@ func TestPostgresRunStoreRejectsIdentityMutation(t *testing.T) {
 			t.Fatalf("timed=%v stored=%+v err=%v", timed, stored, getErr)
 		}
 	}
+	if _, err := store.MutateRun(ctx, id, created.Version, func(run *PlanRun) error {
+		run.RequestKey = "changed-key"
+		return nil
+	}); !errors.Is(err, ErrRunRecordCorrupt) {
+		t.Fatalf("request key mutation error = %v", err)
+	}
 }
 
 func TestPostgresRunStoreSessionMigrationEnforcesActiveSlotAtomically(t *testing.T) {
@@ -392,6 +427,7 @@ func TestPostgresRunConstraintMappingPreservesCauseBehindDomainError(t *testing.
 	}{
 		{constraint: planRunPrimaryKeyConstraint, want: ErrRunAlreadyExists},
 		{constraint: activeRunSessionIndex, want: ErrSessionActiveRun},
+		{constraint: requestKeySessionIndex, want: ErrSubmitRequestKeyExists},
 	} {
 		raw := &pgconn.PgError{Code: "23505", ConstraintName: test.constraint, Message: "raw duplicate detail"}
 		mapped := mapPlanRunConstraintError(raw, "run")
@@ -418,7 +454,7 @@ func TestPostgresRunStoreAutoMigrateRejectsExistingDuplicateActiveSessions(t *te
 		}
 		sessionID := postgresRunID(t) + "-duplicate-session"
 		for index := range 2 {
-			run := PlanRun{ID: fmt.Sprintf("%s-%d", sessionID, index), SessionID: sessionID, Status: RunStatusRunning, Version: 1, Nodes: map[string]*NodeRun{}}
+			run := PlanRun{ID: fmt.Sprintf("%s-%d", sessionID, index), RequestKey: fmt.Sprintf("duplicate-%d", index), SessionID: sessionID, Status: RunStatusRunning, Version: 1, Nodes: map[string]*NodeRun{}}
 			record, _, encodeErr := encodePlanRunRecord(run)
 			if encodeErr != nil {
 				return encodeErr
@@ -434,6 +470,36 @@ func TestPostgresRunStoreAutoMigrateRejectsExistingDuplicateActiveSessions(t *te
 	})
 	if !errors.Is(err, rollback) {
 		t.Fatalf("fixture transaction error = %v", err)
+	}
+}
+
+func TestPostgresRunStoreAutoMigrateBackfillsLegacyRequestKeyAndPayload(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	id := postgresRunID(t)
+	sessionID := id + "-legacy-session"
+	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
+	created, err := store.CreateRun(ctx, PlanRun{ID: id, RequestKey: "original-key", SessionID: sessionID, Status: RunStatusSucceeded, Nodes: map[string]*NodeRun{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS idx_aigc_plan_runs_session_request_key").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("ALTER TABLE aigc_plan_runs ALTER COLUMN request_key DROP NOT NULL").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("UPDATE aigc_plan_runs SET request_key = NULL, payload = payload - 'request_key' WHERE id = ?", created.ID).Error; err != nil {
+			return err
+		}
+		return NewPostgresRunStore(tx).AutoMigrate(ctx)
+	}); err != nil {
+		t.Fatalf("legacy AutoMigrate() error = %v", err)
+	}
+	backfilled, err := store.GetRun(ctx, id)
+	if err != nil || backfilled.RequestKey != id {
+		t.Fatalf("backfilled run = %+v, %v", backfilled, err)
 	}
 }
 

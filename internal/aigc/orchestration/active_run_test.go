@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -96,6 +97,24 @@ func TestMemoryRunStoreRejectsIdentityMutationAtomically(t *testing.T) {
 	}
 }
 
+func TestMemoryRunStoreRejectsRequestKeyMutationAtomically(t *testing.T) {
+	store := NewMemoryRunStore()
+	created, err := store.CreateRun(context.Background(), PlanRun{ID: "request-identity", RequestKey: "frozen-key", SessionID: "session", Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MutateRun(context.Background(), created.ID, created.Version, func(run *PlanRun) error {
+		run.RequestKey = "changed-key"
+		return nil
+	}); !errors.Is(err, ErrRunRecordCorrupt) {
+		t.Fatalf("request key mutation error = %v", err)
+	}
+	stored, err := store.GetRunByRequestKey(context.Background(), "session", "frozen-key")
+	if err != nil || stored.Version != created.Version || stored.RequestKey != created.RequestKey {
+		t.Fatalf("stored = %+v, %v", stored, err)
+	}
+}
+
 type createCommitThenErrorStore struct {
 	RunStore
 	err   error
@@ -162,13 +181,13 @@ func TestSchedulerReturnsJoinedErrorWhenAmbiguousCreateReadFailsThenReplayRecove
 		t.Fatal(err)
 	}
 	plan := activeTestPlan("same", "once")
-	if _, err := scheduler.Submit(context.Background(), "session", "user", plan); !errors.Is(err, ambiguous) || !errors.Is(err, readErr) {
+	if _, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "request-retry", plan); !errors.Is(err, ambiguous) || !errors.Is(err, readErr) {
 		t.Fatalf("first Submit() error = %v", err)
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("tool calls after uncertain read = %d", calls.Load())
 	}
-	recovered, err := scheduler.Submit(context.Background(), "session", "user", plan)
+	recovered, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "request-retry", plan)
 	if err != nil || recovered.ID != "ambiguous" || recovered.Status != RunStatusSucceeded || calls.Load() != 1 {
 		t.Fatalf("replayed Submit() = %+v, calls=%d, err=%v", recovered, calls.Load(), err)
 	}
@@ -215,12 +234,11 @@ func TestSchedulerConcurrentSubmitsEnforceSessionSlot(t *testing.T) {
 				t.Fatal("first tool did not start")
 			}
 			secondRun, secondErr := second.Submit(context.Background(), "session", "user", secondPlan)
-			if samePlan {
-				if secondErr != nil || secondRun.ID != "run-first" {
-					t.Fatalf("identical replay = %+v, %v", secondRun, secondErr)
-				}
-			} else if !errors.Is(secondErr, ErrSessionActiveRun) {
+			if !errors.Is(secondErr, ErrSessionActiveRun) {
 				t.Fatalf("different plan error = %v", secondErr)
+			}
+			if secondRun.ID != "" {
+				t.Fatalf("independent Submit returned run %+v", secondRun)
 			}
 			releaseOnce.Do(func() { close(release) })
 			completed := <-firstResult
@@ -246,7 +264,7 @@ func TestSchedulerTerminalRunReleasesSessionForNewSubmit(t *testing.T) {
 	if err != nil || first.Status != RunStatusSucceeded {
 		t.Fatalf("first Submit() = %+v, %v", first, err)
 	}
-	second, err := scheduler.Submit(context.Background(), "session", "user", activeTestPlan("two", "done"))
+	second, err := scheduler.Submit(context.Background(), "session", "user", activeTestPlan("one", "done"))
 	if err != nil || second.ID != "second" || second.Status != RunStatusSucceeded {
 		t.Fatalf("second Submit() = %+v, %v", second, err)
 	}
@@ -269,11 +287,14 @@ func TestSchedulerSuspendedRunRetainsSessionSlot(t *testing.T) {
 	if _, err := second.Submit(context.Background(), "session", "user", activeTestPlan("two", "pause")); !errors.Is(err, ErrSessionActiveRun) {
 		t.Fatalf("different submit error = %v", err)
 	}
+	if _, err := second.Submit(context.Background(), "session", "user", activeTestPlan("one", "pause")); !errors.Is(err, ErrSessionActiveRun) {
+		t.Fatalf("same-plan independent submit error = %v", err)
+	}
 }
 
 func TestSameSubmitRequestUsesCanonicalPlanNumbers(t *testing.T) {
 	requested := PlanRun{
-		SessionID: "session", UserID: "user", PreviewRequired: true, ResumeDecisionSchema: "approved_bool_v1",
+		RequestKey: "request-canonical", SessionID: "session", UserID: "user", PreviewRequired: true, ResumeDecisionSchema: "approved_bool_v1",
 		Plan: activeTestPlan("canonical", "tool"),
 	}
 	authoritative, err := clonePlanRun(requested)
@@ -292,6 +313,11 @@ func TestSameSubmitRequestUsesCanonicalPlanNumbers(t *testing.T) {
 	authoritative.UserID = "other-user"
 	if sameSubmitRequest(authoritative, requested) {
 		t.Fatal("different user matched submit request")
+	}
+	authoritative = requested
+	authoritative.RequestKey = "other-request"
+	if sameSubmitRequest(authoritative, requested) {
+		t.Fatal("different request key matched submit request")
 	}
 }
 
@@ -318,7 +344,7 @@ func TestSchedulerReplaysApprovedPreviewUsingImmutableRequestOnly(t *testing.T) 
 	second, _ := NewScheduler(secondCfg)
 	plan := activeTestPlan("preview", "preview-work")
 	plan.EstimatedJobs = 2
-	suspended, err := first.Submit(context.Background(), "session", "user", plan)
+	suspended, err := first.SubmitWithKey(context.Background(), "session", "user", "preview-request", plan)
 	if err != nil || !suspended.PreviewRequired {
 		t.Fatalf("initial Submit() = %+v, %v", suspended, err)
 	}
@@ -340,19 +366,136 @@ func TestSchedulerReplaysApprovedPreviewUsingImmutableRequestOnly(t *testing.T) 
 	if err != nil || authoritative.PreviewRequired || authoritative.Status != RunStatusRunning {
 		t.Fatalf("approved active run = %+v, %v", authoritative, err)
 	}
-	replayed, err := second.Submit(context.Background(), "session", "user", plan)
+	replayed, err := second.SubmitWithKey(context.Background(), "session", "user", "preview-request", plan)
 	if err != nil || replayed.ID != suspended.ID {
 		t.Fatalf("same-plan replay = %+v, %v", replayed, err)
 	}
 	different := plan
 	different.PlanID = "different"
-	if _, err := second.Submit(context.Background(), "session", "user", different); !errors.Is(err, ErrSessionActiveRun) {
-		t.Fatalf("different-plan Submit() error = %v", err)
+	if _, err := second.SubmitWithKey(context.Background(), "session", "user", "preview-request", different); !errors.Is(err, ErrSubmitRequestConflict) {
+		t.Fatalf("same-key different-plan Submit() error = %v", err)
 	}
 	releaseOnce.Do(func() { close(release) })
 	completed := <-resumeResult
 	if completed.err != nil || completed.run.Status != RunStatusSucceeded || calls.Load() != 1 {
 		t.Fatalf("resume=%+v calls=%d", completed, calls.Load())
+	}
+}
+
+func TestSchedulerSubmitWithKeyReplaysTerminalRunAndRejectsConflicts(t *testing.T) {
+	store := NewMemoryRunStore()
+	var calls atomic.Int32
+	tool := schedulerTool{key: "keyed", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		calls.Add(1)
+		return vocabulary.Result{}, nil
+	}}
+	var next atomic.Int32
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { return fmt.Sprintf("keyed-%d", next.Add(1)) })
+	scheduler, _ := NewScheduler(cfg)
+	plan := activeTestPlan("keyed", "keyed")
+	first, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "message-1", plan)
+	if err != nil || first.Status != RunStatusSucceeded || first.RequestKey != "message-1" {
+		t.Fatalf("first SubmitWithKey() = %+v, %v", first, err)
+	}
+	replayed, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "message-1", plan)
+	if err != nil || replayed.ID != first.ID || calls.Load() != 1 {
+		t.Fatalf("terminal replay = %+v calls=%d err=%v", replayed, calls.Load(), err)
+	}
+	changed := plan
+	changed.PlanID = "changed"
+	if _, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "message-1", changed); !errors.Is(err, ErrSubmitRequestConflict) {
+		t.Fatalf("same-key changed-plan error = %v", err)
+	}
+	if _, err := scheduler.SubmitWithKey(context.Background(), "session", "other-user", "message-1", plan); !errors.Is(err, ErrSubmitRequestConflict) {
+		t.Fatalf("same-key changed-user error = %v", err)
+	}
+	newRun, err := scheduler.SubmitWithKey(context.Background(), "session", "user", "message-2", plan)
+	if err != nil || newRun.ID != "keyed-5" || calls.Load() != 2 {
+		t.Fatalf("new keyed request = %+v calls=%d err=%v", newRun, calls.Load(), err)
+	}
+}
+
+func TestSchedulerSubmitWithKeyValidatesKey(t *testing.T) {
+	scheduler := schedulerForTest(t, NewMemoryRunStore(), schedulerRegistry(t, schedulerTool{key: "keyed"}), 1)
+	for _, key := range []string{"", "   ", "contains space", strings.Repeat("x", 129), "bad/segment"} {
+		if _, err := scheduler.SubmitWithKey(context.Background(), "session", "user", key, activeTestPlan("keyed", "keyed")); !errors.Is(err, ErrSubmitRequestKeyInvalid) {
+			t.Fatalf("key %q error = %v", key, err)
+		}
+	}
+	trimmed, err := scheduler.SubmitWithKey(context.Background(), "trim-session", "user", "  valid-key  ", activeTestPlan("keyed", "keyed"))
+	if err != nil || trimmed.RequestKey != "valid-key" {
+		t.Fatalf("trimmed key run = %+v, %v", trimmed, err)
+	}
+}
+
+func TestMemoryRunStoreRequestKeyRoundTripAndLookup(t *testing.T) {
+	store := NewMemoryRunStore()
+	created, err := store.CreateRun(context.Background(), PlanRun{ID: "request-run", RequestKey: "request-key", SessionID: "session", Status: RunStatusSucceeded, Nodes: map[string]*NodeRun{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byKey, err := store.GetRunByRequestKey(context.Background(), "session", "request-key")
+	if err != nil || byKey.ID != created.ID || byKey.RequestKey != "request-key" {
+		t.Fatalf("GetRunByRequestKey() = %+v, %v", byKey, err)
+	}
+}
+
+func TestSchedulerSubmitWithKeyConvergesAcrossSchedulers(t *testing.T) {
+	store := NewMemoryRunStore()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	var calls atomic.Int32
+	tool := schedulerTool{key: "keyed-block", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return vocabulary.Result{}, nil
+	}}
+	registry := schedulerRegistry(t, tool)
+	leftCfg := schedulerConfigForTest(store, registry, func() string { return "key-left" })
+	rightCfg := schedulerConfigForTest(store, registry, func() string { return "key-right" })
+	left, _ := NewScheduler(leftCfg)
+	right, _ := NewScheduler(rightCfg)
+	plan := activeTestPlan("keyed-concurrent", "keyed-block")
+	type result struct {
+		run PlanRun
+		err error
+	}
+	leftResult := make(chan result, 1)
+	go func() {
+		run, err := left.SubmitWithKey(context.Background(), "session", "user", "message-concurrent", plan)
+		leftResult <- result{run: run, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first keyed tool did not start")
+	}
+	rightRun, rightErr := right.SubmitWithKey(context.Background(), "session", "user", "message-concurrent", plan)
+	if rightErr != nil || rightRun.ID != "key-left" {
+		t.Fatalf("right replay = %+v, %v", rightRun, rightErr)
+	}
+	once.Do(func() { close(release) })
+	completed := <-leftResult
+	if completed.err != nil || completed.run.Status != RunStatusSucceeded || calls.Load() != 1 {
+		t.Fatalf("left=%+v calls=%d", completed, calls.Load())
+	}
+}
+
+func TestSchedulerSubmitWithKeyIsScopedBySession(t *testing.T) {
+	store := NewMemoryRunStore()
+	tool := schedulerTool{key: "scoped"}
+	var next atomic.Int32
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, tool), func() string { return fmt.Sprintf("scoped-%d", next.Add(1)) })
+	scheduler, _ := NewScheduler(cfg)
+	plan := activeTestPlan("scoped", "scoped")
+	left, leftErr := scheduler.SubmitWithKey(context.Background(), "session-left", "user", "same-key", plan)
+	right, rightErr := scheduler.SubmitWithKey(context.Background(), "session-right", "user", "same-key", plan)
+	if leftErr != nil || rightErr != nil || left.ID == right.ID {
+		t.Fatalf("left=%+v/%v right=%+v/%v", left, leftErr, right, rightErr)
 	}
 }
 
@@ -381,6 +524,10 @@ func TestMemoryRunStoreSessionMigrationEnforcesActiveSlotAtomically(t *testing.T
 			migrated, err := mutateSessionForTest(store, timed, moving, "free", RunStatusRunning)
 			if err != nil || migrated.SessionID != "free" {
 				t.Fatalf("free migration = %+v, %v", migrated, err)
+			}
+			byRequest, err := store.GetRunByRequestKey(context.Background(), "free", migrated.RequestKey)
+			if err != nil || byRequest.ID != migrated.ID {
+				t.Fatalf("migrated request index = %+v, %v", byRequest, err)
 			}
 			terminal, err := mutateSessionForTest(store, timed, migrated, "target", RunStatusCancelled)
 			if err != nil || terminal.SessionID != "target" || terminal.Status != RunStatusCancelled {

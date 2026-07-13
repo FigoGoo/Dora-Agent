@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,12 +15,15 @@ import (
 )
 
 var (
-	ErrRunNotFound        = errors.New("plan run not found")
-	ErrRunAlreadyExists   = errors.New("plan run already exists")
-	ErrRunVersionConflict = errors.New("plan run version conflict")
-	ErrRunNotSerializable = errors.New("plan run is not serializable")
-	ErrRunRecordCorrupt   = errors.New("plan run record is corrupt")
-	ErrSessionActiveRun   = errors.New("session already has an active plan run")
+	ErrRunNotFound             = errors.New("plan run not found")
+	ErrRunAlreadyExists        = errors.New("plan run already exists")
+	ErrRunVersionConflict      = errors.New("plan run version conflict")
+	ErrRunNotSerializable      = errors.New("plan run is not serializable")
+	ErrRunRecordCorrupt        = errors.New("plan run record is corrupt")
+	ErrSessionActiveRun        = errors.New("session already has an active plan run")
+	ErrSubmitRequestKeyExists  = errors.New("submit request key already exists")
+	ErrSubmitRequestConflict   = errors.New("submit request conflicts with an existing request")
+	ErrSubmitRequestKeyInvalid = errors.New("submit request key is invalid")
 )
 
 type SessionActiveRunError struct {
@@ -96,6 +100,7 @@ type GuardApprovalReceipt struct {
 
 type PlanRun struct {
 	ID                   string              `json:"id"`
+	RequestKey           string              `json:"request_key"`
 	SessionID            string              `json:"session_id"`
 	UserID               string              `json:"user_id"`
 	Plan                 ExecutionPlan       `json:"plan"`
@@ -118,6 +123,7 @@ type PlanRun struct {
 type RunStore interface {
 	CreateRun(ctx context.Context, run PlanRun) (PlanRun, error)
 	GetRun(ctx context.Context, id string) (PlanRun, error)
+	GetRunByRequestKey(ctx context.Context, sessionID, requestKey string) (PlanRun, error)
 	GetActiveRun(ctx context.Context, sessionID string) (PlanRun, error)
 	MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error)
 	MutateRunAtAuthoritativeNow(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun, time.Time) error) (PlanRun, error)
@@ -175,9 +181,10 @@ func isActiveRunStatus(status string) bool {
 }
 
 type MemoryRunStore struct {
-	mu    sync.Mutex
-	runs  map[string]PlanRun
-	clock func() time.Time
+	mu          sync.Mutex
+	runs        map[string]PlanRun
+	requestRuns map[string]string
+	clock       func() time.Time
 }
 
 type MemoryRunStoreOption func(*MemoryRunStore)
@@ -191,7 +198,7 @@ func WithMemoryRunStoreClock(clock func() time.Time) MemoryRunStoreOption {
 }
 
 func NewMemoryRunStore(options ...MemoryRunStoreOption) *MemoryRunStore {
-	store := &MemoryRunStore{runs: make(map[string]PlanRun), clock: time.Now}
+	store := &MemoryRunStore{runs: make(map[string]PlanRun), requestRuns: make(map[string]string), clock: time.Now}
 	for _, option := range options {
 		option(store)
 	}
@@ -205,6 +212,9 @@ func (s *MemoryRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun, e
 	if run.ID == "" {
 		return PlanRun{}, errors.New("plan run id is required")
 	}
+	if strings.TrimSpace(run.RequestKey) == "" {
+		run.RequestKey = run.ID
+	}
 	if err := ValidateRunTransition(run.Status, run.Status); err != nil {
 		return PlanRun{}, err
 	}
@@ -213,6 +223,10 @@ func (s *MemoryRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun, e
 	defer s.mu.Unlock()
 	if _, exists := s.runs[run.ID]; exists {
 		return PlanRun{}, fmt.Errorf("%w: run %q", ErrRunAlreadyExists, run.ID)
+	}
+	requestIndexKey := memoryRequestIndexKey(run.SessionID, run.RequestKey)
+	if _, exists := s.requestRuns[requestIndexKey]; exists {
+		return PlanRun{}, fmt.Errorf("%w: request key %q", ErrSubmitRequestKeyExists, run.RequestKey)
 	}
 	if isActiveRunStatus(run.Status) {
 		for _, existing := range s.runs {
@@ -231,6 +245,7 @@ func (s *MemoryRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun, e
 		return PlanRun{}, err
 	}
 	s.runs[stored.ID] = stored
+	s.requestRuns[requestIndexKey] = stored.ID
 	return result, nil
 }
 
@@ -275,6 +290,27 @@ func (s *MemoryRunStore) GetActiveRun(ctx context.Context, sessionID string) (Pl
 	return clonePlanRun(active)
 }
 
+func (s *MemoryRunStore) GetRunByRequestKey(ctx context.Context, sessionID, requestKey string) (PlanRun, error) {
+	if err := ctx.Err(); err != nil {
+		return PlanRun{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, exists := s.requestRuns[memoryRequestIndexKey(sessionID, requestKey)]
+	if !exists {
+		return PlanRun{}, fmt.Errorf("%w: request key %q", ErrRunNotFound, requestKey)
+	}
+	run, exists := s.runs[id]
+	if !exists || run.SessionID != sessionID || run.RequestKey != requestKey {
+		return PlanRun{}, fmt.Errorf("%w: request key index for session %q", ErrRunRecordCorrupt, sessionID)
+	}
+	return clonePlanRun(run)
+}
+
+func memoryRequestIndexKey(sessionID, requestKey string) string {
+	return sessionID + "\x00" + requestKey
+}
+
 func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
 	if err := ctx.Err(); err != nil {
 		return PlanRun{}, err
@@ -303,6 +339,9 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 	if next.ID != current.ID {
 		return PlanRun{}, fmt.Errorf("%w: mutation changed id from %q to %q", ErrRunRecordCorrupt, current.ID, next.ID)
 	}
+	if next.RequestKey != current.RequestKey {
+		return PlanRun{}, fmt.Errorf("%w: mutation changed request key", ErrRunRecordCorrupt)
+	}
 	if err := ValidateRunTransition(current.Status, next.Status); err != nil {
 		return PlanRun{}, err
 	}
@@ -312,6 +351,11 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 				return PlanRun{}, &SessionActiveRunError{ActiveRunID: existing.ID}
 			}
 		}
+	}
+	nextRequestIndexKey := memoryRequestIndexKey(next.SessionID, next.RequestKey)
+	currentRequestIndexKey := memoryRequestIndexKey(current.SessionID, current.RequestKey)
+	if existingID, exists := s.requestRuns[nextRequestIndexKey]; exists && existingID != current.ID {
+		return PlanRun{}, fmt.Errorf("%w: request key %q", ErrSubmitRequestKeyExists, next.RequestKey)
 	}
 	next.Version = current.Version + 1
 	stored, err := clonePlanRun(next)
@@ -323,6 +367,10 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 		return PlanRun{}, err
 	}
 	s.runs[id] = stored
+	if currentRequestIndexKey != nextRequestIndexKey {
+		delete(s.requestRuns, currentRequestIndexKey)
+		s.requestRuns[nextRequestIndexKey] = stored.ID
+	}
 	return result, nil
 }
 

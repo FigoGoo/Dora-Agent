@@ -9,12 +9,15 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
 )
+
+var submitRequestKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 const (
 	defaultMaxParallel   = 4
@@ -141,11 +144,23 @@ func isNilInterface(value any) bool {
 }
 
 func (s *Scheduler) Submit(ctx context.Context, sessionID, userID string, plan ExecutionPlan) (PlanRun, error) {
+	return s.submit(ctx, sessionID, userID, "", false, plan)
+}
+
+func (s *Scheduler) SubmitWithKey(ctx context.Context, sessionID, userID, requestKey string, plan ExecutionPlan) (PlanRun, error) {
+	return s.submit(ctx, sessionID, userID, requestKey, true, plan)
+}
+
+func (s *Scheduler) submit(ctx context.Context, sessionID, userID, requestKey string, explicitKey bool, plan ExecutionPlan) (PlanRun, error) {
 	if ctx == nil {
 		return PlanRun{}, errors.New("scheduler context is required")
 	}
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" {
 		return PlanRun{}, errors.New("scheduler session id and user id are required")
+	}
+	requestKey = strings.TrimSpace(requestKey)
+	if explicitKey && !submitRequestKeyPattern.MatchString(requestKey) {
+		return PlanRun{}, fmt.Errorf("%w: key must be 1-128 characters using letters, digits, '.', '_', ':', or '-'", ErrSubmitRequestKeyInvalid)
 	}
 	if err := plan.Validate(s.vocabulary, s.jobBudget); err != nil {
 		return PlanRun{}, err
@@ -156,6 +171,10 @@ func (s *Scheduler) Submit(ctx context.Context, sessionID, userID string, plan E
 	runID := strings.TrimSpace(s.newID())
 	if runID == "" {
 		return PlanRun{}, errors.New("scheduler generated an empty run id")
+	}
+	if !explicitKey {
+		digest := sha256.Sum256([]byte(runID))
+		requestKey = "one-shot:" + hex.EncodeToString(digest[:])
 	}
 	nodes := make(map[string]*NodeRun, len(plan.Steps))
 	for _, step := range plan.Steps {
@@ -174,7 +193,7 @@ func (s *Scheduler) Submit(ctx context.Context, sessionID, userID string, plan E
 		resumeDecisionSchema = "approved_bool_v1"
 	}
 	requested := PlanRun{
-		ID: runID, SessionID: sessionID, UserID: userID, Plan: plan,
+		ID: runID, RequestKey: requestKey, SessionID: sessionID, UserID: userID, Plan: plan,
 		Status: initialStatus, SuspendReason: suspendReason,
 		PreviewRequired: previewRequired, ResumeKey: resumeKey, Nodes: nodes,
 		ResumeDecisionSchema: resumeDecisionSchema,
@@ -203,21 +222,27 @@ func (s *Scheduler) recoverCreate(ctx context.Context, requested PlanRun, create
 	if !errors.Is(getErr, ErrRunNotFound) {
 		return PlanRun{}, errors.Join(createErr, getErr)
 	}
+	if errors.Is(createErr, ErrSubmitRequestKeyExists) {
+		existing, requestErr := s.store.GetRunByRequestKey(ctx, requested.SessionID, requested.RequestKey)
+		if requestErr != nil {
+			return PlanRun{}, errors.Join(createErr, requestErr)
+		}
+		if !sameSubmitRequest(existing, requested) {
+			return PlanRun{}, errors.Join(
+				fmt.Errorf("%w: request key %q", ErrSubmitRequestConflict, requested.RequestKey),
+				createErr,
+			)
+		}
+		return existing, nil
+	}
 	if !errors.Is(createErr, ErrSessionActiveRun) {
 		return PlanRun{}, createErr
 	}
-	active, activeErr := s.store.GetActiveRun(ctx, requested.SessionID)
-	if activeErr != nil {
-		return PlanRun{}, errors.Join(createErr, activeErr)
-	}
-	if !sameSubmitRequest(active, requested) {
-		return PlanRun{}, createErr
-	}
-	return active, nil
+	return PlanRun{}, createErr
 }
 
 func sameSubmitRequest(authoritative, requested PlanRun) bool {
-	if authoritative.SessionID != requested.SessionID || authoritative.UserID != requested.UserID {
+	if authoritative.RequestKey != requested.RequestKey || authoritative.SessionID != requested.SessionID || authoritative.UserID != requested.UserID {
 		return false
 	}
 	authoritativePlan, err := canonicalJSON(authoritative.Plan)

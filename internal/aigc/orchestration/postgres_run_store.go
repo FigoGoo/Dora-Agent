@@ -16,6 +16,7 @@ import (
 
 const (
 	activeRunSessionIndex       = "idx_aigc_plan_runs_one_active_session"
+	requestKeySessionIndex      = "idx_aigc_plan_runs_session_request_key"
 	planRunPrimaryKeyConstraint = "aigc_plan_runs_pkey"
 )
 
@@ -32,14 +33,25 @@ func (e *runAlreadyExistsConstraintError) Unwrap() []error {
 	return []error{ErrRunAlreadyExists, e.cause}
 }
 
+type submitRequestKeyExistsConstraintError struct{ cause error }
+
+func (e *submitRequestKeyExistsConstraintError) Error() string {
+	return ErrSubmitRequestKeyExists.Error()
+}
+
+func (e *submitRequestKeyExistsConstraintError) Unwrap() []error {
+	return []error{ErrSubmitRequestKeyExists, e.cause}
+}
+
 type planRunRecord struct {
-	ID        string         `gorm:"primaryKey;size:128"`
-	SessionID string         `gorm:"index;size:128;not null"`
-	Status    string         `gorm:"index;size:32;not null"`
-	Version   int            `gorm:"not null"`
-	Payload   datatypes.JSON `gorm:"type:jsonb;not null"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         string         `gorm:"primaryKey;size:128"`
+	SessionID  string         `gorm:"index;size:128;not null"`
+	RequestKey string         `gorm:"size:128"`
+	Status     string         `gorm:"index;size:32;not null"`
+	Version    int            `gorm:"not null"`
+	Payload    datatypes.JSON `gorm:"type:jsonb;not null"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 func (planRunRecord) TableName() string { return "aigc_plan_runs" }
@@ -61,6 +73,19 @@ func (s *PostgresRunStore) AutoMigrate(ctx context.Context) error {
 	}
 	if err := s.db.WithContext(ctx).AutoMigrate(&planRunRecord{}); err != nil {
 		return fmt.Errorf("migrate plan runs: %w", err)
+	}
+	if err := s.db.WithContext(ctx).Exec(`UPDATE aigc_plan_runs
+		SET request_key = id,
+			payload = jsonb_set(payload, '{request_key}', to_jsonb(id::text), true)
+		WHERE request_key IS NULL OR request_key = ''`).Error; err != nil {
+		return fmt.Errorf("backfill plan run request keys: %w", err)
+	}
+	if err := s.db.WithContext(ctx).Exec(`ALTER TABLE aigc_plan_runs ALTER COLUMN request_key SET NOT NULL`).Error; err != nil {
+		return fmt.Errorf("require plan run request keys: %w", err)
+	}
+	if err := s.db.WithContext(ctx).Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + requestKeySessionIndex + `
+		ON aigc_plan_runs (session_id, request_key)`).Error; err != nil {
+		return fmt.Errorf("create plan run request key index: %w", err)
 	}
 	if err := s.db.WithContext(ctx).Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + activeRunSessionIndex + `
 		ON aigc_plan_runs (session_id)
@@ -96,6 +121,9 @@ func (s *PostgresRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun,
 	if strings.TrimSpace(run.ID) == "" {
 		return PlanRun{}, errors.New("plan run id is required")
 	}
+	if strings.TrimSpace(run.RequestKey) == "" {
+		run.RequestKey = run.ID
+	}
 	if err := ValidateRunTransition(run.Status, run.Status); err != nil {
 		return PlanRun{}, err
 	}
@@ -114,6 +142,14 @@ func (s *PostgresRunStore) CreateRun(ctx context.Context, run PlanRun) (PlanRun,
 		}
 		if duplicate != 0 {
 			return fmt.Errorf("%w: run %q", ErrRunAlreadyExists, run.ID)
+		}
+		var keyed planRunRecord
+		keyQuery := tx.Select("id").Where("session_id = ? AND request_key = ?", run.SessionID, run.RequestKey).Limit(1).Find(&keyed)
+		if keyQuery.Error != nil {
+			return fmt.Errorf("check plan run request key: %w", keyQuery.Error)
+		}
+		if keyQuery.RowsAffected != 0 {
+			return fmt.Errorf("%w: request key %q", ErrSubmitRequestKeyExists, run.RequestKey)
 		}
 		if isActiveRunStatus(run.Status) {
 			var active planRunRecord
@@ -171,6 +207,27 @@ func (s *PostgresRunStore) GetActiveRun(ctx context.Context, sessionID string) (
 	}
 	if len(records) > 1 {
 		return PlanRun{}, fmt.Errorf("%w: session %q has multiple active runs", ErrRunRecordCorrupt, sessionID)
+	}
+	return decodePlanRunRecord(records[0])
+}
+
+func (s *PostgresRunStore) GetRunByRequestKey(ctx context.Context, sessionID, requestKey string) (PlanRun, error) {
+	if s == nil || s.db == nil {
+		return PlanRun{}, errors.New("postgres run store db is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return PlanRun{}, err
+	}
+	var records []planRunRecord
+	query := s.db.WithContext(ctx).Where("session_id = ? AND request_key = ?", sessionID, requestKey).Limit(2).Find(&records)
+	if query.Error != nil {
+		return PlanRun{}, fmt.Errorf("get plan run by request key: %w", query.Error)
+	}
+	if len(records) == 0 {
+		return PlanRun{}, fmt.Errorf("%w: request key %q", ErrRunNotFound, requestKey)
+	}
+	if len(records) > 1 {
+		return PlanRun{}, fmt.Errorf("%w: duplicate request key for session %q", ErrRunRecordCorrupt, sessionID)
 	}
 	return decodePlanRunRecord(records[0])
 }
@@ -252,6 +309,9 @@ func (s *PostgresRunStore) mutateRunLocked(
 		if next.ID != current.ID {
 			return fmt.Errorf("%w: mutation changed id from %q to %q", ErrRunRecordCorrupt, current.ID, next.ID)
 		}
+		if next.RequestKey != current.RequestKey {
+			return fmt.Errorf("%w: mutation changed request key", ErrRunRecordCorrupt)
+		}
 		if err := ValidateRunTransition(current.Status, next.Status); err != nil {
 			return err
 		}
@@ -261,10 +321,11 @@ func (s *PostgresRunStore) mutateRunLocked(
 			return err
 		}
 		updates := map[string]any{
-			"session_id": updatedRecord.SessionID,
-			"status":     updatedRecord.Status,
-			"version":    updatedRecord.Version,
-			"payload":    updatedRecord.Payload,
+			"session_id":  updatedRecord.SessionID,
+			"request_key": updatedRecord.RequestKey,
+			"status":      updatedRecord.Status,
+			"version":     updatedRecord.Version,
+			"payload":     updatedRecord.Payload,
 		}
 		updated := tx.Model(&planRunRecord{}).Where("id = ?", id).Updates(updates)
 		if updated.Error != nil {
@@ -292,6 +353,8 @@ func mapPlanRunConstraintError(err error, runID string) error {
 		return &runAlreadyExistsConstraintError{runID: runID, cause: err}
 	case activeRunSessionIndex:
 		return &SessionActiveRunError{cause: err}
+	case requestKeySessionIndex:
+		return &submitRequestKeyExistsConstraintError{cause: err}
 	default:
 		return err
 	}
@@ -307,7 +370,7 @@ func encodePlanRunRecord(run PlanRun) (planRunRecord, PlanRun, error) {
 		return planRunRecord{}, PlanRun{}, err
 	}
 	return planRunRecord{
-		ID: cloned.ID, SessionID: cloned.SessionID, Status: cloned.Status,
+		ID: cloned.ID, SessionID: cloned.SessionID, RequestKey: cloned.RequestKey, Status: cloned.Status,
 		Version: cloned.Version, Payload: datatypes.JSON(payload),
 	}, cloned, nil
 }
@@ -325,7 +388,7 @@ func decodePlanRunRecord(record planRunRecord) (PlanRun, error) {
 	if err := decodeSingleJSONValue(record.Payload, &run); err != nil {
 		return PlanRun{}, fmt.Errorf("%w: decode run %q payload: %v", ErrRunRecordCorrupt, record.ID, err)
 	}
-	if run.ID != record.ID || run.SessionID != record.SessionID || run.Status != record.Status || run.Version != record.Version {
+	if run.ID != record.ID || run.SessionID != record.SessionID || run.RequestKey != record.RequestKey || run.Status != record.Status || run.Version != record.Version {
 		return PlanRun{}, fmt.Errorf("%w: run %q metadata does not match payload", ErrRunRecordCorrupt, record.ID)
 	}
 	cloned, err := clonePlanRun(run)
