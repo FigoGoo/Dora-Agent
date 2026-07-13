@@ -386,94 +386,59 @@ func TestSchedulerGuardsMediaToolCanStartOrdinaryWaitingUserAfterApproval(t *tes
 }
 
 func TestSchedulerGuardsApprovalDoesNotSurviveIdentityChange(t *testing.T) {
-	for _, test := range []struct {
-		name       string
-		mutate     func(*PlanRun)
-		wantStatus string
-		wantCode   string
-	}{
-		{name: "missing_user_rechecks_permission", mutate: func(run *PlanRun) { run.UserID = "" }, wantStatus: RunStatusFailed, wantCode: "permission_denied"},
-		{name: "changed_session_rechecks_compliance", mutate: func(run *PlanRun) { run.SessionID = "session-2" }, wantStatus: RunStatusSuspended},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			base := NewMemoryRunStore()
-			store := &resumeCommitStore{RunStore: base, entered: make(chan struct{}, 1), release: make(chan struct{})}
-			var toolCalls atomic.Int32
-			media := schedulerTool{key: "render", category: "media", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
-				toolCalls.Add(1)
-				return vocabulary.Result{Outputs: map[string]any{"asset": "must-not-run"}}, nil
-			}}
-			cfg := schedulerConfigForTest(store, schedulerRegistry(t, media), func() string { return "identity-" + test.name })
-			cfg.Guard = vocabulary.NewGuardChain(vocabulary.GuardConfig{SoftTerms: []string{"soft-risk"}})
-			scheduler, err := NewScheduler(cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			suspended, err := scheduler.Submit(context.Background(), "session-1", "user-1", ExecutionPlan{
-				PlanID: "identity-change", Source: "dynamic", Summary: "identity change", Direction: "image",
-				Steps: []PlanStep{{ID: "render", Tool: "render", Params: map[string]any{"prompt": "soft-risk"}, Required: true}},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			oldFingerprint := suspended.Nodes["render"].GuardApproval.Fingerprint
-			oldKey := suspended.Nodes["render"].ResumeKey
-			store.block.Store(true)
-			ctx, cancel := context.WithCancel(context.Background())
-			type resumeResult struct {
-				run PlanRun
-				err error
-			}
-			done := make(chan resumeResult, 1)
-			go func() {
-				run, resumeErr := scheduler.Resume(ctx, suspended.ID, suspended.Nodes["render"].ResumeKey, map[string]any{"approved": true})
-				done <- resumeResult{run: run, err: resumeErr}
-			}()
-			<-store.entered
-			cancel()
-			close(store.release)
-			approved := <-done
-			if !errors.Is(approved.err, context.Canceled) || approved.run.Status != RunStatusRunning || approved.run.Nodes["render"].Status != NodeStatusPending {
-				t.Fatalf("approved=%+v err=%v", approved.run, approved.err)
-			}
-			store.block.Store(false)
-			stored, err := base.GetRun(context.Background(), suspended.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = base.MutateRun(context.Background(), stored.ID, stored.Version, func(run *PlanRun) error {
-				test.mutate(run)
-				return nil
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, err := scheduler.Advance(context.Background(), suspended.ID)
-			if err != nil || got.Status != test.wantStatus || toolCalls.Load() != 0 || got.Nodes["render"].Attempt != 1 {
-				t.Fatalf("run=%+v calls=%d err=%v", got, toolCalls.Load(), err)
-			}
-			if test.wantCode != "" && (got.Nodes["render"].Fail == nil || got.Nodes["render"].Fail.Code != test.wantCode) {
-				t.Fatalf("failure=%+v", got.Nodes["render"].Fail)
-			}
-			if test.wantStatus == RunStatusSuspended && got.Nodes["render"].GuardApproval.Fingerprint == oldFingerprint {
-				t.Fatalf("identity change reused fingerprint %q", oldFingerprint)
-			}
-			if test.wantStatus == RunStatusSuspended {
-				newKey := got.Nodes["render"].ResumeKey
-				if newKey == oldKey {
-					t.Fatalf("distinct guard suspensions reused key %q", oldKey)
-				}
-				version := got.Version
-				stale, staleErr := scheduler.Resume(context.Background(), got.ID, oldKey, map[string]any{"approved": true})
-				if !errors.Is(staleErr, ErrResumeKeyMismatch) || stale.Version != version || stale.Status != RunStatusSuspended || toolCalls.Load() != 0 {
-					t.Fatalf("stale=%+v calls=%d err=%v", stale, toolCalls.Load(), staleErr)
-				}
-				approved, approveErr := scheduler.Resume(context.Background(), got.ID, newKey, map[string]any{"approved": true})
-				if approveErr != nil || approved.Status != RunStatusSucceeded || toolCalls.Load() != 1 || approved.Nodes["render"].Attempt != 1 {
-					t.Fatalf("approved=%+v calls=%d err=%v", approved, toolCalls.Load(), approveErr)
-				}
-			}
-		})
+	base := NewMemoryRunStore()
+	store := &resumeCommitStore{RunStore: base, entered: make(chan struct{}, 1), release: make(chan struct{})}
+	var toolCalls atomic.Int32
+	media := schedulerTool{key: "render", category: "media", run: func(context.Context, vocabulary.Call) (vocabulary.Result, error) {
+		toolCalls.Add(1)
+		return vocabulary.Result{Outputs: map[string]any{"asset": "created"}}, nil
+	}}
+	cfg := schedulerConfigForTest(store, schedulerRegistry(t, media), func() string { return "guard-revision" })
+	cfg.Guard = vocabulary.NewGuardChain(vocabulary.GuardConfig{SoftTerms: []string{"soft-risk"}})
+	scheduler, err := NewScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suspended, err := scheduler.Submit(context.Background(), "session-1", "user-1", ExecutionPlan{
+		PlanID: "guard-revision", Source: "dynamic", Summary: "guard revision", Direction: "image",
+		Steps: []PlanStep{{ID: "render", Tool: "render", Params: map[string]any{"prompt": "soft-risk"}, Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldFingerprint := suspended.Nodes["render"].GuardApproval.Fingerprint
+	store.block.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, resumeErr := scheduler.Resume(ctx, suspended.ID, suspended.Nodes["render"].ResumeKey, map[string]any{"approved": true})
+		done <- resumeErr
+	}()
+	<-store.entered
+	cancel()
+	close(store.release)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("resume error=%v", err)
+	}
+	store.block.Store(false)
+	revised, err := scheduler.Revise(context.Background(), suspended.ID, PlanRevision{
+		SkipStepIDs: []string{"render"},
+		AppendSteps: []PlanStep{{ID: "render-revised", Tool: "render", Params: map[string]any{"prompt": "soft-risk revised"}, Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guarded, err := scheduler.Advance(context.Background(), revised.ID)
+	if err != nil || guarded.Status != RunStatusSuspended || toolCalls.Load() != 0 {
+		t.Fatalf("guarded=%+v calls=%d err=%v", guarded, toolCalls.Load(), err)
+	}
+	newNode := guarded.Nodes["render-revised"]
+	if newNode.GuardApproval == nil || newNode.GuardApproval.Fingerprint == oldFingerprint {
+		t.Fatalf("revision reused guard fingerprint %q", oldFingerprint)
+	}
+	completed, err := scheduler.Resume(context.Background(), guarded.ID, newNode.ResumeKey, map[string]any{"approved": true})
+	if err != nil || completed.Status != RunStatusPartialSucceeded || toolCalls.Load() != 1 {
+		t.Fatalf("completed=%+v calls=%d err=%v", completed, toolCalls.Load(), err)
 	}
 }
 
@@ -1453,7 +1418,7 @@ func TestResumeCASConflictRereadsWithoutRepeatingDownstream(t *testing.T) {
 	store := &advancingConflictStore{RunStore: base}
 	scheduler := schedulerForTest(t, store, registry, 1)
 	resumed, err := scheduler.Resume(context.Background(), suspended.ID, suspended.Nodes["pause"].ResumeKey, nil)
-	if err != nil || resumed.Status != RunStatusSucceeded || resumed.UserID != "concurrent-update" || sinkCalls.Load() != 1 {
+	if err != nil || resumed.Status != RunStatusSucceeded || !strings.Contains(resumed.Plan.Summary, "concurrent-update") || sinkCalls.Load() != 1 {
 		t.Fatalf("run=%+v sink=%d err=%v", resumed, sinkCalls.Load(), err)
 	}
 }
@@ -2363,7 +2328,7 @@ type advancingConflictStore struct {
 func (s *advancingConflictStore) MutateRun(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun) error) (PlanRun, error) {
 	if s.conflicted.CompareAndSwap(false, true) {
 		if _, err := s.RunStore.MutateRun(ctx, id, expectedVersion, func(run *PlanRun) error {
-			run.UserID = "concurrent-update"
+			run.Plan.Summary += "|concurrent-update"
 			return nil
 		}); err != nil {
 			return PlanRun{}, err
@@ -2376,7 +2341,7 @@ func (s *advancingConflictStore) MutateRun(ctx context.Context, id string, expec
 func (s *advancingConflictStore) MutateRunAtAuthoritativeNow(ctx context.Context, id string, expectedVersion int, mutate func(*PlanRun, time.Time) error) (PlanRun, error) {
 	if s.conflicted.CompareAndSwap(false, true) {
 		if _, err := s.RunStore.MutateRun(ctx, id, expectedVersion, func(run *PlanRun) error {
-			run.UserID = "concurrent-update"
+			run.Plan.Summary += "|concurrent-update"
 			return nil
 		}); err != nil {
 			return PlanRun{}, err
@@ -2453,8 +2418,8 @@ func TestSchedulerCASConflictRereadsAndPreservesConcurrentUpdate(t *testing.T) {
 	run, err := schedulerForTest(t, store, schedulerRegistry(t, tool), 1).Submit(context.Background(), "s1", "u1", ExecutionPlan{
 		PlanID: "cas-reread", Source: "dynamic", Summary: "cas-reread", Direction: "image", Steps: []PlanStep{{ID: "a", Tool: "work", Required: true}},
 	})
-	if err != nil || run.Status != RunStatusSucceeded || run.UserID != "concurrent-update" || calls.Load() != 1 {
-		t.Fatalf("status=%s user=%s calls=%d err=%v", run.Status, run.UserID, calls.Load(), err)
+	if err != nil || run.Status != RunStatusSucceeded || !strings.Contains(run.Plan.Summary, "concurrent-update") || calls.Load() != 1 {
+		t.Fatalf("status=%s summary=%s calls=%d err=%v", run.Status, run.Plan.Summary, calls.Load(), err)
 	}
 }
 

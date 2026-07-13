@@ -44,14 +44,15 @@ func (e *submitRequestKeyExistsConstraintError) Unwrap() []error {
 }
 
 type planRunRecord struct {
-	ID         string         `gorm:"primaryKey;size:128"`
-	SessionID  string         `gorm:"index;size:128;not null"`
-	RequestKey string         `gorm:"size:128"`
-	Status     string         `gorm:"index;size:32;not null"`
-	Version    int            `gorm:"not null"`
-	Payload    datatypes.JSON `gorm:"type:jsonb;not null"`
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID                       string         `gorm:"primaryKey;size:128"`
+	SessionID                string         `gorm:"index;size:128;not null"`
+	RequestKey               string         `gorm:"size:128"`
+	SubmitRequestFingerprint string         `gorm:"size:71"`
+	Status                   string         `gorm:"index;size:32;not null"`
+	Version                  int            `gorm:"not null"`
+	Payload                  datatypes.JSON `gorm:"type:jsonb;not null"`
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 func (planRunRecord) TableName() string { return "aigc_plan_runs" }
@@ -71,31 +72,36 @@ func (s *PostgresRunStore) AutoMigrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("postgres run store db is required")
 	}
-	if err := s.db.WithContext(ctx).AutoMigrate(&planRunRecord{}); err != nil {
-		return fmt.Errorf("migrate plan runs: %w", err)
-	}
-	if err := s.db.WithContext(ctx).Exec(`UPDATE aigc_plan_runs
-		SET request_key = id,
-			payload = jsonb_set(payload, '{request_key}', to_jsonb(id::text), true)
-		WHERE request_key IS NULL OR request_key = ''`).Error; err != nil {
-		return fmt.Errorf("backfill plan run request keys: %w", err)
-	}
-	if err := backfillSubmitRequestFingerprints(s.db.WithContext(ctx)); err != nil {
-		return err
-	}
-	if err := s.db.WithContext(ctx).Exec(`ALTER TABLE aigc_plan_runs ALTER COLUMN request_key SET NOT NULL`).Error; err != nil {
-		return fmt.Errorf("require plan run request keys: %w", err)
-	}
-	if err := s.db.WithContext(ctx).Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + requestKeySessionIndex + `
-		ON aigc_plan_runs (session_id, request_key)`).Error; err != nil {
-		return fmt.Errorf("create plan run request key index: %w", err)
-	}
-	if err := s.db.WithContext(ctx).Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + activeRunSessionIndex + `
-		ON aigc_plan_runs (session_id)
-		WHERE status IN ('draft', 'running', 'suspended')`).Error; err != nil {
-		return fmt.Errorf("create active plan run session index: %w", err)
-	}
-	return nil
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&planRunRecord{}); err != nil {
+			return fmt.Errorf("migrate plan runs: %w", err)
+		}
+		if err := tx.Exec(`LOCK TABLE aigc_plan_runs IN ACCESS EXCLUSIVE MODE`).Error; err != nil {
+			return fmt.Errorf("lock plan runs for identity migration: %w", err)
+		}
+		if err := tx.Exec(`UPDATE aigc_plan_runs SET request_key = id WHERE request_key IS NULL OR request_key = ''`).Error; err != nil {
+			return fmt.Errorf("backfill plan run request keys: %w", err)
+		}
+		if err := tx.Exec(`UPDATE aigc_plan_runs
+			SET submit_request_fingerprint = payload ->> 'submit_request_fingerprint'
+			WHERE (submit_request_fingerprint IS NULL OR submit_request_fingerprint = '')
+				AND COALESCE(payload ->> 'submit_request_fingerprint', '') <> ''`).Error; err != nil {
+			return fmt.Errorf("promote plan run submit fingerprints: %w", err)
+		}
+		if err := tx.Exec(`ALTER TABLE aigc_plan_runs ALTER COLUMN request_key SET NOT NULL`).Error; err != nil {
+			return fmt.Errorf("require plan run request keys: %w", err)
+		}
+		if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + requestKeySessionIndex + `
+			ON aigc_plan_runs (session_id, request_key)`).Error; err != nil {
+			return fmt.Errorf("create plan run request key index: %w", err)
+		}
+		if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + activeRunSessionIndex + `
+			ON aigc_plan_runs (session_id)
+			WHERE status IN ('draft', 'running', 'suspended')`).Error; err != nil {
+			return fmt.Errorf("create active plan run session index: %w", err)
+		}
+		return nil
+	})
 }
 
 // AuthoritativeNow implements the Scheduler's optional shared-clock contract.
@@ -315,6 +321,12 @@ func (s *PostgresRunStore) mutateRunLocked(
 		if next.ID != current.ID {
 			return fmt.Errorf("%w: mutation changed id from %q to %q", ErrRunRecordCorrupt, current.ID, next.ID)
 		}
+		if next.SessionID != current.SessionID {
+			return fmt.Errorf("%w: mutation changed session id", ErrRunRecordCorrupt)
+		}
+		if next.UserID != current.UserID {
+			return fmt.Errorf("%w: mutation changed user id", ErrRunRecordCorrupt)
+		}
 		if next.RequestKey != current.RequestKey {
 			return fmt.Errorf("%w: mutation changed request key", ErrRunRecordCorrupt)
 		}
@@ -379,43 +391,9 @@ func encodePlanRunRecord(run PlanRun) (planRunRecord, PlanRun, error) {
 		return planRunRecord{}, PlanRun{}, err
 	}
 	return planRunRecord{
-		ID: cloned.ID, SessionID: cloned.SessionID, RequestKey: cloned.RequestKey, Status: cloned.Status,
+		ID: cloned.ID, SessionID: cloned.SessionID, RequestKey: cloned.RequestKey, SubmitRequestFingerprint: cloned.SubmitRequestFingerprint, Status: cloned.Status,
 		Version: cloned.Version, Payload: datatypes.JSON(payload),
 	}, cloned, nil
-}
-
-func backfillSubmitRequestFingerprints(db *gorm.DB) error {
-	var records []planRunRecord
-	query := db.Where("COALESCE(payload ->> 'submit_request_fingerprint', '') = ''").Find(&records)
-	if query.Error != nil {
-		return fmt.Errorf("find legacy plan run fingerprints: %w", query.Error)
-	}
-	for _, record := range records {
-		var run PlanRun
-		if err := decodeSingleJSONValue(record.Payload, &run); err != nil {
-			return fmt.Errorf("%w: decode legacy run %q payload: %v", ErrRunRecordCorrupt, record.ID, err)
-		}
-		if run.ID != record.ID || run.SessionID != record.SessionID || run.RequestKey != record.RequestKey || run.Status != record.Status || run.Version != record.Version {
-			return fmt.Errorf("%w: legacy run %q metadata does not match payload", ErrRunRecordCorrupt, record.ID)
-		}
-		fingerprint, err := computeSubmitRequestFingerprint(run.SessionID, run.UserID, run.RequestKey, run.Plan)
-		if err != nil {
-			return fmt.Errorf("compute legacy run %q fingerprint: %w", record.ID, err)
-		}
-		run.SubmitRequestFingerprint = fingerprint
-		payload, err := clonePlanRunJSON(run)
-		if err != nil {
-			return err
-		}
-		updated := db.Model(&planRunRecord{}).Where("id = ?", record.ID).Update("payload", datatypes.JSON(payload))
-		if updated.Error != nil {
-			return fmt.Errorf("backfill plan run %q fingerprint: %w", record.ID, updated.Error)
-		}
-		if updated.RowsAffected != 1 {
-			return fmt.Errorf("%w: backfill run %q affected %d rows", ErrRunRecordCorrupt, record.ID, updated.RowsAffected)
-		}
-	}
-	return nil
 }
 
 func clonePlanRunJSON(run PlanRun) ([]byte, error) {
@@ -431,11 +409,21 @@ func decodePlanRunRecord(record planRunRecord) (PlanRun, error) {
 	if err := decodeSingleJSONValue(record.Payload, &run); err != nil {
 		return PlanRun{}, fmt.Errorf("%w: decode run %q payload: %v", ErrRunRecordCorrupt, record.ID, err)
 	}
-	if run.ID != record.ID || run.SessionID != record.SessionID || run.RequestKey != record.RequestKey || run.Status != record.Status || run.Version != record.Version {
+	if run.RequestKey == "" {
+		run.RequestKey = record.RequestKey
+	} else if run.RequestKey != record.RequestKey {
+		return PlanRun{}, fmt.Errorf("%w: run %q request key metadata does not match payload", ErrRunRecordCorrupt, record.ID)
+	}
+	if run.SubmitRequestFingerprint == "" {
+		run.SubmitRequestFingerprint = record.SubmitRequestFingerprint
+	} else if run.SubmitRequestFingerprint != record.SubmitRequestFingerprint {
+		return PlanRun{}, fmt.Errorf("%w: run %q fingerprint metadata does not match payload", ErrRunRecordCorrupt, record.ID)
+	}
+	if run.ID != record.ID || run.SessionID != record.SessionID || run.Status != record.Status || run.Version != record.Version {
 		return PlanRun{}, fmt.Errorf("%w: run %q metadata does not match payload", ErrRunRecordCorrupt, record.ID)
 	}
-	if err := validateStoredRunIdentity(run); err != nil {
-		return PlanRun{}, fmt.Errorf("%w: run %q immutable submit identity", err, record.ID)
+	if strings.TrimSpace(run.ID) == "" || strings.TrimSpace(run.RequestKey) == "" {
+		return PlanRun{}, fmt.Errorf("%w: run %q is missing immutable submit metadata", ErrRunRecordCorrupt, record.ID)
 	}
 	cloned, err := clonePlanRun(run)
 	if err != nil {

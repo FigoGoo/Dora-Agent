@@ -355,6 +355,12 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 	if next.ID != current.ID {
 		return PlanRun{}, fmt.Errorf("%w: mutation changed id from %q to %q", ErrRunRecordCorrupt, current.ID, next.ID)
 	}
+	if next.SessionID != current.SessionID {
+		return PlanRun{}, fmt.Errorf("%w: mutation changed session id", ErrRunRecordCorrupt)
+	}
+	if next.UserID != current.UserID {
+		return PlanRun{}, fmt.Errorf("%w: mutation changed user id", ErrRunRecordCorrupt)
+	}
 	if next.RequestKey != current.RequestKey {
 		return PlanRun{}, fmt.Errorf("%w: mutation changed request key", ErrRunRecordCorrupt)
 	}
@@ -371,11 +377,6 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 			}
 		}
 	}
-	nextRequestIndexKey := memoryRequestIndexKey(next.SessionID, next.RequestKey)
-	currentRequestIndexKey := memoryRequestIndexKey(current.SessionID, current.RequestKey)
-	if existingID, exists := s.requestRuns[nextRequestIndexKey]; exists && existingID != current.ID {
-		return PlanRun{}, fmt.Errorf("%w: request key %q", ErrSubmitRequestKeyExists, next.RequestKey)
-	}
 	next.Version = current.Version + 1
 	stored, err := clonePlanRun(next)
 	if err != nil {
@@ -386,10 +387,6 @@ func (s *MemoryRunStore) MutateRun(ctx context.Context, id string, expectedVersi
 		return PlanRun{}, err
 	}
 	s.runs[id] = stored
-	if currentRequestIndexKey != nextRequestIndexKey {
-		delete(s.requestRuns, currentRequestIndexKey)
-		s.requestRuns[nextRequestIndexKey] = stored.ID
-	}
 	return result, nil
 }
 

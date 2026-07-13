@@ -16,6 +16,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/storage"
 	"github.com/FigoGoo/Dora-Agent/internal/aigc/vocabulary"
 	"github.com/jackc/pgx/v5/pgconn"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -304,88 +305,38 @@ func TestPostgresSchedulersRejectDifferentConcurrentSubmit(t *testing.T) {
 }
 
 func TestPostgresRunStoreRejectsIdentityMutation(t *testing.T) {
-	store, db := openPostgresRunStore(t)
-	ctx := context.Background()
-	id := postgresRunID(t)
-	sessionID := id + "-session"
-	t.Cleanup(func() {
-		db.WithContext(context.Background()).Where("session_id = ?", sessionID).Delete(&planRunRecord{})
-	})
-	created, err := store.CreateRun(ctx, PlanRun{ID: id, SessionID: sessionID, Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
-	if err != nil {
-		t.Fatal(err)
+	mutations := map[string]func(*PlanRun){
+		"id":          func(run *PlanRun) { run.ID = "changed" },
+		"session_id":  func(run *PlanRun) { run.SessionID = "changed" },
+		"user_id":     func(run *PlanRun) { run.UserID = "changed" },
+		"request_key": func(run *PlanRun) { run.RequestKey = "changed" },
+		"fingerprint": func(run *PlanRun) { run.SubmitRequestFingerprint = "changed" },
 	}
-	for _, timed := range []bool{false, true} {
-		var mutateErr error
-		if timed {
-			_, mutateErr = store.MutateRunAtAuthoritativeNow(ctx, id, created.Version, func(run *PlanRun, _ time.Time) error {
-				run.ID = "changed"
-				return nil
-			})
-		} else {
-			_, mutateErr = store.MutateRun(ctx, id, created.Version, func(run *PlanRun) error {
-				run.ID = "changed"
-				return nil
-			})
-		}
-		if !errors.Is(mutateErr, ErrRunRecordCorrupt) {
-			t.Fatalf("timed=%v error=%v", timed, mutateErr)
-		}
-		stored, getErr := store.GetRun(ctx, id)
-		if getErr != nil || stored.ID != id || stored.Version != created.Version {
-			t.Fatalf("timed=%v stored=%+v err=%v", timed, stored, getErr)
-		}
-	}
-	if _, err := store.MutateRun(ctx, id, created.Version, func(run *PlanRun) error {
-		run.RequestKey = "changed-key"
-		return nil
-	}); !errors.Is(err, ErrRunRecordCorrupt) {
-		t.Fatalf("request key mutation error = %v", err)
-	}
-	if _, err := store.MutateRun(ctx, id, created.Version, func(run *PlanRun) error {
-		run.SubmitRequestFingerprint = "changed-fingerprint"
-		return nil
-	}); !errors.Is(err, ErrRunRecordCorrupt) {
-		t.Fatalf("fingerprint mutation error = %v", err)
-	}
-}
-
-func TestPostgresRunStoreSessionMigrationEnforcesActiveSlotAtomically(t *testing.T) {
-	for _, timed := range []bool{false, true} {
-		t.Run(fmt.Sprintf("timed_%v", timed), func(t *testing.T) {
-			store, db := openPostgresRunStore(t)
-			prefix := postgresRunID(t)
-			source, target, free := prefix+"-source", prefix+"-target", prefix+"-free"
-			t.Cleanup(func() {
-				db.WithContext(context.Background()).Where("session_id IN ?", []string{source, target, free}).Delete(&planRunRecord{})
-			})
-			occupied, err := store.CreateRun(context.Background(), PlanRun{ID: prefix + "-occupied", SessionID: target, Status: RunStatusRunning, Nodes: map[string]*NodeRun{}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			moving, err := store.CreateRun(context.Background(), PlanRun{ID: prefix + "-moving", SessionID: source, Status: RunStatusRunning, Nodes: map[string]*NodeRun{}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, mutateErr := mutateSessionForTest(store, timed, moving, target, RunStatusRunning)
-			if !errors.Is(mutateErr, ErrSessionActiveRun) {
-				t.Fatalf("occupied migration error = %v", mutateErr)
-			}
-			for _, before := range []PlanRun{occupied, moving} {
-				after, getErr := store.GetRun(context.Background(), before.ID)
-				if getErr != nil || !reflect.DeepEqual(after, before) {
-					t.Fatalf("rollback run %s = %+v, %v", before.ID, after, getErr)
+	for name, mutate := range mutations {
+		for _, timed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s_timed_%v", name, timed), func(t *testing.T) {
+				store, db := openPostgresRunStore(t)
+				prefix := postgresRunID(t)
+				t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", prefix).Delete(&planRunRecord{}) })
+				created, err := store.CreateRun(context.Background(), PlanRun{ID: prefix, RequestKey: "request", SessionID: prefix + "-session", UserID: "user", Status: RunStatusRunning, Nodes: map[string]*NodeRun{}})
+				if err != nil {
+					t.Fatal(err)
 				}
-			}
-			migrated, err := mutateSessionForTest(store, timed, moving, free, RunStatusRunning)
-			if err != nil || migrated.SessionID != free {
-				t.Fatalf("free migration = %+v, %v", migrated, err)
-			}
-			terminal, err := mutateSessionForTest(store, timed, migrated, target, RunStatusCancelled)
-			if err != nil || terminal.SessionID != target || terminal.Status != RunStatusCancelled {
-				t.Fatalf("terminal migration = %+v, %v", terminal, err)
-			}
-		})
+				var mutateErr error
+				if timed {
+					_, mutateErr = store.MutateRunAtAuthoritativeNow(context.Background(), created.ID, created.Version, func(run *PlanRun, _ time.Time) error { mutate(run); return nil })
+				} else {
+					_, mutateErr = store.MutateRun(context.Background(), created.ID, created.Version, func(run *PlanRun) error { mutate(run); return nil })
+				}
+				if !errors.Is(mutateErr, ErrRunRecordCorrupt) {
+					t.Fatalf("mutation error = %v", mutateErr)
+				}
+				after, getErr := store.GetRun(context.Background(), created.ID)
+				if getErr != nil || !reflect.DeepEqual(after, created) {
+					t.Fatalf("stored=%+v before=%+v err=%v", after, created, getErr)
+				}
+			})
+		}
 	}
 }
 
@@ -479,7 +430,7 @@ func TestPostgresRunStoreAutoMigrateRejectsExistingDuplicateActiveSessions(t *te
 	}
 }
 
-func TestPostgresRunStoreAutoMigrateBackfillsLegacyRequestKeyAndPayload(t *testing.T) {
+func TestPostgresRunStoreAutoMigrateHydratesLegacyIdentityWithoutRewritingPayload(t *testing.T) {
 	store, db := openPostgresRunStore(t)
 	ctx := context.Background()
 	id := postgresRunID(t)
@@ -496,7 +447,7 @@ func TestPostgresRunStoreAutoMigrateBackfillsLegacyRequestKeyAndPayload(t *testi
 		if err := tx.Exec("ALTER TABLE aigc_plan_runs ALTER COLUMN request_key DROP NOT NULL").Error; err != nil {
 			return err
 		}
-		if err := tx.Exec("UPDATE aigc_plan_runs SET request_key = NULL, payload = payload - 'request_key' - 'submit_request_fingerprint' WHERE id = ?", created.ID).Error; err != nil {
+		if err := tx.Exec("UPDATE aigc_plan_runs SET request_key = NULL, submit_request_fingerprint = NULL, payload = payload - 'request_key' - 'submit_request_fingerprint' WHERE id = ?", created.ID).Error; err != nil {
 			return err
 		}
 		return NewPostgresRunStore(tx).AutoMigrate(ctx)
@@ -504,9 +455,77 @@ func TestPostgresRunStoreAutoMigrateBackfillsLegacyRequestKeyAndPayload(t *testi
 		t.Fatalf("legacy AutoMigrate() error = %v", err)
 	}
 	backfilled, err := store.GetRun(ctx, id)
-	wantFingerprint, fingerprintErr := computeSubmitRequestFingerprint(backfilled.SessionID, backfilled.UserID, id, backfilled.Plan)
-	if fingerprintErr != nil || err != nil || backfilled.RequestKey != id || backfilled.SubmitRequestFingerprint != wantFingerprint {
-		t.Fatalf("backfilled run = %+v, get=%v fingerprint=%v", backfilled, err, fingerprintErr)
+	if err != nil || backfilled.RequestKey != id || backfilled.SubmitRequestFingerprint != "" {
+		t.Fatalf("backfilled run = %+v, get=%v", backfilled, err)
+	}
+	var raw planRunRecord
+	if err := db.WithContext(ctx).Where("id = ?", id).Take(&raw).Error; err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw.Payload), "request_key") || strings.Contains(string(raw.Payload), "submit_request_fingerprint") {
+		t.Fatalf("migration rewrote legacy payload: %s", raw.Payload)
+	}
+	scheduler := schedulerForTest(t, store, schedulerRegistry(t, schedulerTool{key: "legacy"}), 1)
+	if _, err := scheduler.SubmitWithKey(ctx, sessionID, "user", id, activeTestPlan("legacy", "legacy")); !errors.Is(err, ErrSubmitRequestConflict) {
+		t.Fatalf("legacy replay error = %v", err)
+	}
+}
+
+func TestPostgresRunStoreAutoMigratePromotesExistingPayloadFingerprintToMetadata(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	id := postgresRunID(t)
+	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
+	created, err := store.CreateRun(ctx, PlanRun{ID: id, RequestKey: "existing-key", SessionID: id + "-session", UserID: "user", Status: RunStatusSucceeded, Nodes: map[string]*NodeRun{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WithContext(ctx).Model(&planRunRecord{}).Where("id = ?", id).Update("submit_request_fingerprint", nil).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AutoMigrate(ctx); err != nil {
+		t.Fatalf("AutoMigrate() error = %v", err)
+	}
+	var record planRunRecord
+	if err := db.WithContext(ctx).Where("id = ?", id).Take(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+	if record.SubmitRequestFingerprint != created.SubmitRequestFingerprint {
+		t.Fatalf("metadata fingerprint=%q want=%q", record.SubmitRequestFingerprint, created.SubmitRequestFingerprint)
+	}
+	loaded, err := store.GetRun(ctx, id)
+	if err != nil || loaded.SubmitRequestFingerprint != created.SubmitRequestFingerprint {
+		t.Fatalf("GetRun() = %+v, %v", loaded, err)
+	}
+}
+
+func TestPostgresRunStoreHydratesIdentityFieldsDroppedByOldWriter(t *testing.T) {
+	store, db := openPostgresRunStore(t)
+	ctx := context.Background()
+	id := postgresRunID(t)
+	sessionID := id + "-old-writer-session"
+	t.Cleanup(func() { db.WithContext(context.Background()).Where("id = ?", id).Delete(&planRunRecord{}) })
+	created, err := store.CreateRun(ctx, PlanRun{ID: id, RequestKey: "stable-key", SessionID: sessionID, UserID: "user", Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldPayload := created
+	oldPayload.RequestKey = ""
+	oldPayload.SubmitRequestFingerprint = ""
+	oldPayload.Status = RunStatusRunning
+	oldPayload.Version++
+	payload, err := clonePlanRunJSON(oldPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WithContext(ctx).Model(&planRunRecord{}).Where("id = ?", id).Updates(map[string]any{
+		"status": RunStatusRunning, "version": oldPayload.Version, "payload": datatypes.JSON(payload),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	hydrated, err := store.GetRun(ctx, id)
+	if err != nil || hydrated.RequestKey != created.RequestKey || hydrated.SubmitRequestFingerprint != created.SubmitRequestFingerprint || hydrated.Version != oldPayload.Version {
+		t.Fatalf("hydrated run = %+v, %v", hydrated, err)
 	}
 }
 
@@ -561,7 +580,6 @@ func TestPostgresRunStoreMutationRollbackAndConcurrentCAS(t *testing.T) {
 	}
 	if _, err := store.MutateRun(ctx, id, created.Version, func(run *PlanRun) error {
 		run.Status = RunStatusRunning
-		run.SessionID = "must-also-rollback"
 		run.Nodes["first"].Outputs = map[string]any{"invalid": make(chan struct{})}
 		return nil
 	}); !errors.Is(err, ErrRunNotSerializable) {
@@ -638,7 +656,7 @@ func TestPostgresRunStoreRejectsSubmitFingerprintPayloadDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.WithContext(ctx).Exec("UPDATE aigc_plan_runs SET payload = payload - 'submit_request_fingerprint' WHERE id = ?", created.ID).Error; err != nil {
+	if err := db.WithContext(ctx).Exec("UPDATE aigc_plan_runs SET payload = jsonb_set(payload, '{submit_request_fingerprint}', '\"tampered\"'::jsonb) WHERE id = ?", created.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.GetRun(ctx, id); !errors.Is(err, ErrRunRecordCorrupt) {

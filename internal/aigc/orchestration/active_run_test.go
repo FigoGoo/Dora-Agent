@@ -69,67 +69,37 @@ func TestMemoryRunStoreGetActiveRunFailsClosedOnCorruptionAndClonesNumbers(t *te
 }
 
 func TestMemoryRunStoreRejectsIdentityMutationAtomically(t *testing.T) {
-	store := NewMemoryRunStore()
-	created, err := store.CreateRun(context.Background(), PlanRun{ID: "identity", SessionID: "session", Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
-	if err != nil {
-		t.Fatal(err)
+	mutations := map[string]func(*PlanRun){
+		"id":          func(run *PlanRun) { run.ID = "changed" },
+		"session_id":  func(run *PlanRun) { run.SessionID = "changed" },
+		"user_id":     func(run *PlanRun) { run.UserID = "changed" },
+		"request_key": func(run *PlanRun) { run.RequestKey = "changed" },
+		"fingerprint": func(run *PlanRun) { run.SubmitRequestFingerprint = "changed" },
 	}
-	for _, timed := range []bool{false, true} {
-		var mutateErr error
-		if timed {
-			_, mutateErr = store.MutateRunAtAuthoritativeNow(context.Background(), created.ID, created.Version, func(run *PlanRun, _ time.Time) error {
-				run.ID = "changed"
-				return nil
+	for name, mutate := range mutations {
+		for _, timed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s_timed_%v", name, timed), func(t *testing.T) {
+				store := NewMemoryRunStore()
+				created, err := store.CreateRun(context.Background(), PlanRun{ID: "identity", RequestKey: "request", SessionID: "session", UserID: "user", Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				before := created
+				var mutateErr error
+				if timed {
+					_, mutateErr = store.MutateRunAtAuthoritativeNow(context.Background(), created.ID, created.Version, func(run *PlanRun, _ time.Time) error { mutate(run); return nil })
+				} else {
+					_, mutateErr = store.MutateRun(context.Background(), created.ID, created.Version, func(run *PlanRun) error { mutate(run); return nil })
+				}
+				if !errors.Is(mutateErr, ErrRunRecordCorrupt) {
+					t.Fatalf("mutation error = %v", mutateErr)
+				}
+				after, getErr := store.GetRun(context.Background(), created.ID)
+				if getErr != nil || !reflect.DeepEqual(after, before) {
+					t.Fatalf("stored=%+v before=%+v err=%v", after, before, getErr)
+				}
 			})
-		} else {
-			_, mutateErr = store.MutateRun(context.Background(), created.ID, created.Version, func(run *PlanRun) error {
-				run.ID = "changed"
-				return nil
-			})
 		}
-		if !errors.Is(mutateErr, ErrRunRecordCorrupt) {
-			t.Fatalf("timed=%v mutation error = %v", timed, mutateErr)
-		}
-		stored, getErr := store.GetRun(context.Background(), created.ID)
-		if getErr != nil || stored.ID != created.ID || stored.Version != created.Version {
-			t.Fatalf("timed=%v stored=%+v err=%v", timed, stored, getErr)
-		}
-	}
-}
-
-func TestMemoryRunStoreRejectsRequestKeyMutationAtomically(t *testing.T) {
-	store := NewMemoryRunStore()
-	created, err := store.CreateRun(context.Background(), PlanRun{ID: "request-identity", RequestKey: "frozen-key", SessionID: "session", Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.MutateRun(context.Background(), created.ID, created.Version, func(run *PlanRun) error {
-		run.RequestKey = "changed-key"
-		return nil
-	}); !errors.Is(err, ErrRunRecordCorrupt) {
-		t.Fatalf("request key mutation error = %v", err)
-	}
-	stored, err := store.GetRunByRequestKey(context.Background(), "session", "frozen-key")
-	if err != nil || stored.Version != created.Version || stored.RequestKey != created.RequestKey {
-		t.Fatalf("stored = %+v, %v", stored, err)
-	}
-}
-
-func TestMemoryRunStoreRejectsSubmitFingerprintMutationAtomically(t *testing.T) {
-	store := NewMemoryRunStore()
-	created, err := store.CreateRun(context.Background(), PlanRun{ID: "fingerprint-identity", RequestKey: "frozen-key", SessionID: "session", UserID: "user", Plan: activeTestPlan("fingerprint", "unused"), Status: RunStatusDraft, Nodes: map[string]*NodeRun{}})
-	if err != nil || created.SubmitRequestFingerprint == "" {
-		t.Fatalf("CreateRun() = %+v, %v", created, err)
-	}
-	if _, err := store.MutateRun(context.Background(), created.ID, created.Version, func(run *PlanRun) error {
-		run.SubmitRequestFingerprint = "changed"
-		return nil
-	}); !errors.Is(err, ErrRunRecordCorrupt) {
-		t.Fatalf("fingerprint mutation error = %v", err)
-	}
-	stored, err := store.GetRun(context.Background(), created.ID)
-	if err != nil || stored.Version != created.Version || stored.SubmitRequestFingerprint != created.SubmitRequestFingerprint {
-		t.Fatalf("stored = %+v, %v", stored, err)
 	}
 }
 
@@ -591,6 +561,11 @@ func TestSubmitRequestFingerprintPreservesAdjacentLargeIntegers(t *testing.T) {
 	if leftErr != nil || rightErr != nil || leftFingerprint == rightFingerprint {
 		t.Fatalf("left=%q/%v right=%q/%v", leftFingerprint, leftErr, rightFingerprint, rightErr)
 	}
+	changedSession, sessionErr := computeSubmitRequestFingerprint("other-session", "user", "request", left)
+	changedUser, userErr := computeSubmitRequestFingerprint("session", "other-user", "request", left)
+	if sessionErr != nil || userErr != nil || changedSession == leftFingerprint || changedUser == leftFingerprint {
+		t.Fatalf("base=%q session=%q/%v user=%q/%v", leftFingerprint, changedSession, sessionErr, changedUser, userErr)
+	}
 }
 
 func TestSchedulerOrdinarySubmitRejectsNewIDCollision(t *testing.T) {
@@ -630,59 +605,6 @@ func TestSchedulerSubmitWithKeyReplaysDespiteNewIDCollision(t *testing.T) {
 	if err != nil || replayed.ID != first.ID {
 		t.Fatalf("keyed collision replay = %+v, %v", replayed, err)
 	}
-}
-
-func TestMemoryRunStoreSessionMigrationEnforcesActiveSlotAtomically(t *testing.T) {
-	for _, timed := range []bool{false, true} {
-		t.Run(fmt.Sprintf("timed_%v", timed), func(t *testing.T) {
-			store := NewMemoryRunStore()
-			occupied, err := store.CreateRun(context.Background(), PlanRun{ID: "occupied", SessionID: "target", Status: RunStatusRunning, Nodes: map[string]*NodeRun{}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			moving, err := store.CreateRun(context.Background(), PlanRun{ID: "moving", SessionID: "source", Status: RunStatusRunning, Nodes: map[string]*NodeRun{}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, mutateErr := mutateSessionForTest(store, timed, moving, "target", RunStatusRunning)
-			if !errors.Is(mutateErr, ErrSessionActiveRun) {
-				t.Fatalf("occupied migration error = %v", mutateErr)
-			}
-			for _, before := range []PlanRun{occupied, moving} {
-				after, getErr := store.GetRun(context.Background(), before.ID)
-				if getErr != nil || !reflect.DeepEqual(after, before) {
-					t.Fatalf("rollback run %s = %+v, %v", before.ID, after, getErr)
-				}
-			}
-			migrated, err := mutateSessionForTest(store, timed, moving, "free", RunStatusRunning)
-			if err != nil || migrated.SessionID != "free" {
-				t.Fatalf("free migration = %+v, %v", migrated, err)
-			}
-			byRequest, err := store.GetRunByRequestKey(context.Background(), "free", migrated.RequestKey)
-			if err != nil || byRequest.ID != migrated.ID {
-				t.Fatalf("migrated request index = %+v, %v", byRequest, err)
-			}
-			terminal, err := mutateSessionForTest(store, timed, migrated, "target", RunStatusCancelled)
-			if err != nil || terminal.SessionID != "target" || terminal.Status != RunStatusCancelled {
-				t.Fatalf("terminal migration = %+v, %v", terminal, err)
-			}
-		})
-	}
-}
-
-func mutateSessionForTest(store RunStore, timed bool, run PlanRun, sessionID, status string) (PlanRun, error) {
-	if timed {
-		return store.MutateRunAtAuthoritativeNow(context.Background(), run.ID, run.Version, func(next *PlanRun, _ time.Time) error {
-			next.SessionID = sessionID
-			next.Status = status
-			return nil
-		})
-	}
-	return store.MutateRun(context.Background(), run.ID, run.Version, func(next *PlanRun) error {
-		next.SessionID = sessionID
-		next.Status = status
-		return nil
-	})
 }
 
 func activeTestPlan(id, tool string) ExecutionPlan {
