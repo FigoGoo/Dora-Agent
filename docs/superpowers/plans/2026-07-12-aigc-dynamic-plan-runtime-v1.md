@@ -56,7 +56,7 @@ Plan 2 的入口条件：本计划 Task 4A/4B 的 execution fencing 与活计划
 - Create: `internal/aigc/orchestration/plan_run.go`
 - Create: `internal/aigc/orchestration/plan_run_test.go`
 
-- [ ] **Step 1: 写状态转移失败测试**
+- [x] **Step 1: 写状态转移失败测试**
 
 ```go
 func TestRunStatusTransitions(t *testing.T) {
@@ -90,7 +90,7 @@ func TestRunStatusTransitions(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 写 Store CAS、回调原子性和深拷贝失败测试**
+- [x] **Step 2: 写 Store CAS、回调原子性和深拷贝失败测试**
 
 ```go
 func TestMemoryRunStoreCASAndIsolation(t *testing.T) {
@@ -131,13 +131,13 @@ func TestMemoryRunStoreCASAndIsolation(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: 运行 RED**
+- [x] **Step 3: 运行 RED**
 
 Run: `go test ./internal/aigc/orchestration -run 'TestRunStatus|TestMemoryRunStore' -v`
 
 Expected: 编译失败，缺少 `PlanRun`、`NewMemoryRunStore` 或状态常量。
 
-- [ ] **Step 4: 实现最小状态模型**
+- [x] **Step 4: 实现最小状态模型**
 
 ```go
 var (
@@ -190,13 +190,13 @@ type PlanRun struct {
 
 `RunStore` 必须只暴露 `CreateRun`、`GetRun`、`MutateRun(id, expectedVersion, fn)`；内存实现持锁执行回调，先深拷贝、校验状态转移，成功后 Version `+1` 再替换。
 
-- [ ] **Step 5: 运行 GREEN 和包回归**
+- [x] **Step 5: 运行 GREEN 和包回归**
 
 Run: `go test ./internal/aigc/orchestration -run 'TestRunStatus|TestMemoryRunStore' -v && go test ./internal/aigc/orchestration`
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add internal/aigc/orchestration/plan_run.go internal/aigc/orchestration/plan_run_test.go
@@ -211,7 +211,7 @@ git commit -m "feat(orchestration): add durable plan run state model"
 - Create: `internal/aigc/orchestration/scheduler.go`
 - Create: `internal/aigc/orchestration/scheduler_test.go`
 
-- [ ] **Step 1: 写菱形 DAG 并发测试**
+- [x] **Step 1: 写菱形 DAG 并发测试**
 
 ```go
 func TestSchedulerRunsDiamondDAGOnce(t *testing.T) {
@@ -235,7 +235,7 @@ func TestSchedulerRunsDiamondDAGOnce(t *testing.T) {
 
 测试工具在 `Run` 内用 channel barrier 保证兄弟节点确实重叠，避免仅凭调度时序猜测并发。
 
-- [ ] **Step 2: 写上游引用解析与幂等 Advance 测试**
+- [x] **Step 2: 写上游引用解析与幂等 Advance 测试**
 
 ```go
 func TestSchedulerResolvesUpstreamOutputAndDoesNotRerun(t *testing.T) {
@@ -262,17 +262,17 @@ func TestSchedulerResolvesUpstreamOutputAndDoesNotRerun(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: 写 required/optional 终态测试**
+- [x] **Step 3: 写 required/optional 终态测试**
 
 覆盖三条规则：required 节点失败且无法继续 -> `failed`；optional 节点失败但 required 全成功 -> `partial_succeeded`；所有节点成功 -> `succeeded`。
 
-- [ ] **Step 4: 运行 RED**
+- [x] **Step 4: 运行 RED**
 
 Run: `go test ./internal/aigc/orchestration -run 'TestScheduler' -v`
 
 Expected: 编译失败，缺少 `Scheduler`。
 
-- [ ] **Step 5: 实现 Scheduler 最小 API**
+- [x] **Step 5: 实现 Scheduler 最小 API**
 
 ```go
 type SchedulerConfig struct {
@@ -308,13 +308,13 @@ func (s *Scheduler) Advance(ctx context.Context, runID string) (PlanRun, error)
 
 Tool Result 在持久化前 fail closed 校验：Suspension reason 仅允许 `waiting_user|waiting_agent|waiting_jobs`；Fail 与 Suspension 互斥；Fail 不得同时携带 Outputs；Suspension 可以携带 Outputs（如 `batch_id`）。同一 ready wave 多个 Suspension 是非法歧义恢复点，相关节点以 `multiple_suspensions` 失败、Run 直接 failed、未执行节点 skipped。
 
-- [ ] **Step 6: 运行 GREEN、race 和包回归**
+- [x] **Step 6: 运行 GREEN、race 和包回归**
 
 Run: `go test -race ./internal/aigc/orchestration -run 'TestScheduler' -v && go test ./internal/aigc/orchestration`
 
 Expected: PASS，无 data race。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add internal/aigc/orchestration/scheduler.go internal/aigc/orchestration/scheduler_test.go
@@ -330,7 +330,7 @@ git commit -m "feat(orchestration): execute dynamic plan DAGs"
 - Modify: `internal/aigc/orchestration/scheduler.go`
 - Modify: `internal/aigc/orchestration/scheduler_test.go`
 
-- [ ] **Step 1: 写交互挂起释放测试**
+- [x] **Step 1: 写交互挂起释放测试**
 
 ```go
 func TestSchedulerSuspendsWithoutResidentExecution(t *testing.T) {
@@ -350,7 +350,7 @@ func TestSchedulerSuspendsWithoutResidentExecution(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 写 Resume 幂等和 key 冲突测试**
+- [x] **Step 2: 写 Resume 幂等和 key 冲突测试**
 
 ```go
 func TestResumeIsOneShotAndIdempotent(t *testing.T) {
@@ -372,17 +372,17 @@ func TestResumeIsOneShotAndIdempotent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: 写 Evaluate -> waiting_agent 测试**
+- [x] **Step 3: 写 Evaluate -> waiting_agent 测试**
 
 节点成功且 `PlanStep.Evaluate=true` 时保存 outputs，然后 Run 进入 `suspended(waiting_agent)`；该节点不得重复执行。
 
-- [ ] **Step 4: 运行 RED**
+- [x] **Step 4: 运行 RED**
 
 Run: `go test ./internal/aigc/orchestration -run 'TestSchedulerSuspends|TestResume|TestEvaluate' -v`
 
 Expected: 编译失败，缺少 `Resume` 或断言失败。
 
-- [ ] **Step 5: 实现恢复协议**
+- [x] **Step 5: 实现恢复协议**
 
 ```go
 var ErrResumeKeyMismatch = errors.New("plan run resume key mismatch")
@@ -397,13 +397,13 @@ func (s *Scheduler) Resume(
 
 Resume 先匹配 Run 级预览 receipt，再按 Plan Step 顺序查找 NodeRun ResumeKey。首次恢复才要求 Run 为 suspended 且命中当前挂起载体，并在同一个 CAS 回调内冻结 decision、清空 Suspension、置 `Resumed=true`、执行 Run `suspended->running`；`Outputs["resume_decision"]` 是保留命名空间，Tool 已占用时原子拒绝，nil decision 冻结为空 map。一次性只表示 decision/receipt 不重复应用，不表示执行推进只尝试一次：命中 `Resumed=true` receipt 后，若 Run 仍为 running，必须在当前 per-run gate 内调用私有 `advance` 继续收敛；只有 Run 已 terminal 或再次 suspended（包括下游新卡点）才只读返回当前权威快照。caller cancel、下游基础设施错误或 commit ACK 丢失后，fresh context 使用同一 key 重放必须继续 running receipt，且不得改写已冻结 decision 或增加 receipt Version。单 Scheduler 的 per-run gate 防止本地重复推进；多个 Scheduler 实例可对同一 running receipt 产生 at-least-once Tool 调用，Tool 必须使用稳定 IdempotencyKey 吸收重复业务效果，CAS 重读后所有调用返回同一 terminal 权威 Run。
 
-- [ ] **Step 6: 运行 GREEN 与 race**
+- [x] **Step 6: 运行 GREEN 与 race**
 
 Run: `go test -race ./internal/aigc/orchestration -run 'TestSchedulerSuspends|TestResume|TestEvaluate' -v`
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add internal/aigc/orchestration/resume.go internal/aigc/orchestration/scheduler.go internal/aigc/orchestration/scheduler_test.go
@@ -423,7 +423,7 @@ git commit -m "feat(orchestration): add unified plan suspension and resume"
 - Modify: `internal/aigc/orchestration/scheduler.go`
 - Modify: `internal/aigc/orchestration/scheduler_test.go`
 
-- [ ] **Step 1: 写跨实例 claim 失败测试**
+- [x] **Step 1: 写跨实例 claim 失败测试**
 
 ```go
 func TestExecutionClaimPreventsConcurrentSchedulersFromRunningSameNode(t *testing.T) {
@@ -455,21 +455,21 @@ func TestExecutionClaimPreventsConcurrentSchedulersFromRunningSameNode(t *testin
 }
 ```
 
-- [ ] **Step 2: 写 lease 过期接管与迟到结果 fencing 测试**
+- [x] **Step 2: 写 lease 过期接管与迟到结果 fencing 测试**
 
 第一个 Scheduler claim 后模拟进程退出；fake clock 推进超过 LeaseTTL。第二个 Scheduler 必须保留原 Attempt 和 IdempotencyKey、写入新 token 后接管。第一个 token 的迟到 outcome 必须成为 no-op，不增加 Version、不覆盖第二个 token 的权威结果。
 
-- [ ] **Step 3: 写 heartbeat 与主动释放测试**
+- [x] **Step 3: 写 heartbeat 与主动释放测试**
 
 长 Tool 每 `LeaseTTL/3` 续租；clock 未超过最新 lease 时其他实例不能接管。Tool 返回 infrastructure error、caller cancel 或未开始的 claimed node 必须原子退回 pending，清 owner/token/lease，但保留 Attempt，使下一次 claim 使用同一 idempotency key。
 
-- [ ] **Step 4: 运行 RED**
+- [x] **Step 4: 运行 RED**
 
 Run: `go test ./internal/aigc/orchestration -run 'TestExecutionClaim' -v`
 
 Expected: 编译失败，缺少 execution claim 字段、Scheduler owner/lease 配置或 claim 实现。
 
-- [ ] **Step 5: 实现 claim 类型与配置**
+- [x] **Step 5: 实现 claim 类型与配置**
 
 ```go
 type NodeRun struct {
@@ -493,7 +493,7 @@ type SchedulerConfig struct {
 
 `Now` 的强契约是：所有 Scheduler 实例必须使用同一权威时钟。Task 4A 只以 Memory Store + fake clock 完成 fencing Gate，不宣称已解决生产 clock skew；Task 8 的 Postgres 装配必须注入 `SELECT now()` 等价语义的共享 DB clock，禁止以各进程 `time.Now` 作为生产 Scheduler clock。若该共享时钟未接入，Task 8 恢复 Gate 不得通过。
 
-- [ ] **Step 6: 实现 claim wave、heartbeat 与 fenced merge**
+- [x] **Step 6: 实现 claim wave、heartbeat 与 fenced merge**
 
 ```go
 type executionClaim struct {
@@ -510,11 +510,11 @@ func (s *Scheduler) releaseClaims(ctx context.Context, runID string, claims []ex
 
 每轮最多 claim `MaxParallel` 个 ready node。所有 outcome merge 必须同时匹配 `Status=running + ExecutionOwner + ExecutionToken + Attempt + ExecutionEpoch`；不匹配是迟到结果，直接 no-op。成功/业务失败/Suspension 清 claim 字段；基础设施失败/取消把同 epoch claim 退回 pending。Heartbeat 使用有界 CommitTimeout context；首次 Store 错误、commit timeout 或 claim lost 必须取消 wave context、停止领取未开始任务并尽力释放同 epoch claim。停止时等待 goroutine 退出，不泄漏 ticker。
 
-- [ ] **Step 7: 写 token mismatch 与 claim 清理测试**
+- [x] **Step 7: 写 token mismatch 与 claim 清理测试**
 
 同一 Node 的旧 token outcome、错误 owner heartbeat、重复 release 都必须成为 no-op，不增加 Version；正常 terminal outcome 后 owner/token/lease 全部为空。该步骤只验证 claim/fencing 自身，不依赖 Task 4B 的 Revise API。
 
-- [ ] **Step 8: 运行 GREEN 与 claim Gate**
+- [x] **Step 8: 运行 GREEN 与 claim Gate**
 
 Run:
 
@@ -527,7 +527,7 @@ go vet ./...
 
 Expected: 全部 PASS；无双执行、无 stale overwrite、无 heartbeat/gate goroutine 泄漏。
 
-- [ ] **Step 9: 提交**
+- [x] **Step 9: 提交**
 
 ```bash
 git add internal/aigc/orchestration/execution_claim.go internal/aigc/orchestration/execution_claim_test.go internal/aigc/orchestration/plan_run.go internal/aigc/orchestration/scheduler.go internal/aigc/orchestration/scheduler_test.go
@@ -646,7 +646,7 @@ git commit -m "fix(orchestration): close live revision feasibility gate"
 - Create: `internal/aigc/vocabulary/dispatch_generation.go`
 - Create: `internal/aigc/vocabulary/runtime_tools_test.go`
 
-- [ ] **Step 1: 写 Descriptor 和行为失败测试**
+- [x] **Step 1: 写 Descriptor 和行为失败测试**
 
 ```go
 func TestRuntimeToolsExposeStableContracts(t *testing.T) {
@@ -668,17 +668,17 @@ func TestRuntimeToolsExposeStableContracts(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 写幂等键透传测试**
+- [x] **Step 2: 写幂等键透传测试**
 
 fake dispatcher 记录 `Call.PlanRunID/NodeID/Attempt/IdempotencyKey`，断言 dispatch request 的业务幂等基键由这四项组成；同一 Call 重放返回相同 batch_id。
 
-- [ ] **Step 3: 运行 RED**
+- [x] **Step 3: 运行 RED**
 
 Run: `go test ./internal/aigc/vocabulary -run 'TestRuntimeTools' -v`
 
 Expected: 编译失败，缺少三个 constructor。
 
-- [ ] **Step 4: 实现窄接口和工具**
+- [x] **Step 4: 实现窄接口和工具**
 
 ```go
 type PromptWriter interface {
@@ -708,13 +708,13 @@ type GenerationDispatcher interface {
 
 工具不得依赖 `orchestration` 包，避免 vocabulary -> orchestration 环。业务拒绝放 `Result.Fail`，基础设施故障才返回 Go error。
 
-- [ ] **Step 5: 运行 GREEN**
+- [x] **Step 5: 运行 GREEN**
 
 Run: `go test ./internal/aigc/vocabulary -run 'TestRuntimeTools' -v && go test ./internal/aigc/vocabulary`
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add internal/aigc/vocabulary/write_media_prompt.go internal/aigc/vocabulary/request_confirmation.go internal/aigc/vocabulary/dispatch_generation.go internal/aigc/vocabulary/runtime_tools_test.go
@@ -1072,3 +1072,7 @@ Plan 3 负责模板持久化、计划 A2UI 和资产/actor 产品化，不得反
 - **Task 9 偏差：** 原计划 Files 只列验收测试与本文；验收 RED 证明 Task 6 状态归纳不符合“optional partial => partial_succeeded”，因此按 Step 4 允许范围最小修改 `orchestration/resume.go` 并校准既有 `scheduler_test.go`。没有伪造 Task 1-8 的历史 RED 命令或计数；上方 commits 来自本分支 `git log`。
 - **记录时序：** 原 Task 4B 条目中的“后续 Task 尚未执行”是该 Task 完成时的点时记录；按保留历史记录要求未覆盖，后续实际状态以上方 Task 5-9 条目为准。
 - **Task 9 质量修订（本提交）：** 从 dispatch Node receipt 读取 Operation/Batch/Job IDs，并通过真实 `generation.MemoryStore` 的 Get/List API 逐层核验关联、创建态、计划 attempt/idempotency、`session_deliverable` BindingToken 和 replay 不变性；fixture ID/token 生成器改为 atomic，PromptWriter 只在锁内保存不可变入参，终态 helper 改为显式白名单。人为设置错误 WorkflowRunID 后三条 acceptance 均按预期 RED；恢复真实映射后 `go test -count=50 -race ./internal/aigc/integration -run 'TestDynamicPlanRuntime'`、三包 race、`go test ./...`、`go vet ./...`、前端 73 tests 与 build 均 PASS。测试数量与 skip 统计未变化。
+- **最终跨任务审查 - 取消（`ed35ab4`、`05d2be9`、`f977cf9`）：** preview 与 `request_confirmation` deny 统一收敛为 `cancelled`；`waiting_jobs` 使用 durable cancel intent 和带 session/user/run/node owner tuple 的 generation cancellation；active claim 时 fail closed，`Advance` 可跨实例恢复 pending cancellation，`Resume/Revise` 不得越过 intent。
+- **最终跨任务审查 - 挂起（`ee62366`）：** CAS merge 扫描完整权威 Run 的 active suspensions；跨实例产生多个挂起时统一 `multiple_suspensions` fail closed，清理不可达 suspension、resume receipt 与 execution claim。
+- **最终跨任务审查 - 单 active 与提交幂等（`ffac8c3`、`1e5a240`、`6740fc5`、`e6661f0`、`2cc7e79`、`32af7a5`、`3caf989`、`4cdcf54`、`15cb5cb`、`44f8fb4`）：** Memory/PostgreSQL 原子约束同 session 单 active Run；生产入口使用稳定 `SubmitWithKey`，冻结原始 request fingerprint，普通 `Submit` 保持 one-shot；PostgreSQL 使用 DB 权威 effective request key、rolling-compatible metadata hydration、migration advisory lock 和幂等 v2 expression index。keyed replay 只读返回 receipt，Plan 2 入口随后显式幂等调用 `Advance`。
+- **Checklist 对账：** Task 1-4A、5 的步骤此前保留为未勾选，但对应提交、RED/GREEN 与双审均已完成；本次仅同步 checkbox 状态，不改写历史执行记录。Plan 2/3 仍为明确排除范围，未标记完成。
