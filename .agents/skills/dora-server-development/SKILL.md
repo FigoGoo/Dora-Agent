@@ -70,9 +70,11 @@ Migration Owner 是定义表生命周期、写入事务和数据不变量的 Mod
 - Agent 代码按 `middleware`、`tool`、`graphtool`、`chatmodelagent`、`prompt` 等功能包组织；一个 Graph Tool 一个功能包和一份独立中文设计文档。
 - `graph.go` 只组装拓扑；ChatModel 使用 ChatModel Node，候选输出必须经独立确定性 Validator 后才能进入 Command。
 - 无环 Graph 使用 AllPredecessor 并另定义 typed Fan-in；循环 Graph 使用 AnyPredecessor 和最大步骤。Tool 回执、Approval、Operation、Batch、Job 分别设计状态机。
-- Runtime Skill 只从 PostgreSQL 动态加载系统/用户 Skill，并以内联模式注入唯一主 Agent；已发布版本不可变，同一 Turn 冻结版本，禁止 `fork`/`fork_with_context`，Skill 不得新增 Tool、扩权、提预算或绕过 HITL。
+- Runtime Skill 只从 Business 当前 published snapshot 加载，并以内联模式注入唯一主 Agent；产品仅有 draft/published，Agent 在 Session 创建时冻结快照，新发布只影响新会话。禁止 `fork`/`fork_with_context`，Skill 不得新增 Tool、扩权、提预算或绕过 HITL。
 - Agent 使用独立数据库和 `agent` Schema，不直连 Business 数据库；普通 Business RPC 无必要不得包装为 Tool。
 - Agent-owned Operation/Batch/Job/Outbox 由 `agent/migrations` 管理；Worker 只能按公开版本化消费契约和最小数据库权限访问，不得 import `agent/internal/**`。
+- Skill 草稿/发布、Storyboard、Binding、Asset 和积分归 Business；Agent Graph 通过 RPC 访问，Worker 只负责生成/TOS 并调用 Business Finalize，terminal event 经 Agent Inbox 进入 Session Lane。
+- A2UI 使用独立后端/前端包，所有组件组合具备安全 Markdown 的 Card 公共结构；Worker 不生成 A2UI。
 - PostgreSQL 是 Session、Run、Checkpoint、Receipt、Approval、Operation、Batch、Job、Outbox 和 Event 权威来源；Redis 只缓存和唤醒。
 - 生产调用统一经过 Runner 和持久化 Session Lane；模型/Tool 输出先冻结再投影，恢复不得重复外部副作用。
 - 高风险 Tool 在副作用前使用正式 Approval；通用 HTTP、宿主文件、Shell、任意 SQL 和动态 Tool Search 默认禁用。
