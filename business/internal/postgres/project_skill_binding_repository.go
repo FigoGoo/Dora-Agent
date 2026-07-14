@@ -114,8 +114,8 @@ func (r *ProjectRepository) CreateQuickV2(
 	return result, nil
 }
 
-// readPublishedSkillsForQuickCreateV2 使用一次显式集合 JOIN 读取全部 enabled Binding、Skill 当前发布指针与不可变来源修订。
-// FOR SHARE 锁定 Skill 指针直到事务结束，避免一次 Snapshot 混入两个 publication revision。
+// readPublishedSkillsForQuickCreateV2 使用一次显式集合 JOIN 读取 Binding、当前发布事实与 Publisher Account。
+// Publisher Account 只校验逻辑存在性，不追加账户状态条件；FOR SHARE 锁定全部来源直到事务结束。
 func readPublishedSkillsForQuickCreateV2(tx *gorm.DB, command projectskillbinding.QuickCreateV2Command) ([]projectskillbinding.PublishedSkillReadDTO, error) {
 	if len(command.Bindings) == 0 {
 		return make([]projectskillbinding.PublishedSkillReadDTO, 0), nil
@@ -148,7 +148,8 @@ func readPublishedSkillsForQuickCreateV2(tx *gorm.DB, command projectskillbindin
 			published.definition_schema_version AS definition_schema_version,
 			published.definition_json AS definition_json,
 			published.content_digest AS content_digest,
-			published.published_by_user_id AS publisher_user_id,
+			publisher_account.id AS publisher_user_id,
+			published.published_by_user_id AS published_by_reviewer_user_id,
 			published.published_at AS published_at,
 			revision.id AS revision_id,
 			revision.skill_id AS revision_skill_id,
@@ -164,9 +165,11 @@ func readPublishedSkillsForQuickCreateV2(tx *gorm.DB, command projectskillbindin
 		  ON published.id = skill.current_published_snapshot_id
 		JOIN business.skill_content_revision AS revision
 		  ON revision.id = published.source_content_revision_id
+		JOIN business.user_account AS publisher_account
+		  ON publisher_account.id = skill.owner_user_id
 		WHERE project.id = ? AND project.owner_user_id = ? AND binding.skill_id IN ?
 		ORDER BY binding.priority DESC, binding.namespace ASC, binding.skill_id ASC
-		FOR SHARE OF skill, published, revision`, command.ProjectID, command.OwnerUserID, skillIDs).Scan(&records).Error
+		FOR SHARE OF skill, published, revision, publisher_account`, command.ProjectID, command.OwnerUserID, skillIDs).Scan(&records).Error
 	if err != nil {
 		return nil, fmt.Errorf("read project skill published set: %w", err)
 	}
@@ -185,13 +188,14 @@ func readPublishedSkillsForQuickCreateV2(tx *gorm.DB, command projectskillbindin
 			ProjectLifecycleStatus: record.ProjectLifecycleStatus,
 			BindingID:              record.BindingID, BindingVersion: record.BindingVersion, BindingStatus: record.BindingStatus,
 			Namespace: record.Namespace, Priority: record.Priority, SkillID: record.SkillID,
-			SkillOwnerUserID: record.SkillOwnerUserID, CurrentPublishedSnapshotID: record.CurrentPublishedSnapshotID,
-			SkillPublicationRevision: record.SkillPublicationRevision, GovernanceStatus: record.GovernanceStatus,
+			SkillOwnerUserID: record.SkillOwnerUserID, PublisherUserID: record.PublisherUserID,
+			CurrentPublishedSnapshotID: record.CurrentPublishedSnapshotID,
+			SkillPublicationRevision:   record.SkillPublicationRevision, GovernanceStatus: record.GovernanceStatus,
 			GovernanceEpoch: record.GovernanceEpoch, PublishedSnapshotID: record.PublishedSnapshotID,
 			PublishedSkillID: record.PublishedSkillID, SourceContentRevisionID: record.SourceContentRevisionID,
 			PublishedPublicationRevision: record.PublishedPublicationRevision,
 			DefinitionSchemaVersion:      record.DefinitionSchemaVersion, DefinitionJSON: append([]byte(nil), record.DefinitionJSON...),
-			ContentDigest: contentDigest, PublisherUserID: record.PublisherUserID, PublishedAt: record.PublishedAt,
+			ContentDigest: contentDigest, PublishedByReviewerUserID: record.PublishedByReviewerUserID, PublishedAt: record.PublishedAt,
 			RevisionID: record.RevisionID, RevisionSkillID: record.RevisionSkillID,
 			RevisionDefinitionSchemaVersion: record.RevisionDefinitionSchemaVersion,
 			RevisionDefinitionJSON:          append([]byte(nil), record.RevisionDefinitionJSON...), RevisionContentDigest: revisionDigest,

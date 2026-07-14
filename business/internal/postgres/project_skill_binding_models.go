@@ -152,7 +152,7 @@ type projectSessionSkillResolutionItemModel struct {
 	BindingVersion int64 `gorm:"column:binding_version"`
 	// SkillID 是冻结 Skill。
 	SkillID string `gorm:"column:skill_id;type:uuid"`
-	// PublisherUserID 是 owner-private Publisher。
+	// PublisherUserID 是冻结 Skill Owner，public-market 场景允许与 Project Owner 不同。
 	PublisherUserID string `gorm:"column:publisher_user_id;type:uuid"`
 	// PublishedSnapshotID 是冻结发布快照。
 	PublishedSnapshotID string `gorm:"column:published_snapshot_id;type:uuid"`
@@ -170,7 +170,7 @@ type projectSessionSkillResolutionItemModel struct {
 	AllowedGraphToolKeys jsonbValue `gorm:"column:allowed_graph_tool_keys;type:jsonb"`
 	// PublicToolRefs 是 W1 固定空 JSONB 数组。
 	PublicToolRefs jsonbValue `gorm:"column:public_tool_refs;type:jsonb"`
-	// PermissionSnapshotDigest 是 owner-private 权限摘要。
+	// PermissionSnapshotDigest 是 v1 owner-private 或 v2 public-market 权限摘要。
 	PermissionSnapshotDigest []byte `gorm:"column:permission_snapshot_digest"`
 	// RuntimePolicyRef 是固定安全策略引用。
 	RuntimePolicyRef string `gorm:"column:runtime_policy_ref"`
@@ -348,6 +348,8 @@ type projectSkillPublishedReadRecord struct {
 	SkillID string `gorm:"column:skill_id"`
 	// SkillOwnerUserID 是 Skill 权威 Owner。
 	SkillOwnerUserID string `gorm:"column:skill_owner_user_id"`
+	// PublisherUserID 是同一集合 SQL 关联到的 Publisher Account 标识。
+	PublisherUserID string `gorm:"column:publisher_user_id"`
 	// CurrentPublishedSnapshotID 是 Skill 当前发布指针。
 	CurrentPublishedSnapshotID string `gorm:"column:current_published_snapshot_id"`
 	// SkillPublicationRevision 是 Skill 当前发布序号。
@@ -370,8 +372,8 @@ type projectSkillPublishedReadRecord struct {
 	DefinitionJSON []byte `gorm:"column:definition_json"`
 	// ContentDigest 是发布定义摘要。
 	ContentDigest []byte `gorm:"column:content_digest"`
-	// PublisherUserID 是执行发布的 Reviewer，仅供审计读取。
-	PublisherUserID string `gorm:"column:publisher_user_id"`
+	// PublishedByReviewerUserID 是执行批准发布的 Reviewer，仅用于与 Publisher 身份隔离。
+	PublishedByReviewerUserID string `gorm:"column:published_by_reviewer_user_id"`
 	// PublishedAt 是发布时刻。
 	PublishedAt time.Time `gorm:"column:published_at"`
 	// RevisionID 是来源不可变修订。

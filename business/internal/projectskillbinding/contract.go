@@ -21,6 +21,8 @@ const (
 	BindingSetSchemaVersionV1 = "project_skill_binding_set.v1"
 	// PermissionSnapshotSchemaVersionV1 是 owner-private 权限证明的冻结结构版本。
 	PermissionSnapshotSchemaVersionV1 = "project_skill_permission_snapshot.v1"
+	// PermissionSnapshotSchemaVersionV2 是 public-market 权限证明的冻结结构版本。
+	PermissionSnapshotSchemaVersionV2 = "project_skill_permission_snapshot.v2"
 	// RuntimeContentSchemaVersionV1 是 Published Definition 运行时子集的冻结结构版本。
 	RuntimeContentSchemaVersionV1 = "skill_runtime_content.v1"
 	// SessionSnapshotSchemaVersionV1 是 Agent Session Skill Snapshot 的冻结结构版本。
@@ -33,8 +35,14 @@ const (
 	OutboxPayloadSchemaVersionV2 = "session_bootstrap_outbox_payload.v2"
 	// RuntimePolicyRefV1 是 W1 唯一允许的 Runtime Skill 安全策略引用。
 	RuntimePolicyRefV1 = "skill-runtime-policy:v1"
-	// PermissionPolicyRefV1 是 W1 owner-private 权限规则引用。
-	PermissionPolicyRefV1 = "project-skill-permission:owner-private:v1"
+	// PermissionBasisOwnerPrivate 是 Project Owner 使用自有 Skill 的冻结权限依据。
+	PermissionBasisOwnerPrivate = "owner_private"
+	// PermissionBasisPublicMarket 是消费者使用其他 Publisher 公开 Skill 的冻结权限依据。
+	PermissionBasisPublicMarket = "public_market"
+	// PermissionPolicyRefOwnerPrivateV1 是 W1 owner-private 权限规则引用。
+	PermissionPolicyRefOwnerPrivateV1 = "project-skill-permission:owner-private:v1"
+	// PermissionPolicyRefPublicMarketV1 是 W1 public-market 权限规则引用。
+	PermissionPolicyRefPublicMarketV1 = "project-skill-permission:public-market:v1"
 	// SkillNamespaceUser 是 W1 唯一允许的用户 Skill namespace。
 	SkillNamespaceUser = "user"
 	// BindingPriorityW1 是 W1 固定 Skill 加载优先级，客户端不能覆盖。
@@ -54,7 +62,7 @@ const (
 var (
 	// ErrInvalidBinding 表示绑定集合、UUID、排序或版本不满足冻结契约。
 	ErrInvalidBinding = errors.New("invalid project skill binding")
-	// ErrSkillUnavailable 表示 Skill 不存在、跨 Owner、未发布或引用不一致；调用方不得据此泄露存在性。
+	// ErrSkillUnavailable 表示 Skill 不存在、未发布、不可公开或引用不一致；调用方不得据此泄露存在性。
 	ErrSkillUnavailable = errors.New("project skill unavailable")
 	// ErrGovernanceUnavailable 表示 Skill 当前治理状态不是 active。
 	ErrGovernanceUnavailable = errors.New("project skill governance unavailable")
@@ -218,7 +226,7 @@ type PublishedSkillSnapshotRefV1 struct {
 	Namespace string `json:"namespace"`
 	// SkillID 是 Business Skill UUIDv7。
 	SkillID string `json:"skill_id"`
-	// PublisherUserID 是 Published Snapshot 发布者；owner-private W1 等于项目所有者。
+	// PublisherUserID 是 Skill 权威所有者；public-market 场景允许与项目所有者不同。
 	PublisherUserID string `json:"publisher_user_id"`
 	// PublishedSnapshotID 是不可变发布快照 UUIDv7。
 	PublishedSnapshotID string `json:"published_snapshot_id"`
@@ -238,7 +246,7 @@ type PublishedSkillSnapshotRefV1 struct {
 	AllowedGraphToolKeys []string `json:"allowed_graph_tool_keys"`
 	// PublicToolRefs 在 W1 必须是非 nil 空数组。
 	PublicToolRefs []PublicToolSnapshotRefV1 `json:"public_tool_refs"`
-	// PermissionSnapshotDigest 是 owner-private 权限 Canonical 摘要。
+	// PermissionSnapshotDigest 是 v1 owner-private 或 v2 public-market 权限 Canonical 摘要。
 	PermissionSnapshotDigest string `json:"permission_snapshot_digest"`
 	// RuntimePolicyRef 是固定运行时安全策略引用。
 	RuntimePolicyRef string `json:"runtime_policy_ref"`
@@ -296,6 +304,41 @@ type PermissionSnapshotV1 struct {
 	PolicyRef string `json:"policy_ref"`
 }
 
+// PermissionSnapshotV2 是 W1-F public-market 权限决策的不可变 Canonical 输入。
+// 字段顺序刻意与 v1 一致，但 schema、basis、policy 和 Owner 关系严格隔离，禁止交叉组合。
+type PermissionSnapshotV2 struct {
+	// SchemaVersion 固定为 project_skill_permission_snapshot.v2。
+	SchemaVersion string `json:"schema_version"`
+	// Decision 固定为 allow。
+	Decision string `json:"decision"`
+	// Basis 固定为 public_market。
+	Basis string `json:"basis"`
+	// SubjectUserID 是可信当前消费者。
+	SubjectUserID string `json:"subject_user_id"`
+	// ProjectID 是目标项目。
+	ProjectID string `json:"project_id"`
+	// ProjectOwnerUserID 是项目冻结所有者。
+	ProjectOwnerUserID string `json:"project_owner_user_id"`
+	// BindingID 是解析来源绑定。
+	BindingID string `json:"binding_id"`
+	// BindingVersion 是解析来源绑定版本。
+	BindingVersion int64 `json:"binding_version"`
+	// BindingSetVersion 是解析来源集合版本。
+	BindingSetVersion int64 `json:"binding_set_version"`
+	// Namespace 固定为 user。
+	Namespace string `json:"namespace"`
+	// SkillID 是被授权的公开 Skill。
+	SkillID string `json:"skill_id"`
+	// SkillOwnerUserID 是冻结 Publisher，必须与项目所有者不同。
+	SkillOwnerUserID string `json:"skill_owner_user_id"`
+	// PublishedSnapshotID 是同一事务冻结的精确发布快照。
+	PublishedSnapshotID string `json:"published_snapshot_id"`
+	// AllowedActions 固定为非 nil 单元素 session_snapshot。
+	AllowedActions []string `json:"allowed_actions"`
+	// PolicyRef 固定为 public-market v1 权限策略引用。
+	PolicyRef string `json:"policy_ref"`
+}
+
 // PublishedSkillReadDTO 是 Repository 一次集合查询映射的专用只读 DTO，不参与持久化。
 type PublishedSkillReadDTO struct {
 	// ProjectID 是当前事务中新建或锁定的项目。
@@ -316,8 +359,10 @@ type PublishedSkillReadDTO struct {
 	Priority int
 	// SkillID 是绑定目标 Skill。
 	SkillID string
-	// SkillOwnerUserID 必须等于项目所有者。
+	// SkillOwnerUserID 是 Skill 权威所有者，允许与项目所有者不同。
 	SkillOwnerUserID string
+	// PublisherUserID 是同一 SQL 关联到的 Publisher Account 标识，必须等于 SkillOwnerUserID。
+	PublisherUserID string
 	// CurrentPublishedSnapshotID 是 Skill 当前发布指针。
 	CurrentPublishedSnapshotID string
 	// SkillPublicationRevision 是 Skill 当前发布修订。
@@ -340,8 +385,8 @@ type PublishedSkillReadDTO struct {
 	DefinitionJSON []byte
 	// ContentDigest 是数据库中完整发布定义摘要。
 	ContentDigest Digest
-	// PublisherUserID 是执行发布的可信用户；W1 生产语义要求等于 owner。
-	PublisherUserID string
+	// PublishedByReviewerUserID 是执行批准发布的 Reviewer，仅用于证明不会被误投影为 Publisher。
+	PublishedByReviewerUserID string
 	// PublishedAt 是发布时刻 UTC 时间。
 	PublishedAt time.Time
 	// RevisionID 是 JOIN 到的不可变来源修订标识。
@@ -440,7 +485,7 @@ type ResolutionItem struct {
 	AllowedGraphToolKeys []string
 	// PublicToolRefs 是 W1 非 nil 空数组。
 	PublicToolRefs []PublicToolSnapshotRefV1
-	// PermissionSnapshotDigest 是 owner-private 权限摘要。
+	// PermissionSnapshotDigest 是 v1 owner-private 或 v2 public-market 权限摘要。
 	PermissionSnapshotDigest Digest
 	// RuntimePolicyRef 是固定安全策略引用。
 	RuntimePolicyRef string
@@ -450,6 +495,20 @@ type ResolutionItem struct {
 	PublishedAtUnixMS int64
 	// CreatedAt 是解析项创建 UTC 时间。
 	CreatedAt time.Time
+}
+
+// ReconstructedPermissionAudit 是由不可变 Resolution Header 与 Item 重建并核验的权限审计投影。
+type ReconstructedPermissionAudit struct {
+	// SchemaVersion 是重建出的 v1 owner-private 或 v2 public-market Schema。
+	SchemaVersion string
+	// Basis 是重建出的 owner_private 或 public_market 权限依据。
+	Basis string
+	// PolicyRef 是与 Schema/Basis 成对的冻结权限策略引用。
+	PolicyRef string
+	// CanonicalJSON 是按冻结字段顺序恢复的完整 Canonical JSON。
+	CanonicalJSON []byte
+	// Digest 是 CanonicalJSON 的 SHA-256，必须与 Resolution Item 持久化摘要一致。
+	Digest Digest
 }
 
 // ResolutionV1 是内部解析契约输出，同时承载持久化 metadata 与待加密 Agent Snapshot。

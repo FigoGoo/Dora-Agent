@@ -46,6 +46,7 @@ func ProjectRuntimeContentV1(definition skill.SkillDefinitionV1) (SkillRuntimeCo
 }
 
 // ResolveProjectSkillSnapshotsV1 在 Repository 的同一事务集合查询后冻结精确 Published Snapshot、权限和 Runtime Content。
+// Session Snapshot 结构继续为 v1；每个 Item 的权限按 Owner 关系严格选择 v1 owner-private 或 v2 public-market。
 // 任一 Item 不可用都会使整个解析失败；只有原始 Binding Set 为空才能产生 empty Snapshot。
 func ResolveProjectSkillSnapshotsV1(input ResolveInputV1, rows []PublishedSkillReadDTO, limits LimitsV1) (ResolutionV1, error) {
 	if err := validateResolutionInput(input); err != nil {
@@ -103,14 +104,7 @@ func ResolveProjectSkillSnapshotsV1(input ResolveInputV1, rows []PublishedSkillR
 		if totalRuntimeBytes > limits.MaxTotalRuntimeContentBytes {
 			return ResolutionV1{}, ErrSnapshotLimitExceeded
 		}
-		permission := PermissionSnapshotV1{
-			SchemaVersion: PermissionSnapshotSchemaVersionV1, Decision: "allow", Basis: "owner_private",
-			SubjectUserID: input.OwnerUserID, ProjectID: input.ProjectID, ProjectOwnerUserID: input.OwnerUserID,
-			BindingID: row.BindingID, BindingVersion: row.BindingVersion, BindingSetVersion: input.BindingSetVersion,
-			Namespace: SkillNamespaceUser, SkillID: row.SkillID, SkillOwnerUserID: row.SkillOwnerUserID,
-			PublishedSnapshotID: row.PublishedSnapshotID, AllowedActions: []string{"session_snapshot"}, PolicyRef: PermissionPolicyRefV1,
-		}
-		_, permissionDigest, err := CanonicalPermissionSnapshotV1(permission)
+		permissionDigest, err := canonicalPermissionDigestForPublishedSkill(input, row)
 		if err != nil {
 			return ResolutionV1{}, wrapSnapshotError("canonical permission snapshot", err)
 		}
@@ -118,8 +112,8 @@ func ResolveProjectSkillSnapshotsV1(input ResolveInputV1, rows []PublishedSkillR
 		wireItem := PublishedSkillSnapshotRefV1{
 			LoadOrder: index + 1, Priority: BindingPriorityW1, Namespace: SkillNamespaceUser,
 			SkillID: row.SkillID,
-			// W1 的 publisher 是 Published Skill 所有者；审核 Reviewer 不是跨用户使用授权主体。
-			PublisherUserID:     input.OwnerUserID,
+			// Publisher 永远是 Skill 权威 Owner；执行批准发布的 Reviewer 不进入权限或 Agent Snapshot。
+			PublisherUserID:     row.SkillOwnerUserID,
 			PublishedSnapshotID: row.PublishedSnapshotID, PublicationRevision: row.PublishedPublicationRevision,
 			DefinitionSchemaVersion: row.DefinitionSchemaVersion, ContentDigest: row.ContentDigest.Hex(),
 			RuntimeContentSchemaVersion: RuntimeContentSchemaVersionV1, RuntimeContentDigest: runtimeDigest.Hex(), RuntimeContent: runtimeContent,
@@ -132,7 +126,7 @@ func ResolveProjectSkillSnapshotsV1(input ResolveInputV1, rows []PublishedSkillR
 			ResolutionID: input.ResolutionID, ProjectID: input.ProjectID, CommandID: input.CommandID,
 			LoadOrder: index + 1, Priority: BindingPriorityW1, Namespace: SkillNamespaceUser,
 			BindingID: row.BindingID, BindingVersion: row.BindingVersion, SkillID: row.SkillID,
-			PublisherUserID: input.OwnerUserID, PublishedSnapshotID: row.PublishedSnapshotID,
+			PublisherUserID: row.SkillOwnerUserID, PublishedSnapshotID: row.PublishedSnapshotID,
 			PublicationRevision: row.PublishedPublicationRevision, DefinitionSchemaVersion: row.DefinitionSchemaVersion,
 			ContentDigest: row.ContentDigest, RuntimeContentSchemaVersion: RuntimeContentSchemaVersionV1,
 			RuntimeContentDigest: runtimeDigest, AllowedGraphToolKeys: append([]string(nil), allowedKeys...),
@@ -234,7 +228,8 @@ func validatePublishedSkillRead(input ResolveInputV1, row PublishedSkillReadDTO)
 		row.Namespace != SkillNamespaceUser || row.Priority != BindingPriorityW1 || !isCanonicalUUIDv7(row.SkillID) {
 		return ErrSkillUnavailable
 	}
-	if row.SkillOwnerUserID != input.OwnerUserID || row.CurrentPublishedSnapshotID == "" ||
+	if !isCanonicalUUIDv7(row.SkillOwnerUserID) || row.PublisherUserID != row.SkillOwnerUserID ||
+		row.CurrentPublishedSnapshotID == "" ||
 		row.CurrentPublishedSnapshotID != row.PublishedSnapshotID || row.SkillPublicationRevision != row.PublishedPublicationRevision ||
 		row.PublishedSkillID != row.SkillID || row.RevisionSkillID != row.SkillID ||
 		row.SourceContentRevisionID != row.RevisionID || row.PublishedPublicationRevision < 1 ||
@@ -250,6 +245,32 @@ func validatePublishedSkillRead(input ResolveInputV1, row PublishedSkillReadDTO)
 		return ErrSnapshotInvalid
 	}
 	return nil
+}
+
+// canonicalPermissionDigestForPublishedSkill 按冻结 Owner 关系构造唯一权限版本，禁止调用方覆盖 basis 或 policy。
+func canonicalPermissionDigestForPublishedSkill(input ResolveInputV1, row PublishedSkillReadDTO) (Digest, error) {
+	if row.SkillOwnerUserID == input.OwnerUserID {
+		permission := PermissionSnapshotV1{
+			SchemaVersion: PermissionSnapshotSchemaVersionV1, Decision: "allow", Basis: PermissionBasisOwnerPrivate,
+			SubjectUserID: input.OwnerUserID, ProjectID: input.ProjectID, ProjectOwnerUserID: input.OwnerUserID,
+			BindingID: row.BindingID, BindingVersion: row.BindingVersion, BindingSetVersion: input.BindingSetVersion,
+			Namespace: SkillNamespaceUser, SkillID: row.SkillID, SkillOwnerUserID: row.SkillOwnerUserID,
+			PublishedSnapshotID: row.PublishedSnapshotID, AllowedActions: []string{"session_snapshot"},
+			PolicyRef: PermissionPolicyRefOwnerPrivateV1,
+		}
+		_, digest, err := CanonicalPermissionSnapshotV1(permission)
+		return digest, err
+	}
+	permission := PermissionSnapshotV2{
+		SchemaVersion: PermissionSnapshotSchemaVersionV2, Decision: "allow", Basis: PermissionBasisPublicMarket,
+		SubjectUserID: input.OwnerUserID, ProjectID: input.ProjectID, ProjectOwnerUserID: input.OwnerUserID,
+		BindingID: row.BindingID, BindingVersion: row.BindingVersion, BindingSetVersion: input.BindingSetVersion,
+		Namespace: SkillNamespaceUser, SkillID: row.SkillID, SkillOwnerUserID: row.SkillOwnerUserID,
+		PublishedSnapshotID: row.PublishedSnapshotID, AllowedActions: []string{"session_snapshot"},
+		PolicyRef: PermissionPolicyRefPublicMarketV1,
+	}
+	_, digest, err := CanonicalPermissionSnapshotV2(permission)
+	return digest, err
 }
 
 // mapCapability 显式映射 Business Published Definition 与跨 Module Runtime DTO，避免反射或 JSON 往返。

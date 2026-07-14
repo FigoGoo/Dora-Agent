@@ -713,6 +713,7 @@ User → Payment Order → Channel Attempt / Notification / Query
 | SRV-SKILL-001 | Given Project 启用多个 Skill；When Agent 实际选择 0、1 或多个 Skill | 只为实际选择创建唯一 Invocation；启用、加载和规则读取不扣费。 |
 | SRV-SKILL-002 | Given Skill 已发布且已有 Session；When 修改草稿并再次发布 | 已有 Session 始终使用原 Snapshot，新 Session 使用新发布快照；产品不出现版本明细，历史事实不被改写。 |
 | SRV-SKILL-003 | Given Skill 具有 current published snapshot；When 匿名列表或详情读取 | 只有治理 active 且发布指针、逻辑关联、Canonical 与 digest 完整一致时返回白名单公开 DTO；暂停/下架统一不可见，损坏事实失败关闭且不泄漏草稿、运行 guidance 或内部治理字段。 |
+| SRV-SKILL-004 | Given QuickCreate v2 包含自有或其他发布者的 user Skill；When Business 在同一事务解析 Binding Set | 每项只从可信 Project Owner、Skill Owner、current Published Snapshot 与治理事实派生 v1 `owner_private` 或 v2 `public_market` 权限；消费者 Subject/Project Owner 与 Publisher/Skill Owner 正确分离，任一项失效时九类创建事实全量回滚，旧 Session 冻结不改写，Agent 只消费 opaque permission digest。 |
 | SRV-GTL-001 | Given 生产 Registry 启动或热加载；When 校验 Graph Tool Definition | 六个必备 `tool_key` 各有可执行已发布版本，Schema、权限、预算和计费引用完整；任一缺失或同一用户灰度解析不唯一时失败关闭并告警。 |
 | SRV-GTL-002 | Given 用户显式选择 `write_prompts`；When Agent 处理输入 | 冻结所选 Tool 和版本，只允许补问或调用 `write_prompts`，不得调用媒体生成替代；Run 与事件可追踪。 |
 | SRV-GTL-003 | Given 用户无 Storyboard；When 独立调用媒体生成或视频剪辑 | 创建平台原生 Graph Tool Run 和独立结果，不创建虚假 Skill Invocation，也不覆盖 Active Storyboard。 |

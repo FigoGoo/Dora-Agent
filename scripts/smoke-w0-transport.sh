@@ -22,6 +22,7 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   evidence_file="$repo_root/.local/smoke/w1-skill-foundation-evidence.json"
   governance_evidence_file="$repo_root/.local/smoke/w1-skill-governance-evidence.json"
   skill_market_evidence_file="$repo_root/.local/smoke/w1-skill-market-evidence.json"
+  skill_market_binding_evidence_file="$repo_root/.local/smoke/w1-skill-market-binding-evidence.json"
   legacy_evidence_file=""
 else
   evidence_dir="$repo_root/.local/smoke/w0-transport/runs/$run_id"
@@ -29,11 +30,13 @@ else
   evidence_file="$repo_root/.local/smoke/w05-workspace-transport-evidence.json"
   governance_evidence_file=""
   skill_market_evidence_file=""
+  skill_market_binding_evidence_file=""
   legacy_evidence_file="$repo_root/.local/smoke/w0-transport-evidence.json"
 fi
 pending_evidence_file="$evidence_dir/evidence-summary.pending.json"
 governance_pending_evidence_file=""
 skill_market_pending_evidence_file=""
+skill_market_binding_pending_evidence_file=""
 cookie_jar=""
 user_curl_config=""
 login_response_temp=""
@@ -48,6 +51,12 @@ source_manifest_temp=""
 w05_browser_result_temp=""
 w05_retention_control_dir=""
 w05_retention_injector_pid=""
+w1_public_market_control_dir=""
+w1_browser_playwright_pid=""
+w1_toctou_lock_shell_pid=""
+w1_toctou_lock_database_pid=""
+w1_toctou_governance_shell_pid=""
+w1_toctou_quick_shell_pid=""
 agent_restart_workspace_temp=""
 agent_restart_sse_temp=""
 agent_restart_sse_status_temp=""
@@ -79,13 +88,22 @@ w1_reviewer_rbac_smoke_ran=false
 w1_reviewer_revocation_smoke_ran=false
 w1_skill_governance_smoke_ran=false
 w1_skill_market_smoke_ran=false
+w1_skill_market_binding_smoke_ran=false
 w1_skill_market_fixtures_present=false
 w1_skill_market_public_read=false
 w1_skill_market_safe_projection=false
 w1_skill_market_keyset_pagination=false
 w1_skill_market_governance_visibility=false
 w1_skill_market_cursor_fail_closed=false
-w1_skill_market_cross_owner_use_blocked=false
+w1_skill_market_stale_selection_fail_closed=false
+w1_public_market_quickcreate=false
+w1_public_market_permission_identity_separation=false
+w1_public_market_publisher_snapshot_frozen=false
+w1_public_market_governance_toctou_closed=false
+w1_public_market_mixed_binding_atomicity=false
+w1_public_market_mixed_success=false
+w1_public_market_login_preselection_recovered=false
+w1_public_market_idempotency_frozen_replay=false
 w1_skill_id=""
 w1_review_id=""
 w1_skill_name=""
@@ -96,8 +114,30 @@ w1_binding_prompt=""
 w1_binding_project_id=""
 w1_binding_session_id=""
 w1_binding_input_id=""
+w1_public_market_project_id=""
+w1_public_market_session_id=""
+w1_public_market_snapshot_before=""
+w1_owner_private_skill_id=""
+w1_owner_private_skill_name=""
 
 stop_processes() {
+  if [[ -n "$w1_browser_playwright_pid" ]] && kill -0 "$w1_browser_playwright_pid" 2>/dev/null; then
+    kill -TERM "$w1_browser_playwright_pid" 2>/dev/null || true
+    for _ in $(seq 1 40); do
+      process_state="$(ps -o stat= -p "$w1_browser_playwright_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+      if ! kill -0 "$w1_browser_playwright_pid" 2>/dev/null || [[ "$process_state" == Z* ]]; then
+        break
+      fi
+      sleep 0.25
+    done
+    if kill -0 "$w1_browser_playwright_pid" 2>/dev/null; then
+      kill -KILL "$w1_browser_playwright_pid" 2>/dev/null || true
+    fi
+  fi
+  if [[ -n "$w1_browser_playwright_pid" ]]; then
+    wait "$w1_browser_playwright_pid" 2>/dev/null || true
+    w1_browser_playwright_pid=""
+  fi
   if [[ -n "$w05_retention_injector_pid" ]] && kill -0 "$w05_retention_injector_pid" 2>/dev/null; then
     kill -TERM "$w05_retention_injector_pid" 2>/dev/null || true
     for _ in $(seq 1 40); do
@@ -186,6 +226,9 @@ stop_processes() {
   if [[ -n "$w05_retention_control_dir" ]]; then
     rm -rf "$w05_retention_control_dir"
   fi
+  if [[ -n "$w1_public_market_control_dir" ]]; then
+    rm -rf "$w1_public_market_control_dir"
+  fi
   if [[ -n "$agent_restart_workspace_temp" ]]; then
     rm -f "$agent_restart_workspace_temp"
   fi
@@ -202,7 +245,18 @@ stop_processes() {
 
 cleanup_on_exit() {
   local exit_code="$?"
+  local background_pid=""
   trap - EXIT
+  if [[ "$w1_toctou_lock_database_pid" =~ ^[0-9]+$ && -n "$postgres_container" ]]; then
+    docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc \
+      "SELECT pg_terminate_backend($w1_toctou_lock_database_pid);" >/dev/null 2>&1 || true
+  fi
+  for background_pid in "$w1_toctou_quick_shell_pid" "$w1_toctou_governance_shell_pid" "$w1_toctou_lock_shell_pid"; do
+    if [[ "$background_pid" =~ ^[0-9]+$ ]]; then
+      kill "$background_pid" >/dev/null 2>&1 || true
+      wait "$background_pid" >/dev/null 2>&1 || true
+    fi
+  done
   if [[ "$w1_skill_market_fixtures_present" == "true" && -n "$postgres_container" ]]; then
     cleanup_w1_skill_market_fixtures "$postgres_container" >/dev/null 2>&1 || true
   fi
@@ -215,6 +269,9 @@ cleanup_on_exit() {
     fi
     if [[ -n "$skill_market_evidence_file" ]]; then
       rm -f "$skill_market_evidence_file" "${skill_market_evidence_file}.tmp"
+    fi
+    if [[ -n "$skill_market_binding_evidence_file" ]]; then
+      rm -f "$skill_market_binding_evidence_file" "${skill_market_binding_evidence_file}.tmp"
     fi
     if [[ -n "$evidence_dir" && "$evidence_dir" == "$repo_root/.local/smoke/"* ]]; then
       rm -rf "$evidence_dir"
@@ -393,9 +450,10 @@ discover_local_ipv4() {
 poll_bootstrap_ready() {
   local project_id="$1"
   local output_file="$2"
+  local request_cookie_jar="${3:-$cookie_jar}"
   local status=""
   for _ in $(seq 1 120); do
-    status="$(curl --silent --show-error --max-time 3 -b "$cookie_jar" \
+    status="$(curl --silent --show-error --max-time 3 -b "$request_cookie_jar" \
       -o "$output_file" -w '%{http_code}' \
       "http://127.0.0.1:18081/api/v1/projects/${project_id}/bootstrap")"
     if [[ "$status" == "200" ]] && jq -e '.creation_status == "ready"' "$output_file" >/dev/null; then
@@ -414,11 +472,12 @@ run_concurrent_quick_create() {
   local payload="$2"
   local batch_dir="$3"
   local curl_config="$4"
+  local request_cookie_jar="${5:-$cookie_jar}"
   local request_pids=()
   local index=""
   mkdir -p "$batch_dir"
   for index in $(seq 1 100); do
-    curl_with_body_stdin "$payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    curl_with_body_stdin "$payload" --silent --show-error --max-time 10 -b "$request_cookie_jar" \
       --config "$curl_config" \
       -H 'Content-Type: application/json' \
       -H "Idempotency-Key: $idempotency_key" \
@@ -507,6 +566,16 @@ sha256_file() {
   local output=""
   local digest=""
   output="$(shasum -a 256 "$file")" || return 1
+  digest="${output%% *}"
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s' "$digest"
+}
+
+sha256_text() {
+  local value="$1"
+  local output=""
+  local digest=""
+  output="$(printf '%s' "$value" | shasum -a 256)" || return 1
   digest="${output%% *}"
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
   printf '%s' "$digest"
@@ -601,6 +670,114 @@ read_governance_quickcreate_counts() {
       'session_bindings', (SELECT COUNT(*) FROM business.project_session_binding),
       'outboxes', (SELECT COUNT(*) FROM business.project_session_outbox)
     );"
+}
+
+# wait_w1_public_market_checkpoint 等待浏览器原子发布阶段检查点，并校验 exact-set、身份与 0600 权限。
+wait_w1_public_market_checkpoint() {
+  local checkpoint_file="$1"
+  local expected_phase="$2"
+  local playwright_pid="$3"
+  local expected_skill_id="${4:-}"
+  local process_state=""
+  local file_mode=""
+  local max_attempts="600"
+
+  # 首个 checkpoint 需要覆盖 Playwright 的 180s 全局动作预算；第二阶段仍保持 30s 快速失败。
+  if [[ "$expected_phase" == "before_login" ]]; then
+    max_attempts="3600"
+  fi
+
+  for _ in $(seq 1 "$max_attempts"); do
+    if [[ -s "$checkpoint_file" ]]; then
+      file_mode="$(stat -c '%a' "$checkpoint_file" 2>/dev/null || stat -f '%Lp' "$checkpoint_file" 2>/dev/null || true)"
+      [[ "$file_mode" == "600" ]] || fail "W1 Public Market ${expected_phase} checkpoint 权限不是 0600"
+      jq -e --arg phase "$expected_phase" --arg consumer "$owner_b_user_id" --arg skill "$expected_skill_id" '
+        keys == ["consumer_id","phase","quickcreate_count","schema_version","skill_id"]
+        and .schema_version == "w1.public-market-preselection.checkpoint.v1"
+        and .phase == $phase and .consumer_id == $consumer
+        and (if $skill == "" then (.skill_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) else .skill_id == $skill end)
+        and .quickcreate_count == 0' "$checkpoint_file" >/dev/null || \
+        fail "W1 Public Market ${expected_phase} checkpoint 契约、身份或零请求事实漂移"
+      return 0
+    fi
+    process_state="$(ps -o stat= -p "$playwright_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+    if ! kill -0 "$playwright_pid" 2>/dev/null || [[ "$process_state" == Z* ]]; then
+      sed -n '1,240p' "$evidence_dir/frontend-w1-playwright.log" >&2 || true
+      fail "W1 Playwright 在 ${expected_phase} checkpoint 前提前退出"
+    fi
+    sleep 0.05
+  done
+  fail "等待 W1 Public Market ${expected_phase} checkpoint 超时"
+}
+
+# write_w1_public_market_ack 仅在数据库检查通过后原子放行浏览器下一阶段。
+write_w1_public_market_ack() {
+  local phase="$1"
+  local counts="$2"
+  local skill_id="$3"
+  local ack_file="$w1_public_market_control_dir/${phase}.ack.json"
+  local ack_temp="$ack_file.$$.tmp"
+  local file_mode=""
+
+  jq -n --arg phase "$phase" --arg consumer "$owner_b_user_id" --arg skill "$skill_id" \
+    --argjson counts "$counts" '
+    {schema_version:"w1.public-market-preselection.database-ack.v1",phase:$phase,
+      consumer_id:$consumer,skill_id:$skill,quickcreate_count:0,database_counts:$counts,accepted:true}' \
+    >"$ack_temp" || fail "W1 Public Market ${phase} ACK 生成失败"
+  chmod 600 "$ack_temp"
+  mv "$ack_temp" "$ack_file"
+  file_mode="$(stat -c '%a' "$ack_file" 2>/dev/null || stat -f '%Lp' "$ack_file" 2>/dev/null || true)"
+  [[ "$file_mode" == "600" ]] || fail "W1 Public Market ${phase} ACK 权限不是 0600"
+  jq -e --arg phase "$phase" --arg consumer "$owner_b_user_id" --arg skill "$skill_id" '
+    keys == ["accepted","consumer_id","database_counts","phase","quickcreate_count","schema_version","skill_id"]
+    and .schema_version == "w1.public-market-preselection.database-ack.v1"
+    and .phase == $phase and .consumer_id == $consumer and .skill_id == $skill
+    and .quickcreate_count == 0 and .accepted == true
+    and (.database_counts | keys) == ["binding_audits","binding_sets","bindings","outboxes","projects","receipts","resolution_items","resolutions","session_bindings"]' \
+    "$ack_file" >/dev/null || fail "W1 Public Market ${phase} ACK 契约漂移"
+}
+
+# run_w1_public_market_preselection_controller 用两个浏览器阶段点证明登录恢复未创建九类 QuickCreate 事实。
+run_w1_public_market_preselection_controller() {
+  local playwright_pid="$1"
+  local before_login_checkpoint="$w1_public_market_control_dir/before_login.checkpoint.json"
+  local before_submit_checkpoint="$w1_public_market_control_dir/before_submit.checkpoint.json"
+  local fact_file="$evidence_dir/responses/w1-browser-public-market-preselection-database.json"
+  local before_login_counts=""
+  local before_submit_counts=""
+  local browser_skill_id=""
+
+  wait_w1_public_market_checkpoint "$before_login_checkpoint" "before_login" "$playwright_pid"
+  browser_skill_id="$(jq -er '.skill_id' "$before_login_checkpoint")" || \
+    fail "W1 Public Market 登录前 checkpoint 缺少浏览器现场 Skill"
+  before_login_counts="$(read_governance_quickcreate_counts "$postgres_container")" || \
+    fail "W1 Public Market 登录前九类数据库计数读取失败"
+  jq -e '
+    keys == ["binding_audits","binding_sets","bindings","outboxes","projects","receipts","resolution_items","resolutions","session_bindings"]
+    and all(.[]; ((. | type) == "number" and . >= 0 and . == floor))' <<<"$before_login_counts" >/dev/null || \
+    fail "W1 Public Market 登录前九类数据库计数契约漂移"
+  write_w1_public_market_ack "before_login" "$before_login_counts" "$browser_skill_id"
+
+  wait_w1_public_market_checkpoint "$before_submit_checkpoint" "before_submit" "$playwright_pid" "$browser_skill_id"
+  before_submit_counts="$(read_governance_quickcreate_counts "$postgres_container")" || \
+    fail "W1 Public Market 显式提交前九类数据库计数读取失败"
+  jq -ne --argjson before "$before_login_counts" --argjson after "$before_submit_counts" \
+    '$before == $after' >/dev/null || \
+    fail "W1 Public Market 登录预选在显式提交前留下九类数据库增量"
+
+  jq -n --arg consumer "$owner_b_user_id" --arg skill "$browser_skill_id" \
+    --argjson before "$before_login_counts" --argjson after "$before_submit_counts" '
+    {schema_version:"w1.public-market-preselection.database-fact.v1",consumer_id:$consumer,skill_id:$skill,
+      before_login:$before,before_submit:$after,database_counts_unchanged:($before == $after)}' >"$fact_file"
+  jq -e --arg consumer "$owner_b_user_id" --arg skill "$browser_skill_id" '
+    keys == ["before_login","before_submit","consumer_id","database_counts_unchanged","schema_version","skill_id"]
+    and .schema_version == "w1.public-market-preselection.database-fact.v1"
+    and .consumer_id == $consumer and .skill_id == $skill and .database_counts_unchanged
+    and .before_login == .before_submit
+    and (.before_login | keys) == ["binding_audits","binding_sets","bindings","outboxes","projects","receipts","resolution_items","resolutions","session_bindings"]
+    and all(.before_login[]; ((. | type) == "number" and . >= 0 and . == floor))' "$fact_file" >/dev/null || \
+    fail "W1 Public Market 登录预选数据库双阶段事实漂移"
+  write_w1_public_market_ack "before_submit" "$before_submit_counts" "$browser_skill_id"
 }
 
 # assert_w1_skill_market_list_contract 验证公开列表 exact-set、发布快照投影与 no-store。
@@ -905,6 +1082,50 @@ read_existing_w1_session_snapshot_fact() {
   jq -cn --argjson business "$business_fact" --argjson agent "$agent_fact" '{business:$business,agent:$agent}'
 }
 
+# read_public_market_session_snapshot_fact 读取跨发布者 Project 的消费者、Publisher、权限与不可变 Snapshot 事实。
+read_public_market_session_snapshot_fact() {
+  local postgres_container="$1"
+  local business_fact=""
+  local agent_fact=""
+  business_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'project_count', (SELECT COUNT(*) FROM business.project WHERE id = '$w1_public_market_project_id'::uuid AND owner_user_id = '$owner_b_user_id'::uuid),
+      'receipt_count', (SELECT COUNT(*) FROM business.project_creation_receipt WHERE project_id = '$w1_public_market_project_id'::uuid),
+      'binding_set_count', (SELECT COUNT(*) FROM business.project_skill_binding_set WHERE project_id = '$w1_public_market_project_id'::uuid AND owner_user_id = '$owner_b_user_id'::uuid),
+      'binding_set_version', (SELECT set_version FROM business.project_skill_binding_set WHERE project_id = '$w1_public_market_project_id'::uuid),
+      'binding_count', (SELECT COUNT(*) FROM business.project_skill_binding WHERE project_id = '$w1_public_market_project_id'::uuid AND skill_id = '$w1_skill_id'::uuid AND status = 'enabled'),
+      'binding_id', (SELECT id FROM business.project_skill_binding WHERE project_id = '$w1_public_market_project_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'binding_version', (SELECT version FROM business.project_skill_binding WHERE project_id = '$w1_public_market_project_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'resolution_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution WHERE project_id = '$w1_public_market_project_id'::uuid AND owner_user_id = '$owner_b_user_id'::uuid),
+      'resolution_item_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution_item WHERE project_id = '$w1_public_market_project_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'publisher_user_id', (SELECT publisher_user_id FROM business.project_session_skill_resolution_item WHERE project_id = '$w1_public_market_project_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'published_snapshot_id', (SELECT published_snapshot_id FROM business.project_session_skill_resolution_item WHERE project_id = '$w1_public_market_project_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'permission_snapshot_digest', (SELECT encode(permission_snapshot_digest, 'hex') FROM business.project_session_skill_resolution_item WHERE project_id = '$w1_public_market_project_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'governance_epoch', (SELECT governance_epoch FROM business.project_session_skill_resolution_item WHERE project_id = '$w1_public_market_project_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'snapshot_digest', (SELECT encode(snapshot_set_digest, 'hex') FROM business.project_session_skill_resolution WHERE project_id = '$w1_public_market_project_id'::uuid),
+      'content_digest', (SELECT encode(content_digest, 'hex') FROM business.project_session_skill_resolution_item WHERE project_id = '$w1_public_market_project_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'runtime_content_digest', (SELECT encode(runtime_content_digest, 'hex') FROM business.project_session_skill_resolution_item WHERE project_id = '$w1_public_market_project_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'session_binding_ready', EXISTS (SELECT 1 FROM business.project_session_binding WHERE project_id = '$w1_public_market_project_id'::uuid AND agent_session_id = '$w1_public_market_session_id'::uuid AND provisioning_status = 'ready'),
+      'outbox_delivered', EXISTS (SELECT 1 FROM business.project_session_binding AS binding JOIN business.project_session_outbox AS outbox ON outbox.id = binding.command_id WHERE binding.project_id = '$w1_public_market_project_id'::uuid AND outbox.status = 'delivered')
+    );")" || return 1
+  agent_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_agent -Atc "
+    SELECT json_build_object(
+      'session_count', (SELECT COUNT(*) FROM agent.session WHERE id = '$w1_public_market_session_id'::uuid AND project_id = '$w1_public_market_project_id'::uuid AND user_id = '$owner_b_user_id'::uuid),
+      'snapshot_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot WHERE session_id = '$w1_public_market_session_id'::uuid),
+      'snapshot_kind', (SELECT snapshot_kind FROM agent.session_skill_snapshot WHERE session_id = '$w1_public_market_session_id'::uuid),
+      'skill_count', (SELECT skill_count FROM agent.session_skill_snapshot WHERE session_id = '$w1_public_market_session_id'::uuid),
+      'snapshot_digest', (SELECT snapshot_digest FROM agent.session_skill_snapshot WHERE session_id = '$w1_public_market_session_id'::uuid),
+      'item_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_public_market_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'publisher_user_id', (SELECT publisher_user_id FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_public_market_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'published_snapshot_id', (SELECT published_snapshot_id FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_public_market_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'permission_snapshot_digest', (SELECT permission_snapshot_digest FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_public_market_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'governance_epoch', (SELECT governance_epoch FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_public_market_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'content_digest', (SELECT content_digest FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_public_market_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'runtime_content_digest', (SELECT runtime_content_digest FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_public_market_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid)
+    );")" || return 1
+  jq -cn --argjson business "$business_fact" --argjson agent "$agent_fact" '{business:$business,agent:$agent}'
+}
+
 build_w1_skill_payload() {
   local name="$1"
   local suffix="$2"
@@ -935,7 +1156,351 @@ build_w1_skill_payload() {
     }}'
 }
 
-# run_w1_skill_market_active_smoke 验证匿名/带 Cookie 同投影、发布快照隔离、坏游标与跨 Owner 使用门禁。
+# create_w1_owner_private_published_skill 通过真实 Owner/Reviewer HTTP 链创建 Consumer 自有 Published+Active Skill。
+create_w1_owner_private_published_skill() {
+  local postgres_container="$1"
+  local create_response="$w1_temp_dir/mixed-owner-private-create.json"
+  local create_headers="$w1_temp_dir/mixed-owner-private-create.headers"
+  local submit_response="$w1_temp_dir/mixed-owner-private-submit.json"
+  local review_detail="$w1_temp_dir/mixed-owner-private-review-detail.json"
+  local review_headers="$w1_temp_dir/mixed-owner-private-review-detail.headers"
+  local approve_response="$w1_temp_dir/mixed-owner-private-approve.json"
+  local payload=""
+  local draft_etag=""
+  local review_id=""
+  local review_etag=""
+  local status=""
+  local database_fact=""
+
+  w1_owner_private_skill_name="W1 Owner Private mixed ${run_id}"
+  payload="$(build_w1_skill_payload "$w1_owner_private_skill_name" "owner-private-mixed")"
+  : >"$create_headers"
+  status="$(curl_with_body_stdin "$payload" --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    --config "$owner_b_curl_config" -H 'Content-Type: application/json' \
+    -H "Idempotency-Key: mixed-owner-private-create-${run_id}" -D "$create_headers" \
+    -o "$create_response" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/skills')"
+  [[ "$status" == "201" ]] || fail "Mixed owner-private Skill 创建状态为 $status"
+  w1_owner_private_skill_id="$(jq -er '.skill.skill_id | strings | select(test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))' "$create_response")"
+  draft_etag="$(jq -er '.skill.draft_etag | strings | select(test("^\\\"[^\\\"]+\\\"$"))' "$create_response")"
+  [[ "$(response_header_value "$create_headers" 'ETag')" == "$draft_etag" ]] || \
+    fail "Mixed owner-private Skill 创建 ETag 漂移"
+
+  status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -X POST \
+    --config "$owner_b_curl_config" -H "Idempotency-Key: mixed-owner-private-review-${run_id}" \
+    -H "If-Match: $draft_etag" -o "$submit_response" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/skills/${w1_owner_private_skill_id}/reviews")"
+  [[ "$status" == "201" ]] || fail "Mixed owner-private Skill 提交审核状态为 $status"
+  review_id="$(jq -er '.review_id | strings | select(test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))' "$submit_response")"
+
+  : >"$review_headers"
+  status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -D "$review_headers" \
+    -o "$review_detail" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${review_id}")"
+  [[ "$status" == "200" ]] || fail "Mixed owner-private Skill Reviewer 详情状态为 $status"
+  review_etag="$(jq -er '.review.review_etag | strings | select(test("^\\\"[^\\\"]+\\\"$"))' "$review_detail")"
+  [[ "$(response_header_value "$review_headers" 'ETag')" == "$review_etag" ]] || \
+    fail "Mixed owner-private Skill Review ETag 漂移"
+  jq -e --arg review "$review_id" --arg skill "$w1_owner_private_skill_id" --arg owner "$owner_b_user_id" '
+    .review.review_id == $review and .review.skill_id == $skill and .review.owner_user_id == $owner
+    and .review.status == "reviewing" and .review.allowed_actions == ["approve_and_publish"]' \
+    "$review_detail" >/dev/null || fail "Mixed owner-private Skill Reviewer 详情事实漂移"
+
+  status="$(curl_with_body_stdin '{"decision":"approved"}' --silent --show-error --max-time 10 \
+    -b "$owner_b_cookie_jar" -X POST --config "$owner_b_curl_config" -H 'Content-Type: application/json' \
+    -H "Idempotency-Key: mixed-owner-private-approve-${run_id}" -H "If-Match: $review_etag" \
+    -o "$approve_response" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${review_id}/decisions")"
+  [[ "$status" == "200" ]] || fail "Mixed owner-private Skill 批准状态为 $status"
+  jq -e --arg review "$review_id" --arg skill "$w1_owner_private_skill_id" '
+    .review.review_id == $review and .review.skill_id == $skill
+    and .review.status == "approved" and .review.allowed_actions == []' \
+    "$approve_response" >/dev/null || fail "Mixed owner-private Skill 批准结果漂移"
+
+  database_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'skill_count', COUNT(*),
+      'owner_matches', bool_and(owner_user_id = '$owner_b_user_id'::uuid),
+      'published_active', bool_and(current_published_snapshot_id IS NOT NULL AND governance_status = 'active' AND governance_epoch = 1),
+      'published_count', (SELECT COUNT(*) FROM business.skill_published_snapshot WHERE skill_id = '$w1_owner_private_skill_id'::uuid),
+      'approved_review_count', (SELECT COUNT(*) FROM business.skill_review_submission WHERE skill_id = '$w1_owner_private_skill_id'::uuid AND status = 'approved')
+    ) FROM business.skill WHERE id = '$w1_owner_private_skill_id'::uuid;")" || \
+    fail "Mixed owner-private Skill 数据库事实读取失败"
+  jq -e '
+    keys == ["approved_review_count","owner_matches","published_active","published_count","skill_count"]
+    and .skill_count == 1 and .owner_matches and .published_active
+    and .published_count == 1 and .approved_review_count == 1' <<<"$database_fact" >/dev/null || \
+    fail "Mixed owner-private Skill 未形成真实 Published+Active 权威事实"
+}
+
+# run_w1_public_market_mixed_success_smoke 证明同一有效集合同时冻结 owner_private v1 与 public_market v2。
+run_w1_public_market_mixed_success_smoke() {
+  local postgres_container="$1"
+  local response_file="$w1_temp_dir/public-market-mixed-success.json"
+  local bootstrap_file="$w1_temp_dir/public-market-mixed-success-bootstrap.json"
+  local payload=""
+  local status=""
+  local project_id=""
+  local session_id=""
+  local business_fact=""
+  local agent_fact=""
+  local mixed_fact=""
+  local owner_item=""
+  local public_item=""
+  local owner_permission=""
+  local public_permission=""
+  local owner_permission_digest=""
+  local public_permission_digest=""
+
+  create_w1_owner_private_published_skill "$postgres_container"
+  payload="$(jq -cn --arg owner_skill "$w1_owner_private_skill_id" --arg public_skill "$w1_skill_id" '
+    {schema_version:"project_quick_create.v2",initial_prompt:"",enabled_skill_ids:[$owner_skill,$public_skill]}')"
+  status="$(curl_with_body_stdin "$payload" --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    --config "$owner_b_curl_config" -H 'Content-Type: application/json' \
+    -H "Idempotency-Key: public-market-mixed-success-${run_id}" -o "$response_file" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/projects:quick-create')"
+  [[ "$status" == "201" ]] || fail "Public Market 有效 mixed QuickCreate 状态为 $status"
+  project_id="$(jq -er '.project_id | strings | select(test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))' "$response_file")"
+  poll_bootstrap_ready "$project_id" "$bootstrap_file" "$owner_b_cookie_jar" || \
+    fail "Public Market 有效 mixed Project 未进入 ready"
+  session_id="$(jq -er '.session_id | strings | select(test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))' "$bootstrap_file")"
+
+  business_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'project_count', (SELECT COUNT(*) FROM business.project WHERE id = '$project_id'::uuid AND owner_user_id = '$owner_b_user_id'::uuid),
+      'receipt_count', (SELECT COUNT(*) FROM business.project_creation_receipt WHERE project_id = '$project_id'::uuid),
+      'binding_set_count', (SELECT COUNT(*) FROM business.project_skill_binding_set WHERE project_id = '$project_id'::uuid AND owner_user_id = '$owner_b_user_id'::uuid),
+      'binding_count', (SELECT COUNT(*) FROM business.project_skill_binding WHERE project_id = '$project_id'::uuid AND status = 'enabled'),
+      'binding_audit_count', (SELECT COUNT(*) FROM business.project_skill_binding_audit WHERE project_id = '$project_id'::uuid),
+      'resolution_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution WHERE project_id = '$project_id'::uuid AND owner_user_id = '$owner_b_user_id'::uuid AND skill_count = 2),
+      'binding_set_version', (SELECT binding_set_version FROM business.project_session_skill_resolution WHERE project_id = '$project_id'::uuid),
+      'snapshot_digest', (SELECT encode(snapshot_set_digest, 'hex') FROM business.project_session_skill_resolution WHERE project_id = '$project_id'::uuid),
+      'session_binding_ready', EXISTS (SELECT 1 FROM business.project_session_binding WHERE project_id = '$project_id'::uuid AND agent_session_id = '$session_id'::uuid AND provisioning_status = 'ready'),
+      'outbox_delivered', EXISTS (SELECT 1 FROM business.project_session_binding AS session_binding JOIN business.project_session_outbox AS outbox ON outbox.id = session_binding.command_id WHERE session_binding.project_id = '$project_id'::uuid AND outbox.status = 'delivered'),
+      'items', COALESCE((SELECT json_agg(json_build_object(
+        'skill_id', item.skill_id,
+        'publisher_user_id', item.publisher_user_id,
+        'binding_id', item.binding_id,
+        'binding_version', item.binding_version,
+        'published_snapshot_id', item.published_snapshot_id,
+        'permission_snapshot_digest', encode(item.permission_snapshot_digest, 'hex'),
+        'governance_epoch', item.governance_epoch
+      ) ORDER BY item.skill_id)
+        FROM business.project_session_skill_resolution_item AS item
+        WHERE item.project_id = '$project_id'::uuid), '[]'::json)
+    );")" || fail "Public Market 有效 mixed Business 事实读取失败"
+  agent_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_agent -Atc "
+    SELECT json_build_object(
+      'session_count', (SELECT COUNT(*) FROM agent.session WHERE id = '$session_id'::uuid AND project_id = '$project_id'::uuid AND user_id = '$owner_b_user_id'::uuid),
+      'snapshot_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot WHERE session_id = '$session_id'::uuid AND skill_count = 2),
+      'snapshot_digest', (SELECT snapshot_digest FROM agent.session_skill_snapshot WHERE session_id = '$session_id'::uuid),
+      'items', COALESCE((SELECT json_agg(json_build_object(
+        'skill_id', item.skill_id,
+        'publisher_user_id', item.publisher_user_id,
+        'published_snapshot_id', item.published_snapshot_id,
+        'permission_snapshot_digest', item.permission_snapshot_digest,
+        'governance_epoch', item.governance_epoch
+      ) ORDER BY item.skill_id)
+        FROM agent.session_skill_snapshot_item AS item WHERE item.session_id = '$session_id'::uuid), '[]'::json)
+    );")" || fail "Public Market 有效 mixed Agent 事实读取失败"
+  mixed_fact="$(jq -cn --argjson business "$business_fact" --argjson agent "$agent_fact" '{business:$business,agent:$agent}')"
+  owner_item="$(jq -cer --arg skill "$w1_owner_private_skill_id" '.business.items[] | select(.skill_id == $skill)' <<<"$mixed_fact")"
+  public_item="$(jq -cer --arg skill "$w1_skill_id" '.business.items[] | select(.skill_id == $skill)' <<<"$mixed_fact")"
+  owner_permission="$(jq -cn --arg subject "$owner_b_user_id" --arg project "$project_id" \
+    --argjson item "$owner_item" --argjson set_version "$(jq -er '.business.binding_set_version' <<<"$mixed_fact")" '
+    {schema_version:"project_skill_permission_snapshot.v1",decision:"allow",basis:"owner_private",
+      subject_user_id:$subject,project_id:$project,project_owner_user_id:$subject,
+      binding_id:$item.binding_id,binding_version:$item.binding_version,binding_set_version:$set_version,
+      namespace:"user",skill_id:$item.skill_id,skill_owner_user_id:$subject,
+      published_snapshot_id:$item.published_snapshot_id,allowed_actions:["session_snapshot"],
+      policy_ref:"project-skill-permission:owner-private:v1"}')"
+  public_permission="$(jq -cn --arg subject "$owner_b_user_id" --arg project "$project_id" \
+    --arg publisher "$user_id" --argjson item "$public_item" \
+    --argjson set_version "$(jq -er '.business.binding_set_version' <<<"$mixed_fact")" '
+    {schema_version:"project_skill_permission_snapshot.v2",decision:"allow",basis:"public_market",
+      subject_user_id:$subject,project_id:$project,project_owner_user_id:$subject,
+      binding_id:$item.binding_id,binding_version:$item.binding_version,binding_set_version:$set_version,
+      namespace:"user",skill_id:$item.skill_id,skill_owner_user_id:$publisher,
+      published_snapshot_id:$item.published_snapshot_id,allowed_actions:["session_snapshot"],
+      policy_ref:"project-skill-permission:public-market:v1"}')"
+  owner_permission_digest="$(sha256_text "$owner_permission")" || fail "Mixed owner_private Permission digest 计算失败"
+  public_permission_digest="$(sha256_text "$public_permission")" || fail "Mixed public_market Permission digest 计算失败"
+  unset owner_permission public_permission
+
+  jq -e --arg owner_skill "$w1_owner_private_skill_id" --arg public_skill "$w1_skill_id" \
+    --arg consumer "$owner_b_user_id" --arg publisher "$user_id" \
+    --arg owner_digest "$owner_permission_digest" --arg public_digest "$public_permission_digest" '
+    .business.project_count == 1 and .business.receipt_count == 1
+    and .business.binding_set_count == 1 and .business.binding_count == 2 and .business.binding_audit_count == 2
+    and .business.resolution_count == 1 and .business.binding_set_version == 1
+    and .business.session_binding_ready and .business.outbox_delivered
+    and (.business.snapshot_digest | test("^[0-9a-f]{64}$"))
+    and (.business.items | length) == 2
+    and ([.business.items[].skill_id] | sort) == ([$owner_skill,$public_skill] | sort)
+    and any(.business.items[]; .skill_id == $owner_skill and .publisher_user_id == $consumer
+      and .permission_snapshot_digest == $owner_digest and .governance_epoch == 1)
+    and any(.business.items[]; .skill_id == $public_skill and .publisher_user_id == $publisher
+      and .publisher_user_id != $consumer and .permission_snapshot_digest == $public_digest and .governance_epoch == 1)
+    and .agent.session_count == 1 and .agent.snapshot_count == 1 and (.agent.items | length) == 2
+    and .agent.snapshot_digest == .business.snapshot_digest
+    and (. as $fact | all($fact.business.items[]; . as $business_item
+      | any($fact.agent.items[]; .skill_id == $business_item.skill_id
+          and .publisher_user_id == $business_item.publisher_user_id
+          and .published_snapshot_id == $business_item.published_snapshot_id
+          and .permission_snapshot_digest == $business_item.permission_snapshot_digest
+          and .governance_epoch == $business_item.governance_epoch)))' <<<"$mixed_fact" >/dev/null || \
+    fail "Public Market 有效 mixed 未同时形成 owner_private v1 与 public_market v2"
+  jq -n --arg project_id "$project_id" --arg session_id "$session_id" \
+    '{schema_version:"w1.public-market-mixed-binding-success.database-fact.v1",
+      project_id:$project_id,session_id:$session_id,skill_count:2,
+      owner_private_v1:true,public_market_v2:true,business_agent_consistent:true}' \
+    >"$evidence_dir/responses/w1-public-market-mixed-binding-success.json"
+  w1_public_market_mixed_success=true
+}
+
+# run_w1_public_market_mixed_failure_smoke 使用同两个真实 Skill 证明任一不可用时 mixed 集合全量回滚。
+run_w1_public_market_mixed_failure_smoke() {
+  local postgres_container="$1"
+  local response_file="$w1_temp_dir/public-market-mixed-suspended-failure.json"
+  local payload=""
+  local status=""
+  local before_counts=""
+  local after_counts=""
+  local skill_state_fact=""
+
+  [[ "$w1_public_market_mixed_success" == "true" && -n "$w1_owner_private_skill_id" ]] || \
+    fail "Public Market mixed 失败门禁缺少同批有效 mixed 成功事实"
+  skill_state_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'owner_private_exists', EXISTS (SELECT 1 FROM business.skill WHERE id = '$w1_owner_private_skill_id'::uuid AND owner_user_id = '$owner_b_user_id'::uuid AND current_published_snapshot_id IS NOT NULL AND governance_status = 'active'),
+      'public_market_exists', EXISTS (SELECT 1 FROM business.skill WHERE id = '$w1_skill_id'::uuid AND owner_user_id = '$user_id'::uuid AND current_published_snapshot_id IS NOT NULL AND governance_status = 'suspended')
+    );")" || fail "Public Market mixed 失败前 Skill 权威状态读取失败"
+  jq -e 'keys == ["owner_private_exists","public_market_exists"]
+    and .owner_private_exists and .public_market_exists' <<<"$skill_state_fact" >/dev/null || \
+    fail "Public Market mixed 失败门禁没有使用真实 owner-private active + public-market suspended Skill"
+
+  payload="$(jq -cn --arg owner_skill "$w1_owner_private_skill_id" --arg public_skill "$w1_skill_id" '
+    {schema_version:"project_quick_create.v2",initial_prompt:"",enabled_skill_ids:[$owner_skill,$public_skill]}')"
+  before_counts="$(read_governance_quickcreate_counts "$postgres_container")" || \
+    fail "Public Market mixed 失败前九类数据库计数读取失败"
+  status="$(curl_with_body_stdin "$payload" --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    --config "$owner_b_curl_config" -H 'Content-Type: application/json' \
+    -H "Idempotency-Key: public-market-mixed-suspended-${run_id}" -o "$response_file" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/projects:quick-create')"
+  [[ "$status" == "409" ]] || fail "Public Market suspended mixed QuickCreate 状态为 $status"
+  jq -e '.error.code == "PROJECT_SKILL_UNAVAILABLE" and .error.retryable == false' "$response_file" >/dev/null || \
+    fail "Public Market suspended mixed QuickCreate 错误契约漂移"
+  after_counts="$(read_governance_quickcreate_counts "$postgres_container")" || \
+    fail "Public Market mixed 失败后九类数据库计数读取失败"
+  jq -ne --argjson before "$before_counts" --argjson after "$after_counts" '$before == $after' >/dev/null || \
+    fail "Public Market suspended mixed 失败留下九类部分事实"
+  jq -n --arg owner_skill_id "$w1_owner_private_skill_id" --arg public_skill_id "$w1_skill_id" \
+    '{schema_version:"w1.public-market-mixed-binding-failure.database-fact.v1",
+      owner_skill_id:$owner_skill_id,public_skill_id:$public_skill_id,http_status:409,
+      owner_private_active:true,public_market_suspended:true,database_counts_unchanged:true}' \
+    >"$evidence_dir/responses/w1-public-market-mixed-binding-failure.json"
+  w1_public_market_mixed_binding_atomicity=true
+}
+
+# run_w1_public_market_binding_active_smoke 在 active current Published 状态验证真实跨发布者创建、权限身份与幂等。
+run_w1_public_market_binding_active_smoke() {
+  local postgres_container="$1"
+  local intent_key="public-market-binding-${run_id}"
+  local batch_dir="$evidence_dir/responses/w1-public-market-binding-batch"
+  local bootstrap_file="$w1_temp_dir/public-market-binding-bootstrap.json"
+  local replay_file="$w1_temp_dir/public-market-binding-replay.json"
+  local conflict_file="$w1_temp_dir/public-market-binding-conflict.json"
+  local payload=""
+  local conflict_payload=""
+  local replay_status=""
+  local conflict_status=""
+  local batch_request_count=""
+  local batch_success_count=""
+  local batch_created_count=""
+  local snapshot_fact=""
+  local permission_canonical=""
+  local calculated_permission_digest=""
+
+  payload="$(jq -cn --arg skill "$w1_skill_id" \
+    '{schema_version:"project_quick_create.v2",initial_prompt:"",enabled_skill_ids:[$skill]}')"
+  w1_public_market_project_id="$(run_concurrent_quick_create \
+    "$intent_key" "$payload" "$batch_dir" "$owner_b_curl_config" "$owner_b_cookie_jar")"
+  [[ "$w1_public_market_project_id" =~ ^[0-9a-f-]{36}$ ]] || fail "Public Market Binding Project ID 格式无效"
+  batch_request_count="$(find "$batch_dir" -type f -name '*.status' | wc -l | tr -d '[:space:]')"
+  batch_success_count="$(awk '$1 == "200" || $1 == "201" { count++ } END { print count + 0 }' "$batch_dir"/*.status)"
+  batch_created_count="$(awk '$1 == "201" { count++ } END { print count + 0 }' "$batch_dir"/*.status)"
+  poll_bootstrap_ready "$w1_public_market_project_id" "$bootstrap_file" "$owner_b_cookie_jar" || \
+    fail "Public Market Binding Project 未进入 ready"
+  w1_public_market_session_id="$(jq -er '.session_id | strings | select(test("^[0-9a-f-]{36}$"))' "$bootstrap_file")"
+  jq -e --arg project "$w1_public_market_project_id" --arg session "$w1_public_market_session_id" '
+    .project_id == $project and .session_id == $session and .creation_status == "ready"
+    and .input_id == null and .initial_prompt_status == "absent"' "$bootstrap_file" >/dev/null || \
+    fail "Public Market Binding ready 响应漂移"
+
+  replay_status="$(curl_with_body_stdin "$payload" --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    --config "$owner_b_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: $intent_key" \
+    -o "$replay_file" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/projects:quick-create')"
+  [[ "$replay_status" == "200" ]] || fail "Public Market Binding 同义重放状态为 $replay_status"
+  jq -e --arg project "$w1_public_market_project_id" --arg session "$w1_public_market_session_id" '
+    .project_id == $project and .session_id == $session and .creation_status == "ready" and .input_id == null' \
+    "$replay_file" >/dev/null || fail "Public Market Binding 重放未返回冻结 Project/Session"
+  conflict_payload="$(jq -cn '{schema_version:"project_quick_create.v2",initial_prompt:"",enabled_skill_ids:[]}')"
+  conflict_status="$(curl_with_body_stdin "$conflict_payload" --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    --config "$owner_b_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: $intent_key" \
+    -o "$conflict_file" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/projects:quick-create')"
+  [[ "$conflict_status" == "409" ]] || fail "Public Market Binding 同键异义状态为 $conflict_status"
+  jq -e '.error.code == "IDEMPOTENCY_CONFLICT" and .error.retryable == false' "$conflict_file" >/dev/null || \
+    fail "Public Market Binding 同键异义错误契约漂移"
+  [[ "$batch_request_count" == "100" && "$batch_success_count" == "100" && "$batch_created_count" == "1" ]] || \
+    fail "Public Market Binding 并发数量漂移"
+  w1_public_market_idempotency_frozen_replay=true
+
+  run_w1_public_market_mixed_success_smoke "$postgres_container"
+
+  snapshot_fact="$(read_public_market_session_snapshot_fact "$postgres_container")" || \
+    fail "Public Market Binding 消费者/Publisher Snapshot 事实读取失败"
+  permission_canonical="$(jq -cn \
+    --arg subject "$owner_b_user_id" --arg project "$w1_public_market_project_id" \
+    --arg binding "$(jq -er '.business.binding_id' <<<"$snapshot_fact")" \
+    --arg skill "$w1_skill_id" --arg publisher "$user_id" \
+    --arg snapshot "$(jq -er '.business.published_snapshot_id' <<<"$snapshot_fact")" \
+    --argjson binding_version "$(jq -er '.business.binding_version' <<<"$snapshot_fact")" \
+    --argjson binding_set_version "$(jq -er '.business.binding_set_version' <<<"$snapshot_fact")" '
+    {schema_version:"project_skill_permission_snapshot.v2",decision:"allow",basis:"public_market",
+      subject_user_id:$subject,project_id:$project,project_owner_user_id:$subject,
+      binding_id:$binding,binding_version:$binding_version,binding_set_version:$binding_set_version,
+      namespace:"user",skill_id:$skill,skill_owner_user_id:$publisher,published_snapshot_id:$snapshot,
+      allowed_actions:["session_snapshot"],policy_ref:"project-skill-permission:public-market:v1"}')"
+  calculated_permission_digest="$(sha256_text "$permission_canonical")" || \
+    fail "Public Market Permission Canonical digest 计算失败"
+  unset permission_canonical
+  jq -e --arg consumer "$owner_b_user_id" --arg publisher "$user_id" \
+    --arg permission_digest "$calculated_permission_digest" '
+    .business.project_count == 1 and .business.receipt_count == 1
+    and .business.binding_set_count == 1 and .business.binding_set_version == 1
+    and .business.binding_count == 1 and .business.binding_version == 1
+    and .business.resolution_count == 1 and .business.resolution_item_count == 1
+    and .business.publisher_user_id == $publisher and .business.publisher_user_id != $consumer
+    and .business.permission_snapshot_digest == $permission_digest
+    and .business.governance_epoch == 1 and .business.session_binding_ready and .business.outbox_delivered
+    and (.business.snapshot_digest | test("^[0-9a-f]{64}$"))
+    and (.business.content_digest | test("^[0-9a-f]{64}$"))
+    and (.business.runtime_content_digest | test("^[0-9a-f]{64}$"))
+    and .agent.session_count == 1 and .agent.snapshot_count == 1
+    and .agent.snapshot_kind == "published_refs" and .agent.skill_count == 1 and .agent.item_count == 1
+    and .agent.publisher_user_id == $publisher and .agent.publisher_user_id != $consumer
+    and .agent.permission_snapshot_digest == $permission_digest and .agent.governance_epoch == 1
+    and .business.published_snapshot_id == .agent.published_snapshot_id
+    and .business.permission_snapshot_digest == .agent.permission_snapshot_digest
+    and .business.snapshot_digest == .agent.snapshot_digest
+    and .business.content_digest == .agent.content_digest
+    and .business.runtime_content_digest == .agent.runtime_content_digest' <<<"$snapshot_fact" >/dev/null || \
+    fail "Public Market Binding 消费者/Publisher/Permission/Agent Snapshot 事实不一致"
+  printf '%s\n' "$snapshot_fact" >"$evidence_dir/responses/w1-public-market-binding-snapshot.json"
+  w1_public_market_snapshot_before="$snapshot_fact"
+  w1_public_market_permission_identity_separation=true
+  w1_public_market_quickcreate=true
+}
+
+# run_w1_skill_market_active_smoke 验证匿名/带 Cookie 同投影、发布快照隔离、坏游标与 Public Market Binding 入口。
 run_w1_skill_market_active_smoke() {
   local postgres_container="$1"
   local owner_response="$w1_temp_dir/market-owner-detail.json"
@@ -952,16 +1517,10 @@ run_w1_skill_market_active_smoke() {
   local cookie_detail_headers="$w1_temp_dir/market-active-cookie-detail.headers"
   local invalid_response="$w1_temp_dir/market-invalid-cursor.json"
   local invalid_headers="$w1_temp_dir/market-invalid-cursor.headers"
-  local cross_owner_response="$w1_temp_dir/market-cross-owner-quick-create.json"
-  local cross_owner_headers="$w1_temp_dir/market-cross-owner-quick-create.headers"
   local draft_config="$w1_temp_dir/market-draft-update.curl"
-  local cross_owner_config="$w1_temp_dir/market-cross-owner-quick-create.curl"
   local status=""
   local draft_etag=""
   local draft_payload=""
-  local quick_payload=""
-  local before_counts=""
-  local after_counts=""
 
   : >"$owner_headers"
   status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -D "$owner_headers" \
@@ -1021,22 +1580,7 @@ run_w1_skill_market_active_smoke() {
     fail "Market 非法 cursor 未 fail-closed"
   w1_skill_market_cursor_fail_closed=true
 
-  quick_payload="$(jq -cn --arg skill "$w1_skill_id" \
-    '{schema_version:"project_quick_create.v2",initial_prompt:"",enabled_skill_ids:[$skill]}')"
-  before_counts="$(read_governance_quickcreate_counts "$postgres_container")"
-  write_conditional_curl_config "$cross_owner_config" "$owner_b_curl_config" "" "market-cross-owner-${run_id}" || \
-    fail "Market 跨 Owner QuickCreate curl 配置写入失败"
-  : >"$cross_owner_headers"
-  status="$(curl_with_body_stdin "$quick_payload" --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
-    --config "$cross_owner_config" -H 'Content-Type: application/json' -D "$cross_owner_headers" \
-    -o "$cross_owner_response" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/projects:quick-create')"
-  [[ "$status" == "409" ]] || fail "Market 跨 Owner QuickCreate 状态为 $status"
-  assert_w1_skill_market_error_response "$cross_owner_response" "$cross_owner_headers" "PROJECT_SKILL_UNAVAILABLE" || \
-    fail "Market 跨 Owner QuickCreate 错误契约漂移"
-  after_counts="$(read_governance_quickcreate_counts "$postgres_container")"
-  jq -ne --argjson before "$before_counts" --argjson after "$after_counts" '$before == $after' >/dev/null || \
-    fail "Market 跨 Owner QuickCreate 留下部分事实"
-  w1_skill_market_cross_owner_use_blocked=true
+  run_w1_public_market_binding_active_smoke "$postgres_container"
 }
 
 run_w1_skill_smoke() {
@@ -1328,6 +1872,8 @@ run_w1_skill_smoke() {
     >"$evidence_dir/responses/w1-skill-api.json"
 
   local review_queue="$w1_temp_dir/review-queue.json"
+  local review_queue_page="$w1_temp_dir/review-queue-page.json"
+  local review_queue_seen="$w1_temp_dir/review-queue-seen-cursors.txt"
   local review_detail="$w1_temp_dir/review-detail.json"
   local review_detail_headers="$w1_temp_dir/review-detail-headers.txt"
   local publish_first="$w1_temp_dir/publish-first.json"
@@ -1342,18 +1888,44 @@ run_w1_skill_smoke() {
   local decision_status=""
   local decision_replay_status=""
   local detail_header_etag=""
+  local review_queue_cursor=""
+  local review_queue_next_cursor=""
+  local review_queue_found="false"
+  local review_queue_url=""
+  local review_queue_pages=0
 
-  status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
-    -o "$review_queue" -w '%{http_code}' \
-    'http://127.0.0.1:18081/api/v1/admin/skill-reviews?status=reviewing')"
-  queue_status="$status"
-  [[ "$status" == "200" ]] || fail "W1 Reviewer 待审队列状态为 $status"
-  jq -e --arg review "$w1_review_id" --arg skill "$w1_skill_id" '
-    any(.items[];
-      .review_id == $review and .skill_id == $skill and .status == "reviewing"
-      and .allowed_actions == ["approve_and_publish"])
-    and (.next_cursor == null or (.next_cursor | type) == "string")' \
-    "$review_queue" >/dev/null || fail "W1 Reviewer 待审队列未返回冻结审核项"
+  : >"$review_queue_seen"
+  while (( review_queue_pages < 100 )); do
+    review_queue_url='http://127.0.0.1:18081/api/v1/admin/skill-reviews?status=reviewing'
+    if [[ -n "$review_queue_cursor" ]]; then
+      review_queue_url="${review_queue_url}&cursor=${review_queue_cursor}"
+    fi
+    status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+      -o "$review_queue_page" -w '%{http_code}' "$review_queue_url")"
+    queue_status="$status"
+    [[ "$status" == "200" ]] || fail "W1 Reviewer 待审队列第 $((review_queue_pages + 1)) 页状态为 $status"
+    jq -e '
+      keys == ["items","next_cursor","request_id"] and (.items | type) == "array"
+      and (.next_cursor == null or ((.next_cursor | type) == "string" and (.next_cursor | length) > 0))' \
+      "$review_queue_page" >/dev/null || fail "W1 Reviewer 待审队列分页契约漂移"
+    if jq -e --arg review "$w1_review_id" --arg skill "$w1_skill_id" '
+      any(.items[];
+        .review_id == $review and .skill_id == $skill and .status == "reviewing"
+        and .allowed_actions == ["approve_and_publish"])' "$review_queue_page" >/dev/null; then
+      mv "$review_queue_page" "$review_queue"
+      review_queue_found="true"
+      break
+    fi
+    review_queue_next_cursor="$(jq -r '.next_cursor // empty' "$review_queue_page")"
+    [[ -n "$review_queue_next_cursor" ]] || break
+    if grep -Fqx -- "$review_queue_next_cursor" "$review_queue_seen"; then
+      fail "W1 Reviewer 待审队列返回重复 cursor"
+    fi
+    printf '%s\n' "$review_queue_next_cursor" >>"$review_queue_seen"
+    review_queue_cursor="$review_queue_next_cursor"
+    review_queue_pages=$((review_queue_pages + 1))
+  done
+  [[ "$review_queue_found" == "true" ]] || fail "W1 Reviewer 待审队列 100 页内未返回冻结审核项"
 
   : >"$review_detail_headers"
   status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
@@ -1767,6 +2339,14 @@ run_w1_skill_governance_smoke() {
   local headers_file="$w1_temp_dir/governance-headers.txt"
   local conditional_config="$w1_temp_dir/governance-command.curl"
   local quick_config="$w1_temp_dir/governance-quick-create.curl"
+  local stale_quick_config="$w1_temp_dir/public-market-stale-selection.curl"
+  local stale_quick_response="$w1_temp_dir/public-market-stale-selection.json"
+  local toctou_suspend_response="$w1_temp_dir/public-market-toctou-suspend.json"
+  local toctou_suspend_headers="$w1_temp_dir/public-market-toctou-suspend.headers"
+  local toctou_suspend_status_file="$w1_temp_dir/public-market-toctou-suspend.status"
+  local toctou_quick_status_file="$w1_temp_dir/public-market-toctou-quick.status"
+  local toctou_lock_log="$w1_temp_dir/public-market-toctou-lock.log"
+  local toctou_lock_application="w1-toctou-audit-${run_id}"
   local baseline_fact=""
   local final_fact=""
   local existing_session_snapshot_before=""
@@ -1774,6 +2354,7 @@ run_w1_skill_governance_smoke() {
   local offline_resume_before_fact=""
   local offline_resume_after_fact=""
   local before_counts=""
+  local during_counts=""
   local after_counts=""
   local status=""
   local active_etag=""
@@ -1798,6 +2379,14 @@ run_w1_skill_governance_smoke() {
   local existing_session_status=""
   local offline_existing_session_status=""
   local suspended_quick_status=""
+  local stale_quick_status=""
+  local toctou_lock_shell_pid=""
+  local toctou_lock_database_pid=""
+  local toctou_governance_shell_pid=""
+  local toctou_governance_database_pid=""
+  local toctou_quick_shell_pid=""
+  local toctou_quick_database_pid=""
+  local quick_payload=""
   local resume_status=""
   local resumed_quick_status=""
   local offline_status=""
@@ -1822,6 +2411,7 @@ run_w1_skill_governance_smoke() {
   local suspend_replay_matches="false"
   local offline_resume_state_unchanged="false"
   local existing_session_snapshot_unchanged="false"
+  local public_market_snapshot_after=""
 
   local governor_login_payload=""
   governor_login_payload="$(build_login_json "$governor_email" "$governor_password")" || fail "Governor 登录请求构造失败"
@@ -1917,18 +2507,133 @@ run_w1_skill_governance_smoke() {
 
   write_conditional_curl_config "$conditional_config" "$governor_curl_config" "$active_etag" "governance-suspend-${run_id}" || \
     fail "治理 suspend curl 配置写入失败"
-  : >"$headers_file"
-  suspend_status="$(curl_with_body_stdin "{\"action\":\"suspend\",\"reason_code\":\"incident_containment\",\"approval_reference\":\"SMOKE-SUSPEND-${run_id}\"}" \
-    --silent --show-error --max-time 10 -b "$governor_cookie_jar" --config "$conditional_config" -X POST \
-    -H 'Content-Type: application/json' -D "$headers_file" -o "$response_file" -w '%{http_code}' \
-    "http://127.0.0.1:18081/api/v1/admin/skill-governance/${w1_skill_id}/decisions")"
-  [[ "$suspend_status" == "200" ]] || fail "治理 suspend 状态为 $suspend_status"
-  suspended_etag="$(jq -er '.skill.governance_etag' "$response_file")"
-  suspend_time="$(jq -er '.skill.transitioned_at' "$response_file")"
-  suspend_request_id="$(jq -er '.request_id' "$response_file")"
-  assert_governance_decision_response "$response_file" "$headers_file" "suspended" 2 '["resume","offline"]' || \
+  quick_payload="$(jq -cn --arg skill "$w1_skill_id" '{schema_version:"project_quick_create.v2",initial_prompt:"",enabled_skill_ids:[$skill]}')"
+  write_conditional_curl_config "$stale_quick_config" "$owner_b_curl_config" "" "public-market-stale-${run_id}" || \
+    fail "Public Market 陈旧选择 curl 配置写入失败"
+  before_counts="$(read_governance_quickcreate_counts "$postgres_container")" || \
+    fail "治理 TOCTOU 前九类数据库计数读取失败"
+
+  # 先锁住治理事务最后写入的 append-only audit 表，使真实治理 HTTP 已更新 Skill 行但尚未提交。
+  # 随后的真实 QuickCreate 必须在 FOR SHARE 上直接等待该治理事务；释放阻塞后治理先提交，QuickCreate 返回 409。
+  docker exec -e PGAPPNAME="$toctou_lock_application" -e PGOPTIONS='-c statement_timeout=60000' \
+    "$postgres_container" psql -U dora_admin -d dora_business -v ON_ERROR_STOP=1 -qAtc \
+    'BEGIN; LOCK TABLE business.skill_governance_audit IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(45); ROLLBACK;' \
+    >"$toctou_lock_log" 2>&1 &
+  toctou_lock_shell_pid="$!"
+  w1_toctou_lock_shell_pid="$toctou_lock_shell_pid"
+  for _ in $(seq 1 200); do
+    toctou_lock_database_pid="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc \
+      "SELECT pid FROM pg_stat_activity WHERE application_name = '$toctou_lock_application' AND wait_event = 'PgSleep' LIMIT 1;")"
+    w1_toctou_lock_database_pid="$toctou_lock_database_pid"
+    [[ "$toctou_lock_database_pid" =~ ^[0-9]+$ ]] && break
+    kill -0 "$toctou_lock_shell_pid" 2>/dev/null || fail "治理 TOCTOU audit 锁持有进程提前退出"
+    sleep 0.05
+  done
+  [[ "$toctou_lock_database_pid" =~ ^[0-9]+$ ]] || fail "治理 TOCTOU audit 锁未在预算内建立"
+
+  : >"$toctou_suspend_headers"
+  (
+    curl_with_body_stdin "{\"action\":\"suspend\",\"reason_code\":\"incident_containment\",\"approval_reference\":\"SMOKE-SUSPEND-${run_id}\"}" \
+      --silent --show-error --max-time 30 -b "$governor_cookie_jar" --config "$conditional_config" -X POST \
+      -H 'Content-Type: application/json' -D "$toctou_suspend_headers" -o "$toctou_suspend_response" -w '%{http_code}' \
+      "http://127.0.0.1:18081/api/v1/admin/skill-governance/${w1_skill_id}/decisions" \
+      >"$toctou_suspend_status_file"
+  ) &
+  toctou_governance_shell_pid="$!"
+  w1_toctou_governance_shell_pid="$toctou_governance_shell_pid"
+  for _ in $(seq 1 200); do
+    toctou_governance_database_pid="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+      SELECT blocked.pid
+      FROM pg_stat_activity AS blocked
+      WHERE $toctou_lock_database_pid = ANY(pg_blocking_pids(blocked.pid))
+        AND blocked.query ILIKE '%skill_governance_audit%'
+      ORDER BY blocked.pid
+      LIMIT 1;")"
+    [[ "$toctou_governance_database_pid" =~ ^[0-9]+$ ]] && break
+    kill -0 "$toctou_governance_shell_pid" 2>/dev/null || fail "真实治理请求在形成未提交行锁前退出"
+    sleep 0.05
+  done
+  [[ "$toctou_governance_database_pid" =~ ^[0-9]+$ ]] || fail "未观察到真实治理事务等待 audit 锁"
+
+  (
+    curl_with_body_stdin "$quick_payload" --silent --show-error --max-time 30 -b "$owner_b_cookie_jar" \
+      --config "$stale_quick_config" -H 'Content-Type: application/json' -o "$stale_quick_response" \
+      -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/projects:quick-create' \
+      >"$toctou_quick_status_file"
+  ) &
+  toctou_quick_shell_pid="$!"
+  w1_toctou_quick_shell_pid="$toctou_quick_shell_pid"
+  for _ in $(seq 1 200); do
+    toctou_quick_database_pid="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+      SELECT blocked.pid
+      FROM pg_stat_activity AS blocked
+      WHERE $toctou_governance_database_pid = ANY(pg_blocking_pids(blocked.pid))
+        AND blocked.pid <> $toctou_lock_database_pid
+      ORDER BY blocked.pid
+      LIMIT 1;")"
+    [[ "$toctou_quick_database_pid" =~ ^[0-9]+$ ]] && break
+    kill -0 "$toctou_quick_shell_pid" 2>/dev/null || fail "真实 QuickCreate 在治理行锁等待前退出"
+    sleep 0.05
+  done
+  [[ "$toctou_quick_database_pid" =~ ^[0-9]+$ ]] || fail "未观察到 QuickCreate 直接等待未提交治理行锁"
+  kill -0 "$toctou_quick_shell_pid" 2>/dev/null || fail "真实 QuickCreate 未在治理事务提交前保持等待"
+  [[ "$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT COUNT(*)
+    FROM pg_stat_activity AS blocked
+    WHERE $toctou_governance_database_pid = ANY(pg_blocking_pids(blocked.pid));")" == "1" ]] || \
+    fail "治理事务没有形成唯一的 QuickCreate 数据库等待者"
+  during_counts="$(read_governance_quickcreate_counts "$postgres_container")" || \
+    fail "治理 TOCTOU 锁竞争期间九类数据库计数读取失败"
+  jq -ne --argjson before "$before_counts" --argjson during "$during_counts" '$before == $during' >/dev/null || \
+    fail "治理 TOCTOU 锁竞争期间出现已提交的部分 Project 事实"
+
+  [[ "$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc \
+    "SELECT pg_terminate_backend($toctou_lock_database_pid);")" == "t" ]] || \
+    fail "治理 TOCTOU audit 锁释放失败"
+  wait "$toctou_lock_shell_pid" || true
+  toctou_lock_shell_pid=""
+  w1_toctou_lock_shell_pid=""
+  w1_toctou_lock_database_pid=""
+  wait "$toctou_governance_shell_pid" || fail "真实治理锁竞争请求执行失败"
+  toctou_governance_shell_pid=""
+  w1_toctou_governance_shell_pid=""
+  wait "$toctou_quick_shell_pid" || fail "真实 QuickCreate 锁竞争请求执行失败"
+  toctou_quick_shell_pid=""
+  w1_toctou_quick_shell_pid=""
+  suspend_status="$(tr -d '[:space:]' <"$toctou_suspend_status_file")"
+  stale_quick_status="$(tr -d '[:space:]' <"$toctou_quick_status_file")"
+  [[ "$suspend_status" == "200" ]] || fail "治理 TOCTOU suspend 状态为 $suspend_status"
+  [[ "$stale_quick_status" == "409" ]] || fail "治理 TOCTOU QuickCreate 状态为 $stale_quick_status"
+  jq -e '.error.code == "PROJECT_SKILL_UNAVAILABLE" and .error.retryable == false' "$stale_quick_response" >/dev/null || \
+    fail "治理 TOCTOU QuickCreate 错误契约漂移"
+  after_counts="$(read_governance_quickcreate_counts "$postgres_container")" || \
+    fail "治理 TOCTOU 后九类数据库计数读取失败"
+  jq -ne --argjson before "$before_counts" --argjson after "$after_counts" '$before == $after' >/dev/null || \
+    fail "治理 TOCTOU QuickCreate 回滚后留下九类部分事实"
+  jq -n '
+    {schema_version:"w1.public-market-governance-toctou.database-fact.v1",
+      governance_audit_lock_observed:true,governance_transaction_wait_observed:true,
+      quickcreate_waited_on_governance:true,during_database_counts_unchanged:true,
+      governance_http_status:200,quickcreate_http_status:409,
+      quickcreate_error_code:"PROJECT_SKILL_UNAVAILABLE",after_database_counts_unchanged:true}' \
+    >"$evidence_dir/responses/w1-public-market-governance-toctou.json"
+  jq -e '
+    keys == ["after_database_counts_unchanged","during_database_counts_unchanged","governance_audit_lock_observed","governance_http_status","governance_transaction_wait_observed","quickcreate_error_code","quickcreate_http_status","quickcreate_waited_on_governance","schema_version"]
+    and .schema_version == "w1.public-market-governance-toctou.database-fact.v1"
+    and .governance_audit_lock_observed and .governance_transaction_wait_observed
+    and .quickcreate_waited_on_governance and .during_database_counts_unchanged
+    and .governance_http_status == 200 and .quickcreate_http_status == 409
+    and .quickcreate_error_code == "PROJECT_SKILL_UNAVAILABLE" and .after_database_counts_unchanged' \
+    "$evidence_dir/responses/w1-public-market-governance-toctou.json" >/dev/null || \
+    fail "治理 TOCTOU 派生 Evidence 漂移"
+  suspended_etag="$(jq -er '.skill.governance_etag' "$toctou_suspend_response")"
+  suspend_time="$(jq -er '.skill.transitioned_at' "$toctou_suspend_response")"
+  suspend_request_id="$(jq -er '.request_id' "$toctou_suspend_response")"
+  assert_governance_decision_response "$toctou_suspend_response" "$toctou_suspend_headers" "suspended" 2 '["resume","offline"]' || \
     fail "治理 suspend 响应安全契约漂移"
   assert_w1_skill_market_visibility "suspended" false || fail "Skill 暂停后 Market 未同步隐藏"
+  w1_skill_market_stale_selection_fail_closed=true
+  w1_public_market_governance_toctou_closed=true
 
   : >"$headers_file"
   suspend_replay_status="$(curl_with_body_stdin "{\"action\":\"suspend\",\"reason_code\":\"incident_containment\",\"approval_reference\":\"SMOKE-SUSPEND-${run_id}\"}" \
@@ -1948,8 +2653,8 @@ run_w1_skill_governance_smoke() {
     "http://127.0.0.1:18081/api/v1/agent/sessions/${w1_binding_session_id}/workspace")"
   [[ "$existing_session_status" == "200" ]] || fail "Skill 暂停后既有 Session 不可读取，状态为 $existing_session_status"
 
-  local quick_payload=""
-  quick_payload="$(jq -cn --arg skill "$w1_skill_id" '{schema_version:"project_quick_create.v2",initial_prompt:"",enabled_skill_ids:[$skill]}')"
+  run_w1_public_market_mixed_failure_smoke "$postgres_container"
+
   before_counts="$(read_governance_quickcreate_counts "$postgres_container")"
   write_conditional_curl_config "$quick_config" "$user_curl_config" "" "governance-suspended-project-${run_id}" || fail "暂停 QuickCreate curl 配置写入失败"
   suspended_quick_status="$(curl_with_body_stdin "$quick_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
@@ -2155,6 +2860,20 @@ run_w1_skill_governance_smoke() {
   final_ready_status="$(curl --silent --show-error --max-time 10 -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18081/readyz')"
   [[ "$final_ready_status" == "200" ]] || fail "治理事实落库后 Business Readiness 状态为 $final_ready_status"
 
+  status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/agent/sessions/${w1_public_market_session_id}/workspace")"
+  [[ "$status" == "200" ]] || fail "Public Market Skill 下架/新 Draft 后既有消费者 Session 不可读取，状态为 $status"
+  jq -e --arg project "$w1_public_market_project_id" --arg session "$w1_public_market_session_id" '
+    .session.id == $session and .session.project_id == $project and .session.status == "active"' "$response_file" >/dev/null || \
+    fail "Public Market 既有消费者 Session 权威投影漂移"
+  public_market_snapshot_after="$(read_public_market_session_snapshot_fact "$postgres_container")" || \
+    fail "Public Market 治理/新 Draft 后 Snapshot 事实读取失败"
+  jq -ne --argjson before "$w1_public_market_snapshot_before" --argjson after "$public_market_snapshot_after" '
+    $before == $after and $after.business.governance_epoch == 1 and $after.agent.governance_epoch == 1' >/dev/null || \
+    fail "治理或新 Draft 改写了 Public Market 既有消费者 Session Snapshot"
+  printf '%s\n' "$public_market_snapshot_after" >"$evidence_dir/responses/w1-public-market-binding-snapshot-after.json"
+  w1_public_market_publisher_snapshot_frozen=true
+
   governance_produced_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   jq -n --arg run_id "$run_id" --arg produced_at "$governance_produced_at" --arg skill_id "$w1_skill_id" \
     --arg resumed_project_id "$resumed_project_id" --arg offline_review_id "$offline_review_id" \
@@ -2212,9 +2931,11 @@ run_w1_skill_governance_smoke() {
           and $database.published_count == 1 and $database.new_review_reviewing
           and $database.failed_approve_receipts == 0 and $database.failed_approve_audits == 0)
       }}' >"$governance_pending_evidence_file"
-  jq -e '.schema_version == "w1.skill-governance.smoke.evidence.v1" and .status == "pending"
+  jq -e 'keys == ["agent_binary_sha256","assertions","business_binary_sha256","facts","offline_review_id","produced_at","resumed_project_id","run_id","schema_version","skill_id","source_digest_sha256","status"]
+    and .schema_version == "w1.skill-governance.smoke.evidence.v1" and .status == "pending"
+    and (.facts | keys) == ["existing_session_snapshot_unchanged","governance_audits","governance_epoch","governance_receipts","governance_status","linked_governance_facts","offline_resume_state_unchanged","published_count","review_count","strict_governance_linkage"]
     and (.assertions | keys) == ["skill_governance_idempotency","skill_governance_offline_terminal","skill_governance_quickcreate_gate","skill_governor_rbac","skill_governor_revocation"]
-    and all(.assertions[]; . == true)' "$governance_pending_evidence_file" >/dev/null || \
+    and all(.assertions[]; ((. | type) == "boolean" and . == true))' "$governance_pending_evidence_file" >/dev/null || \
     fail "Skill Governance Evidence 含未通过或非闭集断言"
 
   jq -n --arg run_id "$run_id" --arg produced_at "$governance_produced_at" \
@@ -2224,8 +2945,8 @@ run_w1_skill_governance_smoke() {
     --argjson keyset_pagination "$w1_skill_market_keyset_pagination" \
     --argjson governance_visibility "$w1_skill_market_governance_visibility" \
     --argjson cursor_fail_closed "$w1_skill_market_cursor_fail_closed" \
-    --argjson cross_owner_use_blocked "$w1_skill_market_cross_owner_use_blocked" '
-    {schema_version:"w1.skill-market.smoke.evidence.v1",status:"pending",run_id:$run_id,produced_at:$produced_at,
+    --argjson stale_selection_fail_closed "$w1_skill_market_stale_selection_fail_closed" '
+    {schema_version:"w1.skill-market.smoke.evidence.v2",status:"pending",run_id:$run_id,produced_at:$produced_at,
       source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,
       assertions:{
         skill_market_public_read:$public_read,
@@ -2233,16 +2954,51 @@ run_w1_skill_governance_smoke() {
         skill_market_keyset_pagination:$keyset_pagination,
         skill_market_governance_visibility:$governance_visibility,
         skill_market_cursor_fail_closed:$cursor_fail_closed,
-        skill_market_cross_owner_use_blocked:$cross_owner_use_blocked
+        skill_market_stale_selection_fail_closed:$stale_selection_fail_closed
       }}' >"$skill_market_pending_evidence_file"
   jq -e '
     keys == ["assertions","business_binary_sha256","produced_at","run_id","schema_version","source_digest_sha256","status"]
-    and .schema_version == "w1.skill-market.smoke.evidence.v1" and .status == "pending"
-    and (.assertions | keys) == ["skill_market_cross_owner_use_blocked","skill_market_cursor_fail_closed","skill_market_governance_visibility","skill_market_keyset_pagination","skill_market_public_read","skill_market_safe_projection"]
+    and .schema_version == "w1.skill-market.smoke.evidence.v2" and .status == "pending"
+    and (.assertions | keys) == ["skill_market_cursor_fail_closed","skill_market_governance_visibility","skill_market_keyset_pagination","skill_market_public_read","skill_market_safe_projection","skill_market_stale_selection_fail_closed"]
     and all(.assertions[]; ((. | type) == "boolean" and . == true))' "$skill_market_pending_evidence_file" >/dev/null || \
     fail "Skill Market Evidence 含未通过或非闭集断言"
   w1_skill_governance_smoke_ran=true
   w1_skill_market_smoke_ran=true
+}
+
+write_w1_skill_market_binding_evidence() {
+  local produced_at=""
+  produced_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -n --arg run_id "$run_id" --arg produced_at "$produced_at" \
+    --arg source_digest_sha256 "$source_digest_sha256" \
+    --arg business_binary_sha256 "$business_binary_sha256" --arg agent_binary_sha256 "$agent_binary_sha256" \
+    --argjson quickcreate "$w1_public_market_quickcreate" \
+    --argjson identity_separation "$w1_public_market_permission_identity_separation" \
+    --argjson snapshot_frozen "$w1_public_market_publisher_snapshot_frozen" \
+    --argjson governance_toctou "$w1_public_market_governance_toctou_closed" \
+    --argjson mixed_atomicity "$w1_public_market_mixed_binding_atomicity" \
+    --argjson login_recovered "$w1_public_market_login_preselection_recovered" \
+    --argjson idempotency_replay "$w1_public_market_idempotency_frozen_replay" '
+    {schema_version:"w1.skill-market-binding.smoke.evidence.v1",status:"pending",run_id:$run_id,produced_at:$produced_at,
+      source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,
+      agent_binary_sha256:$agent_binary_sha256,
+      assertions:{
+        public_market_quickcreate:$quickcreate,
+        public_market_permission_identity_separation:$identity_separation,
+        public_market_publisher_snapshot_frozen:$snapshot_frozen,
+        public_market_governance_toctou_closed:$governance_toctou,
+        public_market_mixed_binding_atomicity:$mixed_atomicity,
+        public_market_login_preselection_recovered:$login_recovered,
+        public_market_idempotency_frozen_replay:$idempotency_replay
+      }}' >"$skill_market_binding_pending_evidence_file"
+  jq -e '
+    keys == ["agent_binary_sha256","assertions","business_binary_sha256","produced_at","run_id","schema_version","source_digest_sha256","status"]
+    and .schema_version == "w1.skill-market-binding.smoke.evidence.v1" and .status == "pending"
+    and (.assertions | keys) == ["public_market_governance_toctou_closed","public_market_idempotency_frozen_replay","public_market_login_preselection_recovered","public_market_mixed_binding_atomicity","public_market_permission_identity_separation","public_market_publisher_snapshot_frozen","public_market_quickcreate"]
+    and all(.assertions[]; ((. | type) == "boolean" and . == true))' \
+    "$skill_market_binding_pending_evidence_file" >/dev/null || \
+    fail "Public Market Binding Evidence 含未通过或非闭集断言"
+  w1_skill_market_binding_smoke_ran=true
 }
 
 run_w1_browser_frozen_smoke() {
@@ -2252,12 +3008,17 @@ run_w1_browser_frozen_smoke() {
   local review_api_raw="$w1_temp_dir/browser-review-detail.json"
   local bootstrap_file="$evidence_dir/responses/w1-browser-bootstrap.json"
   local verifier_file="$evidence_dir/responses/w1-browser-frozen-agent-verified.json"
+  local preselection_database_file="$evidence_dir/responses/w1-browser-public-market-preselection-database.json"
   local browser_creator_id=""
   local browser_reviewer_id=""
   local browser_skill_id=""
   local browser_review_id=""
   local browser_snapshot_id=""
   local browser_project_id=""
+  local public_market_consumer_id=""
+  local public_market_project_id=""
+  local public_market_session_id=""
+  local public_market_selected_skill_id=""
   local browser_catalog_session_id=""
   local browser_catalog_request_id=""
   local browser_catalog_exact_unavailable=""
@@ -2275,11 +3036,12 @@ run_w1_browser_frozen_smoke() {
   local browser_input_id=""
   local business_fact=""
   local agent_fact=""
+  local public_market_browser_fact=""
 
   [[ -s "$browser_result_file" ]] || fail "W1 浏览器未产出结构化真实结果"
   jq -e --arg creator "$user_id" --arg reviewer "$owner_b_seed_user_id" '
-    keys == ["creator_admin_api_forbidden","creator_admin_denial_request_id","creator_admin_implicit_api_blocked","creator_admin_route_blocked","creator_id","current_draft_summary","market_public_detail","market_public_list","market_published_projection_safe","project_id","published_snapshot_id","review_id","reviewer_id","reviewer_owner_read_not_found","reviewer_owner_resource_facts_not_disclosed","reviewer_owner_route_not_found","reviewer_owner_write_not_found","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
-    and .schema_version == "w1.real-review-result.v4"
+    keys == ["creator_admin_api_forbidden","creator_admin_denial_request_id","creator_admin_implicit_api_blocked","creator_admin_route_blocked","creator_id","current_draft_summary","market_public_detail","market_public_list","market_published_projection_safe","project_id","public_market_consumer_id","public_market_login_preselection_recovered","public_market_pre_submit_quickcreate_count","public_market_project_id","public_market_selected_skill_id","public_market_session_id","public_market_submit_quickcreate_count","published_snapshot_id","review_id","reviewer_id","reviewer_owner_read_not_found","reviewer_owner_resource_facts_not_disclosed","reviewer_owner_route_not_found","reviewer_owner_write_not_found","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
+    and .schema_version == "w1.real-review-result.v5"
     and .creator_admin_route_blocked == true
     and .creator_admin_implicit_api_blocked == true
     and .creator_admin_api_forbidden == true
@@ -2291,7 +3053,12 @@ run_w1_browser_frozen_smoke() {
     and .market_public_detail == true
     and .market_published_projection_safe == true
     and .creator_id == $creator and .reviewer_id == $reviewer and .creator_id != .reviewer_id
-    and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id,.tool_catalog_session_id,.tool_catalog_request_id,.creator_admin_denial_request_id]
+    and .public_market_consumer_id == $reviewer
+    and .public_market_selected_skill_id == .skill_id
+    and .public_market_login_preselection_recovered == true
+    and .public_market_pre_submit_quickcreate_count == 0
+    and .public_market_submit_quickcreate_count == 1
+    and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id,.public_market_project_id,.public_market_session_id,.tool_catalog_session_id,.tool_catalog_request_id,.creator_admin_denial_request_id]
       | all(.[]; test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
     and .tool_catalog_exact_unavailable == true
     and (.submitted_summary | type) == "string" and (.submitted_summary | length) > 0
@@ -2305,6 +3072,10 @@ run_w1_browser_frozen_smoke() {
   browser_review_id="$(jq -er '.review_id' "$browser_result_file")"
   browser_snapshot_id="$(jq -er '.published_snapshot_id' "$browser_result_file")"
   browser_project_id="$(jq -er '.project_id' "$browser_result_file")"
+  public_market_consumer_id="$(jq -er '.public_market_consumer_id' "$browser_result_file")"
+  public_market_project_id="$(jq -er '.public_market_project_id' "$browser_result_file")"
+  public_market_session_id="$(jq -er '.public_market_session_id' "$browser_result_file")"
+  public_market_selected_skill_id="$(jq -er '.public_market_selected_skill_id' "$browser_result_file")"
   browser_catalog_session_id="$(jq -er '.tool_catalog_session_id' "$browser_result_file")"
   browser_catalog_request_id="$(jq -er '.tool_catalog_request_id' "$browser_result_file")"
   browser_catalog_exact_unavailable="$(jq -er '.tool_catalog_exact_unavailable' "$browser_result_file")"
@@ -2313,6 +3084,41 @@ run_w1_browser_frozen_smoke() {
   current_draft_summary="$(jq -er '.current_draft_summary' "$browser_result_file")"
   submitted_summary_b64="$(printf '%s' "$submitted_summary" | base64 | tr -d '\n')"
   current_draft_summary_b64="$(printf '%s' "$current_draft_summary" | base64 | tr -d '\n')"
+
+  jq -e --arg consumer "$public_market_consumer_id" --arg skill "$public_market_selected_skill_id" '
+    keys == ["before_login","before_submit","consumer_id","database_counts_unchanged","schema_version","skill_id"]
+    and .schema_version == "w1.public-market-preselection.database-fact.v1"
+    and .consumer_id == $consumer and .skill_id == $skill and .database_counts_unchanged
+    and .before_login == .before_submit
+    and (.before_login | keys) == ["binding_audits","binding_sets","bindings","outboxes","projects","receipts","resolution_items","resolutions","session_bindings"]' \
+    "$preselection_database_file" >/dev/null || \
+    fail "W1 Browser 登录预选双阶段数据库零增量事实与浏览器身份不一致"
+
+  public_market_browser_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'project_count', (SELECT COUNT(*) FROM business.project WHERE id = '$public_market_project_id'::uuid AND owner_user_id = '$public_market_consumer_id'::uuid),
+      'resolution_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution WHERE project_id = '$public_market_project_id'::uuid AND owner_user_id = '$public_market_consumer_id'::uuid),
+      'item_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution_item WHERE project_id = '$public_market_project_id'::uuid AND skill_id = '$public_market_selected_skill_id'::uuid AND publisher_user_id = '$browser_creator_id'::uuid),
+      'business_permission_digest', (SELECT encode(permission_snapshot_digest, 'hex') FROM business.project_session_skill_resolution_item WHERE project_id = '$public_market_project_id'::uuid AND skill_id = '$public_market_selected_skill_id'::uuid),
+      'session_binding_ready', EXISTS (SELECT 1 FROM business.project_session_binding WHERE project_id = '$public_market_project_id'::uuid AND agent_session_id = '$public_market_session_id'::uuid AND provisioning_status = 'ready')
+    );")" || fail "W1 Browser Public Market Business 事实读取失败"
+  local public_market_browser_agent_fact=""
+  public_market_browser_agent_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_agent -Atc "
+    SELECT json_build_object(
+      'session_count', (SELECT COUNT(*) FROM agent.session WHERE id = '$public_market_session_id'::uuid AND project_id = '$public_market_project_id'::uuid AND user_id = '$public_market_consumer_id'::uuid),
+      'item_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot_item WHERE session_id = '$public_market_session_id'::uuid AND skill_id = '$public_market_selected_skill_id'::uuid AND publisher_user_id = '$browser_creator_id'::uuid),
+      'agent_permission_digest', (SELECT permission_snapshot_digest FROM agent.session_skill_snapshot_item WHERE session_id = '$public_market_session_id'::uuid AND skill_id = '$public_market_selected_skill_id'::uuid)
+    );")" || fail "W1 Browser Public Market Agent 事实读取失败"
+  jq -cn --argjson business "$public_market_browser_fact" --argjson agent "$public_market_browser_agent_fact" \
+    '{business:$business,agent:$agent}' >"$evidence_dir/responses/w1-browser-public-market-binding.json"
+  jq -e '
+    .business.project_count == 1 and .business.resolution_count == 1 and .business.item_count == 1
+    and .business.session_binding_ready and (.business.business_permission_digest | test("^[0-9a-f]{64}$"))
+    and .agent.session_count == 1 and .agent.item_count == 1
+    and .agent.agent_permission_digest == .business.business_permission_digest' \
+    "$evidence_dir/responses/w1-browser-public-market-binding.json" >/dev/null || \
+    fail "W1 Browser Public Market 消费者/Publisher/Agent Snapshot 事实不一致"
+  w1_public_market_login_preselection_recovered=true
 
   creator_admin_denial_audit_fact="$(sed -n '/^{/p' "$evidence_dir/business.log" \
     | jq -cs --arg actor "$browser_creator_id" --arg request "$creator_admin_denial_request_id" '
@@ -2464,6 +3270,7 @@ run_w1_browser_frozen_smoke() {
 
   jq -n --slurpfile api "$evidence_dir/responses/w1-browser-frozen-api.json" \
     --slurpfile browser "$browser_result_file" \
+    --slurpfile preselection "$preselection_database_file" \
     --slurpfile business "$evidence_dir/responses/w1-browser-frozen-business.json" \
     --slurpfile agent "$evidence_dir/responses/w1-browser-frozen-agent.json" \
     --slurpfile verifier "$verifier_file" \
@@ -2474,7 +3281,7 @@ run_w1_browser_frozen_smoke() {
       reviewer_owner_read_not_found:$browser[0].reviewer_owner_read_not_found,
       reviewer_owner_write_not_found:$browser[0].reviewer_owner_write_not_found,
       reviewer_owner_resource_facts_not_disclosed:$browser[0].reviewer_owner_resource_facts_not_disclosed,
-      browser_result_contract:($browser[0].schema_version == "w1.real-review-result.v4"
+      browser_result_contract:($browser[0].schema_version == "w1.real-review-result.v5"
         and $browser[0].creator_admin_route_blocked == true
         and $browser[0].creator_admin_implicit_api_blocked == true
         and $browser[0].creator_admin_api_forbidden == true
@@ -2487,7 +3294,22 @@ run_w1_browser_frozen_smoke() {
         and $browser[0].market_public_list == true
         and $browser[0].market_public_detail == true
         and $browser[0].market_published_projection_safe == true
+        and $browser[0].public_market_consumer_id == $browser[0].reviewer_id
+        and $browser[0].public_market_selected_skill_id == $browser[0].skill_id
+        and $browser[0].public_market_login_preselection_recovered == true
+        and $browser[0].public_market_pre_submit_quickcreate_count == 0
+        and $browser[0].public_market_submit_quickcreate_count == 1
+        and $preselection[0].consumer_id == $browser[0].public_market_consumer_id
+        and $preselection[0].skill_id == $browser[0].public_market_selected_skill_id
+        and $preselection[0].database_counts_unchanged == true
+        and $preselection[0].before_login == $preselection[0].before_submit
         and $api[0].owner_status == 200 and $api[0].review_status == 200),
+      browser_public_market_preselection_database_zero_delta:
+        ($preselection[0].schema_version == "w1.public-market-preselection.database-fact.v1"
+          and $preselection[0].consumer_id == $browser[0].reviewer_id
+          and $preselection[0].skill_id == $browser[0].skill_id
+          and $preselection[0].database_counts_unchanged == true
+          and $preselection[0].before_login == $preselection[0].before_submit),
       formal_api_frozen_revision:($api[0].owner_current_draft_is_b
         and $api[0].review_frozen_submission_is_a and $api[0].review_current_published_is_a),
       business_frozen_revision:($business[0].review_fact_count == 1 and $business[0].published_fact_count == 1
@@ -2515,12 +3337,14 @@ run_w1_browser_frozen_smoke() {
       and $browser[0].reviewer_owner_read_not_found == true
       and $browser[0].reviewer_owner_write_not_found == true
       and $browser[0].reviewer_owner_resource_facts_not_disclosed == true
+      and .browser_public_market_preselection_database_zero_delta
       and .formal_api_frozen_revision
       and .business_frozen_revision and .agent_snapshot_matches_published
       and .digest_business_agent_verifier_consistent and .browser_tool_catalog_static_unavailable)' \
     >"$evidence_dir/responses/w1-browser-frozen-consistency.json"
   jq -e '.browser_result_contract and .formal_api_frozen_revision and .business_frozen_revision
     and .agent_snapshot_matches_published and .digest_business_agent_verifier_consistent
+    and .browser_public_market_preselection_database_zero_delta
     and .browser_tool_catalog_static_unavailable and .creator_admin_denial_audited
     and .reviewer_owner_route_not_found and .reviewer_owner_read_not_found
     and .reviewer_owner_write_not_found and .reviewer_owner_resource_facts_not_disclosed
@@ -2546,6 +3370,9 @@ fi
 if [[ -n "$skill_market_evidence_file" ]]; then
   rm -f "$skill_market_evidence_file" "${skill_market_evidence_file}.tmp"
 fi
+if [[ -n "$skill_market_binding_evidence_file" ]]; then
+  rm -f "$skill_market_binding_evidence_file" "${skill_market_binding_evidence_file}.tmp"
+fi
 if [[ -n "$legacy_evidence_file" ]]; then
   rm -f "$legacy_evidence_file"
 fi
@@ -2563,8 +3390,11 @@ source_manifest_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-source-manifest.XXXXXX"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   w1_temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/dora-w1-skill.XXXXXX")"
   chmod 700 "$w1_temp_dir"
+  w1_public_market_control_dir="$w1_temp_dir/public-market-preselection-control"
+  mkdir -m 700 "$w1_public_market_control_dir"
   governance_pending_evidence_file="$evidence_dir/governance-evidence.pending.json"
   skill_market_pending_evidence_file="$evidence_dir/skill-market-evidence.pending.json"
+  skill_market_binding_pending_evidence_file="$evidence_dir/skill-market-binding-evidence.pending.json"
   governor_cookie_jar="$w1_temp_dir/governor-cookie.jar"
   governor_curl_config="$w1_temp_dir/governor-csrf.curl"
   governor_login_response_temp="$w1_temp_dir/governor-login.json"
@@ -3229,6 +4059,7 @@ if [[ "$w1_browser_smoke_enabled" == "1" ]]; then
     fail "W1 Reviewer 浏览器门禁缺少 Creator/Reviewer 凭据"
   w1_browser_result="$w1_temp_dir/browser-real-review-result.json"
   rm -f "$w1_browser_result"
+  rm -f "$w1_public_market_control_dir"/*.json "$w1_public_market_control_dir"/*.tmp
   (
     cd "$repo_root/frontend"
     DORA_E2E_USER_EMAIL="$DORA_SMOKE_USER_EMAIL" \
@@ -3238,12 +4069,19 @@ if [[ "$w1_browser_smoke_enabled" == "1" ]]; then
     DORA_E2E_BUSINESS_API_TARGET="http://127.0.0.1:18081" \
     DORA_E2E_OUTPUT_DIR="../.local/playwright/w1-skill-foundation" \
     DORA_E2E_W1_RESULT_PATH="$w1_browser_result" \
-    npm run test:e2e:w1-real-review
-  ) >"$evidence_dir/frontend-w1-playwright.log" 2>&1 || {
+    DORA_E2E_W1_PUBLIC_MARKET_CONTROL_DIR="$w1_public_market_control_dir" \
+    exec npm run test:e2e:w1-real-review
+  ) >"$evidence_dir/frontend-w1-playwright.log" 2>&1 &
+  w1_browser_playwright_pid="$!"
+  run_w1_public_market_preselection_controller "$w1_browser_playwright_pid"
+  if ! wait "$w1_browser_playwright_pid"; then
+    w1_browser_playwright_pid=""
     sed -n '1,240p' "$evidence_dir/frontend-w1-playwright.log" >&2
     fail "W1 Creator→Reviewer→QuickCreate v2 浏览器真实链路失败"
-  }
+  fi
+  w1_browser_playwright_pid=""
   run_w1_browser_frozen_smoke "$postgres_container" "$w1_browser_result"
+  write_w1_skill_market_binding_evidence
   w1_browser_smoke_ran=true
 fi
 
@@ -3317,6 +4155,7 @@ produced_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   [[ "$w1_skill_smoke_ran" == "true" ]] || fail "W1 Skill API/数据库/跨 Owner 门禁未完整执行"
   [[ "$w1_skill_binding_smoke_ran" == "true" ]] || fail "W1 Project Skill Binding 跨模块门禁未完整执行"
+  [[ "$w1_skill_market_binding_smoke_ran" == "true" ]] || fail "W1 Public Market Binding 门禁未完整执行"
   [[ "$w1_reviewer_rbac_smoke_ran" == "true" ]] || fail "W1 Reviewer RBAC/HTTP 发布门禁未完整执行"
   [[ "$w1_reviewer_revocation_smoke_ran" == "true" ]] || fail "W1 Reviewer 撤权即时失效门禁未完整执行"
   [[ "$w1_browser_smoke_ran" == "true" ]] || fail "W1-C2 @w1-real-review 真实浏览器门禁未完整执行"
@@ -3445,14 +4284,26 @@ fi
 
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   jq -e '
-    .schema_version == "w1.skill-foundation.smoke.evidence.v3"
+    keys == ["agent_binary_sha256","assertions","business_binary_sha256","produced_at","project_skill_binding","run_id","schema_version","skill_foundation","source_digest_sha256","status","transport_prerequisite"]
+    and .schema_version == "w1.skill-foundation.smoke.evidence.v3"
     and .status == "pending"
+    and (.run_id | type) == "string" and (.run_id | length) > 0
+    and (.produced_at | type) == "string"
+    and (.source_digest_sha256 | test("^[0-9a-f]{64}$"))
+    and (.business_binary_sha256 | test("^[0-9a-f]{64}$"))
+    and (.agent_binary_sha256 | test("^[0-9a-f]{64}$"))
+    and (.transport_prerequisite | type) == "object"
+    and (.skill_foundation | type) == "object"
+    and (.project_skill_binding | type) == "object"
+    and (.assertions | keys) == ["agent_v2_snapshot_encrypted","browser_agent_snapshot_matches_published","browser_business_frozen_revision","browser_digest_business_agent_verifier_consistent","browser_formal_api_frozen_revision","browser_review_publish_quickcreate_v2","browser_tool_catalog_static_unavailable","browser_ui","business_v2_envelope_cleared","content_digest_business_agent_verifier_consistent","cover_asset_null_only","cross_owner_not_found","governance_audit_count","if_match_update","logout_revoked","logout_workspace_denied","missing_array_failed_closed","no_physical_foreign_keys","null_array_failed_closed","owner_list_and_detail","public_tool_refs_failed_closed","published_snapshot_count","quick_create_v2_concurrent_requests","quick_create_v2_conflict","quick_create_v2_replay","receipt_audit_request_id_consistent","review_approve_and_publish","review_approve_replay","review_count","review_frozen_definition","review_if_match","review_replay_200","review_strong_etag","review_submit_201","reviewer_rbac","reviewer_revocation","revision_count","runtime_content_digest_business_agent_verifier_consistent","skill_count_business_agent_verifier_consistent","skill_create_201","skill_create_conflict_409","skill_create_replay_200","snapshot_digest_business_agent_verifier_consistent","stale_etag_conflict","tool_catalog_cross_owner_not_found","transport_prerequisite","v1_v2_session_isolation"]
     and .assertions.revision_count == 2
     and .assertions.review_count == 1
     and .assertions.published_snapshot_count == 1
     and .assertions.governance_audit_count == 1
     and .assertions.quick_create_v2_concurrent_requests == 100
-    and (.assertions | length) == 47
+    and all([.assertions.revision_count,.assertions.review_count,.assertions.published_snapshot_count,
+      .assertions.governance_audit_count,.assertions.quick_create_v2_concurrent_requests][];
+      ((. | type) == "number" and . >= 0 and . == floor))
     and ([.assertions | to_entries[]
       | select(.key != "revision_count"
         and .key != "review_count"
@@ -3465,20 +4316,51 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   [[ "$w1_skill_governance_smoke_ran" == "true" && -s "$governance_pending_evidence_file" ]] || \
     fail "W1 Governance Smoke 未产生独立 pending Evidence"
   jq -e '
-    .schema_version == "w1.skill-governance.smoke.evidence.v1"
+    keys == ["agent_binary_sha256","assertions","business_binary_sha256","facts","offline_review_id","produced_at","resumed_project_id","run_id","schema_version","skill_id","source_digest_sha256","status"]
+    and .schema_version == "w1.skill-governance.smoke.evidence.v1"
     and .status == "pending"
+    and (.run_id | type) == "string" and (.run_id | length) > 0
+    and (.produced_at | type) == "string"
+    and (.source_digest_sha256 | test("^[0-9a-f]{64}$"))
+    and (.business_binary_sha256 | test("^[0-9a-f]{64}$"))
+    and (.agent_binary_sha256 | test("^[0-9a-f]{64}$"))
+    and all([.skill_id,.resumed_project_id,.offline_review_id][];
+      ((. | type) == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
+    and (.facts | keys) == ["existing_session_snapshot_unchanged","governance_audits","governance_epoch","governance_receipts","governance_status","linked_governance_facts","offline_resume_state_unchanged","published_count","review_count","strict_governance_linkage"]
+    and (.facts.governance_status | type) == "string"
+    and all([.facts.governance_epoch,.facts.governance_receipts,.facts.governance_audits,
+      .facts.linked_governance_facts,.facts.published_count,.facts.review_count][];
+      ((. | type) == "number" and . >= 0 and . == floor))
+    and all([.facts.strict_governance_linkage,.facts.offline_resume_state_unchanged,
+      .facts.existing_session_snapshot_unchanged][]; ((. | type) == "boolean" and . == true))
     and (.assertions | keys) == ["skill_governance_idempotency","skill_governance_offline_terminal","skill_governance_quickcreate_gate","skill_governor_rbac","skill_governor_revocation"]
-    and all(.assertions[]; . == true)' "$governance_pending_evidence_file" >/dev/null || \
+    and all(.assertions[]; ((. | type) == "boolean" and . == true))' "$governance_pending_evidence_file" >/dev/null || \
     fail "W1 Governance Evidence 含未通过断言，禁止发布 passed summary"
   [[ "$w1_skill_market_smoke_ran" == "true" && -s "$skill_market_pending_evidence_file" ]] || \
     fail "W1 Skill Market Smoke 未产生独立 pending Evidence"
   jq -e '
     keys == ["assertions","business_binary_sha256","produced_at","run_id","schema_version","source_digest_sha256","status"]
-    and .schema_version == "w1.skill-market.smoke.evidence.v1"
+    and .schema_version == "w1.skill-market.smoke.evidence.v2"
     and .status == "pending"
-    and (.assertions | keys) == ["skill_market_cross_owner_use_blocked","skill_market_cursor_fail_closed","skill_market_governance_visibility","skill_market_keyset_pagination","skill_market_public_read","skill_market_safe_projection"]
+    and (.assertions | keys) == ["skill_market_cursor_fail_closed","skill_market_governance_visibility","skill_market_keyset_pagination","skill_market_public_read","skill_market_safe_projection","skill_market_stale_selection_fail_closed"]
     and all(.assertions[]; ((. | type) == "boolean" and . == true))' "$skill_market_pending_evidence_file" >/dev/null || \
     fail "W1 Skill Market Evidence 含未通过断言，禁止发布 passed summary"
+  [[ "$w1_skill_market_binding_smoke_ran" == "true" && -s "$skill_market_binding_pending_evidence_file" ]] || \
+    fail "W1 Public Market Binding Smoke 未产生独立 pending Evidence"
+  jq -e '
+    keys == ["agent_binary_sha256","assertions","business_binary_sha256","produced_at","run_id","schema_version","source_digest_sha256","status"]
+    and .schema_version == "w1.skill-market-binding.smoke.evidence.v1"
+    and .status == "pending"
+    and (.assertions | keys) == ["public_market_governance_toctou_closed","public_market_idempotency_frozen_replay","public_market_login_preselection_recovered","public_market_mixed_binding_atomicity","public_market_permission_identity_separation","public_market_publisher_snapshot_frozen","public_market_quickcreate"]
+    and all(.assertions[]; ((. | type) == "boolean" and . == true))' \
+    "$skill_market_binding_pending_evidence_file" >/dev/null || \
+    fail "W1 Public Market Binding Evidence 含未通过断言，禁止发布 passed summary"
+  jq -ne --slurpfile foundation "$pending_evidence_file" --slurpfile governance "$governance_pending_evidence_file" \
+    --slurpfile market "$skill_market_pending_evidence_file" --slurpfile binding "$skill_market_binding_pending_evidence_file" '
+    [$foundation[0],$governance[0],$market[0],$binding[0]] as $evidence
+    | all($evidence[]; .run_id == $evidence[0].run_id
+        and .source_digest_sha256 == $evidence[0].source_digest_sha256)' >/dev/null || \
+    fail "W1 四份 Evidence 的 run_id/source digest 不一致"
 elif [[ "$browser_smoke_ran" == "true" ]]; then
   jq -e '
     .schema_version == "w05.workspace-transport.smoke.evidence.v3"
@@ -3526,12 +4408,16 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   assert_evidence_excludes_literal "$w1_updated_skill_name" "W1 Skill 更新后原始名称"
   assert_evidence_excludes_literal "$w1_market_draft_name" "W1 Skill Market 隔离草稿名称"
   assert_evidence_excludes_literal "$w1_offline_draft_name" "W1 Skill Offline 草稿名称"
+  assert_evidence_excludes_literal "$w1_owner_private_skill_name" "W1 Mixed Owner-private Skill 原始名称"
   assert_evidence_excludes_literal "$w1_binding_prompt" "W1 Binding 完整 Prompt"
   assert_evidence_excludes_regex '"definition"[[:space:]]*:' "W1 Skill 完整定义正文"
   assert_evidence_excludes_regex '(?i)"(payload_nonce|payload_ciphertext|runtime_content_ciphertext)"[[:space:]]*:' "W1 密文或 Nonce 字段"
   assert_evidence_excludes_regex '"governance_etag"[[:space:]]*:|"sg1-' "Skill Governance ETag"
   assert_evidence_excludes_regex 'incident_containment|incident_resolved|repeated_violation|risk_cleared|SMOKE-(SUSPEND|RESUME|OFFLINE)' "Skill Governance 原因或审批引用"
   assert_evidence_excludes_regex 'governance-(suspend|resume|offline|suspended-project|resumed-project|offline-project)' "Skill Governance 原始幂等键"
+  assert_evidence_excludes_regex '(public-market-(binding|stale)|public-market-mixed-(success|suspended)|mixed-owner-private-(create|review|approve))-[0-9]' "Public Market Binding 原始幂等键"
+  assert_evidence_excludes_regex 'W1 Public Market QuickCreate [0-9]+' "W1 Public Market 浏览器完整 Prompt"
+  assert_evidence_excludes_regex '"schema_version":"project_skill_permission_snapshot\.v2"' "Public Market Permission Canonical"
   if [[ -n "${BUSINESS_PROJECT_PROMPT_KEY_BASE64:-}" ]]; then
     assert_evidence_excludes_literal "$BUSINESS_PROJECT_PROMPT_KEY_BASE64" "Business Prompt 密钥材料"
   fi
@@ -3545,11 +4431,14 @@ jq '.status = "passed"' "$pending_evidence_file" >"${evidence_file}.tmp"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   jq '.status = "passed"' "$governance_pending_evidence_file" >"${governance_evidence_file}.tmp"
   jq '.status = "passed"' "$skill_market_pending_evidence_file" >"${skill_market_evidence_file}.tmp"
+  jq '.status = "passed"' "$skill_market_binding_pending_evidence_file" >"${skill_market_binding_evidence_file}.tmp"
 fi
 rm -f "$pending_evidence_file"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   rm -f "$governance_pending_evidence_file"
   rm -f "$skill_market_pending_evidence_file"
+  rm -f "$skill_market_binding_pending_evidence_file"
+  mv "${skill_market_binding_evidence_file}.tmp" "$skill_market_binding_evidence_file"
   mv "${skill_market_evidence_file}.tmp" "$skill_market_evidence_file"
   mv "${governance_evidence_file}.tmp" "$governance_evidence_file"
 fi

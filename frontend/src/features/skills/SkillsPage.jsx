@@ -86,7 +86,7 @@ export function SkillsPage({
       </div>
 
       <p className="skill-market-page__scope" role="note">
-        当前仅提供基础预览；搜索、收藏、费用、指标和跨发布者使用尚未开放。
+        当前提供公开预览与详情页创作预选；搜索、收藏、费用和指标尚未开放。
       </p>
 
       {status === 'loading' ? (

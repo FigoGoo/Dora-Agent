@@ -555,6 +555,7 @@ Dashboard 支持总览和单个 Skill 视图，并支持时间范围筛选，不
 | USR-SKILL-003 | Given Skill 已有发布快照且草稿正在编辑或审核；When 查看“我的 Skill” | Skill 仍归“已发布”，只标记“有未发布修改/审核信息”，不展示版本明细或版本差异。 |
 | USR-SKILL-004 | Given 用户在旧 Session 运行期间再次发布 Skill；When 旧 Session 与新 Session 分别继续创作 | 旧 Session 保持原快照，新 Session 使用新发布内容，界面不出现版本选择。 |
 | USR-SKILL-005 | Given 游客或登录用户进入 Skill 市场；When 浏览最新列表并打开详情 | 只展示当前已发布且治理 active 的安全公开投影；草稿、运行指令、内部快照/修订/digest、治理与审核事实不泄漏，暂停或下架后下一次请求立即不可见。 |
+| USR-SKILL-006 | Given 游客或登录用户打开其他发布者 current-published + active 的 Skill 详情；When 选择“使用此 Skill 创作”、完成必要登录并显式开始创作 | App 级内存恢复同一安全预选并通过 QuickCreate v2 新建 Project/Session；登录本身不自动创建，重复点击与技术重试保持冻结意图，失效时安全失败，且不产生收藏、安装或最近使用语义。 |
 | USR-TOOL-001 | Given 登录用户进入 Project 并打开工具箱；When 目录加载 | 按顺序展示六个必备 Graph Tool；前置条件不足的工具显示原因，不能无提示消失。 |
 | USR-TOOL-002 | Given 用户显式选择某个 Graph Tool；When 补齐输入并提交 | 运行冻结所选 `tool_key`，展示状态、费用和结果；Agent 不能静默替换工具。 |
 | USR-TOOL-003 | Given 用户没有 Storyboard；When 独立使用提示词写法、媒体生成或视频剪辑 | 可以产生 Project 内独立结果，且不创建或覆盖 Active Storyboard。 |

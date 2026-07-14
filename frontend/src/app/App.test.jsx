@@ -9,6 +9,7 @@ import {
   skillMarketListItemFixture
 } from '../test/skillMarketFixtures.js';
 import { skillReviewQueueResponseFixture } from '../test/skillReviewFixtures.js';
+import { AUTH_SESSION_EXPIRED_EVENT } from '../platform/auth/authSession.js';
 import { App } from './App.jsx';
 
 beforeEach(() => {
@@ -427,7 +428,135 @@ describe('DORAIGC static client pages', () => {
     expect(fetchMock.mock.calls.filter(([input]) => (
       requestPath(input) === `/api/v1/skill-market/${SKILL_MARKET_IDS.skill}`
     ))).toHaveLength(1);
-    expect(screen.queryByRole('button', { name: /立即使用/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '登录后使用此 Skill' })).toBeInTheDocument();
+  });
+
+  it('recovers an anonymous Market preselection after login without creating until explicit submit', async () => {
+    window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+    const fetchMock = mockAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '登录后使用此 Skill' }));
+    const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
+    expect(within(dialog).getByText('短片提示词助手')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/projects:quick-create')).toHaveLength(0);
+
+    await submitLoginModal(user, dialog);
+    expect(await screen.findByLabelText('已预选市场 Skill')).toHaveTextContent('短片提示词助手');
+    expect(screen.getByRole('button', { name: '移除市场 Skill 短片提示词助手' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/projects:quick-create')).toHaveLength(0);
+
+    await user.type(screen.getByPlaceholderText('由一个想法或故事开始...'), '使用公开 Skill 创作');
+    await user.click(screen.getByRole('button', { name: '开始创作' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => (
+      requestPath(input) === '/api/v1/projects:quick-create'
+    ))).toHaveLength(1));
+    const quickCall = fetchMock.mock.calls.find(([input]) => requestPath(input) === '/api/v1/projects:quick-create');
+    expect(JSON.parse(quickCall[1].body)).toEqual({
+      schema_version: 'project_quick_create.v2',
+      initial_prompt: '使用公开 Skill 创作',
+      enabled_skill_ids: [SKILL_MARKET_IDS.skill]
+    });
+  });
+
+  it('deduplicates a Market selection and combines it with a refreshed Owner selection in sorted v2 form', async () => {
+    window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+    const ownerSkill = ownerSkillFixture({
+      content_status: 'published',
+      has_unpublished_changes: false,
+      governance_status: 'active'
+    });
+    const fetchMock = mockAppFetch({ authenticatedBootstrap: true, ownerSkills: [ownerSkill] });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '使用此 Skill 创作' }));
+    expect(await screen.findByLabelText('已预选市场 Skill')).toHaveTextContent('短片提示词助手');
+    expect(screen.getByRole('button', { name: 'Skill，已选择 1 个' })).toBeInTheDocument();
+
+    act(() => {
+      window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await user.click(await screen.findByRole('button', { name: '使用此 Skill 创作' }));
+    const deduplicatedMarketSelection = await screen.findByLabelText('已预选市场 Skill');
+    expect(within(deduplicatedMarketSelection).getAllByText('短片提示词助手')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Skill，已选择 1 个' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Skill，已选择 1 个' }));
+    const picker = screen.getByRole('dialog', { name: '选择 QuickCreate Skill' });
+    await user.click(await within(picker).findByRole('checkbox', { name: '选择 剧情短片 Skill' }));
+    expect(screen.getByRole('button', { name: 'Skill，已选择 2 个' })).toBeInTheDocument();
+    await user.click(within(picker).getByRole('button', { name: '刷新 Skill 列表' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/skills')).toHaveLength(2));
+    expect(screen.getByRole('button', { name: 'Skill，已选择 2 个' })).toBeInTheDocument();
+    expect(screen.getByLabelText('已预选市场 Skill')).toHaveTextContent('短片提示词助手');
+
+    await user.type(screen.getByPlaceholderText('由一个想法或故事开始...'), '混合 Skill 创作');
+    await user.click(screen.getByRole('button', { name: '开始创作' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/projects:quick-create')).toHaveLength(1));
+    const quickCall = fetchMock.mock.calls.find(([input]) => requestPath(input) === '/api/v1/projects:quick-create');
+    expect(JSON.parse(quickCall[1].body)).toEqual({
+      schema_version: 'project_quick_create.v2',
+      initial_prompt: '混合 Skill 创作',
+      enabled_skill_ids: [SKILL_MARKET_IDS.skill, SKILL_IDS.skill]
+    });
+  });
+
+  it('drops the Market preselection when its login is superseded by a newer authority epoch', async () => {
+    window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+    const baseFetch = mockAppFetch();
+    let resolveLogin;
+    const fetchMock = vi.fn((input, options = {}) => {
+      const path = requestPath(input);
+      const method = options.method || 'GET';
+      if (path === '/api/v1/auth/session' && method === 'POST') {
+        return new Promise((resolve) => {
+          resolveLogin = () => resolve(jsonResponse(mockAuthPayload()));
+        });
+      }
+      return baseFetch(input, options);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '登录后使用此 Skill' }));
+    const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
+    await submitLoginModal(user, dialog);
+    await waitFor(() => expect(resolveLogin).toBeTypeOf('function'));
+
+    act(() => window.dispatchEvent(new CustomEvent(AUTH_SESSION_EXPIRED_EVENT, { detail: { status: 401 } })));
+    resolveLogin();
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '登录后继续创作' })).not.toBeInTheDocument());
+    expect(window.location.pathname).toBe(`/skills/${SKILL_MARKET_IDS.skill}`);
+    expect(screen.queryByLabelText('已预选市场 Skill')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/projects:quick-create')).toHaveLength(0);
+  });
+
+  it('drops the pending Market login selection when browser navigation leaves its source flow', async () => {
+    window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+    const fetchMock = mockAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '登录后使用此 Skill' }));
+    expect(screen.getByRole('dialog', { name: '登录后继续创作' })).toBeInTheDocument();
+
+    act(() => {
+      window.history.pushState({}, '', '/skills');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '登录后继续创作' })).not.toBeInTheDocument());
+    expect(await screen.findByRole('heading', { name: 'Skill 市场', level: 2 })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/projects:quick-create')).toHaveLength(0);
   });
 
   it.each([
@@ -3372,7 +3501,7 @@ describe('DORAIGC static client pages', () => {
     await user.click(screen.getByRole('button', { name: 'Skill 市场' }));
     expect(screen.getByRole('heading', { name: 'Skill 市场', level: 2 })).toBeInTheDocument();
     expect(await screen.findAllByTestId('skill-market-card')).toHaveLength(1);
-    expect(screen.getByText(/搜索、收藏、费用、指标和跨发布者使用尚未开放/)).toBeInTheDocument();
+    expect(screen.getByText(/公开预览与详情页创作预选/)).toBeInTheDocument();
   });
 });
 

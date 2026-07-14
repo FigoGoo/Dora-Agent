@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { writeFile } from 'node:fs/promises';
+import { chmod, readFile, rename, writeFile } from 'node:fs/promises';
 import { ownerSkillFixture, SKILL_IDS } from '../src/test/skillFixtures.js';
 
 const email = process.env.DORA_E2E_USER_EMAIL || '';
@@ -7,6 +7,21 @@ const password = process.env.DORA_E2E_USER_PASSWORD || '';
 const reviewerEmail = process.env.DORA_E2E_REVIEWER_EMAIL || '';
 const reviewerPassword = process.env.DORA_E2E_REVIEWER_PASSWORD || '';
 const w1ResultPath = process.env.DORA_E2E_W1_RESULT_PATH || '';
+const publicMarketControlDir = process.env.DORA_E2E_W1_PUBLIC_MARKET_CONTROL_DIR || '';
+
+const PUBLIC_MARKET_CHECKPOINT_SCHEMA = 'w1.public-market-preselection.checkpoint.v1';
+const PUBLIC_MARKET_ACK_SCHEMA = 'w1.public-market-preselection.database-ack.v1';
+const QUICK_CREATE_DATABASE_COUNT_KEYS = [
+  'binding_audits',
+  'binding_sets',
+  'bindings',
+  'outboxes',
+  'projects',
+  'receipts',
+  'resolution_items',
+  'resolutions',
+  'session_bindings'
+];
 
 const capabilityLabels = [
   '流程规划',
@@ -40,6 +55,74 @@ function isStrictOwnerNotFoundResponse(result, pathname) {
     && !Array.isArray(error?.details)
     && Object.keys(error.details).length === 0
     && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(error?.request_id || '');
+}
+
+async function writePublicMarketControlJSON(name, payload) {
+  const path = `${publicMarketControlDir}/${name}`;
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  await writeFile(temporaryPath, `${JSON.stringify(payload)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await chmod(temporaryPath, 0o600);
+  await rename(temporaryPath, path);
+}
+
+async function waitForPublicMarketControlJSON(name, timeout = 30_000) {
+  const path = `${publicMarketControlDir}/${name}`;
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    try {
+      return JSON.parse(await readFile(path, 'utf8'));
+    } catch (error) {
+      if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`等待 W1 Public Market 数据库 ACK 超时: ${name}`);
+}
+
+async function checkpointPublicMarketPreselection({ phase, consumerID, skillID, quickCreateCount }) {
+  if (!publicMarketControlDir) return;
+
+  await writePublicMarketControlJSON(`${phase}.checkpoint.json`, {
+    schema_version: PUBLIC_MARKET_CHECKPOINT_SCHEMA,
+    phase,
+    consumer_id: consumerID,
+    skill_id: skillID,
+    quickcreate_count: quickCreateCount
+  });
+  const ack = await waitForPublicMarketControlJSON(`${phase}.ack.json`);
+  expect(Object.keys(ack).sort()).toEqual([
+    'accepted', 'consumer_id', 'database_counts', 'phase', 'quickcreate_count', 'schema_version', 'skill_id'
+  ]);
+  expect(ack).toMatchObject({
+    schema_version: PUBLIC_MARKET_ACK_SCHEMA,
+    phase,
+    consumer_id: consumerID,
+    skill_id: skillID,
+    quickcreate_count: quickCreateCount,
+    accepted: true
+  });
+  expect(Object.keys(ack.database_counts || {}).sort()).toEqual(QUICK_CREATE_DATABASE_COUNT_KEYS);
+  expect(Object.values(ack.database_counts).every((value) => Number.isInteger(value) && value >= 0)).toBe(true);
+}
+
+async function findSkillReviewCardAcrossPages(page, skillName) {
+  const reviewCard = page.locator('article.skill-review-card').filter({ hasText: skillName });
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    if (await reviewCard.count() === 1) return reviewCard;
+    const loadMore = page.getByRole('button', { name: '加载更多' });
+    if (await loadMore.count() === 0) break;
+    const responsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET'
+        && url.pathname === '/api/v1/admin/skill-reviews'
+        && url.searchParams.get('status') === 'reviewing'
+        && Boolean(url.searchParams.get('cursor'));
+    });
+    await loadMore.click();
+    expect((await responsePromise).status()).toBe(200);
+    await expect(page.getByRole('button', { name: '正在加载…' })).toHaveCount(0);
+  }
+  return reviewCard;
 }
 
 async function ownerResponseObservation(response) {
@@ -259,7 +342,7 @@ test.describe('W1 real Skill Foundation browser smoke', () => {
 
 test.describe('W1 mandatory real Reviewer publish chain', () => {
   test('@w1-real-review creator -> reviewer -> creator publishes and binds the frozen submission', async ({ page }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(180_000);
 
     expect(email, 'DORA_E2E_USER_EMAIL must be preflighted').toBeTruthy();
     expect(password, 'DORA_E2E_USER_PASSWORD must be preflighted').toBeTruthy();
@@ -271,6 +354,7 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     const sentinelA = `W1-REVIEW-SENTINEL-A-${runSuffix}`;
     const sentinelB = `W1-REVIEW-SENTINEL-B-${runSuffix}`;
     const quickCreatePrompt = `W1 Reviewer QuickCreate ${runSuffix}`;
+    const publicMarketQuickCreatePrompt = `W1 Public Market QuickCreate ${runSuffix}`;
     const businessRequests = [];
     page.on('request', (request) => {
       const url = new URL(request.url());
@@ -544,7 +628,7 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     await page.getByRole('button', { name: 'Skill 审核' }).click();
     const queueResponse = await queueResponsePromise;
     expect(queueResponse.status()).toBe(200);
-    const reviewCard = page.locator('article.skill-review-card').filter({ hasText: skillName });
+    const reviewCard = await findSkillReviewCardAcrossPages(page, skillName);
     await expect(reviewCard).toHaveCount(1);
 
     const detailResponsePromise = page.waitForResponse((response) => (
@@ -607,7 +691,7 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     await expect(marketListCard).toHaveCount(1);
     await expect(marketListCard).toContainText(sentinelA);
     await expect(marketListCard).not.toContainText(sentinelB);
-    await expect(page.getByRole('button', { name: /立即使用/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /使用此 Skill/ })).toHaveCount(0);
     const marketListPageText = await page.locator('body').innerText();
     const marketPublicList = marketListResponse.status() === 200
       && marketListResponse.headers()['cache-control'] === 'no-store'
@@ -627,7 +711,8 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     await expect(page.getByText('基础预览', { exact: true }).first()).toBeVisible();
     await expect(page.getByText(sentinelA, { exact: true })).toBeVisible();
     await expect(page.locator('body')).not.toContainText(sentinelB);
-    await expect(page.getByRole('button', { name: /立即使用/ })).toHaveCount(0);
+    const publicMarketUseButton = page.getByRole('button', { name: '登录后使用此 Skill' });
+    await expect(publicMarketUseButton).toBeVisible();
     const marketDetailPageText = await page.locator('body').innerText();
     const marketPublicDetail = marketDetailResponse.status() === 200
       && marketDetailResponse.headers()['cache-control'] === 'no-store'
@@ -646,6 +731,71 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
       'Anonymous Market UI and DTOs must expose Published sentinel A without leaking Draft sentinel B'
     ).toBe(true);
 
+    const quickCreateRequestCount = () => businessRequests.filter((request) => (
+      request.method === 'POST' && request.pathname === '/api/v1/projects:quick-create'
+    )).length;
+    const publicMarketQuickCreateBaseline = quickCreateRequestCount();
+    const publicMarketBeforeLoginQuickCreateCount = quickCreateRequestCount() - publicMarketQuickCreateBaseline;
+    expect(publicMarketBeforeLoginQuickCreateCount).toBe(0);
+    await checkpointPublicMarketPreselection({
+      phase: 'before_login',
+      consumerID: reviewerID,
+      skillID,
+      quickCreateCount: publicMarketBeforeLoginQuickCreateCount
+    });
+    await publicMarketUseButton.click();
+    const publicMarketLoginDialog = page.getByRole('dialog', { name: '登录后继续创作' });
+    await publicMarketLoginDialog.getByRole('textbox', { name: '邮箱' }).fill(reviewerEmail);
+    await publicMarketLoginDialog.getByLabel('密码').fill(reviewerPassword);
+    const publicMarketLoginResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/v1/auth/session'
+    ));
+    await publicMarketLoginDialog.getByRole('button', { name: '登录并继续' }).click();
+    const publicMarketLoginResponse = await publicMarketLoginResponsePromise;
+    expect(publicMarketLoginResponse.status()).toBe(200);
+    expect(exactPrincipalID(await publicMarketLoginResponse.json())).toBe(reviewerID);
+    await expect(page).toHaveURL((url) => url.pathname === '/');
+    const publicMarketSelection = page.getByLabel('已预选市场 Skill');
+    await expect(publicMarketSelection).toContainText(skillName);
+    await expect(publicMarketSelection).toContainText('市场 Skill');
+    const publicMarketPreSubmitQuickCreateCount = quickCreateRequestCount() - publicMarketQuickCreateBaseline;
+    expect(publicMarketPreSubmitQuickCreateCount).toBe(0);
+    await checkpointPublicMarketPreselection({
+      phase: 'before_submit',
+      consumerID: reviewerID,
+      skillID,
+      quickCreateCount: publicMarketPreSubmitQuickCreateCount
+    });
+
+    await page.getByPlaceholder('由一个想法或故事开始...').fill(publicMarketQuickCreatePrompt);
+    const publicMarketQuickCreateResponsePromise = page.waitForResponse((response) => (
+      isSkillResponse(response, 'POST', '/api/v1/projects:quick-create')
+    ));
+    await page.getByRole('button', { name: '开始创作' }).click();
+    const publicMarketQuickCreateResponse = await publicMarketQuickCreateResponsePromise;
+    expect(publicMarketQuickCreateResponse.status()).toBe(201);
+    expect(publicMarketQuickCreateResponse.request().headers()['idempotency-key']).toBeTruthy();
+    expect(publicMarketQuickCreateResponse.request().headers()['x-csrf-token']).toBeTruthy();
+    expect(publicMarketQuickCreateResponse.request().postDataJSON()).toEqual({
+      schema_version: 'project_quick_create.v2',
+      initial_prompt: publicMarketQuickCreatePrompt,
+      enabled_skill_ids: [skillID]
+    });
+    const publicMarketQuickCreatePayload = await publicMarketQuickCreateResponse.json();
+    const publicMarketProjectID = String(publicMarketQuickCreatePayload.project_id || '');
+    expect(publicMarketProjectID).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    await expect(page).toHaveURL((url) => url.pathname === `/projects/${publicMarketProjectID}/workspace`);
+    const publicMarketWorkspace = page.locator('main[data-workspace-state]');
+    await expect(publicMarketWorkspace).toHaveAttribute('data-workspace-state', 'ready', { timeout: 30_000 });
+    await expect(publicMarketWorkspace).toHaveAttribute('data-project-id', publicMarketProjectID);
+    const publicMarketSessionID = String(await publicMarketWorkspace.getAttribute('data-session-id') || '');
+    expect(publicMarketSessionID).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    const publicMarketSubmitQuickCreateCount = quickCreateRequestCount() - publicMarketQuickCreateBaseline;
+    expect(publicMarketSubmitQuickCreateCount).toBe(1);
+
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: '用户菜单' })).toBeVisible();
+    await logoutFromCurrentContext(page);
     await page.goto('/');
     const creatorRelogin = await loginAs(page, email, password);
     expect(exactPrincipalID(creatorRelogin)).toBe(creatorID);
@@ -778,7 +928,7 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
 
     if (w1ResultPath) {
       await writeFile(w1ResultPath, JSON.stringify({
-        schema_version: 'w1.real-review-result.v4',
+        schema_version: 'w1.real-review-result.v5',
         creator_id: creatorID,
         creator_admin_route_blocked: creatorAdminRouteBlocked,
         creator_admin_implicit_api_blocked: creatorAdminImplicitAPIBlocked,
@@ -795,6 +945,13 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
         market_public_list: marketPublicList,
         market_public_detail: marketPublicDetail,
         market_published_projection_safe: marketPublishedProjectionSafe,
+        public_market_consumer_id: reviewerID,
+        public_market_selected_skill_id: skillID,
+        public_market_project_id: publicMarketProjectID,
+        public_market_session_id: publicMarketSessionID,
+        public_market_login_preselection_recovered: true,
+        public_market_pre_submit_quickcreate_count: publicMarketPreSubmitQuickCreateCount,
+        public_market_submit_quickcreate_count: publicMarketSubmitQuickCreateCount,
         project_id: projectID,
         tool_catalog_session_id: workspaceSessionID,
         tool_catalog_request_id: toolCatalogPayload.request_id,

@@ -5,11 +5,13 @@ import { PROJECT_QUICK_CREATE_MAX_SKILL_COUNT } from './projectQuickCreate.js';
 
 const INITIAL_STATE = Object.freeze({ kind: 'idle', items: [], error: null });
 const MAX_LIST_PAGES = 100;
+const EMPTY_RETAINED_SKILL_IDS = Object.freeze([]);
 
 export function QuickCreateSkillPicker({
   isAuthenticated,
   isDisabled = false,
   selectedSkillIDs,
+  retainedSkillIDs = EMPTY_RETAINED_SKILL_IDS,
   onChange,
   onLogin,
   loadSkills = listOwnerSkills
@@ -21,9 +23,11 @@ export function QuickCreateSkillPicker({
   const triggerRef = useRef(null);
   const closeButtonRef = useRef(null);
   const selectedRef = useRef(selectedSkillIDs);
+  const retainedRef = useRef(retainedSkillIDs);
   const onChangeRef = useRef(onChange);
 
   selectedRef.current = selectedSkillIDs;
+  retainedRef.current = retainedSkillIDs;
   onChangeRef.current = onChange;
 
   const load = useCallback(async () => {
@@ -37,6 +41,7 @@ export function QuickCreateSkillPicker({
       if (generation !== generationRef.current || controller.signal.aborted) return;
       setState({ kind: 'ready', items, error: null });
       const selectableIDs = new Set(items.filter(isSelectableSkill).map((skill) => skill.skillID));
+      retainedRef.current.forEach((skillID) => selectableIDs.add(skillID));
       const nextSelection = selectedRef.current.filter((skillID) => selectableIDs.has(skillID));
       if (!sameIDs(nextSelection, selectedRef.current)) {
         onChangeRef.current(nextSelection);

@@ -14,6 +14,7 @@ import (
 const (
 	testProjectID    = "019f0000-0000-7000-8000-0000000000ab"
 	testOwnerID      = "019f0000-0000-7000-8000-0000000000cd"
+	testPublisherID  = "019f0000-0000-7000-8000-0000000000ef"
 	testSkillID      = "019f0000-0000-7000-8000-000000000101"
 	testBindingID    = "019f0000-0000-7000-8000-000000000104"
 	testSnapshotID   = "019f0000-0000-7000-8000-000000000103"
@@ -33,18 +34,34 @@ func TestProducerCanonicalGoldenVectors(t *testing.T) {
 	}
 
 	permission := PermissionSnapshotV1{
-		SchemaVersion: PermissionSnapshotSchemaVersionV1, Decision: "allow", Basis: "owner_private",
+		SchemaVersion: PermissionSnapshotSchemaVersionV1, Decision: "allow", Basis: PermissionBasisOwnerPrivate,
 		SubjectUserID: testOwnerID, ProjectID: testProjectID, ProjectOwnerUserID: testOwnerID,
 		BindingID: testBindingID, BindingVersion: 1, BindingSetVersion: 1, Namespace: "user",
 		SkillID: testSkillID, SkillOwnerUserID: testOwnerID, PublishedSnapshotID: testSnapshotID,
-		AllowedActions: []string{"session_snapshot"}, PolicyRef: PermissionPolicyRefV1,
+		AllowedActions: []string{"session_snapshot"}, PolicyRef: PermissionPolicyRefOwnerPrivateV1,
 	}
-	_, permissionDigest, err := CanonicalPermissionSnapshotV1(permission)
+	permissionBytes, permissionDigest, err := CanonicalPermissionSnapshotV1(permission)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if permissionDigest.Hex() != "785ae395603deae2c7daf8d183e27b2f2ca21c082a906cb1bab07b2e45c5280e" {
-		t.Fatalf("permission golden drift: %s", permissionDigest.Hex())
+	const expectedPermission = `{"schema_version":"project_skill_permission_snapshot.v1","decision":"allow","basis":"owner_private","subject_user_id":"019f0000-0000-7000-8000-0000000000cd","project_id":"019f0000-0000-7000-8000-0000000000ab","project_owner_user_id":"019f0000-0000-7000-8000-0000000000cd","binding_id":"019f0000-0000-7000-8000-000000000104","binding_version":1,"binding_set_version":1,"namespace":"user","skill_id":"019f0000-0000-7000-8000-000000000101","skill_owner_user_id":"019f0000-0000-7000-8000-0000000000cd","published_snapshot_id":"019f0000-0000-7000-8000-000000000103","allowed_actions":["session_snapshot"],"policy_ref":"project-skill-permission:owner-private:v1"}`
+	if string(permissionBytes) != expectedPermission || permissionDigest.Hex() != "785ae395603deae2c7daf8d183e27b2f2ca21c082a906cb1bab07b2e45c5280e" {
+		t.Fatalf("permission golden drift: bytes=%s digest=%s", permissionBytes, permissionDigest.Hex())
+	}
+	publicPermission := PermissionSnapshotV2{
+		SchemaVersion: PermissionSnapshotSchemaVersionV2, Decision: "allow", Basis: PermissionBasisPublicMarket,
+		SubjectUserID: testOwnerID, ProjectID: testProjectID, ProjectOwnerUserID: testOwnerID,
+		BindingID: testBindingID, BindingVersion: 1, BindingSetVersion: 1, Namespace: SkillNamespaceUser,
+		SkillID: testSkillID, SkillOwnerUserID: testPublisherID, PublishedSnapshotID: testSnapshotID,
+		AllowedActions: []string{"session_snapshot"}, PolicyRef: PermissionPolicyRefPublicMarketV1,
+	}
+	publicPermissionBytes, publicPermissionDigest, err := CanonicalPermissionSnapshotV2(publicPermission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const expectedPublicPermission = `{"schema_version":"project_skill_permission_snapshot.v2","decision":"allow","basis":"public_market","subject_user_id":"019f0000-0000-7000-8000-0000000000cd","project_id":"019f0000-0000-7000-8000-0000000000ab","project_owner_user_id":"019f0000-0000-7000-8000-0000000000cd","binding_id":"019f0000-0000-7000-8000-000000000104","binding_version":1,"binding_set_version":1,"namespace":"user","skill_id":"019f0000-0000-7000-8000-000000000101","skill_owner_user_id":"019f0000-0000-7000-8000-0000000000ef","published_snapshot_id":"019f0000-0000-7000-8000-000000000103","allowed_actions":["session_snapshot"],"policy_ref":"project-skill-permission:public-market:v1"}`
+	if string(publicPermissionBytes) != expectedPublicPermission || publicPermissionDigest.Hex() != "7c398d2febe3e22cd81d467079d61731bad9179cadaaf15f2c1223bbf9d38351" {
+		t.Fatalf("public permission golden drift: bytes=%s digest=%s", publicPermissionBytes, publicPermissionDigest.Hex())
 	}
 
 	runtimeContent, keys, runtimeBytes, runtimeDigest, err := ProjectRuntimeContentV1(runtimeGoldenDefinition())
@@ -91,6 +108,28 @@ func TestProducerCanonicalGoldenVectors(t *testing.T) {
 	if requestDigest.Hex() != "2a12a43e1a774216fb3828a9caac6ba55a6c1a02f5f77ec9addeeadf997c4091" {
 		t.Fatalf("producer ensure request golden drift: %s", requestDigest.Hex())
 	}
+
+	publicProducerItem := producerItem
+	publicProducerItem.PublisherUserID = testPublisherID
+	publicProducerItem.PermissionSnapshotDigest = publicPermissionDigest.Hex()
+	_, publicSnapshotDigest, err := CanonicalSnapshotSetV1([]PublishedSkillSnapshotRefV1{publicProducerItem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if publicSnapshotDigest.Hex() != "92b9eed06ade6add5828922fe9ddbc63053e1234d866c0cd189d55abf49115f4" {
+		t.Fatalf("public snapshot golden drift: %s", publicSnapshotDigest.Hex())
+	}
+	publicSnapshot := SessionSkillSnapshotV1{
+		SchemaVersion: SessionSnapshotSchemaVersionV1, SnapshotKind: SnapshotKindPublishedRefs,
+		SkillCount: 1, SnapshotSetDigest: publicSnapshotDigest.Hex(), Skills: []PublishedSkillSnapshotRefV1{publicProducerItem},
+	}
+	_, publicRequestDigest, err := CanonicalEnsureRequestV2(testProjectID, testOwnerID, true, promptDigest, publicSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if publicRequestDigest.Hex() != "1352201431cd11586f5c5814827e63ed84a4a584be3556827102a63e5575485b" {
+		t.Fatalf("public ensure request golden drift: %s", publicRequestDigest.Hex())
+	}
 }
 
 func TestResolveProjectSkillSnapshotsV1AndPrepareOutbox(t *testing.T) {
@@ -116,7 +155,7 @@ func TestResolveProjectSkillSnapshotsV1AndPrepareOutbox(t *testing.T) {
 		PublishedSnapshotID: testSnapshotID, PublishedSkillID: testSkillID,
 		SourceContentRevisionID: "019f0000-0000-7000-8000-000000000107", PublishedPublicationRevision: 2,
 		DefinitionSchemaVersion: skill.DefinitionSchemaVersionV1, DefinitionJSON: definitionBytes, ContentDigest: contentDigest,
-		PublisherUserID: "019f0000-0000-7000-8000-000000000108", PublishedAt: resolvedAt,
+		PublisherUserID: testOwnerID, PublishedByReviewerUserID: "019f0000-0000-7000-8000-000000000108", PublishedAt: resolvedAt,
 		RevisionID: "019f0000-0000-7000-8000-000000000107", RevisionSkillID: testSkillID,
 		RevisionDefinitionSchemaVersion: skill.DefinitionSchemaVersionV1,
 		RevisionDefinitionJSON:          append([]byte(nil), definitionBytes...), RevisionContentDigest: contentDigest,
@@ -193,6 +232,99 @@ func TestResolveProjectSkillSnapshotsV1FailsClosed(t *testing.T) {
 	}
 }
 
+func TestPermissionSnapshotVersionsRejectCrossedPairs(t *testing.T) {
+	ownerPermission := PermissionSnapshotV1{
+		SchemaVersion: PermissionSnapshotSchemaVersionV1, Decision: "allow", Basis: PermissionBasisOwnerPrivate,
+		SubjectUserID: testOwnerID, ProjectID: testProjectID, ProjectOwnerUserID: testOwnerID,
+		BindingID: testBindingID, BindingVersion: 1, BindingSetVersion: 1, Namespace: SkillNamespaceUser,
+		SkillID: testSkillID, SkillOwnerUserID: testOwnerID, PublishedSnapshotID: testSnapshotID,
+		AllowedActions: []string{"session_snapshot"}, PolicyRef: PermissionPolicyRefOwnerPrivateV1,
+	}
+	crossOwnerV1 := ownerPermission
+	crossOwnerV1.SkillOwnerUserID = testPublisherID
+	if _, _, err := CanonicalPermissionSnapshotV1(crossOwnerV1); !errors.Is(err, ErrSkillUnavailable) {
+		t.Fatalf("owner-private cross Owner must fail: %v", err)
+	}
+	wrongOwnerPolicy := ownerPermission
+	wrongOwnerPolicy.PolicyRef = PermissionPolicyRefPublicMarketV1
+	if _, _, err := CanonicalPermissionSnapshotV1(wrongOwnerPolicy); !errors.Is(err, ErrSnapshotInvalid) {
+		t.Fatalf("v1 with public policy must fail: %v", err)
+	}
+
+	publicPermission := PermissionSnapshotV2{
+		SchemaVersion: PermissionSnapshotSchemaVersionV2, Decision: "allow", Basis: PermissionBasisPublicMarket,
+		SubjectUserID: testOwnerID, ProjectID: testProjectID, ProjectOwnerUserID: testOwnerID,
+		BindingID: testBindingID, BindingVersion: 1, BindingSetVersion: 1, Namespace: SkillNamespaceUser,
+		SkillID: testSkillID, SkillOwnerUserID: testPublisherID, PublishedSnapshotID: testSnapshotID,
+		AllowedActions: []string{"session_snapshot"}, PolicyRef: PermissionPolicyRefPublicMarketV1,
+	}
+	sameOwnerV2 := publicPermission
+	sameOwnerV2.SkillOwnerUserID = testOwnerID
+	if _, _, err := CanonicalPermissionSnapshotV2(sameOwnerV2); !errors.Is(err, ErrSkillUnavailable) {
+		t.Fatalf("public-market same Owner must fail: %v", err)
+	}
+	wrongPublicSchema := publicPermission
+	wrongPublicSchema.SchemaVersion = PermissionSnapshotSchemaVersionV1
+	if _, _, err := CanonicalPermissionSnapshotV2(wrongPublicSchema); !errors.Is(err, ErrSnapshotInvalid) {
+		t.Fatalf("public-market with v1 schema must fail: %v", err)
+	}
+	wrongSubject := publicPermission
+	wrongSubject.SubjectUserID = testPublisherID
+	if _, _, err := CanonicalPermissionSnapshotV2(wrongSubject); !errors.Is(err, ErrSkillUnavailable) {
+		t.Fatalf("public-market subject mismatch must fail: %v", err)
+	}
+}
+
+func TestResolveProjectSkillSnapshotsV1MixedPermissionVersionsAndAudit(t *testing.T) {
+	resolvedAt := time.UnixMilli(1784011500123).UTC()
+	ownerSkillID := "019f0000-0000-7000-8000-000000000109"
+	ownerBindingID := "019f0000-0000-7000-8000-000000000110"
+	ownerSnapshotID := "019f0000-0000-7000-8000-000000000111"
+	rows := []PublishedSkillReadDTO{
+		projectSkillReadFixture(t, ownerSkillID, ownerBindingID, ownerSnapshotID,
+			"019f0000-0000-7000-8000-000000000112", testOwnerID,
+			"019f0000-0000-7000-8000-000000000113", resolvedAt),
+		projectSkillReadFixture(t, testSkillID, testBindingID, testSnapshotID,
+			"019f0000-0000-7000-8000-000000000107", testPublisherID,
+			"019f0000-0000-7000-8000-000000000108", resolvedAt),
+	}
+	_, selectionDigest, err := CanonicalBindingSelectionV1([]BindingSelectionItemV1{
+		{Priority: BindingPriorityW1, Namespace: SkillNamespaceUser, SkillID: testSkillID},
+		{Priority: BindingPriorityW1, Namespace: SkillNamespaceUser, SkillID: ownerSkillID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolution, err := ResolveProjectSkillSnapshotsV1(ResolveInputV1{
+		ResolutionID: testResolutionID, ProjectID: testProjectID, OwnerUserID: testOwnerID,
+		CommandID: testCommandID, BindingSetVersion: 1, BindingSelectionDigest: selectionDigest, ResolvedAt: resolvedAt,
+	}, rows, DefaultLimitsV1())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolution.Items) != 2 || resolution.Items[0].SkillID != testSkillID ||
+		resolution.Items[0].PublisherUserID != testPublisherID || resolution.Items[1].SkillID != ownerSkillID ||
+		resolution.Items[1].PublisherUserID != testOwnerID {
+		t.Fatalf("mixed resolution identity/order drifted: %+v", resolution.Items)
+	}
+	publicAudit, err := ReconstructResolutionPermissionAudit(resolution.Header, resolution.Items[0])
+	if err != nil || publicAudit.SchemaVersion != PermissionSnapshotSchemaVersionV2 ||
+		publicAudit.Basis != PermissionBasisPublicMarket || publicAudit.PolicyRef != PermissionPolicyRefPublicMarketV1 ||
+		publicAudit.Digest.Hex() != "7c398d2febe3e22cd81d467079d61731bad9179cadaaf15f2c1223bbf9d38351" {
+		t.Fatalf("public audit reconstruction failed: audit=%+v err=%v", publicAudit, err)
+	}
+	ownerAudit, err := ReconstructResolutionPermissionAudit(resolution.Header, resolution.Items[1])
+	if err != nil || ownerAudit.SchemaVersion != PermissionSnapshotSchemaVersionV1 ||
+		ownerAudit.Basis != PermissionBasisOwnerPrivate || ownerAudit.PolicyRef != PermissionPolicyRefOwnerPrivateV1 {
+		t.Fatalf("owner audit reconstruction failed: audit=%+v err=%v", ownerAudit, err)
+	}
+	tampered := resolution.Items[0]
+	tampered.PermissionSnapshotDigest = SHA256Digest([]byte("tampered permission audit"))
+	if _, err := ReconstructResolutionPermissionAudit(resolution.Header, tampered); !errors.Is(err, ErrSnapshotInvalid) {
+		t.Fatalf("tampered permission audit must fail: %v", err)
+	}
+}
+
 func TestNewQuickCreateV2CommandStrictSchemaAndSkillIDs(t *testing.T) {
 	seed := QuickCreateV2Seed{
 		SchemaVersion: QuickCreateSchemaVersionV2,
@@ -246,6 +378,40 @@ func runtimeGoldenDefinition() skill.SkillDefinitionV1 {
 		WritePrompts:   skill.CapabilityGuidanceV1{Applicability: "enabled", Guidance: "Write concise prompts."},
 		AssembleOutput: notApplicable, Examples: make([]skill.SkillExampleV1, 0),
 		StarterPrompts: []string{"Improve this prompt."}, PublicToolRefs: make([]skill.PublicToolReferenceV1, 0),
+	}
+}
+
+func projectSkillReadFixture(
+	t *testing.T,
+	skillID string,
+	bindingID string,
+	snapshotID string,
+	revisionID string,
+	skillOwnerUserID string,
+	reviewerUserID string,
+	resolvedAt time.Time,
+) PublishedSkillReadDTO {
+	t.Helper()
+	definitionBytes, definitionDigest, err := skill.CanonicalDefinitionV1(runtimeGoldenDefinition())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contentDigest Digest
+	copy(contentDigest[:], definitionDigest[:])
+	return PublishedSkillReadDTO{
+		ProjectID: testProjectID, ProjectOwnerUserID: testOwnerID, ProjectLifecycleStatus: "active",
+		BindingID: bindingID, BindingVersion: 1, BindingStatus: BindingStatusEnabled,
+		Namespace: SkillNamespaceUser, Priority: BindingPriorityW1, SkillID: skillID,
+		SkillOwnerUserID: skillOwnerUserID, PublisherUserID: skillOwnerUserID,
+		CurrentPublishedSnapshotID: snapshotID, SkillPublicationRevision: 2,
+		GovernanceStatus: "active", GovernanceEpoch: 3,
+		PublishedSnapshotID: snapshotID, PublishedSkillID: skillID, SourceContentRevisionID: revisionID,
+		PublishedPublicationRevision: 2, DefinitionSchemaVersion: skill.DefinitionSchemaVersionV1,
+		DefinitionJSON: definitionBytes, ContentDigest: contentDigest,
+		PublishedByReviewerUserID: reviewerUserID, PublishedAt: resolvedAt,
+		RevisionID: revisionID, RevisionSkillID: skillID,
+		RevisionDefinitionSchemaVersion: skill.DefinitionSchemaVersionV1,
+		RevisionDefinitionJSON:          append([]byte(nil), definitionBytes...), RevisionContentDigest: contentDigest,
 	}
 }
 

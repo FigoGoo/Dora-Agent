@@ -6,16 +6,40 @@ import { parseSkillMarketDetailResponse } from './skillMarketContract.js';
 import { SkillMarketDetailPage } from './SkillMarketDetailPage.jsx';
 
 describe('SkillMarketDetailPage', () => {
-  it('renders the strict public projection without an executable use action', async () => {
+  it('renders the strict public projection and delegates an authenticated use selection', async () => {
     const loadSkill = vi.fn().mockResolvedValue(parseSkillMarketDetailResponse(skillMarketDetailResponseFixture()));
-    render(<SkillMarketDetailPage skillID={SKILL_MARKET_IDS.skill} loadSkill={loadSkill} />);
+    const onUseSkill = vi.fn();
+    render(<SkillMarketDetailPage
+      skillID={SKILL_MARKET_IDS.skill}
+      isAuthenticated
+      loadSkill={loadSkill}
+      onUseSkill={onUseSkill}
+    />);
 
     expect(await screen.findByRole('heading', { name: '短片提示词助手' })).toBeInTheDocument();
     expect(loadSkill).toHaveBeenCalledWith(SKILL_MARKET_IDS.skill, { signal: expect.any(AbortSignal) });
     expect(screen.getByText('公开市场详情。')).toBeInTheDocument();
     expect(screen.getByText('提示词写法')).toBeInTheDocument();
-    expect(screen.getByText(/不表示当前可执行或已开放使用/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /立即使用/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/不表示对应 Graph Tool 已开放执行/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '使用此 Skill 创作' }));
+    expect(onUseSkill).toHaveBeenCalledWith(expect.objectContaining({ skillID: SKILL_MARKET_IDS.skill }));
+  });
+
+  it('labels anonymous login recovery and disables use at the selection limit', async () => {
+    const loadSkill = vi.fn().mockResolvedValue(parseSkillMarketDetailResponse(skillMarketDetailResponseFixture()));
+    const onUseSkill = vi.fn();
+    render(<SkillMarketDetailPage
+      skillID={SKILL_MARKET_IDS.skill}
+      isUseDisabled
+      loadSkill={loadSkill}
+      onUseSkill={onUseSkill}
+    />);
+
+    const button = await screen.findByRole('button', { name: '登录后使用此 Skill' });
+    expect(button).toBeDisabled();
+    expect(screen.getByText(/已经选择 16 个 Skill/)).toBeInTheDocument();
+    await userEvent.click(button);
+    expect(onUseSkill).not.toHaveBeenCalled();
   });
 
   it('distinguishes a public 404 and returns to the market', async () => {

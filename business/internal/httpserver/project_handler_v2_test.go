@@ -142,6 +142,7 @@ func TestProjectHandlerMapsV2ErrorsWithoutLeakingCause(t *testing.T) {
 		{name: "disabled", err: projectcreation.ErrV2Disabled, status: http.StatusServiceUnavailable, code: "PROJECT_SKILL_SNAPSHOT_V2_UNAVAILABLE"},
 		{name: "invalid binding", err: projectskillbinding.ErrInvalidBinding, status: http.StatusBadRequest, code: "PROJECT_SKILL_BINDING_INVALID"},
 		{name: "unavailable", err: projectskillbinding.ErrSkillUnavailable, status: http.StatusConflict, code: "PROJECT_SKILL_UNAVAILABLE"},
+		{name: "governance unavailable", err: projectskillbinding.ErrGovernanceUnavailable, status: http.StatusConflict, code: "PROJECT_SKILL_UNAVAILABLE"},
 		{name: "invalid snapshot", err: projectskillbinding.ErrSnapshotInvalid, status: http.StatusConflict, code: "PROJECT_SKILL_SNAPSHOT_INVALID"},
 		{name: "limit", err: projectskillbinding.ErrSnapshotLimitExceeded, status: http.StatusRequestEntityTooLarge, code: "SNAPSHOT_LIMIT_EXCEEDED"},
 		{name: "protection", err: projectskillbinding.ErrContentProtection, status: http.StatusServiceUnavailable, code: "PROJECT_SKILL_SNAPSHOT_PROTECTION_UNAVAILABLE"},

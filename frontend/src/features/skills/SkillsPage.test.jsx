@@ -36,7 +36,7 @@ describe('SkillsPage public market', () => {
       await first;
     });
     expect(await screen.findAllByTestId('skill-market-card')).toHaveLength(1);
-    expect(screen.getByText(/搜索、收藏、费用、指标和跨发布者使用尚未开放/)).toBeInTheDocument();
+    expect(screen.getByText(/公开预览与详情页创作预选/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /立即使用/ })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: '加载更多' }));

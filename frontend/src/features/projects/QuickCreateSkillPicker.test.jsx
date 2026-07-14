@@ -93,6 +93,20 @@ describe('QuickCreate Skill picker', () => {
     expect(screen.getByRole('button', { name: 'Skill' })).not.toHaveClass('is-active');
   });
 
+  it('retains a selected public Market Skill that is intentionally absent from the Owner projection', async () => {
+    const loadSkills = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
+    const user = userEvent.setup();
+    render(<PickerHarness
+      loadSkills={loadSkills}
+      initialSelection={[IDS.published]}
+      retainedSkillIDs={[IDS.published]}
+    />);
+
+    await user.click(screen.getByRole('button', { name: 'Skill，已选择 1 个' }));
+    expect(await screen.findByText('还没有 Skill')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Skill，已选择 1 个' })).toHaveClass('is-active');
+  });
+
   it('refreshes the Owner projection every time it reopens', async () => {
     const loadSkills = vi.fn()
       .mockResolvedValueOnce({
@@ -174,6 +188,7 @@ function PickerHarness({
   isAuthenticated = true,
   isDisabled = false,
   initialSelection = [],
+  retainedSkillIDs = [],
   loadSkills,
   onLogin = vi.fn()
 }) {
@@ -183,6 +198,7 @@ function PickerHarness({
       isAuthenticated={isAuthenticated}
       isDisabled={isDisabled}
       selectedSkillIDs={selectedSkillIDs}
+      retainedSkillIDs={retainedSkillIDs}
       onChange={setSelectedSkillIDs}
       onLogin={onLogin}
       loadSkills={loadSkills}

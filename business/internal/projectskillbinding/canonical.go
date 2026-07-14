@@ -18,7 +18,7 @@ type snapshotMetadataV1 struct {
 	Namespace string `json:"namespace"`
 	// SkillID 是 Business Skill 标识。
 	SkillID string `json:"skill_id"`
-	// PublisherUserID 是 owner-private Publisher 标识。
+	// PublisherUserID 是冻结 Skill Owner，允许与 Project Owner 不同。
 	PublisherUserID string `json:"publisher_user_id"`
 	// PublishedSnapshotID 是不可变发布快照标识。
 	PublishedSnapshotID string `json:"published_snapshot_id"`
@@ -36,7 +36,7 @@ type snapshotMetadataV1 struct {
 	AllowedGraphToolKeys []string `json:"allowed_graph_tool_keys"`
 	// PublicToolRefs 是 W1 固定空数组。
 	PublicToolRefs []PublicToolSnapshotRefV1 `json:"public_tool_refs"`
-	// PermissionSnapshotDigest 是 owner-private 权限摘要。
+	// PermissionSnapshotDigest 是 v1 owner-private 或 v2 public-market 权限摘要。
 	PermissionSnapshotDigest string `json:"permission_snapshot_digest"`
 	// RuntimePolicyRef 是固定运行时安全策略引用。
 	RuntimePolicyRef string `json:"runtime_policy_ref"`
@@ -107,17 +107,11 @@ func CanonicalBindingSelectionV1(items []BindingSelectionItemV1) ([]byte, Digest
 // CanonicalPermissionSnapshotV1 验证 owner-private 固定字段并返回 Canonical bytes 与摘要。
 func CanonicalPermissionSnapshotV1(permission PermissionSnapshotV1) ([]byte, Digest, error) {
 	if permission.SchemaVersion != PermissionSnapshotSchemaVersionV1 || permission.Decision != "allow" ||
-		permission.Basis != "owner_private" || permission.Namespace != SkillNamespaceUser || permission.PolicyRef != PermissionPolicyRefV1 ||
-		len(permission.AllowedActions) != 1 || permission.AllowedActions[0] != "session_snapshot" ||
-		permission.BindingVersion < 1 || permission.BindingSetVersion < 1 {
+		permission.Basis != PermissionBasisOwnerPrivate || permission.PolicyRef != PermissionPolicyRefOwnerPrivateV1 ||
+		validatePermissionSnapshotCommon(permission.SubjectUserID, permission.ProjectID, permission.ProjectOwnerUserID,
+			permission.BindingID, permission.BindingVersion, permission.BindingSetVersion, permission.Namespace,
+			permission.SkillID, permission.SkillOwnerUserID, permission.PublishedSnapshotID, permission.AllowedActions) != nil {
 		return nil, Digest{}, ErrSnapshotInvalid
-	}
-	ids := []string{permission.SubjectUserID, permission.ProjectID, permission.ProjectOwnerUserID, permission.BindingID,
-		permission.SkillID, permission.SkillOwnerUserID, permission.PublishedSnapshotID}
-	for _, id := range ids {
-		if !isCanonicalUUIDv7(id) {
-			return nil, Digest{}, ErrSnapshotInvalid
-		}
 	}
 	if permission.SubjectUserID != permission.ProjectOwnerUserID || permission.SkillOwnerUserID != permission.ProjectOwnerUserID {
 		return nil, Digest{}, ErrSkillUnavailable
@@ -127,6 +121,99 @@ func CanonicalPermissionSnapshotV1(permission PermissionSnapshotV1) ([]byte, Dig
 		return nil, Digest{}, wrapSnapshotError("encode permission snapshot", err)
 	}
 	return encoded, SHA256Digest(encoded), nil
+}
+
+// CanonicalPermissionSnapshotV2 验证 public-market 固定字段与跨 Owner 关系后返回 Canonical bytes 与摘要。
+func CanonicalPermissionSnapshotV2(permission PermissionSnapshotV2) ([]byte, Digest, error) {
+	if permission.SchemaVersion != PermissionSnapshotSchemaVersionV2 || permission.Decision != "allow" ||
+		permission.Basis != PermissionBasisPublicMarket || permission.PolicyRef != PermissionPolicyRefPublicMarketV1 ||
+		validatePermissionSnapshotCommon(permission.SubjectUserID, permission.ProjectID, permission.ProjectOwnerUserID,
+			permission.BindingID, permission.BindingVersion, permission.BindingSetVersion, permission.Namespace,
+			permission.SkillID, permission.SkillOwnerUserID, permission.PublishedSnapshotID, permission.AllowedActions) != nil {
+		return nil, Digest{}, ErrSnapshotInvalid
+	}
+	if permission.SubjectUserID != permission.ProjectOwnerUserID || permission.SkillOwnerUserID == permission.ProjectOwnerUserID {
+		return nil, Digest{}, ErrSkillUnavailable
+	}
+	encoded, err := canonicalJSON(permission)
+	if err != nil {
+		return nil, Digest{}, wrapSnapshotError("encode public market permission snapshot", err)
+	}
+	return encoded, SHA256Digest(encoded), nil
+}
+
+// ReconstructResolutionPermissionAudit 从不可变 Header/Item 唯一重建权限版本并核对持久化摘要。
+// 它不读取当前 Skill Owner、治理或发布指针，因此历史审计不会被后续业务状态改写。
+func ReconstructResolutionPermissionAudit(header ResolutionHeader, item ResolutionItem) (ReconstructedPermissionAudit, error) {
+	if header.ID != item.ResolutionID || header.CommandID != item.CommandID || header.ProjectID != item.ProjectID ||
+		header.BindingSetVersion < 1 || item.BindingVersion < 1 || item.LoadOrder < 1 ||
+		item.Priority != BindingPriorityW1 || item.Namespace != SkillNamespaceUser ||
+		!isCanonicalUUIDv7(header.ID) || !isCanonicalUUIDv7(header.CommandID) ||
+		!isCanonicalUUIDv7(header.OwnerUserID) || isZeroDigest(item.PermissionSnapshotDigest) {
+		return ReconstructedPermissionAudit{}, ErrSnapshotInvalid
+	}
+	commonActions := []string{"session_snapshot"}
+	if header.OwnerUserID == item.PublisherUserID {
+		permission := PermissionSnapshotV1{
+			SchemaVersion: PermissionSnapshotSchemaVersionV1, Decision: "allow", Basis: PermissionBasisOwnerPrivate,
+			SubjectUserID: header.OwnerUserID, ProjectID: header.ProjectID, ProjectOwnerUserID: header.OwnerUserID,
+			BindingID: item.BindingID, BindingVersion: item.BindingVersion, BindingSetVersion: header.BindingSetVersion,
+			Namespace: item.Namespace, SkillID: item.SkillID, SkillOwnerUserID: item.PublisherUserID,
+			PublishedSnapshotID: item.PublishedSnapshotID, AllowedActions: commonActions,
+			PolicyRef: PermissionPolicyRefOwnerPrivateV1,
+		}
+		encoded, digest, err := CanonicalPermissionSnapshotV1(permission)
+		if err != nil || digest != item.PermissionSnapshotDigest {
+			return ReconstructedPermissionAudit{}, ErrSnapshotInvalid
+		}
+		return ReconstructedPermissionAudit{
+			SchemaVersion: permission.SchemaVersion, Basis: permission.Basis, PolicyRef: permission.PolicyRef,
+			CanonicalJSON: encoded, Digest: digest,
+		}, nil
+	}
+	permission := PermissionSnapshotV2{
+		SchemaVersion: PermissionSnapshotSchemaVersionV2, Decision: "allow", Basis: PermissionBasisPublicMarket,
+		SubjectUserID: header.OwnerUserID, ProjectID: header.ProjectID, ProjectOwnerUserID: header.OwnerUserID,
+		BindingID: item.BindingID, BindingVersion: item.BindingVersion, BindingSetVersion: header.BindingSetVersion,
+		Namespace: item.Namespace, SkillID: item.SkillID, SkillOwnerUserID: item.PublisherUserID,
+		PublishedSnapshotID: item.PublishedSnapshotID, AllowedActions: commonActions,
+		PolicyRef: PermissionPolicyRefPublicMarketV1,
+	}
+	encoded, digest, err := CanonicalPermissionSnapshotV2(permission)
+	if err != nil || digest != item.PermissionSnapshotDigest {
+		return ReconstructedPermissionAudit{}, ErrSnapshotInvalid
+	}
+	return ReconstructedPermissionAudit{
+		SchemaVersion: permission.SchemaVersion, Basis: permission.Basis, PolicyRef: permission.PolicyRef,
+		CanonicalJSON: encoded, Digest: digest,
+	}, nil
+}
+
+// validatePermissionSnapshotCommon 校验两个权限版本共享的 UUID、版本、namespace 与 action exact-set。
+func validatePermissionSnapshotCommon(
+	subjectUserID string,
+	projectID string,
+	projectOwnerUserID string,
+	bindingID string,
+	bindingVersion int64,
+	bindingSetVersion int64,
+	namespace string,
+	skillID string,
+	skillOwnerUserID string,
+	publishedSnapshotID string,
+	allowedActions []string,
+) error {
+	if namespace != SkillNamespaceUser || len(allowedActions) != 1 || allowedActions[0] != "session_snapshot" ||
+		bindingVersion < 1 || bindingSetVersion < 1 {
+		return ErrSnapshotInvalid
+	}
+	ids := []string{subjectUserID, projectID, projectOwnerUserID, bindingID, skillID, skillOwnerUserID, publishedSnapshotID}
+	for _, id := range ids {
+		if !isCanonicalUUIDv7(id) {
+			return ErrSnapshotInvalid
+		}
+	}
+	return nil
 }
 
 // CanonicalRuntimeContentV1 严格验证 capability 互斥、非 nil 数组和稳定排序后返回运行时内容摘要。

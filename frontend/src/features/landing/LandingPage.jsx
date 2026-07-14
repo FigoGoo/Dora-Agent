@@ -32,7 +32,7 @@ import {
 } from '../../app/routes.js';
 import { AUTH_SESSION_STATUS, useAuthSession } from '../../platform/auth/authSession.js';
 import { ProjectsPage } from '../projects/ProjectsPage.jsx';
-import { quickCreateProject } from '../projects/projectQuickCreate.js';
+import { PROJECT_QUICK_CREATE_MAX_SKILL_COUNT, quickCreateProject } from '../projects/projectQuickCreate.js';
 import { QuickCreateSkillPicker } from '../projects/QuickCreateSkillPicker.jsx';
 import {
   createQuickCreateIntent,
@@ -136,9 +136,15 @@ function PromptComposer({
   quickCreateIntent,
   isAuthenticated,
   selectedSkillIDs,
-  onSkillSelectionChange
+  onSkillSelectionChange,
+  marketSkillSelections,
+  onRemoveMarketSkill
 }) {
   const isSubmitting = quickCreateIntent?.status === QUICK_CREATE_STATUS.SUBMITTING;
+  const retainedMarketSkillIDs = useMemo(
+    () => marketSkillSelections.map((skill) => skill.skillID),
+    [marketSkillSelections]
+  );
   return (
     <section className="prompt-composer" aria-label="快速创作">
       <textarea
@@ -155,6 +161,7 @@ function PromptComposer({
             isAuthenticated={isAuthenticated}
             isDisabled={isSubmitting}
             selectedSkillIDs={selectedSkillIDs}
+            retainedSkillIDs={retainedMarketSkillIDs}
             onChange={onSkillSelectionChange}
             onLogin={onLogin}
           />
@@ -173,6 +180,21 @@ function PromptComposer({
       <div className="prompt-composer__count" aria-hidden="true">
         {prompt.length}/2000
       </div>
+      {marketSkillSelections.length ? (
+        <div className="market-skill-selections" aria-label="已预选市场 Skill">
+          {marketSkillSelections.map((skill) => (
+            <span className="market-skill-selection" key={skill.skillID}>
+              <span>
+                <strong>{skill.name}</strong>
+                <small>市场 Skill · {skill.publisherDisplayName}</small>
+              </span>
+              <button type="button" aria-label={`移除市场 Skill ${skill.name}`} disabled={isSubmitting} onClick={() => onRemoveMarketSkill(skill.skillID)}>
+                <X aria-hidden="true" size={14} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
       <QuickCreateFeedback intent={quickCreateIntent} onRetry={() => onCreate(prompt, { retry: true })} />
     </section>
   );
@@ -770,6 +792,8 @@ export function LandingPage() {
   const [activeCategory, setActiveCategory] = useState('全部');
   const [quickCreateIntent, setQuickCreateIntent] = useState(null);
   const [selectedQuickCreateSkillIDs, setSelectedQuickCreateSkillIDs] = useState([]);
+  const [selectedMarketSkills, setSelectedMarketSkills] = useState([]);
+  const [pendingMarketSkill, setPendingMarketSkill] = useState(null);
   const quickCreateIntentRef = useRef(null);
   const quickCreateRequestRef = useRef(null);
   const quickCreateOperationRef = useRef(0);
@@ -788,6 +812,47 @@ export function LandingPage() {
   function requestLogin(title, promptValue, targetPage) {
     openLoginIntent(setLoginIntent, title, promptValue || prompt || '登录后会继续刚才的创作动作。', targetPage);
     setIsAccountMenuOpen(false);
+  }
+
+  function activateMarketSkill(skill) {
+    if (!selectedQuickCreateSkillIDs.includes(skill.skillID)
+      && selectedQuickCreateSkillIDs.length >= PROJECT_QUICK_CREATE_MAX_SKILL_COUNT) {
+      return false;
+    }
+    setSelectedQuickCreateSkillIDs((current) => (
+      current.includes(skill.skillID) ? current : [...current, skill.skillID].sort()
+    ));
+    setSelectedMarketSkills((current) => (
+      current.some((item) => item.skillID === skill.skillID)
+        ? current
+        : [...current, skill].sort((left, right) => left.skillID.localeCompare(right.skillID))
+    ));
+    return true;
+  }
+
+  function handleUseMarketSkill(skill) {
+    const selection = marketSkillSelection(skill);
+    if (isLoggedIn) {
+      if (activateMarketSkill(selection)) navigateToPage('home');
+      return;
+    }
+    setPendingMarketSkill(selection);
+    openLoginIntent(setLoginIntent, '登录后使用此 Skill', selection.name, 'market_skill');
+  }
+
+  function handleQuickCreateSkillSelectionChange(skillIDs) {
+    setSelectedQuickCreateSkillIDs(skillIDs);
+    setSelectedMarketSkills((current) => current.filter((skill) => skillIDs.includes(skill.skillID)));
+  }
+
+  function removeMarketSkill(skillID) {
+    setSelectedMarketSkills((current) => current.filter((skill) => skill.skillID !== skillID));
+    setSelectedQuickCreateSkillIDs((current) => current.filter((id) => id !== skillID));
+  }
+
+  function closeLoginIntent() {
+    if (loginIntent?.targetPage === 'market_skill') setPendingMarketSkill(null);
+    setLoginIntent(null);
   }
 
   function commitQuickCreateIntent(intent) {
@@ -888,6 +953,15 @@ export function LandingPage() {
     setLoginIntent(null);
     setIsAccountMenuOpen(false);
 
+    if (!nextSession || nextSession.status !== AUTH_SESSION_STATUS.AUTHENTICATED) {
+      cancelQuickCreateRequest();
+      commitQuickCreateIntent(null);
+      setSelectedQuickCreateSkillIDs([]);
+      setSelectedMarketSkills([]);
+      setPendingMarketSkill(null);
+      return;
+    }
+
     if (targetPage === 'quick_create') {
       const intent = quickCreateIntentRef.current;
       if (intent) {
@@ -897,6 +971,10 @@ export function LandingPage() {
       const intent = createQuickCreateIntent(prompt, { enabledSkillIDs: selectedQuickCreateSkillIDs });
       commitQuickCreateIntent(intent);
       submitStableQuickCreate(intent, nextSession?.csrfToken).catch(() => {});
+    } else if (targetPage === 'market_skill') {
+      const selection = pendingMarketSkill;
+      setPendingMarketSkill(null);
+      if (selection && activateMarketSkill(selection)) navigateToPage('home');
     } else if (targetPage) {
       navigateToPage(targetPage);
     }
@@ -926,6 +1004,8 @@ export function LandingPage() {
       cancelQuickCreateRequest();
       commitQuickCreateIntent(null);
       setSelectedQuickCreateSkillIDs([]);
+      setSelectedMarketSkills([]);
+      setPendingMarketSkill(null);
     }
   }
 
@@ -956,6 +1036,11 @@ export function LandingPage() {
       setPendingScrollTarget(targetId);
       setActiveNavTarget(targetId);
       setIsAccountMenuOpen(false);
+      setLoginIntent((current) => {
+        if (current?.targetPage !== 'market_skill') return current;
+        setPendingMarketSkill(null);
+        return null;
+      });
 
       if (normalizedPath === '/explore') {
         window.history.replaceState({}, '', getPathForPage('home'));
@@ -978,6 +1063,8 @@ export function LandingPage() {
       cancelQuickCreateRequest();
       commitQuickCreateIntent(null);
       setSelectedQuickCreateSkillIDs([]);
+      setSelectedMarketSkills([]);
+      setPendingMarketSkill(null);
       setIsAccountMenuOpen(false);
     }
   }, [authStatus]);
@@ -1006,6 +1093,7 @@ export function LandingPage() {
     function closeOverlay(event) {
       if (event.key === 'Escape') {
         setLoginIntent(null);
+        setPendingMarketSkill(null);
         setPreviewWork(null);
         setIsAccountMenuOpen(false);
       }
@@ -1081,7 +1169,9 @@ export function LandingPage() {
                     quickCreateIntent={quickCreateIntent}
                     isAuthenticated={isLoggedIn}
                     selectedSkillIDs={selectedQuickCreateSkillIDs}
-                    onSkillSelectionChange={setSelectedQuickCreateSkillIDs}
+                    onSkillSelectionChange={handleQuickCreateSkillSelectionChange}
+                    marketSkillSelections={selectedMarketSkills}
+                    onRemoveMarketSkill={removeMarketSkill}
                   />
                 </div>
                 <HotSkills onUse={(skill) => requestLogin(skill.title, skill.title)} />
@@ -1106,7 +1196,13 @@ export function LandingPage() {
           <SkillsPage isLoggedIn={isLoggedIn} onLogin={requestLogin} />
         ) : null}
         {activePage === 'skillDetail' && publicSkillRoute ? (
-          <SkillMarketDetailPage skillID={publicSkillRoute.skillID} />
+          <SkillMarketDetailPage
+            skillID={publicSkillRoute.skillID}
+            isAuthenticated={isLoggedIn}
+            isUseDisabled={!selectedQuickCreateSkillIDs.includes(publicSkillRoute.skillID)
+              && selectedQuickCreateSkillIDs.length >= PROJECT_QUICK_CREATE_MAX_SKILL_COUNT}
+            onUseSkill={handleUseMarketSkill}
+          />
         ) : null}
         {activePage === 'skillDetail' && !publicSkillRoute ? (
           <section className="route-state" aria-labelledby="invalid-public-skill-route-title">
@@ -1146,8 +1242,16 @@ export function LandingPage() {
         {activePage === 'works' ? <WorksPage onIntent={requestLogin} /> : null}
         {activePage === 'credits' ? <CreditsPage onIntent={requestLogin} /> : null}
       </main>
-      <LoginModal intent={loginIntent} onClose={() => setLoginIntent(null)} onSubmit={handleLoginComplete} />
+      <LoginModal intent={loginIntent} onClose={closeLoginIntent} onSubmit={handleLoginComplete} />
       <WorkPreviewModal work={previewWork} onClose={() => setPreviewWork(null)} onCreate={handleWorkCreate} />
     </div>
   );
+}
+
+function marketSkillSelection(skill) {
+  return Object.freeze({
+    skillID: String(skill.skillID),
+    name: String(skill.name),
+    publisherDisplayName: String(skill.publisher.displayName)
+  });
 }

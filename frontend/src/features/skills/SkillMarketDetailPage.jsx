@@ -5,8 +5,11 @@ import { SKILL_MARKET_CAPABILITY_LABELS } from './skillMarketContract.js';
 
 export function SkillMarketDetailPage({
   skillID,
+  isAuthenticated = false,
+  isUseDisabled = false,
   loadSkill = getSkillMarketDetail,
-  onNavigate = navigate
+  onNavigate = navigate,
+  onUseSkill = () => {}
 }) {
   const [status, setStatus] = useState('loading');
   const [skill, setSkill] = useState(null);
@@ -98,8 +101,19 @@ export function SkillMarketDetailPage({
       </header>
 
       <p className="skill-market-page__scope" role="note">
-        当前仅提供公开信息预览；搜索、收藏、费用、指标和跨发布者使用尚未开放。
+        使用会把该 Skill 预选到一次新的创作；搜索、收藏、费用和指标尚未开放。
       </p>
+
+      <div className="skill-market-detail__use">
+        <button type="button" className="start-button" disabled={isUseDisabled} onClick={() => onUseSkill(skill)}>
+          {isAuthenticated ? '使用此 Skill 创作' : '登录后使用此 Skill'}
+        </button>
+        <small>
+          {isUseDisabled
+            ? '本次创作已经选择 16 个 Skill，请先回到首页移除一个选择。'
+            : '创建 Project 时会重新校验当前发布快照和治理状态，不会产生安装或收藏记录。'}
+        </small>
+      </div>
 
       <div className="skill-market-detail__grid">
         <section>
@@ -121,7 +135,7 @@ export function SkillMarketDetailPage({
               ? skill.declaredCapabilityKeys.map((key) => <span key={key}>{SKILL_MARKET_CAPABILITY_LABELS[key]}</span>)
               : <span>未声明能力</span>}
           </div>
-          <small>能力声明仅表示发布内容覆盖的领域，不表示当前可执行或已开放使用。</small>
+          <small>能力声明仅表示发布内容覆盖的领域，不表示对应 Graph Tool 已开放执行。</small>
         </section>
         <section>
           <h3>标签与分类</h3>
