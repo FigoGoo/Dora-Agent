@@ -123,7 +123,7 @@ type ingressTurnV1 struct {
 	SessionID         string `json:"session_id"`
 	InputID           string `json:"input_id"`
 	TurnKind          string `json:"turn_kind"`
-	SnapshotCutoffSeq int64  `json:"snapshot_cutoff_seq"`
+	ContextMessageSeq int64  `json:"context_message_seq"`
 	Status            string `json:"status"`
 	Version           int64  `json:"version"`
 }
@@ -618,7 +618,7 @@ func applyIngressCommandV1(before ingressSnapshotV1, command ingressCommandV1) (
 	if turnKind != "" {
 		after.Turns = append(after.Turns, ingressTurnV1{
 			TurnID: command.AllocatedTurnID, SessionID: command.SessionID, InputID: input.InputID,
-			TurnKind: turnKind, SnapshotCutoffSeq: input.EnqueueSeq, Status: "created", Version: 1,
+			TurnKind: turnKind, ContextMessageSeq: session.LastMessageSeq, Status: "created", Version: 1,
 		})
 	}
 	if command.FailAt == "after_turn" {
@@ -898,11 +898,12 @@ func validateIngressSnapshotV1(snapshot ingressSnapshotV1) error {
 	turns := make(map[string]ingressTurnV1, len(snapshot.Turns))
 	turnByInput := make(map[string]string, len(snapshot.Turns))
 	for _, turn := range snapshot.Turns {
-		if _, err := parseCanonicalUUIDv7(turn.TurnID); err != nil || !validIngressTurnStatusV1(turn.Status) || turn.Version <= 0 || turn.SnapshotCutoffSeq <= 0 {
+		if _, err := parseCanonicalUUIDv7(turn.TurnID); err != nil || !validIngressTurnStatusV1(turn.Status) || turn.Version <= 0 || turn.ContextMessageSeq < 0 {
 			return fmt.Errorf("非法 turn %s", turn.TurnID)
 		}
 		input, exists := inputs[turn.InputID]
-		if !exists || input.SessionID != turn.SessionID || input.EnqueueSeq != turn.SnapshotCutoffSeq || input.TurnID != turn.TurnID {
+		session, sessionExists := sessions[turn.SessionID]
+		if !exists || !sessionExists || input.SessionID != turn.SessionID || input.TurnID != turn.TurnID || turn.ContextMessageSeq > session.LastMessageSeq {
 			return fmt.Errorf("turn/input 因果引用不一致")
 		}
 		if _, exists := turns[turn.TurnID]; exists || turnByInput[turn.InputID] != "" {
@@ -1032,7 +1033,7 @@ func validateStoredIngressMappingV1(input ingressInputV1, messages map[string]in
 		}
 		message, messageExists := messages[input.MessageID]
 		turn, turnExists := turns[input.TurnID]
-		if !messageExists || message.SessionID != input.SessionID || message.ContentDigest != input.ContentDigest || !turnExists || turn.TurnKind != "chat" {
+		if !messageExists || message.SessionID != input.SessionID || message.ContentDigest != input.ContentDigest || !turnExists || turn.TurnKind != "chat" || turn.ContextMessageSeq != message.MessageSeq {
 			return fmt.Errorf("user input Message/Turn 引用非法")
 		}
 	case "approval_continuation_result":
@@ -1094,9 +1095,9 @@ func summarizeIngressStateV1(snapshot ingressSnapshotV1, sessionID string) ingre
 	for _, turn := range snapshot.Turns {
 		if turn.SessionID == sessionID {
 			summary.TurnCount++
-			if turn.SnapshotCutoffSeq >= summary.LastTurnCutoff {
+			if turn.ContextMessageSeq >= summary.LastTurnCutoff {
 				summary.LastTurnKind = turn.TurnKind
-				summary.LastTurnCutoff = turn.SnapshotCutoffSeq
+				summary.LastTurnCutoff = turn.ContextMessageSeq
 			}
 		}
 	}

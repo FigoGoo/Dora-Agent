@@ -756,7 +756,7 @@ Agent PostgreSQL EventLog 至少包含：
 
 ### 15.2 Session Lane 测试
 
-W2-R02 已新增独立 [`PostgreSQL Session Lane 与 Runner Runtime 可执行契约 v1`](./session-lane-runtime-contract-v1.md)、[`Session Lane Ingress 与 Command Receipt 可执行契约 v1`](./session-lane-ingress-command-contract-v1.md) 与测试专用 Corpus：前者以 60 条向量覆盖纯状态迁移、HOL、Fence 纪元、Takeover、Effect State 防降级、绑定目标 Input/Run 与 Cancel Version 的 first-write-wins/Claim 前取消、PG Scan trigger 和 Drain Handoff 候选；后者以 42 条向量固定 `enqueue_input_v1` 的全局 CommandID、Source/Class、alias Receipt、原子创建、重放与查询候选，并以独立测试固定推进态冻结结果和损坏 Receipt fail-closed。`evidence_kind/digest` 仍只是分支夹具，Ingress 也未执行真实事务/Redis；下列清单仍按“生产 Repository/Runner/故障注入完成”口径保持未勾选，不能用纯模型冒充 PostgreSQL 集成、lost-wake 恢复或 `SMK-017` 证据。
+W2-R02 已新增独立 [`PostgreSQL Session Lane 与 Runner Runtime 可执行契约 v1`](./session-lane-runtime-contract-v1.md)、[`Session Lane Ingress 与 Command Receipt 可执行契约 v1`](./session-lane-ingress-command-contract-v1.md)、[`Session Lane PostgreSQL 物理设计与升级方案 v1`](./session-lane-postgresql-design-v1.md) 与测试专用 Corpus：前者以 60 条向量覆盖 Lane 纯状态迁移；Ingress 以 42 条向量固定 `enqueue_input_v1` 的全局 CommandID、Source/Class、alias Receipt、原子创建、重放与查询；Database Design Draft 推荐全局 Header + origin Result、内部 Session Version CAS、legacy fail-closed 升级、Turn/Run/Lease/HOL 与真实 PG 证据矩阵，但尚未 Approved，也没有 Migration/Repository。`evidence_kind/digest` 仍只是分支夹具，Ingress 也未执行真实事务/Redis；下列清单继续保持未勾选，不能用设计或纯模型冒充 PostgreSQL 集成、lost-wake 恢复或 `SMK-017` 证据。
 
 - [ ] 同 Session 100 个并发输入只按 `enqueue_seq` 执行；
 - [ ] 不同 Session 可并发且互不阻塞；

@@ -353,7 +353,7 @@
           "last_source_type": "approval_continuation_result",
           "last_class": "approval_continuation",
           "last_turn_kind": "approval_continuation",
-          "last_turn_cutoff": 3
+          "last_turn_cutoff": 2
         },
         "result": {
           "disposition": "created",
@@ -414,7 +414,7 @@
           "last_source_type": "approval_continuation_result",
           "last_class": "deterministic_projection",
           "last_turn_kind": "approval_continuation",
-          "last_turn_cutoff": 3
+          "last_turn_cutoff": 2
         },
         "result": {
           "disposition": "created",
@@ -475,7 +475,7 @@
           "last_source_type": "batch_continuation_result",
           "last_class": "batch_explanation",
           "last_turn_kind": "batch_explanation",
-          "last_turn_cutoff": 5
+          "last_turn_cutoff": 2
         },
         "result": {
           "disposition": "created",
@@ -536,7 +536,7 @@
           "last_source_type": "batch_continuation_result",
           "last_class": "deterministic_projection",
           "last_turn_kind": "batch_explanation",
-          "last_turn_cutoff": 5
+          "last_turn_cutoff": 2
         },
         "result": {
           "disposition": "created",
