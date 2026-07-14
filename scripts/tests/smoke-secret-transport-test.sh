@@ -125,5 +125,11 @@ fi
 if rg -- '--arg[[:space:]]+password' "$repo_root/scripts/lib/smoke-secret-transport.sh" >/dev/null; then
   fail 'login JSON builder still passes password in jq argv'
 fi
+grep -F 'assert_evidence_excludes_literal "$governor_csrf_token"' "$smoke_script" >/dev/null || \
+  fail 'governor CSRF is missing from the evidence scan'
+grep -F 'assert_evidence_excludes_literal "$governor_cookie_token"' "$smoke_script" >/dev/null || \
+  fail 'governor cookie is missing from the evidence scan'
+grep -F 'write_conditional_curl_config "$conditional_config" "$governor_curl_config"' "$smoke_script" >/dev/null || \
+  fail 'governance ETag/idempotency headers are not transported through 0600 curl config'
 
 printf 'smoke secret transport contract passed\n'

@@ -1,3 +1,5 @@
+//go:build localsmoke
+
 // Package main 提供仅允许 local 环境执行的正常 Argon2id Smoke 账号准备命令。
 package main
 
@@ -43,8 +45,8 @@ func run() error {
 		return localseed.ErrLocalEnvironmentRequired
 	}
 	dsn := strings.TrimSpace(os.Getenv("BUSINESS_DATABASE_URL"))
-	if dsn == "" {
-		return errors.New("business database URL is required")
+	if !localseed.IsSafeLocalBusinessDSN(dsn) {
+		return errors.New("unsafe local Business DSN")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

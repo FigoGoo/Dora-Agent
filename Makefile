@@ -8,17 +8,20 @@ THRIFTGO_VERSION := v0.4.5
 MIGRATE_VERSION := v4.19.0
 W0_ENV_FILE ?= .env.example
 
-.PHONY: verify test test-smoke-contracts vet race build test-frontend build-frontend check-frontend rpc-tools foundation-rpc-tools migration-tools generate-foundation-rpc generate-session-rpc generate-rpc check-generated check-migrations check-database-contracts local-up local-down local-reset migrate-up migrate-down seed-local-smoke-user foundation-smoke w0-smoke w0-browser-smoke w05-smoke w05-browser-smoke w1-smoke w1-browser-smoke run-business run-agent run-worker
+.PHONY: verify test test-smoke-contracts test-local-smoke-seeders vet race build test-frontend build-frontend check-frontend rpc-tools foundation-rpc-tools migration-tools generate-foundation-rpc generate-session-rpc generate-rpc check-generated check-migrations check-database-contracts local-up local-down local-reset migrate-up migrate-down seed-local-smoke-user foundation-smoke w0-smoke w0-browser-smoke w05-smoke w05-browser-smoke w1-smoke w1-browser-smoke run-business run-agent run-worker
 
 verify:
 	@for module in $(MODULES); do (cd $$module && GOWORK=off $(GO) mod verify) || exit 1; done
 
-test: test-smoke-contracts
+test: test-smoke-contracts test-local-smoke-seeders
 	@for module in $(MODULES); do (cd $$module && GOWORK=off $(GO) test ./...) || exit 1; done
 
 test-smoke-contracts:
 	@./scripts/tests/w1-smoke-mode-test.sh
 	@./scripts/tests/smoke-secret-transport-test.sh
+
+test-local-smoke-seeders:
+	@cd business && GOWORK=off $(GO) test -tags localsmoke ./cmd/local-smoke-seeder ./cmd/local-smoke-reviewer-seeder
 
 vet:
 	@for module in $(MODULES); do (cd $$module && GOWORK=off $(GO) vet ./...) || exit 1; done
@@ -87,7 +90,7 @@ migrate-down:
 	@set -a; . ./$(ENV_FILE); set +a; ./scripts/migrate.sh business down
 
 seed-local-smoke-user:
-	@set -a; . ./$(ENV_FILE); set +a; cd business && GOWORK=off $(GO) run ./cmd/local-smoke-seeder
+	@set -a; . ./$(ENV_FILE); set +a; cd business && GOWORK=off $(GO) run -tags localsmoke ./cmd/local-smoke-seeder
 
 foundation-smoke: build
 	@ENV_FILE=$(ENV_FILE) ./scripts/smoke-foundation.sh

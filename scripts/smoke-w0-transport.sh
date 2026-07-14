@@ -20,14 +20,17 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   evidence_dir="$repo_root/.local/smoke/w1-skill-foundation/runs/$run_id"
   evidence_scan_root="$repo_root/.local/smoke/w1-skill-foundation/runs"
   evidence_file="$repo_root/.local/smoke/w1-skill-foundation-evidence.json"
+  governance_evidence_file="$repo_root/.local/smoke/w1-skill-governance-evidence.json"
   legacy_evidence_file=""
 else
   evidence_dir="$repo_root/.local/smoke/w0-transport/runs/$run_id"
   evidence_scan_root="$repo_root/.local/smoke/w0-transport/runs"
   evidence_file="$repo_root/.local/smoke/w05-workspace-transport-evidence.json"
+  governance_evidence_file=""
   legacy_evidence_file="$repo_root/.local/smoke/w0-transport-evidence.json"
 fi
 pending_evidence_file="$evidence_dir/evidence-summary.pending.json"
+governance_pending_evidence_file=""
 cookie_jar=""
 user_curl_config=""
 login_response_temp=""
@@ -53,6 +56,14 @@ provisioner_password=""
 reviewer_assignment_id=""
 reviewer_seed_creator_user_id=""
 provisioner_user_id=""
+governor_password=""
+governor_assignment_id=""
+governor_user_id=""
+governor_cookie_jar=""
+governor_curl_config=""
+governor_login_response_temp=""
+governor_csrf_token=""
+governor_cookie_token=""
 user_cookie_token=""
 business_pid=""
 agent_pid=""
@@ -62,6 +73,7 @@ w1_browser_smoke_ran=false
 w1_skill_binding_smoke_ran=false
 w1_reviewer_rbac_smoke_ran=false
 w1_reviewer_revocation_smoke_ran=false
+w1_skill_governance_smoke_ran=false
 w1_skill_id=""
 w1_review_id=""
 w1_skill_name=""
@@ -142,6 +154,15 @@ stop_processes() {
   if [[ -n "$owner_b_denied_headers_temp" ]]; then
     rm -f "$owner_b_denied_headers_temp"
   fi
+  if [[ -n "$governor_cookie_jar" ]]; then
+    rm -f "$governor_cookie_jar"
+  fi
+  if [[ -n "$governor_curl_config" ]]; then
+    rm -f "$governor_curl_config"
+  fi
+  if [[ -n "$governor_login_response_temp" ]]; then
+    rm -f "$governor_login_response_temp"
+  fi
   if [[ -n "$source_manifest_temp" ]]; then
     rm -f "$source_manifest_temp"
   fi
@@ -169,8 +190,15 @@ cleanup_on_exit() {
   local exit_code="$?"
   trap - EXIT
   stop_processes
-  if [[ "$exit_code" -ne 0 && -n "$evidence_dir" && "$evidence_dir" == "$repo_root/.local/smoke/"* ]]; then
-    rm -rf "$evidence_dir"
+  if [[ "$exit_code" -ne 0 ]]; then
+    # 本次运行已经在启动时撤销旧 summary；发布任一步失败时必须同时撤销两个新 summary，避免独立 Governance 假绿。
+    rm -f "$evidence_file" "${evidence_file}.tmp"
+    if [[ -n "$governance_evidence_file" ]]; then
+      rm -f "$governance_evidence_file" "${governance_evidence_file}.tmp"
+    fi
+    if [[ -n "$evidence_dir" && "$evidence_dir" == "$repo_root/.local/smoke/"* ]]; then
+      rm -rf "$evidence_dir"
+    fi
   fi
   exit "$exit_code"
 }
@@ -468,6 +496,136 @@ response_header_value() {
   tr -d '\r' <"$headers_file" | awk -F ': *' -v name="$header_name" '
     tolower($1) == tolower(name) { print substr($0, index($0, ":") + 2); exit }
   '
+}
+
+# write_conditional_curl_config 把 CSRF、If-Match 与幂等键写入 0600 curl 配置，避免原值进入进程参数和 Evidence。
+write_conditional_curl_config() {
+  local output_file="$1"
+  local base_config="$2"
+  local if_match="${3:-}"
+  local idempotency_key="${4:-}"
+  local if_match_file="${output_file}.if-match"
+  local idempotency_file="${output_file}.idempotency"
+  [[ -f "$base_config" ]] || return 1
+  if [[ -n "$if_match" ]]; then
+    write_curl_header_config "$if_match_file" 'If-Match' "$if_match" || return 1
+  else
+    (umask 077; : >"$if_match_file") || return 1
+    chmod 600 "$if_match_file" || return 1
+  fi
+  if [[ -n "$idempotency_key" ]]; then
+    write_curl_header_config "$idempotency_file" 'Idempotency-Key' "$idempotency_key" || return 1
+  else
+    (umask 077; : >"$idempotency_file") || return 1
+    chmod 600 "$idempotency_file" || return 1
+  fi
+  (umask 077; cat "$base_config" "$if_match_file" "$idempotency_file" >"$output_file") || return 1
+  chmod 600 "$output_file" || return 1
+  rm -f "$if_match_file" "$idempotency_file"
+}
+
+# assert_governance_decision_response 验证治理成功响应 exact-set、安全字段、Strong ETag 与 no-store Header。
+assert_governance_decision_response() {
+  local response_file="$1"
+  local headers_file="$2"
+  local expected_status="$3"
+  local expected_epoch="$4"
+  local expected_actions="$5"
+  local body_etag=""
+  body_etag="$(jq -er --arg skill "$w1_skill_id" --arg status "$expected_status" \
+    --argjson epoch "$expected_epoch" --argjson actions "$expected_actions" '
+      (keys == ["request_id","skill"]
+      and (.request_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+      and (.skill | keys) == ["allowed_actions","governance_epoch","governance_etag","governance_status","skill_id","transitioned_at"]
+      and .skill.skill_id == $skill
+      and .skill.governance_status == $status
+      and .skill.governance_epoch == $epoch
+      and .skill.allowed_actions == $actions
+      and (.skill.transitioned_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"))
+      and (.skill.governance_etag | test("^\\\"sg1-[A-Za-z0-9_-]{43}\\\"$")))
+      as $valid
+      | if $valid then .skill.governance_etag else error("invalid governance decision response") end' "$response_file")" || return 1
+  [[ "$(response_header_value "$headers_file" 'ETag')" == "$body_etag" ]] || return 1
+  [[ "$(response_header_value "$headers_file" 'Cache-Control')" == "no-store" ]] || return 1
+}
+
+# assert_governance_error_response 验证治理失败使用统一安全 Envelope、UUIDv7 request_id 与 no-store。
+assert_governance_error_response() {
+  local response_file="$1"
+  local headers_file="$2"
+  local expected_code="$3"
+  jq -e --arg code "$expected_code" '
+    keys == ["error"]
+    and (.error | keys) == ["code","details","message","request_id","retryable"]
+    and .error.code == $code
+    and (.error.message | type) == "string" and (.error.message | length) > 0
+    and (.error.request_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+    and .error.retryable == false and .error.details == {}' "$response_file" >/dev/null || return 1
+  [[ "$(response_header_value "$headers_file" 'Cache-Control')" == "no-store" ]] || return 1
+}
+
+# read_governance_quickcreate_counts 用固定 SQL 读取候选 Project 全事实计数，验证治理失败没有部分提交。
+read_governance_quickcreate_counts() {
+  local postgres_container="$1"
+  docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'projects', (SELECT COUNT(*) FROM business.project),
+      'receipts', (SELECT COUNT(*) FROM business.project_creation_receipt),
+      'binding_sets', (SELECT COUNT(*) FROM business.project_skill_binding_set),
+      'bindings', (SELECT COUNT(*) FROM business.project_skill_binding),
+      'binding_audits', (SELECT COUNT(*) FROM business.project_skill_binding_audit),
+      'resolutions', (SELECT COUNT(*) FROM business.project_session_skill_resolution),
+      'resolution_items', (SELECT COUNT(*) FROM business.project_session_skill_resolution_item),
+      'session_bindings', (SELECT COUNT(*) FROM business.project_session_binding),
+      'outboxes', (SELECT COUNT(*) FROM business.project_session_outbox)
+    );"
+}
+
+# read_governance_skill_state_fact 读取 offline 终态命令前后的最小聚合、回执与审计事实。
+read_governance_skill_state_fact() {
+  local postgres_container="$1"
+  docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'version', skill_record.version,
+      'governance_status', skill_record.governance_status,
+      'governance_epoch', skill_record.governance_epoch,
+      'current_published_snapshot_id', skill_record.current_published_snapshot_id,
+      'publication_revision', skill_record.publication_revision,
+      'governance_receipts', (SELECT COUNT(*) FROM business.skill_command_receipt WHERE result_skill_id = skill_record.id AND command_type = 'governance_transition'),
+      'governance_audits', (SELECT COUNT(*) FROM business.skill_governance_audit WHERE skill_id = skill_record.id AND action IN ('governance_suspended','governance_resumed','governance_offlined'))
+    ) FROM business.skill AS skill_record WHERE skill_record.id = '$w1_skill_id'::uuid;"
+}
+
+# read_existing_w1_session_snapshot_fact 读取治理前后既有 Session 的 Business resolution 与 Agent immutable snapshot 摘要。
+read_existing_w1_session_snapshot_fact() {
+  local postgres_container="$1"
+  local business_fact=""
+  local agent_fact=""
+  business_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'resolution_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution WHERE project_id = '$w1_binding_project_id'::uuid),
+      'item_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution_item AS item JOIN business.project_session_skill_resolution AS resolution ON resolution.id = item.resolution_id WHERE resolution.project_id = '$w1_binding_project_id'::uuid),
+      'resolution_id', (SELECT id FROM business.project_session_skill_resolution WHERE project_id = '$w1_binding_project_id'::uuid),
+      'snapshot_digest', (SELECT encode(snapshot_set_digest, 'hex') FROM business.project_session_skill_resolution WHERE project_id = '$w1_binding_project_id'::uuid),
+      'published_snapshot_id', (SELECT item.published_snapshot_id FROM business.project_session_skill_resolution_item AS item JOIN business.project_session_skill_resolution AS resolution ON resolution.id = item.resolution_id WHERE resolution.project_id = '$w1_binding_project_id'::uuid AND item.skill_id = '$w1_skill_id'::uuid),
+      'governance_epoch', (SELECT item.governance_epoch FROM business.project_session_skill_resolution_item AS item JOIN business.project_session_skill_resolution AS resolution ON resolution.id = item.resolution_id WHERE resolution.project_id = '$w1_binding_project_id'::uuid AND item.skill_id = '$w1_skill_id'::uuid),
+      'content_digest', (SELECT encode(item.content_digest, 'hex') FROM business.project_session_skill_resolution_item AS item JOIN business.project_session_skill_resolution AS resolution ON resolution.id = item.resolution_id WHERE resolution.project_id = '$w1_binding_project_id'::uuid AND item.skill_id = '$w1_skill_id'::uuid),
+      'runtime_content_digest', (SELECT encode(item.runtime_content_digest, 'hex') FROM business.project_session_skill_resolution_item AS item JOIN business.project_session_skill_resolution AS resolution ON resolution.id = item.resolution_id WHERE resolution.project_id = '$w1_binding_project_id'::uuid AND item.skill_id = '$w1_skill_id'::uuid)
+    );")" || return 1
+  agent_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_agent -Atc "
+    SELECT json_build_object(
+      'session_count', (SELECT COUNT(*) FROM agent.session WHERE id = '$w1_binding_session_id'::uuid AND project_id = '$w1_binding_project_id'::uuid),
+      'snapshot_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot WHERE session_id = '$w1_binding_session_id'::uuid),
+      'snapshot_kind', (SELECT snapshot_kind FROM agent.session_skill_snapshot WHERE session_id = '$w1_binding_session_id'::uuid),
+      'snapshot_digest', (SELECT snapshot_digest FROM agent.session_skill_snapshot WHERE session_id = '$w1_binding_session_id'::uuid),
+      'skill_count', (SELECT skill_count FROM agent.session_skill_snapshot WHERE session_id = '$w1_binding_session_id'::uuid),
+      'item_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_binding_session_id'::uuid),
+      'published_snapshot_id', (SELECT published_snapshot_id FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_binding_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'governance_epoch', (SELECT governance_epoch FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_binding_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'content_digest', (SELECT content_digest FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_binding_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid),
+      'runtime_content_digest', (SELECT runtime_content_digest FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_binding_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid)
+    );")" || return 1
+  jq -cn --argjson business "$business_fact" --argjson agent "$agent_fact" '{business:$business,agent:$agent}'
 }
 
 build_w1_skill_payload() {
@@ -1221,6 +1379,457 @@ run_w1_skill_binding_smoke() {
   w1_skill_binding_smoke_ran=true
 }
 
+# run_w1_skill_governance_smoke 使用四个真实账号验证治理状态机、项目门禁、终态、撤权和数据库原子事实。
+run_w1_skill_governance_smoke() {
+  local postgres_container="$1"
+  local response_file="$w1_temp_dir/governance-response.json"
+  local headers_file="$w1_temp_dir/governance-headers.txt"
+  local conditional_config="$w1_temp_dir/governance-command.curl"
+  local quick_config="$w1_temp_dir/governance-quick-create.curl"
+  local baseline_fact=""
+  local final_fact=""
+  local existing_session_snapshot_before=""
+  local existing_session_snapshot_after=""
+  local offline_resume_before_fact=""
+  local offline_resume_after_fact=""
+  local before_counts=""
+  local after_counts=""
+  local status=""
+  local active_etag=""
+  local suspended_etag=""
+  local resumed_etag=""
+  local offline_etag=""
+  local suspend_time=""
+  local suspend_request_id=""
+  local resumed_project_id=""
+  local resumed_bootstrap="$w1_temp_dir/governance-resumed-bootstrap.json"
+  local offline_review_id=""
+  local offline_review_etag=""
+  local offline_draft_etag=""
+  local offline_updated_etag=""
+  local creator_forbidden_status=""
+  local reviewer_forbidden_status=""
+  local governor_review_forbidden_status=""
+  local queue_status=""
+  local detail_status=""
+  local suspend_status=""
+  local suspend_replay_status=""
+  local existing_session_status=""
+  local offline_existing_session_status=""
+  local suspended_quick_status=""
+  local resume_status=""
+  local resumed_quick_status=""
+  local offline_status=""
+  local offline_quick_status=""
+  local offline_resume_status=""
+  local offline_update_status=""
+  local offline_submit_status=""
+  local offline_review_detail_status=""
+  local offline_approve_status=""
+  local governor_session_status=""
+  local governor_denied_status=""
+  local governance_produced_at=""
+  local final_ready_status=""
+  local governor_role=""
+  local governor_capability=""
+  local creator_forbidden_code=""
+  local reviewer_forbidden_code=""
+  local governor_review_forbidden_code=""
+  local governor_denied_code=""
+  local revoked_role_count=""
+  local revoked_capability_count=""
+  local suspend_replay_matches="false"
+  local offline_resume_state_unchanged="false"
+  local existing_session_snapshot_unchanged="false"
+
+  local governor_login_payload=""
+  governor_login_payload="$(build_login_json "$governor_email" "$governor_password")" || fail "Governor 登录请求构造失败"
+  status="$(curl_with_body_stdin "$governor_login_payload" --silent --show-error --max-time 10 \
+    -c "$governor_cookie_jar" -H 'Content-Type: application/json' -o "$governor_login_response_temp" \
+    -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/auth/session')"
+  unset governor_login_payload
+  [[ "$status" == "200" ]] || fail "Governor 登录状态为 $status"
+  governor_csrf_token="$(jq -er '.csrf_token | strings | select(length > 0)' "$governor_login_response_temp")"
+  write_curl_header_config "$governor_curl_config" 'X-CSRF-Token' "$governor_csrf_token" || fail "Governor curl 安全配置写入失败"
+  governor_cookie_token="$(awk 'NF >= 7 {value=$7} END {print value}' "$governor_cookie_jar")"
+  [[ -n "$governor_cookie_token" ]] || fail "Governor Cookie 会话未建立"
+  governor_role="$(jq -er '.principal.roles | if length == 1 then .[0] else error("role count") end' "$governor_login_response_temp")"
+  governor_capability="$(jq -er '.principal.capabilities | if length == 1 then .[0] else error("capability count") end' "$governor_login_response_temp")"
+  jq -e --arg governor "$governor_user_id" --arg creator "$user_id" --arg reviewer "$owner_b_seed_user_id" --arg provisioner "$provisioner_user_id" '
+    .principal.id == $governor
+    and .principal.roles == ["skill_governor"]
+    and .principal.capabilities == ["skill.govern"]
+    and $governor != $creator and $governor != $reviewer and $governor != $provisioner' \
+    "$governor_login_response_temp" >/dev/null || fail "Governor 登录未返回隔离的权威角色与 capability"
+  rm -f "$governor_login_response_temp"
+  governor_login_response_temp=""
+
+  baseline_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'version', skill_record.version,
+      'published_snapshot_id', skill_record.current_published_snapshot_id,
+      'publication_revision', skill_record.publication_revision,
+      'published_count', (SELECT COUNT(*) FROM business.skill_published_snapshot WHERE skill_id = skill_record.id),
+      'review_count', (SELECT COUNT(*) FROM business.skill_review_submission WHERE skill_id = skill_record.id),
+      'governance_receipt_count', (SELECT COUNT(*) FROM business.skill_command_receipt WHERE result_skill_id = skill_record.id AND command_type = 'governance_transition'),
+      'governance_audit_count', (SELECT COUNT(*) FROM business.skill_governance_audit WHERE skill_id = skill_record.id AND action IN ('governance_suspended','governance_resumed','governance_offlined'))
+    ) FROM business.skill AS skill_record WHERE skill_record.id = '$w1_skill_id'::uuid;")"
+  jq -e '.version >= 1 and (.published_snapshot_id | type) == "string" and .publication_revision == 1
+    and .published_count == 1 and .review_count == 1
+    and .governance_receipt_count == 0 and .governance_audit_count == 0' <<<"$baseline_fact" >/dev/null || \
+    fail "治理前 Skill 基线事实漂移"
+  existing_session_snapshot_before="$(read_existing_w1_session_snapshot_fact "$postgres_container")" || \
+    fail "治理前既有 Session Snapshot 事实读取失败"
+  jq -e '
+    .business.resolution_count == 1 and .business.item_count == 1 and .business.governance_epoch == 1
+    and .agent.session_count == 1 and .agent.snapshot_count == 1 and .agent.snapshot_kind == "published_refs"
+    and .agent.skill_count == 1 and .agent.item_count == 1 and .agent.governance_epoch == 1
+    and .business.published_snapshot_id == .agent.published_snapshot_id
+    and .business.snapshot_digest == .agent.snapshot_digest
+    and .business.content_digest == .agent.content_digest
+    and .business.runtime_content_digest == .agent.runtime_content_digest' \
+    <<<"$existing_session_snapshot_before" >/dev/null || fail "治理前既有 Session Snapshot 基线漂移"
+
+  creator_forbidden_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/admin/skill-governance/${w1_skill_id}")"
+  [[ "$creator_forbidden_status" == "403" ]] || fail "Creator 调用治理 API 状态为 $creator_forbidden_status"
+  creator_forbidden_code="$(jq -er '.error.code' "$response_file")"
+  [[ "$creator_forbidden_code" == "SKILL_GOVERNANCE_CAPABILITY_REQUIRED" ]] || fail "Creator 治理拒绝码漂移"
+
+  reviewer_forbidden_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/admin/skill-governance/${w1_skill_id}")"
+  [[ "$reviewer_forbidden_status" == "403" ]] || fail "Reviewer 调用治理 API 状态为 $reviewer_forbidden_status"
+  reviewer_forbidden_code="$(jq -er '.error.code' "$response_file")"
+  [[ "$reviewer_forbidden_code" == "SKILL_GOVERNANCE_CAPABILITY_REQUIRED" ]] || fail "Reviewer 治理拒绝码漂移"
+
+  governor_review_forbidden_status="$(curl --silent --show-error --max-time 10 -b "$governor_cookie_jar" \
+    -o "$response_file" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/admin/skill-reviews?status=reviewing')"
+  [[ "$governor_review_forbidden_status" == "403" ]] || fail "Governor 调用 Reviewer API 状态为 $governor_review_forbidden_status"
+  governor_review_forbidden_code="$(jq -er '.error.code' "$response_file")"
+  [[ "$governor_review_forbidden_code" == "SKILL_REVIEW_CAPABILITY_REQUIRED" ]] || fail "Governor Reviewer 拒绝码漂移"
+
+  queue_status="$(curl --silent --show-error --max-time 10 -b "$governor_cookie_jar" \
+    -o "$response_file" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/admin/skill-governance?status=active')"
+  [[ "$queue_status" == "200" ]] || fail "Governor active 队列状态为 $queue_status"
+  jq -e --arg skill "$w1_skill_id" 'any(.items[]; .skill_id == $skill and .governance_status == "active"
+    and .governance_epoch == 1 and .allowed_actions == ["suspend","offline"])' "$response_file" >/dev/null || \
+    fail "Governor active 队列未返回目标 Skill"
+
+  : >"$headers_file"
+  detail_status="$(curl --silent --show-error --max-time 10 -b "$governor_cookie_jar" -D "$headers_file" \
+    -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/admin/skill-governance/${w1_skill_id}")"
+  [[ "$detail_status" == "200" ]] || fail "Governor active 详情状态为 $detail_status"
+  active_etag="$(jq -er '.skill.governance_etag | strings | select(test("^\\\"[^\\\"]+\\\"$"))' "$response_file")"
+  [[ "$(response_header_value "$headers_file" 'ETag')" == "$active_etag" ]] || fail "治理 active Header/Body ETag 不一致"
+  [[ "$(response_header_value "$headers_file" 'Cache-Control')" == "no-store" ]] || fail "治理 active 详情缺少 no-store"
+  jq -e --arg skill "$w1_skill_id" '
+    keys == ["request_id","skill"]
+    and (.request_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+    and (.skill | keys) == ["allowed_actions","definition","governance_epoch","governance_etag","governance_status","published_at","skill_id"]
+    and (.skill.definition | type) == "object" and (.skill.published_at | type) == "string"
+    and .skill.skill_id == $skill and .skill.governance_status == "active"
+    and .skill.governance_epoch == 1 and .skill.allowed_actions == ["suspend","offline"]' "$response_file" >/dev/null || \
+    fail "治理 active 详情投影漂移"
+
+  write_conditional_curl_config "$conditional_config" "$governor_curl_config" "$active_etag" "governance-suspend-${run_id}" || \
+    fail "治理 suspend curl 配置写入失败"
+  : >"$headers_file"
+  suspend_status="$(curl_with_body_stdin "{\"action\":\"suspend\",\"reason_code\":\"incident_containment\",\"approval_reference\":\"SMOKE-SUSPEND-${run_id}\"}" \
+    --silent --show-error --max-time 10 -b "$governor_cookie_jar" --config "$conditional_config" -X POST \
+    -H 'Content-Type: application/json' -D "$headers_file" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/admin/skill-governance/${w1_skill_id}/decisions")"
+  [[ "$suspend_status" == "200" ]] || fail "治理 suspend 状态为 $suspend_status"
+  suspended_etag="$(jq -er '.skill.governance_etag' "$response_file")"
+  suspend_time="$(jq -er '.skill.transitioned_at' "$response_file")"
+  suspend_request_id="$(jq -er '.request_id' "$response_file")"
+  assert_governance_decision_response "$response_file" "$headers_file" "suspended" 2 '["resume","offline"]' || \
+    fail "治理 suspend 响应安全契约漂移"
+
+  : >"$headers_file"
+  suspend_replay_status="$(curl_with_body_stdin "{\"action\":\"suspend\",\"reason_code\":\"incident_containment\",\"approval_reference\":\"SMOKE-SUSPEND-${run_id}\"}" \
+    --silent --show-error --max-time 10 -b "$governor_cookie_jar" --config "$conditional_config" -X POST \
+    -H 'Content-Type: application/json' -D "$headers_file" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/admin/skill-governance/${w1_skill_id}/decisions")"
+  [[ "$suspend_replay_status" == "200" ]] || fail "治理 suspend 重放状态为 $suspend_replay_status"
+  assert_governance_decision_response "$response_file" "$headers_file" "suspended" 2 '["resume","offline"]' || \
+    fail "治理 suspend 重放响应安全契约漂移"
+  jq -e --arg etag "$suspended_etag" --arg transitioned "$suspend_time" --arg request "$suspend_request_id" '
+    .skill.governance_status == "suspended" and .skill.governance_epoch == 2
+    and .skill.governance_etag == $etag and .skill.transitioned_at == $transitioned and .request_id != $request' \
+    "$response_file" >/dev/null || fail "治理 suspend 重放未返回首次冻结业务结果"
+  suspend_replay_matches="true"
+
+  existing_session_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/agent/sessions/${w1_binding_session_id}/workspace")"
+  [[ "$existing_session_status" == "200" ]] || fail "Skill 暂停后既有 Session 不可读取，状态为 $existing_session_status"
+
+  local quick_payload=""
+  quick_payload="$(jq -cn --arg skill "$w1_skill_id" '{schema_version:"project_quick_create.v2",initial_prompt:"",enabled_skill_ids:[$skill]}')"
+  before_counts="$(read_governance_quickcreate_counts "$postgres_container")"
+  write_conditional_curl_config "$quick_config" "$user_curl_config" "" "governance-suspended-project-${run_id}" || fail "暂停 QuickCreate curl 配置写入失败"
+  suspended_quick_status="$(curl_with_body_stdin "$quick_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$quick_config" -H 'Content-Type: application/json' -o "$response_file" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/projects:quick-create')"
+  [[ "$suspended_quick_status" == "409" ]] || fail "Skill 暂停后 QuickCreate 状态为 $suspended_quick_status"
+  jq -e '.error.code == "PROJECT_SKILL_UNAVAILABLE"' "$response_file" >/dev/null || fail "暂停 QuickCreate 错误码漂移"
+  after_counts="$(read_governance_quickcreate_counts "$postgres_container")"
+  jq -ne --argjson before "$before_counts" --argjson after "$after_counts" '$before == $after' >/dev/null || \
+    fail "暂停 QuickCreate 留下部分 Project 事实"
+
+  write_conditional_curl_config "$conditional_config" "$governor_curl_config" "$suspended_etag" "governance-resume-${run_id}" || fail "治理 resume curl 配置写入失败"
+  : >"$headers_file"
+  resume_status="$(curl_with_body_stdin "{\"action\":\"resume\",\"reason_code\":\"incident_resolved\",\"approval_reference\":\"SMOKE-RESUME-${run_id}\"}" \
+    --silent --show-error --max-time 10 -b "$governor_cookie_jar" --config "$conditional_config" -X POST \
+    -H 'Content-Type: application/json' -D "$headers_file" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/admin/skill-governance/${w1_skill_id}/decisions")"
+  [[ "$resume_status" == "200" ]] || fail "治理 resume 状态为 $resume_status"
+  resumed_etag="$(jq -er '.skill.governance_etag' "$response_file")"
+  assert_governance_decision_response "$response_file" "$headers_file" "active" 3 '["suspend","offline"]' || \
+    fail "治理 resume 响应安全契约漂移"
+
+  write_conditional_curl_config "$quick_config" "$user_curl_config" "" "governance-resumed-project-${run_id}" || fail "恢复 QuickCreate curl 配置写入失败"
+  resumed_quick_status="$(curl_with_body_stdin "$quick_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$quick_config" -H 'Content-Type: application/json' -o "$response_file" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/projects:quick-create')"
+  [[ "$resumed_quick_status" == "201" ]] || fail "Skill 恢复后 QuickCreate 状态为 $resumed_quick_status"
+  resumed_project_id="$(jq -er '.project_id | strings | select(test("^[0-9a-f-]{36}$"))' "$response_file")"
+  poll_bootstrap_ready "$resumed_project_id" "$resumed_bootstrap" || fail "Skill 恢复后的新 Project 未进入 ready"
+
+  write_conditional_curl_config "$conditional_config" "$governor_curl_config" "$resumed_etag" "governance-offline-${run_id}" || fail "治理 offline curl 配置写入失败"
+  : >"$headers_file"
+  offline_status="$(curl_with_body_stdin "{\"action\":\"offline\",\"reason_code\":\"repeated_violation\",\"approval_reference\":\"SMOKE-OFFLINE-${run_id}\"}" \
+    --silent --show-error --max-time 10 -b "$governor_cookie_jar" --config "$conditional_config" -X POST \
+    -H 'Content-Type: application/json' -D "$headers_file" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/admin/skill-governance/${w1_skill_id}/decisions")"
+  [[ "$offline_status" == "200" ]] || fail "治理 offline 状态为 $offline_status"
+  offline_etag="$(jq -er '.skill.governance_etag' "$response_file")"
+  assert_governance_decision_response "$response_file" "$headers_file" "offline" 4 '[]' || \
+    fail "治理 offline 响应安全契约漂移"
+
+  before_counts="$(read_governance_quickcreate_counts "$postgres_container")"
+  write_conditional_curl_config "$quick_config" "$user_curl_config" "" "governance-offline-project-${run_id}" || fail "下架 QuickCreate curl 配置写入失败"
+  offline_quick_status="$(curl_with_body_stdin "$quick_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$quick_config" -H 'Content-Type: application/json' -o "$response_file" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/projects:quick-create')"
+  [[ "$offline_quick_status" == "409" ]] || fail "Skill 下架后 QuickCreate 状态为 $offline_quick_status"
+  jq -e '.error.code == "PROJECT_SKILL_UNAVAILABLE"' "$response_file" >/dev/null || fail "下架 QuickCreate 错误码漂移"
+  after_counts="$(read_governance_quickcreate_counts "$postgres_container")"
+  jq -ne --argjson before "$before_counts" --argjson after "$after_counts" '$before == $after' >/dev/null || \
+    fail "下架 QuickCreate 留下部分 Project 事实"
+
+  offline_resume_before_fact="$(read_governance_skill_state_fact "$postgres_container")" || fail "offline resume 前事实读取失败"
+  write_conditional_curl_config "$conditional_config" "$governor_curl_config" "$offline_etag" "governance-offline-resume-${run_id}" || fail "终态 resume curl 配置写入失败"
+  : >"$headers_file"
+  offline_resume_status="$(curl_with_body_stdin "{\"action\":\"resume\",\"reason_code\":\"risk_cleared\",\"approval_reference\":\"SMOKE-OFFLINE-RESUME-${run_id}\"}" \
+    --silent --show-error --max-time 10 -b "$governor_cookie_jar" --config "$conditional_config" -X POST \
+    -H 'Content-Type: application/json' -D "$headers_file" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/admin/skill-governance/${w1_skill_id}/decisions")"
+  [[ "$offline_resume_status" == "409" ]] || fail "offline 终态 resume 状态为 $offline_resume_status"
+  assert_governance_error_response "$response_file" "$headers_file" "SKILL_GOVERNANCE_CONFLICT" || fail "offline 终态错误响应漂移"
+  offline_resume_after_fact="$(read_governance_skill_state_fact "$postgres_container")" || fail "offline resume 后事实读取失败"
+  jq -ne --argjson before "$offline_resume_before_fact" --argjson after "$offline_resume_after_fact" '
+    $before == $after and $before.governance_status == "offline" and $before.governance_epoch == 4
+    and $before.governance_receipts == 3 and $before.governance_audits == 3' >/dev/null || \
+    fail "offline 终态 resume 改变了聚合、发布指针、回执或审计"
+  offline_resume_state_unchanged="true"
+
+  offline_existing_session_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/agent/sessions/${w1_binding_session_id}/workspace")"
+  [[ "$offline_existing_session_status" == "200" ]] || fail "Skill 下架后既有 Session 不可读取，状态为 $offline_existing_session_status"
+  jq -e --arg project "$w1_binding_project_id" --arg session "$w1_binding_session_id" '
+    .session.id == $session and .session.project_id == $project and .session.status == "active"' "$response_file" >/dev/null || \
+    fail "Skill 下架后既有 Session 权威投影漂移"
+  existing_session_snapshot_after="$(read_existing_w1_session_snapshot_fact "$postgres_container")" || \
+    fail "Skill 下架后既有 Session Snapshot 事实读取失败"
+  jq -ne --argjson before "$existing_session_snapshot_before" --argjson after "$existing_session_snapshot_after" '
+    $before == $after and $after.business.governance_epoch == 1 and $after.agent.governance_epoch == 1' >/dev/null || \
+    fail "Skill 下架改写了既有 Session 的 Business resolution 或 Agent snapshot"
+  existing_session_snapshot_unchanged="true"
+
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}")"
+  [[ "$status" == "200" ]] || fail "offline 后 Creator 详情状态为 $status"
+  offline_draft_etag="$(jq -er '.skill.draft_etag' "$response_file")"
+  local offline_payload=""
+  offline_payload="$(build_w1_skill_payload "W1 Skill offline draft ${run_id}" "offline-review")"
+  write_conditional_curl_config "$conditional_config" "$user_curl_config" "$offline_draft_etag" "" || fail "offline 草稿更新 curl 配置写入失败"
+  offline_update_status="$(curl_with_body_stdin "$offline_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$conditional_config" -X PUT -H 'Content-Type: application/json' -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/draft")"
+  [[ "$offline_update_status" == "200" ]] || fail "offline 后草稿更新状态为 $offline_update_status"
+  offline_updated_etag="$(jq -er '.skill.draft_etag' "$response_file")"
+  write_conditional_curl_config "$conditional_config" "$user_curl_config" "$offline_updated_etag" "governance-offline-review-${run_id}" || fail "offline 提审 curl 配置写入失败"
+  offline_submit_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" --config "$conditional_config" -X POST \
+    -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/reviews")"
+  [[ "$offline_submit_status" == "201" ]] || fail "offline 后新 Review 提交状态为 $offline_submit_status"
+  offline_review_id="$(jq -er '.review_id | strings | select(test("^[0-9a-f-]{36}$"))' "$response_file")"
+
+  : >"$headers_file"
+  offline_review_detail_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -D "$headers_file" \
+    -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${offline_review_id}")"
+  [[ "$offline_review_detail_status" == "200" ]] || fail "offline 后新 Review 详情状态为 $offline_review_detail_status"
+  offline_review_etag="$(jq -er '.review.review_etag' "$response_file")"
+  [[ "$(response_header_value "$headers_file" 'ETag')" == "$offline_review_etag" ]] || fail "offline Review Header/Body ETag 不一致"
+  write_conditional_curl_config "$conditional_config" "$owner_b_curl_config" "$offline_review_etag" "governance-offline-approve-${run_id}" || fail "offline 审批 curl 配置写入失败"
+  offline_approve_status="$(curl_with_body_stdin '{"decision":"approved"}' --silent --show-error --max-time 10 \
+    -b "$owner_b_cookie_jar" --config "$conditional_config" -X POST -H 'Content-Type: application/json' \
+    -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${offline_review_id}/decisions")"
+  [[ "$offline_approve_status" == "409" ]] || fail "offline 后批准 Review 状态为 $offline_approve_status"
+  jq -e '.error.code == "SKILL_REVIEW_CONFLICT"' "$response_file" >/dev/null || fail "offline 后批准错误码漂移"
+
+  local governor_revoke_output="$w1_temp_dir/governor-revoke.json"
+  (
+    cd "$repo_root/business"
+    DORA_ROLE_ADMIN_POSTGRES_DSN="$BUSINESS_DATABASE_URL" GOWORK=off "$go_bin" run ./cmd/business-role-admin \
+      -action revoke -assignment-id "$governor_assignment_id" -expected-version 1 \
+      -target-user-id "$governor_user_id" -actor-user-id "$provisioner_user_id" \
+      -role skill_governor -reason local_smoke_governance_cleanup \
+      -approval-reference "local-smoke-governor-revoke-${run_id}"
+  ) >"$governor_revoke_output"
+  jq -e --arg assignment "$governor_assignment_id" --arg governor "$governor_user_id" '
+    .action == "revoke" and .assignment_id == $assignment and .target_user_id == $governor
+    and .role == "skill_governor" and .status == "revoked" and .version == 2' "$governor_revoke_output" >/dev/null || \
+    fail "Governor 正式撤权结果漂移"
+  governor_session_status="$(curl --silent --show-error --max-time 10 -b "$governor_cookie_jar" \
+    -o "$response_file" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/auth/session')"
+  [[ "$governor_session_status" == "200" ]] || fail "Governor 撤权后 Session 重新解析状态为 $governor_session_status"
+  jq -e --arg governor "$governor_user_id" '.principal.id == $governor and .principal.roles == [] and .principal.capabilities == []' \
+    "$response_file" >/dev/null || fail "Governor 撤权后同一 Cookie 仍保留 capability"
+  revoked_role_count="$(jq -er '.principal.roles | length' "$response_file")"
+  revoked_capability_count="$(jq -er '.principal.capabilities | length' "$response_file")"
+  governor_denied_status="$(curl --silent --show-error --max-time 10 -b "$governor_cookie_jar" \
+    -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/admin/skill-governance/${w1_skill_id}")"
+  [[ "$governor_denied_status" == "403" ]] || fail "Governor 撤权后治理 API 状态为 $governor_denied_status"
+  governor_denied_code="$(jq -er '.error.code' "$response_file")"
+  [[ "$governor_denied_code" == "SKILL_GOVERNANCE_CAPABILITY_REQUIRED" ]] || fail "Governor 撤权错误码漂移"
+
+  final_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'governance_status', skill_record.governance_status,
+      'governance_epoch', skill_record.governance_epoch,
+      'version', skill_record.version,
+      'current_published_snapshot_id', skill_record.current_published_snapshot_id,
+      'publication_revision', skill_record.publication_revision,
+      'published_count', (SELECT COUNT(*) FROM business.skill_published_snapshot WHERE skill_id = skill_record.id),
+      'review_count', (SELECT COUNT(*) FROM business.skill_review_submission WHERE skill_id = skill_record.id),
+      'new_review_reviewing', EXISTS (SELECT 1 FROM business.skill_review_submission WHERE id = '$offline_review_id'::uuid AND status = 'reviewing'),
+      'failed_approve_receipts', (SELECT COUNT(*) FROM business.skill_command_receipt WHERE command_type = 'approve_and_publish' AND scope_id = '$offline_review_id'::uuid),
+      'failed_approve_audits', (SELECT COUNT(*) FROM business.skill_governance_audit WHERE review_submission_id = '$offline_review_id'::uuid),
+      'governance_receipts', (SELECT COUNT(*) FROM business.skill_command_receipt WHERE result_skill_id = skill_record.id AND command_type = 'governance_transition'),
+      'governance_audits', (SELECT COUNT(*) FROM business.skill_governance_audit WHERE skill_id = skill_record.id AND action IN ('governance_suspended','governance_resumed','governance_offlined')),
+      'linked_governance_facts', (SELECT COUNT(*) FROM business.skill_command_receipt AS receipt JOIN business.skill_governance_audit AS audit ON audit.command_receipt_id = receipt.id WHERE receipt.result_skill_id = skill_record.id AND receipt.command_type = 'governance_transition' AND receipt.actor_user_id = audit.actor_user_id AND receipt.response_governance_status = audit.to_status AND receipt.response_governance_epoch = audit.governance_epoch),
+      'strict_governance_linkage', NOT EXISTS (
+        SELECT 1
+        FROM business.skill_command_receipt AS receipt
+        LEFT JOIN business.skill_governance_audit AS audit ON audit.command_receipt_id = receipt.id
+        WHERE receipt.result_skill_id = skill_record.id
+          AND receipt.command_type = 'governance_transition'
+          AND (
+            audit.id IS NULL
+            OR receipt.scope_id IS DISTINCT FROM skill_record.id
+            OR audit.skill_id IS DISTINCT FROM skill_record.id
+            OR receipt.actor_user_id IS DISTINCT FROM audit.actor_user_id
+            OR receipt.request_id IS DISTINCT FROM audit.request_id
+            OR receipt.response_governance_status IS DISTINCT FROM audit.to_status
+            OR receipt.response_governance_epoch IS DISTINCT FROM audit.governance_epoch
+            OR receipt.created_at IS DISTINCT FROM audit.occurred_at
+            OR receipt.result_content_revision_id IS NOT NULL
+            OR receipt.result_review_submission_id IS NOT NULL
+            OR receipt.result_published_snapshot_id IS DISTINCT FROM skill_record.current_published_snapshot_id
+            OR receipt.response_published_snapshot_id IS DISTINCT FROM skill_record.current_published_snapshot_id
+            OR receipt.response_review_submission_id IS NOT NULL
+            OR receipt.response_review_status IS NOT NULL
+            OR receipt.response_review_reason_code IS NOT NULL
+            OR receipt.response_review_updated_at IS NOT NULL
+            OR audit.review_submission_id IS NOT NULL
+            OR audit.actor_role_key IS DISTINCT FROM 'skill_governor'
+            OR audit.safe_reason_code IS NULL
+            OR audit.approval_reference IS NULL
+            OR audit.source_address IS NULL
+          )
+      ),
+      'transition_matrix_matches', (SELECT COUNT(*) FROM business.skill_governance_audit WHERE skill_id = skill_record.id AND ((action = 'governance_suspended' AND from_status = 'active' AND to_status = 'suspended' AND governance_epoch = 2) OR (action = 'governance_resumed' AND from_status = 'suspended' AND to_status = 'active' AND governance_epoch = 3) OR (action = 'governance_offlined' AND from_status = 'active' AND to_status = 'offline' AND governance_epoch = 4))),
+      'original_resolution_epoch_one', EXISTS (SELECT 1 FROM business.project_session_skill_resolution AS resolution JOIN business.project_session_skill_resolution_item AS item ON item.resolution_id = resolution.id WHERE resolution.project_id = '$w1_binding_project_id'::uuid AND item.skill_id = skill_record.id AND item.governance_epoch = 1),
+      'resumed_resolution_epoch_three', EXISTS (SELECT 1 FROM business.project_session_skill_resolution AS resolution JOIN business.project_session_skill_resolution_item AS item ON item.resolution_id = resolution.id WHERE resolution.project_id = '$resumed_project_id'::uuid AND item.skill_id = skill_record.id AND item.governance_epoch = 3)
+    ) FROM business.skill AS skill_record WHERE skill_record.id = '$w1_skill_id'::uuid;")"
+  jq -e --arg pointer "$(jq -er '.published_snapshot_id' <<<"$baseline_fact")" \
+    --argjson base_version "$(jq -er '.version' <<<"$baseline_fact")" \
+    --argjson offline_version "$(jq -er '.version' <<<"$offline_resume_before_fact")" '
+    .governance_status == "offline" and .governance_epoch == 4
+    and $offline_version == ($base_version + 3)
+    and .current_published_snapshot_id == $pointer and .publication_revision == 1 and .published_count == 1
+    and .review_count == 2 and .new_review_reviewing and .failed_approve_receipts == 0 and .failed_approve_audits == 0
+    and .governance_receipts == 3 and .governance_audits == 3 and .linked_governance_facts == 3
+    and .strict_governance_linkage and .transition_matrix_matches == 3
+    and .original_resolution_epoch_one and .resumed_resolution_epoch_three' \
+    <<<"$final_fact" >/dev/null || fail "治理终态、回执审计、发布指针或 Snapshot epoch 事实漂移"
+  final_ready_status="$(curl --silent --show-error --max-time 10 -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18081/readyz')"
+  [[ "$final_ready_status" == "200" ]] || fail "治理事实落库后 Business Readiness 状态为 $final_ready_status"
+
+  governance_produced_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -n --arg run_id "$run_id" --arg produced_at "$governance_produced_at" --arg skill_id "$w1_skill_id" \
+    --arg resumed_project_id "$resumed_project_id" --arg offline_review_id "$offline_review_id" \
+    --arg governor_role "$governor_role" --arg governor_capability "$governor_capability" \
+    --arg creator_forbidden_code "$creator_forbidden_code" --arg reviewer_forbidden_code "$reviewer_forbidden_code" \
+    --arg governor_review_forbidden_code "$governor_review_forbidden_code" --arg governor_denied_code "$governor_denied_code" \
+    --arg source_digest_sha256 "$source_digest_sha256" --arg business_binary_sha256 "$business_binary_sha256" \
+    --arg agent_binary_sha256 "$agent_binary_sha256" --argjson creator_forbidden "$creator_forbidden_status" \
+    --argjson reviewer_forbidden "$reviewer_forbidden_status" --argjson governor_review_forbidden "$governor_review_forbidden_status" \
+    --argjson queue_status "$queue_status" --argjson detail_status "$detail_status" \
+    --argjson suspend_status "$suspend_status" --argjson suspend_replay_status "$suspend_replay_status" \
+    --argjson existing_session_status "$existing_session_status" --argjson suspended_quick_status "$suspended_quick_status" \
+    --argjson resume_status "$resume_status" --argjson resumed_quick_status "$resumed_quick_status" \
+    --argjson offline_status "$offline_status" --argjson offline_quick_status "$offline_quick_status" \
+    --argjson offline_existing_session_status "$offline_existing_session_status" \
+    --argjson offline_resume_status "$offline_resume_status" --argjson offline_update_status "$offline_update_status" \
+    --argjson offline_submit_status "$offline_submit_status" --argjson offline_review_detail_status "$offline_review_detail_status" \
+    --argjson offline_approve_status "$offline_approve_status" --argjson governor_session_status "$governor_session_status" \
+    --argjson governor_denied_status "$governor_denied_status" --argjson revoked_role_count "$revoked_role_count" \
+    --argjson revoked_capability_count "$revoked_capability_count" --argjson suspend_replay_matches "$suspend_replay_matches" \
+    --argjson offline_resume_state_unchanged "$offline_resume_state_unchanged" \
+    --argjson existing_session_snapshot_unchanged "$existing_session_snapshot_unchanged" \
+    --argjson final_ready_status "$final_ready_status" \
+    --argjson database "$final_fact" '
+    {schema_version:"w1.skill-governance.smoke.evidence.v1",status:"pending",run_id:$run_id,produced_at:$produced_at,
+      source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,agent_binary_sha256:$agent_binary_sha256,
+      skill_id:$skill_id,resumed_project_id:$resumed_project_id,offline_review_id:$offline_review_id,
+      facts:{governance_status:$database.governance_status,governance_epoch:$database.governance_epoch,
+        governance_receipts:$database.governance_receipts,governance_audits:$database.governance_audits,
+        linked_governance_facts:$database.linked_governance_facts,published_count:$database.published_count,
+        review_count:$database.review_count,strict_governance_linkage:$database.strict_governance_linkage,
+        offline_resume_state_unchanged:$offline_resume_state_unchanged,
+        existing_session_snapshot_unchanged:$existing_session_snapshot_unchanged},
+      assertions:{
+        skill_governor_rbac:($governor_role == "skill_governor" and $governor_capability == "skill.govern"
+          and $creator_forbidden == 403 and $creator_forbidden_code == "SKILL_GOVERNANCE_CAPABILITY_REQUIRED"
+          and $reviewer_forbidden == 403 and $reviewer_forbidden_code == "SKILL_GOVERNANCE_CAPABILITY_REQUIRED"
+          and $governor_review_forbidden == 403 and $governor_review_forbidden_code == "SKILL_REVIEW_CAPABILITY_REQUIRED"
+          and $queue_status == 200 and $detail_status == 200),
+        skill_governor_revocation:($governor_session_status == 200 and $revoked_role_count == 0 and $revoked_capability_count == 0
+          and $governor_denied_status == 403 and $governor_denied_code == "SKILL_GOVERNANCE_CAPABILITY_REQUIRED"),
+        skill_governance_idempotency:($suspend_status == 200 and $suspend_replay_status == 200
+          and $suspend_replay_matches
+          and $database.governance_receipts == 3 and $database.governance_audits == 3
+          and $database.linked_governance_facts == 3 and $database.strict_governance_linkage
+          and $final_ready_status == 200),
+        skill_governance_quickcreate_gate:($existing_session_status == 200 and $suspended_quick_status == 409
+          and $resume_status == 200 and $resumed_quick_status == 201 and $offline_quick_status == 409
+          and $offline_existing_session_status == 200 and $existing_session_snapshot_unchanged
+          and $database.original_resolution_epoch_one and $database.resumed_resolution_epoch_three),
+        skill_governance_offline_terminal:($offline_status == 200 and $offline_resume_status == 409
+          and $offline_resume_state_unchanged
+          and $offline_update_status == 200 and $offline_submit_status == 201 and $offline_review_detail_status == 200
+          and $offline_approve_status == 409 and $database.governance_status == "offline" and $database.governance_epoch == 4
+          and $database.published_count == 1 and $database.new_review_reviewing
+          and $database.failed_approve_receipts == 0 and $database.failed_approve_audits == 0)
+      }}' >"$governance_pending_evidence_file"
+  jq -e '.schema_version == "w1.skill-governance.smoke.evidence.v1" and .status == "pending"
+    and (.assertions | keys) == ["skill_governance_idempotency","skill_governance_offline_terminal","skill_governance_quickcreate_gate","skill_governor_rbac","skill_governor_revocation"]
+    and all(.assertions[]; . == true)' "$governance_pending_evidence_file" >/dev/null || \
+    fail "Skill Governance Evidence 含未通过或非闭集断言"
+  w1_skill_governance_smoke_ran=true
+}
+
 run_w1_browser_frozen_smoke() {
   local postgres_container="$1"
   local browser_result_file="$2"
@@ -1510,6 +2119,9 @@ if [[ "$w1_skill_smoke_enabled" == "1" && "${W0_RUN_BROWSER_SMOKE:-0}" == "1" ]]
 fi
 # 新运行开始即撤销旧的 canonical summary；失败运行不得让消费者继续读取上一次 passed。
 rm -f "$evidence_file"
+if [[ -n "$governance_evidence_file" ]]; then
+  rm -f "$governance_evidence_file" "${governance_evidence_file}.tmp"
+fi
 if [[ -n "$legacy_evidence_file" ]]; then
   rm -f "$legacy_evidence_file"
 fi
@@ -1527,6 +2139,14 @@ source_manifest_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-source-manifest.XXXXXX"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   w1_temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/dora-w1-skill.XXXXXX")"
   chmod 700 "$w1_temp_dir"
+  governance_pending_evidence_file="$evidence_dir/governance-evidence.pending.json"
+  governor_cookie_jar="$w1_temp_dir/governor-cookie.jar"
+  governor_curl_config="$w1_temp_dir/governor-csrf.curl"
+  governor_login_response_temp="$w1_temp_dir/governor-login.json"
+  : >"$governor_cookie_jar"
+  : >"$governor_curl_config"
+  : >"$governor_login_response_temp"
+  chmod 600 "$governor_cookie_jar" "$governor_curl_config" "$governor_login_response_temp"
 else
   w05_browser_result_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-browser-result.XXXXXX")"
   w05_retention_control_dir="$(mktemp -d "${TMPDIR:-/tmp}/dora-w05-retention-control.XXXXXX")"
@@ -1594,6 +2214,9 @@ owner_b_display_name="本地冒烟权限用户"
 provisioner_email="provisioner.${DORA_SMOKE_USER_EMAIL}"
 provisioner_password="provisioner-${DORA_SMOKE_USER_PASSWORD}"
 provisioner_display_name="本地冒烟角色赋权人"
+governor_email="governor.${DORA_SMOKE_USER_EMAIL}"
+governor_password="governor-${DORA_SMOKE_USER_PASSWORD}"
+governor_display_name="本地冒烟 Skill 治理员"
 
 "${compose[@]}" up -d
 ENV_FILE="$env_file" "$repo_root/scripts/wait-for-local-infra.sh"
@@ -1601,13 +2224,15 @@ MIGRATE_BIN="$migrate_bin" "$repo_root/scripts/migrate.sh" business up
 MIGRATE_BIN="$migrate_bin" "$repo_root/scripts/migrate.sh" agent up
 (
   cd "$repo_root/business"
-  GOWORK=off "$go_bin" run ./cmd/local-smoke-seeder
+  GOWORK=off "$go_bin" run -tags localsmoke ./cmd/local-smoke-seeder
 )
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   (
     cd "$repo_root/business"
     DORA_SMOKE_REVIEWER_EMAIL="$owner_b_email" DORA_SMOKE_REVIEWER_PASSWORD="$owner_b_password" \
       DORA_SMOKE_REVIEWER_DISPLAY_NAME="$owner_b_display_name" \
+      DORA_SMOKE_GOVERNOR_EMAIL="$governor_email" DORA_SMOKE_GOVERNOR_PASSWORD="$governor_password" \
+      DORA_SMOKE_GOVERNOR_DISPLAY_NAME="$governor_display_name" \
       DORA_SMOKE_PROVISIONER_EMAIL="$provisioner_email" DORA_SMOKE_PROVISIONER_PASSWORD="$provisioner_password" \
       DORA_SMOKE_PROVISIONER_DISPLAY_NAME="$provisioner_display_name" \
       GOWORK=off "$go_bin" run -tags localsmoke ./cmd/local-smoke-reviewer-seeder
@@ -1615,18 +2240,25 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   reviewer_assignment_id="$(jq -er '.assignment_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
   owner_b_seed_user_id="$(jq -er '.reviewer_user_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
   reviewer_seed_creator_user_id="$(jq -er '.creator_user_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
+  governor_assignment_id="$(jq -er '.governor_assignment_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
+  governor_user_id="$(jq -er '.governor_user_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
   provisioner_user_id="$(jq -er '.provisioner_user_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
   jq -e '
     .role == "skill_reviewer" and .reason == "local_smoke_fixture"
+    and .governor_role == "skill_governor" and .governor_reason == "local_smoke_governance_fixture"
+    and .assignment_id != .governor_assignment_id
     and .creator_user_id != .reviewer_user_id
+    and .creator_user_id != .governor_user_id
     and .creator_user_id != .provisioner_user_id
-    and .reviewer_user_id != .provisioner_user_id' "$owner_b_seed_response_temp" >/dev/null || \
-    fail "Reviewer Seeder 未创建三身份隔离的正式角色分配"
+    and .reviewer_user_id != .governor_user_id
+    and .reviewer_user_id != .provisioner_user_id
+    and .governor_user_id != .provisioner_user_id' "$owner_b_seed_response_temp" >/dev/null || \
+    fail "Reviewer/Governor Seeder 未创建四身份隔离的正式角色分配"
 else
   (
     cd "$repo_root/business"
     DORA_SMOKE_USER_EMAIL="$owner_b_email" DORA_SMOKE_USER_PASSWORD="$owner_b_password" \
-      DORA_SMOKE_USER_DISPLAY_NAME="$owner_b_display_name" GOWORK=off "$go_bin" run ./cmd/local-smoke-seeder
+      DORA_SMOKE_USER_DISPLAY_NAME="$owner_b_display_name" GOWORK=off "$go_bin" run -tags localsmoke ./cmd/local-smoke-seeder
   ) >"$owner_b_seed_response_temp"
   owner_b_seed_user_id="$(jq -er 'select(.status == "ready") | .user_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
 fi
@@ -1732,6 +2364,7 @@ postgres_container="$("${compose[@]}" ps -q postgres)"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   run_w1_skill_smoke "$postgres_container"
   run_w1_skill_binding_smoke "$postgres_container"
+  run_w1_skill_governance_smoke "$postgres_container"
 fi
 business_assertion="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
   SELECT json_build_object(
@@ -2401,6 +3034,14 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
       | ($boolean_assertions | length) == 42
       and all($boolean_assertions[]; ((.value | type) == "boolean" and .value == true)))' \
     "$pending_evidence_file" >/dev/null || fail "W1 canonical Evidence 含未通过断言，禁止发布 passed summary"
+  [[ "$w1_skill_governance_smoke_ran" == "true" && -s "$governance_pending_evidence_file" ]] || \
+    fail "W1 Governance Smoke 未产生独立 pending Evidence"
+  jq -e '
+    .schema_version == "w1.skill-governance.smoke.evidence.v1"
+    and .status == "pending"
+    and (.assertions | keys) == ["skill_governance_idempotency","skill_governance_offline_terminal","skill_governance_quickcreate_gate","skill_governor_rbac","skill_governor_revocation"]
+    and all(.assertions[]; . == true)' "$governance_pending_evidence_file" >/dev/null || \
+    fail "W1 Governance Evidence 含未通过断言，禁止发布 passed summary"
 elif [[ "$browser_smoke_ran" == "true" ]]; then
   jq -e '
     .schema_version == "w05.workspace-transport.smoke.evidence.v3"
@@ -2441,11 +3082,17 @@ assert_evidence_excludes_regex '(?i)x-csrf-token[[:space:]]*:' "CSRF Header"
 assert_evidence_excludes_regex '(?i)"password"[[:space:]]*:' "密码字段"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   assert_evidence_excludes_literal "$provisioner_password" "Reviewer Provisioner 密码"
+  assert_evidence_excludes_literal "$governor_password" "Skill Governor 密码"
+  assert_evidence_excludes_literal "$governor_csrf_token" "Skill Governor CSRF"
+  assert_evidence_excludes_literal "$governor_cookie_token" "Skill Governor Cookie"
   assert_evidence_excludes_literal "$w1_skill_name" "W1 Skill 原始名称"
   assert_evidence_excludes_literal "$w1_updated_skill_name" "W1 Skill 更新后原始名称"
   assert_evidence_excludes_literal "$w1_binding_prompt" "W1 Binding 完整 Prompt"
   assert_evidence_excludes_regex '"definition"[[:space:]]*:' "W1 Skill 完整定义正文"
   assert_evidence_excludes_regex '(?i)"(payload_nonce|payload_ciphertext|runtime_content_ciphertext)"[[:space:]]*:' "W1 密文或 Nonce 字段"
+  assert_evidence_excludes_regex '"governance_etag"[[:space:]]*:|"sg1-' "Skill Governance ETag"
+  assert_evidence_excludes_regex 'incident_containment|incident_resolved|repeated_violation|risk_cleared|SMOKE-(SUSPEND|RESUME|OFFLINE)' "Skill Governance 原因或审批引用"
+  assert_evidence_excludes_regex 'governance-(suspend|resume|offline|suspended-project|resumed-project|offline-project)' "Skill Governance 原始幂等键"
   if [[ -n "${BUSINESS_PROJECT_PROMPT_KEY_BASE64:-}" ]]; then
     assert_evidence_excludes_literal "$BUSINESS_PROJECT_PROMPT_KEY_BASE64" "Business Prompt 密钥材料"
   fi
@@ -2456,15 +3103,22 @@ fi
 
 # 只有脱敏扫描、Runtime 退出和 etcd 租约摘除全部成功后，才原子发布 passed summary。
 jq '.status = "passed"' "$pending_evidence_file" >"${evidence_file}.tmp"
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  jq '.status = "passed"' "$governance_pending_evidence_file" >"${governance_evidence_file}.tmp"
+fi
 rm -f "$pending_evidence_file"
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  rm -f "$governance_pending_evidence_file"
+  mv "${governance_evidence_file}.tmp" "$governance_evidence_file"
+fi
 # canonical W0.5 summary 是最后一次可失败写操作；旧 W0 summary 已在运行开始撤销，避免双真源假绿。
 mv "${evidence_file}.tmp" "$evidence_file"
 trap - EXIT
 
 if [[ "$w1_skill_smoke_enabled" == "1" && "$w1_browser_smoke_ran" == "true" ]]; then
-  echo "W1 Skill 发布、Project Binding、Session Snapshot v2、跨 Owner 与浏览器冒烟通过"
+  echo "W1 Skill 发布、治理、Project Binding、Session Snapshot v2、跨 Owner 与浏览器冒烟通过"
 elif [[ "$w1_skill_smoke_enabled" == "1" ]]; then
-  echo "W1 Skill 发布、Project Binding、Session Snapshot v2、数据库一致性与跨 Owner 冒烟通过"
+  echo "W1 Skill 发布、治理、Project Binding、Session Snapshot v2、数据库一致性与跨 Owner 冒烟通过"
 elif [[ "$browser_smoke_ran" == "true" ]]; then
   echo "W0.5 Transport API/Snapshot/SSE 与真实浏览器登录、Quick Create、正式工作台、退出冒烟通过"
 else

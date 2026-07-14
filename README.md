@@ -8,11 +8,11 @@ Dora 是面向桌面 Web 的 Skill 驱动 AIGC Agent 平台。本仓库正在从
 
 | 范围 | 当前事实 | 下一门槛 |
 | --- | --- | --- |
-| 前端 | `frontend/` 已接入真实登录/退出、QuickCreate、Project Workspace、Snapshot→SSE 水合和 Input 六态，W0.5 Chromium 主路径通过；其余业务页面仍包含 Mock 数据 | 补受控断网、Cursor reset、跨 Owner 与旧连接隔离矩阵，再按业务纵切移除 Mock |
-| Business Service | `business/` 已具备真实 Auth/Session、Project QuickCreate/Bootstrap、加密 Outbox/Dispatcher、Agent Workspace BFF 与内部身份签名 | 完整管理员角色/数据范围 RBAC 留在 W5；继续实现 W1 领域纵切 |
+| 前端 | `frontend/` 已接入真实登录/退出、QuickCreate、Project Workspace、Snapshot→SSE、Owner Skill Builder、Reviewer 管理入口和最多 16 项 Published+Active Skill 选择；W0.5/W1 Chromium 主路径通过 | 继续实现公开 Skill 市场与治理页面，再按业务纵切移除 Mock |
+| Business Service | `business/` 已具备真实 Auth/Session、Project QuickCreate/Bootstrap、Skill 草稿/审核/不可变发布、Reviewer/Governor 动态权限、治理状态机、加密 Outbox/Dispatcher、Agent Workspace BFF 与内部身份签名 | 实现公开 Skill 市场；完整管理员角色/数据范围 RBAC 仍留在 W5 |
 | Agent Service | `agent/` 已具备 Session/Input/Event Transport、幂等 Ensure RPC、Workspace Snapshot、PostgreSQL 补读优先 SSE、内部身份验签和 Nonce 防重放；尚未注册六个 Graph Tool | 完成对应中文设计评审后，从 Agent Runtime/首个 Graph Tool 纵切推进 |
 | Business Worker | `worker/` 已可独立构建，具备依赖探针、执行器资源边界、健康检查与优雅退出；尚未消费 Job | Job/Event/Finalize 契约评审通过后实现 Claim/Lease/Heartbeat |
-| 本地基础设施 | `go.work`、三 Schema Migration、PostgreSQL/Redis/etcd Compose、跨服务 Probe、Schema Catalog 契约测试，以及 W0/W0.5 真实 API/浏览器 Smoke 已建立 | 把脱敏 Evidence 与故障注入矩阵纳入持续 CI |
+| 本地基础设施 | `go.work`、三 Schema Migration、PostgreSQL/Redis/etcd Compose、跨服务 Probe、Schema Catalog 契约测试，以及 W0/W0.5/W1 真实 API/浏览器 Smoke 已建立；W1 另有四角色治理 HTTP/数据库 Evidence | 把脱敏 Evidence 与故障注入矩阵纳入持续 CI |
 
 根目录不再保留生产 `go.mod`、`go.sum`；`go.work` 只用于本地联调，CI 和发布必须在三个 Module 内以 `GOWORK=off` 独立执行。`main` 分支及旧 `internal/aigc/**` 代码只可作为历史实现参考，不得整分支恢复或直接作为当前能力验收。
 
@@ -120,6 +120,14 @@ make GO=/Users/figo/sdk/go1.26.3/bin/go W0_ENV_FILE=.env.example w05-smoke
 make GO=/Users/figo/sdk/go1.26.3/bin/go W0_ENV_FILE=.env.example w05-browser-smoke
 ```
 
+W1 Skill Foundation、Reviewer 浏览器链和 Governor HTTP/数据库治理链使用同一完整门禁：
+
+```bash
+make GO=/Users/figo/sdk/go1.26.3/bin/go W0_ENV_FILE=.env.example w1-smoke
+```
+
+成功运行会同时发布权限为 `0600` 的 `.local/smoke/w1-skill-foundation-evidence.json` 与 `.local/smoke/w1-skill-governance-evidence.json`。前者固定为 canonical v3 的 47 项 assertions/42 项布尔门禁；后者固定为独立治理 v1 的五项闭集布尔门禁，不扩容 canonical 合同。该命令已经覆盖 Creator/Reviewer Chromium 主链和 Governor 真实 Login、暂停/恢复/offline、QuickCreate 门禁、正式撤权；不表示治理页面、公开 Skill 市场或完整 ADM-RBAC 已实现。
+
 Foundation Thrift 代码只能从 Business Owner 的单一 IDL 生成。修改 IDL 后执行：
 
 ```bash
@@ -138,4 +146,4 @@ make build
 make check-database-contracts
 ```
 
-基础设施默认使用 PostgreSQL `15432`、Redis `16379`、etcd `12379`；Business HTTP 使用 `18081`，Agent HTTP 使用 `18082`，Business Foundation RPC 使用 `19081`，避免与历史 Demo 占用的标准端口冲突。W0.5 尚未覆盖的受控断网、跨 Owner、Cursor reset 后完整回源与旧连接隔离，以全功能冒烟开发推进计划为准。
+基础设施默认使用 PostgreSQL `15432`、Redis `16379`、etcd `12379`；Business HTTP 使用 `18081`，Agent HTTP 使用 `18082`，Business Foundation RPC 使用 `19081`，避免与历史 Demo 占用的标准端口冲突。W0.5 已覆盖受控断网、跨 Owner、Cursor reset 后完整回源与旧连接隔离；尚未完成的业务域和全功能冒烟口径以推进计划为准。

@@ -1,6 +1,6 @@
 //go:build localsmoke
 
-// Package main 提供只允许 local 环境编译执行的 Creator、Reviewer 与 Provisioner 角色夹具。
+// Package main 提供只允许 local 环境编译执行的 Creator、Reviewer、Governor 与 Provisioner 角色夹具。
 package main
 
 import (
@@ -25,9 +25,11 @@ import (
 const (
 	localReviewerReason            = "local_smoke_fixture"
 	localReviewerApprovalReference = "local-smoke-reviewer-fixture-v1"
+	localGovernorReason            = "local_smoke_governance_fixture"
+	localGovernorApprovalReference = "local-smoke-governor-fixture-v1"
 )
 
-// reviewerSeederOutput 是成功时允许写入 Evidence 的非敏感角色夹具结果。
+// reviewerSeederOutput 是仅供 0700 临时目录消费的角色夹具结果；调用方不得把 reason 字段复制到 Evidence。
 type reviewerSeederOutput struct {
 	// AssignmentID 是正式 Authorization Repository 保存的角色分配 UUIDv7。
 	AssignmentID string `json:"assignment_id"`
@@ -35,10 +37,18 @@ type reviewerSeederOutput struct {
 	Role string `json:"role"`
 	// Reason 是固定 local_smoke_fixture。
 	Reason string `json:"reason"`
+	// GovernorAssignmentID 是正式 Authorization Repository 保存的独立治理角色分配 UUIDv7。
+	GovernorAssignmentID string `json:"governor_assignment_id"`
+	// GovernorRole 固定为 skill_governor。
+	GovernorRole string `json:"governor_role"`
+	// GovernorReason 是与 Reviewer 不同的稳定治理夹具原因。
+	GovernorReason string `json:"governor_reason"`
 	// CreatorUserID 是普通 Skill 创建者 UUIDv7。
 	CreatorUserID string `json:"creator_user_id"`
 	// ReviewerUserID 是获得正式 Reviewer assignment 的用户 UUIDv7。
 	ReviewerUserID string `json:"reviewer_user_id"`
+	// GovernorUserID 是只获得正式 Governor assignment 的用户 UUIDv7。
+	GovernorUserID string `json:"governor_user_id"`
 	// ProvisionerUserID 是与 Creator、Reviewer 分离的本地赋权 actor UUIDv7。
 	ProvisionerUserID string `json:"provisioner_user_id"`
 }
@@ -61,7 +71,7 @@ func main() {
 	}
 }
 
-// run 校验 build-tag 之外的环境与 DSN 边界，准备三个独立用户并通过正式 Authorization Service 授权。
+// run 校验 build-tag 之外的环境与 DSN 边界，准备四个独立用户并通过正式 Authorization Service 分别授权。
 func run() error {
 	if strings.TrimSpace(os.Getenv("DORA_ENV")) != "local" {
 		return localseed.ErrLocalEnvironmentRequired
@@ -78,11 +88,15 @@ func run() error {
 		Email: os.Getenv("DORA_SMOKE_REVIEWER_EMAIL"), Password: os.Getenv("DORA_SMOKE_REVIEWER_PASSWORD"),
 		DisplayName: os.Getenv("DORA_SMOKE_REVIEWER_DISPLAY_NAME"),
 	}
+	governor := smokeUserConfig{
+		Email: os.Getenv("DORA_SMOKE_GOVERNOR_EMAIL"), Password: os.Getenv("DORA_SMOKE_GOVERNOR_PASSWORD"),
+		DisplayName: os.Getenv("DORA_SMOKE_GOVERNOR_DISPLAY_NAME"),
+	}
 	provisioner := smokeUserConfig{
 		Email: os.Getenv("DORA_SMOKE_PROVISIONER_EMAIL"), Password: os.Getenv("DORA_SMOKE_PROVISIONER_PASSWORD"),
 		DisplayName: os.Getenv("DORA_SMOKE_PROVISIONER_DISPLAY_NAME"),
 	}
-	if !distinctSmokeUsers(creator, reviewer, provisioner) {
+	if !distinctSmokeUsers(creator, reviewer, governor, provisioner) {
 		return localseed.ErrInvalidFixture
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -107,12 +121,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	governorResult, err := ensureSmokeUser(ctx, userRepository, governor)
+	if err != nil {
+		return err
+	}
 	provisionerResult, err := ensureSmokeUser(ctx, userRepository, provisioner)
 	if err != nil {
 		return err
 	}
-	if creatorResult.UserID == reviewerResult.UserID || creatorResult.UserID == provisionerResult.UserID ||
-		reviewerResult.UserID == provisionerResult.UserID {
+	if !distinctSmokeUserIDs(creatorResult.UserID, reviewerResult.UserID, governorResult.UserID, provisionerResult.UserID) {
 		return localseed.ErrFixtureConflict
 	}
 	authorizationRepository, err := postgres.NewAuthorizationRepository(client)
@@ -131,9 +148,22 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	governorGrant, err := authorizationService.Grant(ctx, authorization.GrantCommand{
+		TargetUserID: governorResult.UserID, ActorUserID: provisionerResult.UserID,
+		Role: authorization.RoleSkillGovernor, ReasonCode: localGovernorReason,
+		ApprovalReference: localGovernorApprovalReference,
+	})
+	if err != nil {
+		return err
+	}
+	if grant.Assignment.ID == governorGrant.Assignment.ID {
+		return localseed.ErrFixtureConflict
+	}
 	return json.NewEncoder(os.Stdout).Encode(reviewerSeederOutput{
 		AssignmentID: grant.Assignment.ID, Role: string(grant.Assignment.Role), Reason: localReviewerReason,
-		CreatorUserID: creatorResult.UserID, ReviewerUserID: reviewerResult.UserID, ProvisionerUserID: provisionerResult.UserID,
+		GovernorAssignmentID: governorGrant.Assignment.ID, GovernorRole: string(governorGrant.Assignment.Role),
+		GovernorReason: localGovernorReason, CreatorUserID: creatorResult.UserID, ReviewerUserID: reviewerResult.UserID,
+		GovernorUserID: governorResult.UserID, ProvisionerUserID: provisionerResult.UserID,
 	})
 }
 
@@ -164,6 +194,21 @@ func distinctSmokeUsers(users ...smokeUserConfig) bool {
 			return false
 		}
 		seen[normalized] = struct{}{}
+	}
+	return true
+}
+
+// distinctSmokeUserIDs 拒绝数据库中任意身份合并，防止规范化或历史夹具把职责边界折叠到同一账户。
+func distinctSmokeUserIDs(userIDs ...string) bool {
+	seen := make(map[string]struct{}, len(userIDs))
+	for _, userID := range userIDs {
+		if userID == "" {
+			return false
+		}
+		if _, exists := seen[userID]; exists {
+			return false
+		}
+		seen[userID] = struct{}{}
 	}
 	return true
 }
