@@ -2,29 +2,27 @@
 
 `npm run test:e2e:w0` 使用真实 Chromium 依次验证：页面登录、Quick Create、进入正式
 `/projects/:project_id/workspace`、Snapshot 与 SSE 就绪、首个 Prompt 可见、硬刷新后恢复同一
-Session，以及规范但不存在的 Project 返回不可访问。测试随后用 Chromium 原生离线控制命中
+Session。canonical 编排会在活动 SSE 停留于 Cursor 2 时，用本地 PostgreSQL 原子故障注入追加并
+保留 seq 3、删除旧事件并推进 `min_available_seq=3`；测试通过 Chromium CDP 逐帧验证无 `id` 的
+`stream.reset(cursor_expired)`，观察页面保留最后可信投影、完整回源 Snapshot，再从 Cursor 3 收到
+`stream.ready` 并恢复同一 Session。测试随后用 Chromium 原生离线控制命中
 真实 SSE 断线，在保留已验证 Snapshot 的同时观察 `reconnecting`，恢复网络后回到同一 Session；
 最后切换到第二个真实用户，验证首用户工作台在 Project 层返回 Owner-safe `404`，且不会继续请求
 Agent Workspace/Events/Tools。全程还会审计浏览器请求，保证没有调用 `POST /api/aigc/sessions`、
 其他历史 Demo API 或跨 Origin 直连 Agent。
 
-运行前需保证 Business、Agent 和依赖基础设施已经可用，并准备两个相互隔离、由本地 Seeder 创建的
-测试账号。账号、密码和 0600 结构化结果路径只从进程环境读取，不应写入前端文件、Playwright
-配置或测试报告：
+完整用例应由仓库根目录的 canonical 编排启动；它负责当前 worktree 二进制、两个隔离账号、
+`0700` Retention 握手目录、PostgreSQL 故障注入器、0600 结果文件和脱敏扫描：
 
 ```sh
-cd frontend
-DORA_E2E_USER_EMAIL="$DORA_SMOKE_USER_EMAIL" \
-DORA_E2E_USER_PASSWORD="$DORA_SMOKE_USER_PASSWORD" \
-DORA_E2E_OWNER_B_EMAIL="$DORA_SMOKE_OWNER_B_EMAIL" \
-DORA_E2E_OWNER_B_PASSWORD="$DORA_SMOKE_OWNER_B_PASSWORD" \
-DORA_E2E_W05_RESULT_PATH="$(mktemp)" \
-npm run test:e2e:w0
+make GO=/Users/figo/sdk/go1.26.3/bin/go W0_ENV_FILE=.env.example w05-browser-smoke
 ```
 
-上述五项缺少任一项时用例会标记为 skipped；canonical `w05-browser-smoke` 还会要求结果文件存在、
-精确符合 `w05.workspace-browser.smoke.result.v1`，并逐值校验断线命中、同 Session 恢复、跨 Owner
-404、Agent 请求阻断和资源事实不泄漏，因而 skipped 运行不能发布 passed Evidence。
+Browser Driver 仍只从进程环境读取账号、密码、0600 结果路径与 `0700`
+`DORA_E2E_W05_RETENTION_CONTROL_DIR`，不把它们写入前端配置或报告。任一必需环境缺失时用例会
+标记为 skipped；canonical `w05-browser-smoke` 还要求结果精确符合
+`w05.workspace-browser.smoke.result.v2`，逐值校验 Retention Reset/完整回源、受控断线恢复、跨
+Owner 404、Agent 请求阻断和资源事实不泄漏，因而 skipped 运行不能发布 passed Evidence。
 
 可选配置：
 

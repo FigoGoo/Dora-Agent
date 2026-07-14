@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 const email = process.env.DORA_E2E_USER_EMAIL || '';
@@ -8,12 +8,15 @@ const password = process.env.DORA_E2E_USER_PASSWORD || '';
 const ownerBEmail = process.env.DORA_E2E_OWNER_B_EMAIL || '';
 const ownerBPassword = process.env.DORA_E2E_OWNER_B_PASSWORD || '';
 const resultPath = process.env.DORA_E2E_W05_RESULT_PATH || '';
+const retentionControlDir = process.env.DORA_E2E_W05_RETENTION_CONTROL_DIR || '';
 const prompt = process.env.DORA_E2E_PROMPT || `W0 浏览器冒烟 ${Date.now()}`;
 
 const FORMAL_AGENT_API_PREFIX = '/api/v1/agent/';
 const LEGACY_DEMO_API_PREFIX = '/api/aigc/';
 const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const W05_RESULT_SCHEMA = 'w05.workspace-browser.smoke.result.v1';
+const W05_RESULT_SCHEMA = 'w05.workspace-browser.smoke.result.v2';
+const RETENTION_REQUEST_SCHEMA = 'w05.retention-window.fixture.request.v1';
+const RETENTION_ACK_SCHEMA = 'w05.retention-window.fixture.ack.v1';
 
 function waitForWorkspaceTransportResponses(page) {
   return {
@@ -66,21 +69,78 @@ function createNonexistentProjectID(existingProjectID) {
   return candidate;
 }
 
+function createFixtureUUIDv7() {
+  const bytes = randomBytes(16);
+  const timestamp = BigInt(Date.now());
+  for (let index = 5; index >= 0; index -= 1) {
+    bytes[index] = Number((timestamp >> BigInt((5 - index) * 8)) & 0xffn);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x70;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+async function writeControlJSON(name, payload) {
+  const path = `${retentionControlDir}/${name}`;
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  await writeFile(temporaryPath, `${JSON.stringify(payload)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await chmod(temporaryPath, 0o600);
+  await rename(temporaryPath, path);
+}
+
+async function waitForControlJSON(name, timeout = 30_000) {
+  const path = `${retentionControlDir}/${name}`;
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    try {
+      return JSON.parse(await readFile(path, 'utf8'));
+    } catch (error) {
+      if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`等待 W0.5 Retention 控制文件超时: ${name}`);
+}
+
+function isSessionWorkspaceResponse(response, sessionID) {
+  const url = new URL(response.url());
+  return response.request().method() === 'GET'
+    && url.pathname === `${FORMAL_AGENT_API_PREFIX}sessions/${sessionID}/workspace`
+    && response.status() === 200;
+}
+
 test.describe('W0 real browser transport smoke', () => {
   test.skip(
-    !email || !password || !ownerBEmail || !ownerBPassword || !resultPath,
-    '需要同时提供用户 A、Owner B 真实冒烟账号和 DORA_E2E_W05_RESULT_PATH'
+    !email || !password || !ownerBEmail || !ownerBPassword || !resultPath || !retentionControlDir,
+    '需要同时提供用户 A、Owner B 真实冒烟账号、结果路径和 Retention 控制目录'
   );
 
-  test('login -> Quick Create -> controlled disconnect -> cross-owner gate', async ({ page }) => {
-    test.setTimeout(150_000);
+  test('login -> Quick Create -> retention reset -> controlled disconnect -> cross-owner gate', async ({ page }) => {
+    test.setTimeout(210_000);
 
     const requests = [];
+    const eventSourceMessages = [];
+    const eventSourceRequestURLs = new Map();
     let controlledDisconnect = false;
     let sameSessionRecovery = false;
+    let retentionResetReceived = false;
+    let retentionResetWithoutID = false;
+    let retentionSnapshotRetained = false;
+    let retentionSnapshotReloaded = false;
+    let retentionSameSessionRecovery = false;
+    let retentionNoStaleEventReplayed = false;
     let crossOwnerNotFound = false;
     let crossOwnerAgentBlocked = false;
     let resourceFactsNotDisclosed = false;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Network.enable');
+    cdp.on('Network.eventSourceMessageReceived', (message) => {
+      eventSourceMessages.push(message);
+    });
+    cdp.on('Network.requestWillBeSent', (request) => {
+      eventSourceRequestURLs.set(request.requestId, request.request.url);
+    });
     page.on('request', (request) => {
       const url = new URL(request.url());
       requests.push({ method: request.method(), origin: url.origin, pathname: url.pathname });
@@ -145,6 +205,183 @@ test.describe('W0 real browser transport smoke', () => {
     await expect(page).toHaveURL((url) => url.pathname === workspacePath);
     await assertWorkspaceTransportResponses(reloadTransportResponses);
     await assertLiveWorkspace(page, { projectID, sessionID, firstPrompt: prompt });
+
+    await page.evaluate(({ expectedProjectID, expectedSessionID, expectedPrompt }) => {
+      const transitions = [];
+      const record = () => {
+        const workspace = document.querySelector('main[data-workspace-state]');
+        if (!workspace) return;
+        transitions.push({
+          state: workspace.getAttribute('data-workspace-state'),
+          stream: workspace.getAttribute('data-stream-state'),
+          projectID: workspace.getAttribute('data-project-id'),
+          sessionID: workspace.getAttribute('data-session-id'),
+          busy: workspace.getAttribute('aria-busy'),
+          expectedProjectionRetained: workspace.getAttribute('data-project-id') === expectedProjectID
+            && workspace.getAttribute('data-session-id') === expectedSessionID
+            && document.body.textContent.includes(expectedPrompt),
+          resetStatusVisible: document.body.textContent.includes('正在同步最新工作台状态…')
+        });
+      };
+      const observer = new MutationObserver(record);
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-workspace-state', 'data-stream-state', 'aria-busy'],
+        childList: true,
+        subtree: true
+      });
+      window.__doraW05WorkspaceTransitions = transitions;
+      window.__doraW05WorkspaceObserver = observer;
+      record();
+    }, { expectedProjectID: projectID, expectedSessionID: sessionID, expectedPrompt: prompt });
+
+    const retentionEventID = createFixtureUUIDv7();
+    const retentionBootstrapPromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET'
+        && url.pathname === `/api/v1/projects/${projectID}/bootstrap`
+        && response.status() === 200;
+    }, { timeout: 30_000 });
+    const retentionSnapshotPromise = page.waitForResponse(async (response) => {
+      if (!isSessionWorkspaceResponse(response, sessionID)) return false;
+      try {
+        const payload = await response.json();
+        return payload?.session?.id === sessionID
+          && payload?.session?.project_id === projectID
+          && payload?.event_high_watermark === 3
+          && payload?.min_available_seq === 3;
+      } catch {
+        return false;
+      }
+    }, { timeout: 30_000 });
+    await writeControlJSON('request.json', {
+      schema_version: RETENTION_REQUEST_SCHEMA,
+      project_id: projectID,
+      session_id: sessionID,
+      input_id: inputID,
+      event_id: retentionEventID
+    });
+    const retentionAck = await waitForControlJSON('ack.json');
+    expect(Object.keys(retentionAck).sort()).toEqual([
+      'event_id', 'input_id', 'inserted_events', 'last_seq', 'min_available_seq', 'project_id',
+      'pruned_events', 'retained_event_seq', 'schema_version', 'session_id'
+    ]);
+    expect(retentionAck).toEqual({
+      schema_version: RETENTION_ACK_SCHEMA,
+      project_id: projectID,
+      session_id: sessionID,
+      input_id: inputID,
+      event_id: retentionEventID,
+      inserted_events: 1,
+      pruned_events: 2,
+      last_seq: 3,
+      min_available_seq: 3,
+      retained_event_seq: 3
+    });
+
+    await expect.poll(async () => page.evaluate(() => (
+      window.__doraW05WorkspaceTransitions.some((transition) => (
+        transition.state === 'reset'
+        && transition.stream === 'connecting'
+        && transition.busy === 'true'
+        && transition.expectedProjectionRetained
+        && transition.resetStatusVisible
+      ))
+    )), { timeout: 30_000 }).toBe(true);
+    retentionSnapshotRetained = true;
+
+    const [retentionBootstrapResponse, retentionSnapshotResponse] = await Promise.all([
+      retentionBootstrapPromise,
+      retentionSnapshotPromise
+    ]);
+    expect(retentionBootstrapResponse.status()).toBe(200);
+    const retentionSnapshot = await retentionSnapshotResponse.json();
+    expect(retentionSnapshot.session?.id).toBe(sessionID);
+    expect(retentionSnapshot.session?.project_id).toBe(projectID);
+    expect(retentionSnapshot.event_high_watermark).toBe(3);
+    expect(retentionSnapshot.min_available_seq).toBe(3);
+    expect(retentionSnapshot.messages?.some((message) => message.content === prompt)).toBe(true);
+    expect(retentionSnapshot.inputs?.some((input) => input.id === inputID)).toBe(true);
+    retentionSnapshotReloaded = true;
+
+    await expect.poll(() => eventSourceMessages.some((message) => {
+      if (message.eventName !== 'stream.reset') return false;
+      try {
+        const payload = JSON.parse(message.data);
+        return payload.schema_version === 'workspace.stream-control.v1'
+          && payload.event === 'stream.reset'
+          && payload.session_id === sessionID
+          && payload.reason === 'cursor_expired'
+          && payload.snapshot_required === true
+          && payload.min_available_seq === 3
+          && payload.latest_seq === 3;
+      } catch {
+        return false;
+      }
+    }), { timeout: 30_000 }).toBe(true);
+    const retentionResetMessage = eventSourceMessages.find((message) => {
+      if (message.eventName !== 'stream.reset') return false;
+      try {
+        return JSON.parse(message.data).session_id === sessionID;
+      } catch {
+        return false;
+      }
+    });
+    retentionResetReceived = Boolean(retentionResetMessage);
+    retentionResetWithoutID = retentionResetMessage?.eventId === '';
+    expect(retentionResetReceived).toBe(true);
+    expect(retentionResetWithoutID).toBe(true);
+
+    const workspaceAfterRetentionReset = await assertLiveWorkspace(page, {
+      projectID,
+      sessionID,
+      firstPrompt: prompt
+    });
+    retentionSameSessionRecovery = await workspaceAfterRetentionReset.getAttribute('data-project-id') === projectID
+      && await workspaceAfterRetentionReset.getAttribute('data-session-id') === sessionID;
+    expect(retentionSameSessionRecovery).toBe(true);
+    await expect.poll(() => eventSourceMessages.some((message) => {
+      if (message.eventName !== 'stream.ready') return false;
+      try {
+        const payload = JSON.parse(message.data);
+        return payload.schema_version === 'workspace.stream-control.v1'
+          && payload.event === 'stream.ready'
+          && payload.session_id === sessionID
+          && payload.cursor === 3
+          && payload.min_available_seq === 3
+          && payload.latest_seq === 3;
+      } catch {
+        return false;
+      }
+    }), { timeout: 30_000 }).toBe(true);
+    const retentionReadyMessage = eventSourceMessages.find((message) => {
+      if (message.eventName !== 'stream.ready') return false;
+      try {
+        const payload = JSON.parse(message.data);
+        return payload.session_id === sessionID
+          && payload.cursor === 3
+          && payload.min_available_seq === 3
+          && payload.latest_seq === 3;
+      } catch {
+        return false;
+      }
+    });
+    expect(retentionReadyMessage?.eventId).toBe('');
+    expect(retentionReadyMessage?.requestId).toBeTruthy();
+    expect(retentionReadyMessage?.requestId).not.toBe(retentionResetMessage?.requestId);
+    const retentionReadyURL = new URL(eventSourceRequestURLs.get(retentionReadyMessage.requestId));
+    expect(retentionReadyURL.pathname).toBe(`${FORMAL_AGENT_API_PREFIX}sessions/${sessionID}/events`);
+    expect([...retentionReadyURL.searchParams.entries()]).toEqual([['after_seq', '3']]);
+    retentionNoStaleEventReplayed = !eventSourceMessages.some((message) => {
+      if (message.eventName !== 'session.input.accepted') return false;
+      try {
+        const payload = JSON.parse(message.data);
+        return payload.session_id === sessionID && payload.seq === 3;
+      } catch {
+        return false;
+      }
+    });
+    expect(retentionNoStaleEventReplayed).toBe(true);
 
     const workspaceBeforeDisconnect = page.locator('main[data-workspace-state]');
     await page.context().setOffline(true);
@@ -292,6 +529,12 @@ test.describe('W0 real browser transport smoke', () => {
       cross_owner_user_id: crossOwnerUserID,
       project_id: projectID,
       session_id: sessionID,
+      retention_reset_received: retentionResetReceived,
+      retention_reset_without_id: retentionResetWithoutID,
+      retention_snapshot_retained: retentionSnapshotRetained,
+      retention_snapshot_reloaded: retentionSnapshotReloaded,
+      retention_same_session_recovery: retentionSameSessionRecovery,
+      retention_no_stale_event_replayed: retentionNoStaleEventReplayed,
       controlled_disconnect: controlledDisconnect,
       same_session_recovery: sameSessionRecovery,
       cross_owner_not_found: crossOwnerNotFound,

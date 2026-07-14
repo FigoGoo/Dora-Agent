@@ -335,14 +335,25 @@ make w1-browser-smoke
 `w05-browser-smoke` 使用两个真实密码账号、当前 worktree 重建的 Business/Agent 二进制和真实
 PostgreSQL/Redis/etcd。它必须先向 Agent 发送 TERM、有界等待退出，再用同一二进制重启并通过
 Business BFF 证明原 Session Snapshot、持久化 Event 与 `stream.ready` 可恢复；随后 Chromium 用
-原生离线控制命中 SSE 断线，逐值证明 `reconnecting`→同 Session `live`，并在第二用户 UI 中证明
+`0700` 文件握手触发 smoke-only PostgreSQL 原子故障注入：追加安全 seq 3 sentinel、裁剪 seq 1/2、
+推进 `min_available_seq=3`。活动 Cursor 2 的正式页面必须通过 CDP 收到无 `id` 的
+`stream.reset(cursor_expired)`，Reset 期间保留最后可信投影，完整回源高水位 3 Snapshot，再从
+Cursor 3 收到 `stream.ready` 且不得重放已经由 Snapshot 吸收的 sentinel。随后 Chromium 用原生
+离线控制命中 SSE 断线，逐值证明 `reconnecting`→同 Session `live`，并在第二用户 UI 中证明
 首用户 Project 只返回 Owner-safe 404、不会继续请求 Agent，也不显示 Project/Session/Prompt。
-Browser Driver 必须写 0600 的 `w05.workspace-browser.smoke.result.v1`；缺字段、skip、身份不一致或
-任一布尔 false 都禁止发布 `w05.workspace-transport.smoke.evidence.v2`。v2 assertion exact-set 为
-25 项：`concurrent_requests=100`，其余 24 项必须为布尔 `true`。非浏览器 `w05-smoke` 继续保留
+Browser Driver 必须写 0600 的 `w05.workspace-browser.smoke.result.v2`；缺字段、skip、身份不一致或
+任一布尔 false 都禁止发布 `w05.workspace-transport.smoke.evidence.v3`。v3 assertion exact-set 为
+34 项：`concurrent_requests=100`，其余 33 项必须为布尔 `true`。非浏览器 `w05-smoke` 继续保留
 Evidence v1 兼容格式，但同样执行 Agent 重启恢复并在本次 run bundle 中保存脱敏恢复事实。W0.5
 本地门禁先有界停止 Runtime、确认 etcd 摘除，再扫描闭合 Evidence 集合；失败时删除尚未完成脱敏
 闭环的本地 run bundle，不能把未扫描的失败日志当成可保留 Evidence。
+
+Retention 故障注入只允许本地专用 smoke 数据库，并通过 UUIDv7 参数、精确 Project/Session/Input
+绑定、初始 `last_seq=2/min_available_seq=1`、精确事件集合 `[1,2]`、5 秒锁超时、10 秒语句超时和
+单条事务语句失败关闭；它不是生产 Retention Job。
+当前 Migration 允许 `min_available_seq=last_seq+1`，而客户端从 Snapshot 的 `last_seq` 重连；生产
+Retention 实现进入开发前必须冻结“至少保留最后一个 Event（`min_available_seq<=last_seq`）”或同步
+重审 Cursor 过期边界，禁止上线会形成永久 Reset 循环的策略。
 
 `w1-smoke` 是 `w1-browser-smoke` 的兼容别名，两者必须执行同一套 W1-C2 canonical 门禁：使用真实 PostgreSQL、Redis、etcd、Business Runtime 与 Agent Runtime，显式开启默认关闭的 Project Skill Snapshot v2 feature/capability 双门禁，并执行 `@w1-real-review` 真实 Chromium 链路。仅 `localsmoke` 可编译的 Seeder 只负责通过正式密码用户与 Authorization Service 创建相互隔离的 Creator、Reviewer、Provisioner 及持久化 `skill_reviewer` 分配；之后 Reviewer 必须通过真实 Login 和每次 Session Resolve 的生产权限投影访问正式队列/冻结详情/批准发布 HTTP，再执行 100 个同幂等键的非空 Skill QuickCreate v2。在单一真实 Chromium context 中还必须证明 Creator 提交、Reviewer 批准、Creator 选择已发布 Skill、进入 Workspace，并从同一 ready Session 读取六项全禁用 Tool Definition Catalog；不得拦截业务请求、注入 capability 或用前端常量补齐目录。任何只执行 API/数据库链路的 W1 调用都必须失败关闭，不得生成 `w1.skill-foundation.smoke.evidence.v3` passed Evidence。W1 Evidence 固定包含 47 项断言，其中 42 项为必须等于 `true` 的布尔门禁。Evidence 必须同时证明：
 

@@ -40,6 +40,8 @@ owner_b_denied_response_temp=""
 owner_b_denied_headers_temp=""
 source_manifest_temp=""
 w05_browser_result_temp=""
+w05_retention_control_dir=""
+w05_retention_injector_pid=""
 agent_restart_workspace_temp=""
 agent_restart_sse_temp=""
 agent_restart_sse_status_temp=""
@@ -70,6 +72,22 @@ w1_binding_session_id=""
 w1_binding_input_id=""
 
 stop_processes() {
+  if [[ -n "$w05_retention_injector_pid" ]] && kill -0 "$w05_retention_injector_pid" 2>/dev/null; then
+    kill -TERM "$w05_retention_injector_pid" 2>/dev/null || true
+    for _ in $(seq 1 40); do
+      if ! kill -0 "$w05_retention_injector_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.25
+    done
+    if kill -0 "$w05_retention_injector_pid" 2>/dev/null; then
+      kill -KILL "$w05_retention_injector_pid" 2>/dev/null || true
+    fi
+  fi
+  if [[ -n "$w05_retention_injector_pid" ]]; then
+    wait "$w05_retention_injector_pid" 2>/dev/null || true
+    w05_retention_injector_pid=""
+  fi
   for pid in "$business_pid" "$agent_pid"; do
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       kill -TERM "$pid" 2>/dev/null || true
@@ -130,6 +148,9 @@ stop_processes() {
   if [[ -n "$w05_browser_result_temp" ]]; then
     rm -f "$w05_browser_result_temp"
   fi
+  if [[ -n "$w05_retention_control_dir" ]]; then
+    rm -rf "$w05_retention_control_dir"
+  fi
   if [[ -n "$agent_restart_workspace_temp" ]]; then
     rm -f "$agent_restart_workspace_temp"
   fi
@@ -172,6 +193,132 @@ wait_ready() {
     sleep 0.25
   done
   fail "端口 $port 的 Readiness 未在 30 秒内成功"
+}
+
+run_w05_retention_window_injector() {
+  local request_file="$w05_retention_control_dir/request.json"
+  local ack_file="$w05_retention_control_dir/ack.json"
+  local ack_temp="$ack_file.$$.tmp"
+  local request_ready=false
+  local project_id=""
+  local session_id=""
+  local input_id=""
+  local event_id=""
+  local injection_fact=""
+  local final_fact=""
+  local inserted_events=""
+  local pruned_events=""
+  local advanced_rows=""
+  local last_seq=""
+  local min_available_seq=""
+  local retained_events=""
+  local retained_min_seq=""
+  local retained_max_seq=""
+
+  for _ in $(seq 1 600); do
+    if [[ -s "$request_file" ]] && jq -e '
+      keys == ["event_id","input_id","project_id","schema_version","session_id"]
+      and .schema_version == "w05.retention-window.fixture.request.v1"
+      and all(.project_id,.session_id,.input_id,.event_id;
+        test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))' \
+      "$request_file" >/dev/null 2>&1; then
+      request_ready=true
+      break
+    fi
+    sleep 0.05
+  done
+  [[ "$request_ready" == "true" ]] || return 41
+
+  project_id="$(jq -er '.project_id' "$request_file")"
+  session_id="$(jq -er '.session_id' "$request_file")"
+  input_id="$(jq -er '.input_id' "$request_file")"
+  event_id="$(jq -er '.event_id' "$request_file")"
+
+  injection_fact="$(docker exec -i -e PGOPTIONS='-c statement_timeout=10000 -c lock_timeout=5000' \
+    "$postgres_container" psql -v ON_ERROR_STOP=1 -qAtF '|' \
+    -U dora_admin -d dora_agent \
+    -v project_id="$project_id" -v session_id="$session_id" -v input_id="$input_id" -v event_id="$event_id" <<'SQL'
+      WITH target AS MATERIALIZED (
+        SELECT counter.session_id
+        FROM agent.session_event_counter AS counter
+        JOIN agent.session AS session_record ON session_record.id = counter.session_id
+        WHERE counter.session_id = :'session_id'::uuid
+          AND session_record.project_id = :'project_id'::uuid
+          AND counter.last_seq = 2
+          AND counter.min_available_seq = 1
+          AND ARRAY(
+            SELECT retained.seq
+            FROM agent.session_event_log AS retained
+            WHERE retained.session_id = counter.session_id
+            ORDER BY retained.seq
+          ) = ARRAY[1::bigint, 2::bigint]
+        FOR UPDATE OF counter
+      ), source_event AS MATERIALIZED (
+        SELECT event_record.*
+        FROM agent.session_event_log AS event_record
+        JOIN target ON target.session_id = event_record.session_id
+        WHERE event_record.seq = 2
+          AND event_record.event_type = 'session.input.accepted'
+          AND event_record.schema_version = 'session.event.v1'
+          AND event_record.aggregate_type = 'session_input'
+          AND event_record.aggregate_id = :'input_id'::uuid
+          AND event_record.aggregate_version = 1
+      ), inserted AS (
+        INSERT INTO agent.session_event_log (
+          event_id, session_id, seq, event_type, schema_version, source_kind, source_id,
+          projection_index, aggregate_type, aggregate_id, aggregate_version, payload, created_at
+        )
+        SELECT :'event_id'::uuid, source_event.session_id, 3, source_event.event_type,
+          source_event.schema_version, 'w05_retention_fixture', :'event_id'::uuid, 0,
+          source_event.aggregate_type, source_event.aggregate_id, source_event.aggregate_version,
+          source_event.payload, clock_timestamp()
+        FROM source_event
+        RETURNING session_id, seq
+      ), pruned AS (
+        DELETE FROM agent.session_event_log AS event_record
+        USING inserted
+        WHERE event_record.session_id = inserted.session_id AND event_record.seq < 3
+        RETURNING event_record.seq
+      ), advanced AS (
+        UPDATE agent.session_event_counter AS counter
+        SET last_seq = 3, min_available_seq = 3, updated_at = clock_timestamp()
+        FROM inserted
+        WHERE counter.session_id = inserted.session_id
+          AND counter.last_seq = 2
+          AND counter.min_available_seq = 1
+        RETURNING counter.last_seq, counter.min_available_seq
+      )
+      SELECT (SELECT count(*) FROM inserted), (SELECT count(*) FROM pruned),
+        (SELECT count(*) FROM advanced), (SELECT last_seq FROM advanced),
+        (SELECT min_available_seq FROM advanced);
+SQL
+  )" || return 42
+  IFS='|' read -r inserted_events pruned_events advanced_rows last_seq min_available_seq <<<"$injection_fact"
+  [[ "$inserted_events" == "1" && "$pruned_events" == "2" && "$advanced_rows" == "1" && \
+    "$last_seq" == "3" && "$min_available_seq" == "3" ]] || return 43
+
+  final_fact="$(docker exec -i -e PGOPTIONS='-c statement_timeout=10000 -c lock_timeout=5000' \
+    "$postgres_container" psql -v ON_ERROR_STOP=1 -qAtF '|' \
+    -U dora_admin -d dora_agent -v session_id="$session_id" <<'SQL'
+      SELECT count(event_record.seq), min(event_record.seq), max(event_record.seq),
+        counter.last_seq, counter.min_available_seq
+      FROM agent.session_event_counter AS counter
+      JOIN agent.session_event_log AS event_record ON event_record.session_id = counter.session_id
+      WHERE counter.session_id = :'session_id'::uuid
+      GROUP BY counter.last_seq, counter.min_available_seq;
+SQL
+  )" || return 44
+  IFS='|' read -r retained_events retained_min_seq retained_max_seq last_seq min_available_seq <<<"$final_fact"
+  [[ "$retained_events" == "1" && "$retained_min_seq" == "3" && "$retained_max_seq" == "3" && \
+    "$last_seq" == "3" && "$min_available_seq" == "3" ]] || return 45
+
+  jq -n --arg project_id "$project_id" --arg session_id "$session_id" --arg input_id "$input_id" \
+    --arg event_id "$event_id" \
+    '{schema_version:"w05.retention-window.fixture.ack.v1",project_id:$project_id,session_id:$session_id,
+      input_id:$input_id,event_id:$event_id,inserted_events:1,pruned_events:2,last_seq:3,
+      min_available_seq:3,retained_event_seq:3}' >"$ack_temp" || return 46
+  chmod 600 "$ack_temp"
+  mv "$ack_temp" "$ack_file"
 }
 
 discover_local_ipv4() {
@@ -1324,6 +1471,7 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   chmod 700 "$w1_temp_dir"
 else
   w05_browser_result_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-browser-result.XXXXXX")"
+  w05_retention_control_dir="$(mktemp -d "${TMPDIR:-/tmp}/dora-w05-retention-control.XXXXXX")"
   agent_restart_workspace_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-agent-restart-workspace.XXXXXX")"
   agent_restart_sse_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-agent-restart-sse.XXXXXX")"
   agent_restart_sse_status_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-agent-restart-sse-status.XXXXXX")"
@@ -1333,6 +1481,7 @@ chmod 600 "$cookie_jar" "$user_curl_config" "$owner_b_cookie_jar" "$owner_b_curl
   "$owner_b_seed_response_temp" "$owner_b_login_response_temp" "$owner_b_denied_response_temp" \
   "$owner_b_denied_headers_temp" "$source_manifest_temp"
 if [[ "$w1_skill_smoke_enabled" != "1" ]]; then
+  chmod 700 "$w05_retention_control_dir"
   chmod 600 "$w05_browser_result_temp" "$agent_restart_workspace_temp" \
     "$agent_restart_sse_temp" "$agent_restart_sse_status_temp"
 fi
@@ -1860,6 +2009,9 @@ if [[ "${W0_RUN_BROWSER_SMOKE:-0}" == "1" ]]; then
     }
   else
     : >"$w05_browser_result_temp"
+    rm -f "$w05_retention_control_dir/request.json" "$w05_retention_control_dir/ack.json"
+    run_w05_retention_window_injector >"$evidence_dir/retention-window-injector.log" 2>&1 &
+    w05_retention_injector_pid="$!"
     (
       cd "$repo_root/frontend"
       DORA_E2E_USER_EMAIL="$DORA_SMOKE_USER_EMAIL" \
@@ -1869,24 +2021,85 @@ if [[ "${W0_RUN_BROWSER_SMOKE:-0}" == "1" ]]; then
       DORA_E2E_PROMPT="$w05_browser_prompt" \
       DORA_E2E_BUSINESS_API_TARGET="http://127.0.0.1:18081" \
       DORA_E2E_W05_RESULT_PATH="$w05_browser_result_temp" \
+      DORA_E2E_W05_RETENTION_CONTROL_DIR="$w05_retention_control_dir" \
       npm run test:e2e:w0
     ) >"$evidence_dir/frontend-playwright.log" 2>&1 || {
       sed -n '1,240p' "$evidence_dir/frontend-playwright.log" >&2
       fail "W0 浏览器页面链路失败"
     }
+    if ! wait "$w05_retention_injector_pid"; then
+      w05_retention_injector_pid=""
+      fail "W0.5 Retention Window 故障注入器未完成原子推进"
+    fi
+    w05_retention_injector_pid=""
     jq -e --arg creator "$user_id" --arg owner_b "$owner_b_user_id" '
-      keys == ["controlled_disconnect","creator_user_id","cross_owner_agent_blocked","cross_owner_not_found","cross_owner_user_id","project_id","resource_facts_not_disclosed","same_session_recovery","schema_version","session_id"]
-      and .schema_version == "w05.workspace-browser.smoke.result.v1"
+      keys == ["controlled_disconnect","creator_user_id","cross_owner_agent_blocked","cross_owner_not_found","cross_owner_user_id","project_id","resource_facts_not_disclosed","retention_no_stale_event_replayed","retention_reset_received","retention_reset_without_id","retention_same_session_recovery","retention_snapshot_reloaded","retention_snapshot_retained","same_session_recovery","schema_version","session_id"]
+      and .schema_version == "w05.workspace-browser.smoke.result.v2"
       and .creator_user_id == $creator and .cross_owner_user_id == $owner_b
       and .creator_user_id != .cross_owner_user_id
       and (.project_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
       and (.session_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
       and .controlled_disconnect == true
       and .same_session_recovery == true
+      and .retention_reset_received == true
+      and .retention_reset_without_id == true
+      and .retention_snapshot_retained == true
+      and .retention_snapshot_reloaded == true
+      and .retention_same_session_recovery == true
+      and .retention_no_stale_event_replayed == true
       and .cross_owner_not_found == true
       and .cross_owner_agent_blocked == true
       and .resource_facts_not_disclosed == true' "$w05_browser_result_temp" >/dev/null || \
-      fail "W0.5 Playwright 结构化恢复/跨 Owner 结果不满足严格契约"
+      fail "W0.5 Playwright 结构化 Retention/恢复/跨 Owner 结果不满足严格契约"
+
+    jq -e --slurpfile browser "$w05_browser_result_temp" '
+      keys == ["event_id","input_id","inserted_events","last_seq","min_available_seq","project_id","pruned_events","retained_event_seq","schema_version","session_id"]
+      and .schema_version == "w05.retention-window.fixture.ack.v1"
+      and .project_id == $browser[0].project_id and .session_id == $browser[0].session_id
+      and (.input_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+      and (.event_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+      and .inserted_events == 1 and .pruned_events == 2
+      and .last_seq == 3 and .min_available_seq == 3 and .retained_event_seq == 3' \
+      "$w05_retention_control_dir/ack.json" >/dev/null || \
+      fail "W0.5 Retention Window ACK 与浏览器结果不一致"
+
+    retention_database_fact="$(docker exec -i -e PGOPTIONS='-c statement_timeout=10000 -c lock_timeout=5000' \
+      "$postgres_container" psql -v ON_ERROR_STOP=1 -qAtF '|' \
+      -U dora_admin -d dora_agent \
+      -v session_id="$(jq -er '.session_id' "$w05_browser_result_temp")" <<'SQL'
+        SELECT count(event_record.seq), min(event_record.seq), max(event_record.seq),
+          counter.last_seq, counter.min_available_seq
+        FROM agent.session_event_counter AS counter
+        JOIN agent.session_event_log AS event_record ON event_record.session_id = counter.session_id
+        WHERE counter.session_id = :'session_id'::uuid
+        GROUP BY counter.last_seq, counter.min_available_seq;
+SQL
+    )"
+    [[ "$retention_database_fact" == "1|3|3|3|3" ]] || \
+      fail "W0.5 Retention Window 最终数据库事实漂移: $retention_database_fact"
+    retention_server_reset_count="$(sed -n '/^{/p' "$evidence_dir/agent-restart.log" \
+      | jq -r --arg session "$(jq -er '.session_id' "$w05_browser_result_temp")" '
+      select(.msg == "Workspace EventLog 投影需要客户端 Reset"
+        and .session_id == $session and .reason == "cursor_expired") | 1' \
+      | wc -l | tr -d '[:space:]')"
+    [[ "$retention_server_reset_count" =~ ^[0-9]+$ && "$retention_server_reset_count" -ge 1 ]] || \
+      fail "Agent 未记录浏览器 Session 的 cursor_expired Reset"
+    jq -n --slurpfile browser "$w05_browser_result_temp" --slurpfile ack "$w05_retention_control_dir/ack.json" \
+      --argjson server_reset_count "$retention_server_reset_count" '
+      {schema_version:"w05.retention-window.smoke.fact.v1",
+       project_id:$browser[0].project_id,session_id:$browser[0].session_id,
+       last_seq:$ack[0].last_seq,min_available_seq:$ack[0].min_available_seq,
+       retained_event_seq:$ack[0].retained_event_seq,retained_event_count:1,
+       inserted_events:$ack[0].inserted_events,pruned_events:$ack[0].pruned_events,
+       server_cursor_expired_reset_count:$server_reset_count,
+       retention_window_advanced:($ack[0].last_seq == 3 and $ack[0].min_available_seq == 3),
+       retention_old_events_pruned:($ack[0].pruned_events == 2 and $ack[0].retained_event_seq == 3),
+       retention_server_cursor_expired_reset:($server_reset_count >= 1)}' \
+      >"$evidence_dir/responses/browser-retention-window.json"
+    jq -e '.retention_window_advanced and .retention_old_events_pruned
+      and .retention_server_cursor_expired_reset' \
+      "$evidence_dir/responses/browser-retention-window.json" >/dev/null || \
+      fail "W0.5 Retention Window 派生证据不成立"
   fi
   browser_smoke_ran=true
 fi
@@ -2085,7 +2298,7 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
 else
   if [[ "$browser_smoke_ran" == "true" ]]; then
     jq -n \
-      --arg schema_version "w05.workspace-transport.smoke.evidence.v2" \
+      --arg schema_version "w05.workspace-transport.smoke.evidence.v3" \
       --arg run_id "$run_id" --arg produced_at "$produced_at" \
       --arg source_digest_sha256 "$source_digest_sha256" \
       --arg business_binary_sha256 "$business_binary_sha256" --arg agent_binary_sha256 "$agent_binary_sha256" \
@@ -2094,7 +2307,8 @@ else
       --argjson browser_ui "$browser_smoke_ran" \
       --slurpfile restart "$evidence_dir/responses/agent-restart-recovery.json" \
       --slurpfile browser "$w05_browser_result_temp" \
-      '{schema_version:$schema_version,status:"pending",run_id:$run_id,produced_at:$produced_at,source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,agent_binary_sha256:$agent_binary_sha256,prompt_project:{project_id:$project_id,session_id:$session_id,input_id:$input_id},blank_project:{project_id:$blank_project_id,session_id:$blank_session_id,input_id:null},browser_workspace:{project_id:$browser[0].project_id,session_id:$browser[0].session_id},assertions:{concurrent_requests:100,idempotent_replay:true,idempotency_conflict:true,business_prompt_cleared:true,agent_unique_facts:true,blank_negative_side_effects:true,workspace_snapshot:true,workspace_empty_arrays:true,workspace_owner_safe_not_found:true,workspace_cross_owner_not_found:true,events_cross_owner_not_found:true,agent_direct_access_denied:true,sse_replay_and_ready:true,sse_cursor_reset:true,browser_ui:$browser_ui,logout_revoked:true,logout_workspace_denied:true,agent_restart_hit:$restart[0].agent_restart_hit,snapshot_after_restart:$restart[0].snapshot_after_restart,sse_after_restart:$restart[0].sse_after_restart,browser_controlled_disconnect:$browser[0].controlled_disconnect,browser_same_session_recovery:$browser[0].same_session_recovery,browser_cross_owner_not_found:$browser[0].cross_owner_not_found,browser_cross_owner_agent_blocked:$browser[0].cross_owner_agent_blocked,browser_resource_facts_not_disclosed:$browser[0].resource_facts_not_disclosed}}' \
+      --slurpfile retention "$evidence_dir/responses/browser-retention-window.json" \
+      '{schema_version:$schema_version,status:"pending",run_id:$run_id,produced_at:$produced_at,source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,agent_binary_sha256:$agent_binary_sha256,prompt_project:{project_id:$project_id,session_id:$session_id,input_id:$input_id},blank_project:{project_id:$blank_project_id,session_id:$blank_session_id,input_id:null},browser_workspace:{project_id:$browser[0].project_id,session_id:$browser[0].session_id},assertions:{concurrent_requests:100,idempotent_replay:true,idempotency_conflict:true,business_prompt_cleared:true,agent_unique_facts:true,blank_negative_side_effects:true,workspace_snapshot:true,workspace_empty_arrays:true,workspace_owner_safe_not_found:true,workspace_cross_owner_not_found:true,events_cross_owner_not_found:true,agent_direct_access_denied:true,sse_replay_and_ready:true,sse_cursor_reset:true,browser_ui:$browser_ui,logout_revoked:true,logout_workspace_denied:true,agent_restart_hit:$restart[0].agent_restart_hit,snapshot_after_restart:$restart[0].snapshot_after_restart,sse_after_restart:$restart[0].sse_after_restart,browser_controlled_disconnect:$browser[0].controlled_disconnect,browser_same_session_recovery:$browser[0].same_session_recovery,browser_cross_owner_not_found:$browser[0].cross_owner_not_found,browser_cross_owner_agent_blocked:$browser[0].cross_owner_agent_blocked,browser_resource_facts_not_disclosed:$browser[0].resource_facts_not_disclosed,retention_window_advanced:$retention[0].retention_window_advanced,retention_old_events_pruned:$retention[0].retention_old_events_pruned,retention_server_cursor_expired_reset:$retention[0].retention_server_cursor_expired_reset,browser_retention_reset_received:$browser[0].retention_reset_received,browser_retention_reset_without_id:$browser[0].retention_reset_without_id,browser_retention_snapshot_retained:$browser[0].retention_snapshot_retained,browser_retention_snapshot_reloaded:$browser[0].retention_snapshot_reloaded,browser_retention_same_session_recovery:$browser[0].retention_same_session_recovery,browser_retention_no_stale_event_replayed:$browser[0].retention_no_stale_event_replayed}}' \
       >"$pending_evidence_file"
   else
     jq -n \
@@ -2131,18 +2345,18 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
     "$pending_evidence_file" >/dev/null || fail "W1 canonical Evidence 含未通过断言，禁止发布 passed summary"
 elif [[ "$browser_smoke_ran" == "true" ]]; then
   jq -e '
-    .schema_version == "w05.workspace-transport.smoke.evidence.v2"
+    .schema_version == "w05.workspace-transport.smoke.evidence.v3"
     and .status == "pending"
     and (keys == ["agent_binary_sha256","assertions","blank_project","browser_workspace","business_binary_sha256","produced_at","prompt_project","run_id","schema_version","source_digest_sha256","status"])
     and (.browser_workspace.project_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
     and (.browser_workspace.session_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
     and .assertions.concurrent_requests == 100
-    and (.assertions | length) == 25
-    and (.assertions | keys) == ["agent_direct_access_denied","agent_restart_hit","agent_unique_facts","blank_negative_side_effects","browser_controlled_disconnect","browser_cross_owner_agent_blocked","browser_cross_owner_not_found","browser_resource_facts_not_disclosed","browser_same_session_recovery","browser_ui","business_prompt_cleared","concurrent_requests","events_cross_owner_not_found","idempotency_conflict","idempotent_replay","logout_revoked","logout_workspace_denied","snapshot_after_restart","sse_after_restart","sse_cursor_reset","sse_replay_and_ready","workspace_cross_owner_not_found","workspace_empty_arrays","workspace_owner_safe_not_found","workspace_snapshot"]
-    and ([.assertions | to_entries[] | select(.key != "concurrent_requests")] | length) == 24
+    and (.assertions | length) == 34
+    and (.assertions | keys) == ["agent_direct_access_denied","agent_restart_hit","agent_unique_facts","blank_negative_side_effects","browser_controlled_disconnect","browser_cross_owner_agent_blocked","browser_cross_owner_not_found","browser_resource_facts_not_disclosed","browser_retention_no_stale_event_replayed","browser_retention_reset_received","browser_retention_reset_without_id","browser_retention_same_session_recovery","browser_retention_snapshot_reloaded","browser_retention_snapshot_retained","browser_same_session_recovery","browser_ui","business_prompt_cleared","concurrent_requests","events_cross_owner_not_found","idempotency_conflict","idempotent_replay","logout_revoked","logout_workspace_denied","retention_old_events_pruned","retention_server_cursor_expired_reset","retention_window_advanced","snapshot_after_restart","sse_after_restart","sse_cursor_reset","sse_replay_and_ready","workspace_cross_owner_not_found","workspace_empty_arrays","workspace_owner_safe_not_found","workspace_snapshot"]
+    and ([.assertions | to_entries[] | select(.key != "concurrent_requests")] | length) == 33
     and all(.assertions | to_entries[] | select(.key != "concurrent_requests");
       ((.value | type) == "boolean" and .value == true))' \
-    "$pending_evidence_file" >/dev/null || fail "W0.5 Recovery Evidence v2 含未通过或非布尔断言，禁止发布 passed summary"
+    "$pending_evidence_file" >/dev/null || fail "W0.5 Recovery Evidence v3 含未通过或非布尔断言，禁止发布 passed summary"
 fi
 
 stop_processes
