@@ -27,7 +27,7 @@ type roleAdminInput struct {
 	TargetUserID string
 	// ActorUserID 是可追责的独立 active 操作人 UUIDv7。
 	ActorUserID string
-	// Role 是固定 skill_reviewer。
+	// Role 是闭集 skill_reviewer 或 skill_governor。
 	Role string
 	// ReasonCode 是稳定原因代码。
 	ReasonCode string
@@ -47,7 +47,7 @@ type roleAdminOutput struct {
 	AssignmentID string `json:"assignment_id"`
 	// TargetUserID 是被操作用户 UUIDv7。
 	TargetUserID string `json:"target_user_id"`
-	// Role 是固定 skill_reviewer。
+	// Role 是闭集 skill_reviewer 或 skill_governor。
 	Role string `json:"role"`
 	// Status 是操作后的 active 或 revoked。
 	Status string `json:"status"`
@@ -134,7 +134,7 @@ func parseRoleAdminInput(args []string) (roleAdminInput, error) {
 	flags.StringVar(&input.Action, "action", "", "grant or revoke")
 	flags.StringVar(&input.TargetUserID, "target-user-id", "", "target user UUIDv7")
 	flags.StringVar(&input.ActorUserID, "actor-user-id", "", "actor user UUIDv7")
-	flags.StringVar(&input.Role, "role", "", "fixed role key")
+	flags.StringVar(&input.Role, "role", "", "closed role key")
 	flags.StringVar(&input.ReasonCode, "reason", "", "stable reason code")
 	flags.StringVar(&input.ApprovalReference, "approval-reference", "", "external approval reference")
 	flags.StringVar(&input.AssignmentID, "assignment-id", "", "assignment UUIDv7 for revoke")
@@ -153,6 +153,10 @@ func parseRoleAdminInput(args []string) (roleAdminInput, error) {
 		return roleAdminInput{}, authorization.ErrInvalidCommand
 	}
 	if input.TargetUserID == "" || input.ActorUserID == "" || input.Role == "" || input.ReasonCode == "" || input.ApprovalReference == "" {
+		return roleAdminInput{}, authorization.ErrInvalidCommand
+	}
+	// CLI 在连接专用数据库前先拒绝闭集外角色，避免无效命令触碰生产信任边界。
+	if input.Role != string(authorization.RoleSkillReviewer) && input.Role != string(authorization.RoleSkillGovernor) {
 		return roleAdminInput{}, authorization.ErrInvalidCommand
 	}
 	return input, nil

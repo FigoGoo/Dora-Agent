@@ -100,3 +100,60 @@ func TestAuthorizationRepositoryPostgreSQLLifecycle(t *testing.T) {
 		t.Fatal("append-only trigger allowed role assignment DELETE")
 	}
 }
+
+func TestAuthorizationRepositoryPostgreSQLProjectsIndependentReviewAndGovernRoles(t *testing.T) {
+	_, db := openBusinessIntegrationRepository(t)
+	now := time.Date(2026, 7, 14, 11, 30, 0, 0, time.UTC)
+	targetID := "019f0000-0000-7000-8000-000000000086"
+	actorID := "019f0000-0000-7000-8000-000000000087"
+	for _, seed := range []struct {
+		id   string
+		name string
+	}{{targetID, "Dual Role Admin"}, {actorID, "Role Provisioner"}} {
+		if err := db.Exec(`
+			INSERT INTO business.user_account (id, display_name, user_type, status, version, created_at, updated_at)
+			VALUES (?, ?, 'personal', 'active', 1, ?, ?)`, seed.id, seed.name, now, now).Error; err != nil {
+			t.Fatalf("seed dual-role authorization account: %v", err)
+		}
+	}
+	repository, err := NewAuthorizationRepository(&Client{db: db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewerService, _ := authorization.NewService(repository, authorizationIntegrationClock{now: now}, authorizationIntegrationIDs{
+		id: "019f0000-0000-7000-8000-000000000088",
+	})
+	governorService, _ := authorization.NewService(repository, authorizationIntegrationClock{now: now}, authorizationIntegrationIDs{
+		id: "019f0000-0000-7000-8000-000000000089",
+	})
+	if _, err := reviewerService.Grant(context.Background(), authorization.GrantCommand{
+		TargetUserID: targetID, ActorUserID: actorID, Role: authorization.RoleSkillReviewer,
+		ReasonCode: "reviewer_onboarding", ApprovalReference: "DEPLOY-501",
+	}); err != nil {
+		t.Fatalf("grant reviewer in dual-role projection: %v", err)
+	}
+	governor, err := governorService.Grant(context.Background(), authorization.GrantCommand{
+		TargetUserID: targetID, ActorUserID: actorID, Role: authorization.RoleSkillGovernor,
+		ReasonCode: "governor_onboarding", ApprovalReference: "DEPLOY-502",
+	})
+	if err != nil {
+		t.Fatalf("grant governor in dual-role projection: %v", err)
+	}
+	projection, err := reviewerService.Resolve(context.Background(), targetID)
+	if err != nil || len(projection.Roles) != 2 || projection.Roles[0] != "skill_governor" || projection.Roles[1] != "skill_reviewer" ||
+		len(projection.Capabilities) != 2 || projection.Capabilities[0] != "skill.govern" || projection.Capabilities[1] != "skill.review" {
+		t.Fatalf("dual-role projection is not stable and separated: %+v err=%v", projection, err)
+	}
+	if _, err := governorService.Revoke(context.Background(), authorization.RevokeCommand{
+		AssignmentID: governor.Assignment.ID, TargetUserID: targetID, ActorUserID: actorID,
+		Role: authorization.RoleSkillGovernor, ExpectedVersion: 1,
+		ReasonCode: "governor_offboarding", ApprovalReference: "DEPLOY-503",
+	}); err != nil {
+		t.Fatalf("revoke governor independently: %v", err)
+	}
+	projection, err = reviewerService.Resolve(context.Background(), targetID)
+	if err != nil || len(projection.Roles) != 1 || projection.Roles[0] != "skill_reviewer" ||
+		len(projection.Capabilities) != 1 || projection.Capabilities[0] != "skill.review" {
+		t.Fatalf("governor revoke changed reviewer capability: %+v err=%v", projection, err)
+	}
+}

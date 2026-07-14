@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// AuthorizationRepository 使用 GORM 实现一次动态解析和固定锁序的角色授予、撤销。
+// AuthorizationRepository 使用 GORM 实现 Skill 审核、治理角色的一次动态解析和固定锁序授予、撤销。
 type AuthorizationRepository struct {
 	// db 只在 Repository 内部使用，不向 Auth、CLI 或 HTTP 暴露。
 	db *gorm.DB

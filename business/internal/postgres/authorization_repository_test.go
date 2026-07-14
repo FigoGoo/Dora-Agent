@@ -42,6 +42,7 @@ func TestAuthorizationRepositoryResolveUsesOneAggregateQuery(t *testing.T) {
 	}{
 		{name: "no roles", rolesJSON: `[]`, wantRoles: 0, wantActive: true},
 		{name: "reviewer", rolesJSON: `["skill_reviewer"]`, wantRoles: 1, wantActive: true},
+		{name: "reviewer and governor", rolesJSON: `["skill_governor","skill_reviewer"]`, wantRoles: 2, wantActive: true},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			repository, mock := newAuthorizationRepositoryTestDB(t)

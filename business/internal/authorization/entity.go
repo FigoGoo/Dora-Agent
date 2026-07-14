@@ -1,4 +1,4 @@
-// Package authorization 定义 Business 最小 Reviewer RBAC 的领域边界。
+// Package authorization 定义 Business Skill 审核与治理 RBAC 的领域边界。
 package authorization
 
 import (
@@ -25,10 +25,14 @@ var (
 )
 
 const (
-	// RoleSkillReviewer 是 W1-C2 唯一允许持久化的 Reviewer 角色。
+	// RoleSkillReviewer 是允许持久化的 Skill 审核角色。
 	RoleSkillReviewer RoleKey = "skill_reviewer"
-	// CapabilitySkillReview 是 skill_reviewer 唯一投影的审核能力。
+	// RoleSkillGovernor 是允许持久化的 Skill 治理角色。
+	RoleSkillGovernor RoleKey = "skill_governor"
+	// CapabilitySkillReview 是 skill_reviewer 投影的审核能力。
 	CapabilitySkillReview CapabilityKey = "skill.review"
+	// CapabilitySkillGovern 是 skill_governor 投影的治理能力。
+	CapabilitySkillGovern CapabilityKey = "skill.govern"
 	// StatusActive 表示角色分配当前生效。
 	StatusActive AssignmentStatus = "active"
 	// StatusRevoked 表示角色分配已经单向撤销。
@@ -95,7 +99,7 @@ type Assignment struct {
 // Validate 校验角色分配的 UUIDv7、闭集角色、审计字段和单向状态不变量。
 func (assignment Assignment) Validate() error {
 	if !isUUIDv7(assignment.ID) || !isUUIDv7(assignment.UserID) || !isUUIDv7(assignment.AssignedByUserID) ||
-		assignment.UserID == assignment.AssignedByUserID || assignment.Role != RoleSkillReviewer ||
+		assignment.UserID == assignment.AssignedByUserID || !validRole(assignment.Role) ||
 		assignment.Version < 1 || !validStableValue(assignment.AssignmentReasonCode, 128) ||
 		!validStableValue(assignment.ApprovalReference, 160) || assignment.AssignedAt.IsZero() ||
 		assignment.UpdatedAt.Before(assignment.AssignedAt) {
@@ -116,6 +120,11 @@ func (assignment Assignment) Validate() error {
 		return ErrInvalidCommand
 	}
 	return nil
+}
+
+// validRole 只接受代码与 Migration 共同冻结的 Skill 审核、治理角色闭集。
+func validRole(role RoleKey) bool {
+	return role == RoleSkillReviewer || role == RoleSkillGovernor
 }
 
 // GrantCommand 是受控 Role Admin 或 local Seeder 提交的授予语义。

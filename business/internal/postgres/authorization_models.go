@@ -7,7 +7,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/business/internal/authorization"
 )
 
-// userRoleAssignmentModel 是 Business Reviewer 角色分配持久化模型，不创建数据库物理外键。
+// userRoleAssignmentModel 是 Business Skill 审核、治理角色分配持久化模型，不创建数据库物理外键。
 type userRoleAssignmentModel struct {
 	// ID 是应用生成的 UUIDv7 主键。
 	ID string `gorm:"column:id;type:uuid;primaryKey"`

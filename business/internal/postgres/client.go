@@ -89,13 +89,16 @@ func (c *Client) VerifySchema(ctx context.Context, timeout time.Duration) error 
 	if err := c.verifyAuthorizationIntegrity(checkCtx); err != nil {
 		return err
 	}
+	if err := c.verifySkillGovernanceIntegrity(checkCtx); err != nil {
+		return err
+	}
 	if err := c.verifySchemaContract(checkCtx); err != nil {
 		return err
 	}
 	return nil
 }
 
-// verifyRequiredAuthColumns 校验 Auth 与 Reviewer Decision 需要的前向 Migration 字段，避免旧 Schema 误通过 Ready。
+// verifyRequiredAuthColumns 校验 Auth、Reviewer Decision 与 Skill Governance 需要的前向字段，避免旧 Schema 误通过 Ready。
 func (c *Client) verifyRequiredAuthColumns(ctx context.Context) error {
 	var requiredColumnCount int64
 	if err := c.db.WithContext(ctx).Raw(`
@@ -105,11 +108,15 @@ func (c *Client) verifyRequiredAuthColumns(ctx context.Context) error {
 		  AND (
 		    (table_name = 'user_account' AND column_name = 'display_name') OR
 		    (table_name = 'skill_command_receipt' AND column_name = 'request_id') OR
-		    (table_name = 'skill_governance_audit' AND column_name = 'request_id')
+		    (table_name = 'skill_command_receipt' AND column_name = 'response_governance_epoch') OR
+		    (table_name = 'skill_governance_audit' AND column_name IN (
+		      'request_id', 'actor_role_key', 'governance_epoch', 'approval_reference',
+		      'source_address', 'command_receipt_id'
+		    ))
 		  )`, schemaName).Scan(&requiredColumnCount).Error; err != nil {
 		return fmt.Errorf("query business auth required columns: %w", err)
 	}
-	if requiredColumnCount != 3 {
+	if requiredColumnCount != 9 {
 		return fmt.Errorf("business schema is missing required auth or RBAC columns; run business migrations")
 	}
 	return nil
@@ -127,11 +134,43 @@ func (c *Client) verifyAuthorizationIntegrity(ctx context.Context) error {
 		WHERE target_account.id IS NULL
 		   OR actor_account.id IS NULL
 		   OR (assignment.revoked_by_user_id IS NOT NULL AND revoke_actor_account.id IS NULL)
-		   OR assignment.role_key <> 'skill_reviewer'`).Scan(&invalidAssignmentCount).Error; err != nil {
+		   OR assignment.role_key NOT IN ('skill_reviewer', 'skill_governor')`).Scan(&invalidAssignmentCount).Error; err != nil {
 		return fmt.Errorf("query business authorization integrity: %w", err)
 	}
 	if invalidAssignmentCount != 0 {
 		return fmt.Errorf("business authorization contains %d orphan or unknown assignments", invalidAssignmentCount)
+	}
+	return nil
+}
+
+// verifySkillGovernanceIntegrity 用一次固定 FULL JOIN 检测治理回执与不可变审计的双向孤儿和字段错配。
+func (c *Client) verifySkillGovernanceIntegrity(ctx context.Context) error {
+	var invalidGovernanceFactCount int64
+	if err := c.db.WithContext(ctx).Raw(`
+		SELECT COUNT(*)
+		FROM business.skill_command_receipt AS receipt
+		FULL OUTER JOIN business.skill_governance_audit AS audit
+		  ON audit.command_receipt_id = receipt.id
+		WHERE (
+		        receipt.command_type = 'governance_transition'
+		        OR audit.action IN ('governance_suspended', 'governance_resumed', 'governance_offlined')
+		      )
+		  AND (
+		        receipt.id IS NULL
+		        OR audit.id IS NULL
+		        OR receipt.command_type <> 'governance_transition'
+		        OR audit.action NOT IN ('governance_suspended', 'governance_resumed', 'governance_offlined')
+		        OR receipt.actor_user_id IS DISTINCT FROM audit.actor_user_id
+		        OR receipt.result_skill_id IS DISTINCT FROM audit.skill_id
+		        OR receipt.request_id IS DISTINCT FROM audit.request_id
+		        OR receipt.response_governance_status IS DISTINCT FROM audit.to_status
+		        OR receipt.response_governance_epoch IS DISTINCT FROM audit.governance_epoch
+		        OR receipt.created_at IS DISTINCT FROM audit.occurred_at
+		      )`).Scan(&invalidGovernanceFactCount).Error; err != nil {
+		return fmt.Errorf("query business skill governance integrity: %w", err)
+	}
+	if invalidGovernanceFactCount != 0 {
+		return fmt.Errorf("business skill governance contains %d orphan or mismatched receipt audits", invalidGovernanceFactCount)
 	}
 	return nil
 }

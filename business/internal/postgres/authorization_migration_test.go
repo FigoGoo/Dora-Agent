@@ -62,6 +62,7 @@ func TestReviewerRBACMigrationHasForwardOnlyContract(t *testing.T) {
 func TestReviewerRBACMigrationPostgreSQLContract(t *testing.T) {
 	_, db := openBusinessIntegrationRepository(t)
 	upPath, downPath := reviewerRBACMigrationPaths(t)
+	governanceUpPath, governanceDownPath := skillGovernanceMigrationPaths(t)
 	upSQL, err := os.ReadFile(upPath)
 	if err != nil {
 		t.Fatalf("read Reviewer RBAC up migration: %v", err)
@@ -70,8 +71,20 @@ func TestReviewerRBACMigrationPostgreSQLContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read Reviewer RBAC down migration: %v", err)
 	}
+	governanceUpSQL, err := os.ReadFile(governanceUpPath)
+	if err != nil {
+		t.Fatalf("read Skill Governance up migration: %v", err)
+	}
+	governanceDownSQL, err := os.ReadFile(governanceDownPath)
+	if err != nil {
+		t.Fatalf("read Skill Governance down migration: %v", err)
+	}
 
 	// openBusinessIntegrationRepository 已从空 business Schema 顺序应用全部 Up Migration。
+	assertSkillGovernanceSchemaPresent(t, db)
+	if err := db.Exec(string(governanceDownSQL)).Error; err != nil {
+		t.Fatalf("apply local Skill Governance down migration before Reviewer rollback: %v", err)
+	}
 	assertReviewerRBACSchemaPresent(t, db)
 	if err := db.Exec(string(downSQL)).Error; err != nil {
 		t.Fatalf("apply local Reviewer RBAC down migration: %v", err)
@@ -83,8 +96,12 @@ func TestReviewerRBACMigrationPostgreSQLContract(t *testing.T) {
 		t.Fatalf("upgrade Business schema from 005 to 006: %v", err)
 	}
 	assertReviewerRBACSchemaPresent(t, db)
+	if err := db.Exec(string(governanceUpSQL)).Error; err != nil {
+		t.Fatalf("upgrade Business schema from 006 to 007: %v", err)
+	}
+	assertSkillGovernanceSchemaPresent(t, db)
 	if err := (&Client{db: db}).VerifySchema(context.Background(), 5*time.Second); err != nil {
-		t.Fatalf("005 to 006 schema is not ready: %v", err)
+		t.Fatalf("005 to 006 to 007 schema is not ready: %v", err)
 	}
 
 	// 版本化 Migration 被误重复执行时必须失败，且不能损坏已经完成的 006 Schema。
@@ -92,6 +109,7 @@ func TestReviewerRBACMigrationPostgreSQLContract(t *testing.T) {
 		t.Fatal("duplicate Reviewer RBAC migration initialization unexpectedly succeeded")
 	}
 	assertReviewerRBACSchemaPresent(t, db)
+	assertSkillGovernanceSchemaPresent(t, db)
 }
 
 // TestReviewerRBACReadinessPostgreSQLRejectsOrphan 使用真实无外键 Schema 验证孤儿 assignment 阻止 Ready。

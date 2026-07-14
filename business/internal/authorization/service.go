@@ -20,7 +20,7 @@ type IDGenerator interface {
 	New() (string, error)
 }
 
-// Service 实现最小 Reviewer 角色解析、授予和单向撤销。
+// Service 实现 Skill 审核、治理角色的动态解析、授予和单向撤销。
 type Service struct {
 	repository Repository
 	clock      Clock
@@ -56,6 +56,9 @@ func (service *Service) Resolve(ctx context.Context, userID string) (Projection,
 		case RoleSkillReviewer:
 			roleSet[string(role)] = struct{}{}
 			capabilitySet[string(CapabilitySkillReview)] = struct{}{}
+		case RoleSkillGovernor:
+			roleSet[string(role)] = struct{}{}
+			capabilitySet[string(CapabilitySkillGovern)] = struct{}{}
 		default:
 			// 数据库 CHECK 之外仍在领域层拒绝未知角色，避免损坏数据被静默当成低权限。
 			return Projection{}, ErrUnavailable
@@ -111,14 +114,14 @@ func (service *Service) Revoke(ctx context.Context, command RevokeCommand) (Muta
 // validGrantCommand 校验 Grant 的 UUIDv7、actor 分离和稳定文本边界。
 func validGrantCommand(command GrantCommand) bool {
 	return isUUIDv7(command.TargetUserID) && isUUIDv7(command.ActorUserID) &&
-		command.TargetUserID != command.ActorUserID && command.Role == RoleSkillReviewer &&
+		command.TargetUserID != command.ActorUserID && validRole(command.Role) &&
 		validStableValue(command.ReasonCode, 128) && validStableValue(command.ApprovalReference, 160)
 }
 
 // validRevokeCommand 校验 Revoke 的 assignment、版本、actor 分离和稳定文本边界。
 func validRevokeCommand(command RevokeCommand) bool {
 	return isUUIDv7(command.AssignmentID) && isUUIDv7(command.TargetUserID) && isUUIDv7(command.ActorUserID) &&
-		command.TargetUserID != command.ActorUserID && command.Role == RoleSkillReviewer && command.ExpectedVersion >= 1 &&
+		command.TargetUserID != command.ActorUserID && validRole(command.Role) && command.ExpectedVersion >= 1 &&
 		validStableValue(command.ReasonCode, 128) && validStableValue(command.ApprovalReference, 160)
 }
 

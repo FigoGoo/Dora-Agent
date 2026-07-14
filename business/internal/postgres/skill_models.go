@@ -151,6 +151,8 @@ type skillCommandReceiptModel struct {
 	ResponseReviewUpdatedAt *time.Time `gorm:"column:response_review_updated_at"`
 	// ResponseGovernanceStatus 是首次安全响应冻结的治理状态。
 	ResponseGovernanceStatus string `gorm:"column:response_governance_status"`
+	// ResponseGovernanceEpoch 是治理命令首次安全响应冻结的治理纪元，其他命令为空。
+	ResponseGovernanceEpoch *int64 `gorm:"column:response_governance_epoch"`
 	// RequestID 是首次 HTTP 审核决定的服务端请求标识。
 	RequestID *string `gorm:"column:request_id;type:uuid"`
 	// CreatedAt 是首次命令提交时间。
@@ -176,8 +178,18 @@ type skillGovernanceAuditModel struct {
 	ToStatus string `gorm:"column:to_status"`
 	// SafeReasonCode 是可选安全原因代码。
 	SafeReasonCode *string `gorm:"column:safe_reason_code"`
-	// ActorUserID 是受信 Reviewer。
+	// ActorUserID 是受信 Reviewer 或 Governor。
 	ActorUserID string `gorm:"column:actor_user_id;type:uuid"`
+	// ActorRoleKey 是治理动作使用的权威角色，历史审核发布行为为空。
+	ActorRoleKey *string `gorm:"column:actor_role_key"`
+	// GovernanceEpoch 是治理动作提交后的纪元，历史审核发布行为为空。
+	GovernanceEpoch *int64 `gorm:"column:governance_epoch"`
+	// ApprovalReference 是治理动作关联的规范外部审批引用。
+	ApprovalReference *string `gorm:"column:approval_reference"`
+	// SourceAddress 是治理 HTTP 请求的规范直连 peer 地址。
+	SourceAddress *string `gorm:"column:source_address;type:inet"`
+	// CommandReceiptID 是治理审计唯一对应的命令回执，历史审核发布行为为空。
+	CommandReceiptID *string `gorm:"column:command_receipt_id;type:uuid"`
 	// RequestID 是首次 HTTP 审核决定的服务端请求标识。
 	RequestID *string `gorm:"column:request_id;type:uuid"`
 	// OccurredAt 是 UTC 动作时间。

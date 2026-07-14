@@ -71,7 +71,7 @@ func TestVerifySchemaRejectsAuthorizationOrphan(t *testing.T) {
 	mock.ExpectQuery(`pg_catalog\.pg_tables`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(len(requiredBusinessTables)))
 	mock.ExpectQuery(`information_schema\.columns`).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(9))
 	mock.ExpectQuery(`FROM business\.user_role_assignment AS assignment`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 
@@ -81,5 +81,27 @@ func TestVerifySchemaRejectsAuthorizationOrphan(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet authorization readiness SQL expectations: %v", err)
+	}
+}
+
+func TestVerifySchemaRejectsGovernanceReceiptAuditMismatch(t *testing.T) {
+	client, mock := newReadinessTestClient(t)
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(`pg_catalog\.pg_tables`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(len(requiredBusinessTables)))
+	mock.ExpectQuery(`information_schema\.columns`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(9))
+	mock.ExpectQuery(`FROM business\.user_role_assignment AS assignment`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`FULL OUTER JOIN business\.skill_governance_audit AS audit`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	err := client.VerifySchema(context.Background(), time.Second)
+	if err == nil || !strings.Contains(err.Error(), "orphan or mismatched receipt audits") {
+		t.Fatalf("expected governance receipt/audit integrity readiness error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet governance readiness SQL expectations: %v", err)
 	}
 }

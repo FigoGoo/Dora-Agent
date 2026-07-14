@@ -215,6 +215,16 @@ func Run(ctx context.Context, build BuildInfo) error {
 		_ = registry.Close(ctx)
 		return fmt.Errorf("create business skill review HTTP handler: %w", err)
 	}
+	skillGovernanceService, err := skill.NewGovernanceService(skillRepository, clock.System{}, idgen.UUIDv7{})
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business skill governance service: %w", err)
+	}
+	skillGovernanceHandler, err := httpserver.NewSkillGovernanceHandler(skillGovernanceService, idgen.UUIDv7{})
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business skill governance HTTP handler: %w", err)
+	}
 	agentSessionAccessService, err := project.NewAgentSessionAccessService(projectRepository)
 	if err != nil {
 		_ = registry.Close(ctx)
@@ -292,7 +302,7 @@ func Run(ctx context.Context, build BuildInfo) error {
 	}
 	server, err := httpserver.New(cfg.HTTP, cfg.Service, state, httpserver.RouteHandlers{
 		Auth: authHandler, Project: projectHandler, Agent: agentProxyHandler,
-		Skill: skillHandler, SkillReview: skillReviewHandler,
+		Skill: skillHandler, SkillReview: skillReviewHandler, SkillGovernance: skillGovernanceHandler,
 	})
 	if err != nil {
 		_ = registry.Close(ctx)

@@ -13,6 +13,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/business/internal/config"
 	"github.com/FigoGoo/Dora-Agent/business/internal/health"
 	"github.com/FigoGoo/Dora-Agent/business/internal/project"
+	"github.com/FigoGoo/Dora-Agent/business/internal/skill"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -94,7 +95,7 @@ func TestServerRegistersProjectRouteBehindSessionAndCSRF(t *testing.T) {
 	}, config.ServiceConfig{Name: "business-test", Version: "test"}, state, RouteHandlers{
 		Auth: authHandler, Project: projectHandler,
 		Agent: mustAgentProxyHandlerForServerTest(t), Skill: mustSkillHandlerForServerTest(t),
-		SkillReview: mustSkillReviewHandlerForServerTest(t),
+		SkillReview: mustSkillReviewHandlerForServerTest(t), SkillGovernance: mustSkillGovernanceHandlerForServerTest(t),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -155,6 +156,7 @@ func TestServerRegistersAgentProxyBehindBusinessSession(t *testing.T) {
 	}, config.ServiceConfig{Name: "business-test", Version: "test"}, state, RouteHandlers{
 		Auth: authHandler, Project: projectHandler, Agent: mustAgentProxyHandlerForServerTest(t),
 		Skill: mustSkillHandlerForServerTest(t), SkillReview: mustSkillReviewHandlerForServerTest(t),
+		SkillGovernance: mustSkillGovernanceHandlerForServerTest(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -200,6 +202,7 @@ func TestServerRegistersSkillWriteBehindSessionAndCSRF(t *testing.T) {
 	}, config.ServiceConfig{Name: "business-test", Version: "test"}, health.NewState(), RouteHandlers{
 		Auth: authHandler, Project: projectHandler, Agent: mustAgentProxyHandlerForServerTest(t),
 		Skill: skillHandler, SkillReview: mustSkillReviewHandlerForServerTest(t),
+		SkillGovernance: mustSkillGovernanceHandlerForServerTest(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -224,5 +227,72 @@ func TestServerRegistersSkillWriteBehindSessionAndCSRF(t *testing.T) {
 	server.Handler().ServeHTTP(accepted, withCSRF)
 	if accepted.Code != http.StatusCreated || skillService.createCommand.OwnerUserID != resolved.Principal.ID {
 		t.Fatalf("Skill write did not use trusted session: status=%d command=%+v body=%s", accepted.Code, skillService.createCommand, accepted.Body.String())
+	}
+}
+
+func TestServerRegistersSkillGovernanceDecisionBehindSessionCapabilityAndCSRF(t *testing.T) {
+	_, resolved := validAuthHandlerSession()
+	resolved.Principal.Capabilities = []string{skill.GovernanceCapability}
+	authService := &authHandlerTestService{resolveResult: resolved}
+	authHandler, err := NewAuthHandler(authService, config.AuthConfig{
+		CookieName: "dora_session", CookieSameSite: "lax", MaxRequestBodyBytes: 4096,
+	}, authHandlerTestIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectHandler, err := NewProjectHandler(&projectHTTPService{}, authHandlerTestIDs{}, project.MaxInitialPromptBytes+1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skillID, _ := uuid.NewV7()
+	snapshotID, _ := uuid.NewV7()
+	oldETag, _ := skill.GovernanceETag(skillID.String(), snapshotID.String(), skill.GovernanceStatusActive, 1)
+	newETag, _ := skill.GovernanceETag(skillID.String(), snapshotID.String(), skill.GovernanceStatusSuspended, 2)
+	governanceService := &skillGovernanceHTTPService{decisionResult: skill.GovernanceDecisionResult{Skill: skill.GovernanceDecisionDTO{
+		SkillID: skillID.String(), GovernanceStatus: skill.GovernanceStatusSuspended, GovernanceEpoch: 2,
+		TransitionedAt: "2026-07-14T09:10:00Z", GovernanceETag: newETag,
+		AllowedActions: []string{"resume", "offline"},
+	}}}
+	governanceHandler, err := NewSkillGovernanceHandler(governanceService, authHandlerTestIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(config.HTTPConfig{
+		Address: ":0", HeaderTimeout: time.Second, ReadTimeout: time.Second,
+		WriteTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 1024,
+	}, config.ServiceConfig{Name: "business-test", Version: "test"}, health.NewState(), RouteHandlers{
+		Auth: authHandler, Project: projectHandler, Agent: mustAgentProxyHandlerForServerTest(t),
+		Skill: mustSkillHandlerForServerTest(t), SkillReview: mustSkillReviewHandlerForServerTest(t),
+		SkillGovernance: governanceHandler,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/admin/skill-governance/" + skillID.String() + "/decisions"
+	body := `{"action":"suspend","reason_code":"content_safety","approval_reference":"TICKET-123"}`
+	newRequest := func() *http.Request {
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("If-Match", oldETag)
+		request.Header.Set("Idempotency-Key", "server-governance-1")
+		request.AddCookie(&http.Cookie{Name: "dora_session", Value: "opaque-cookie-token"})
+		return request
+	}
+
+	withoutCSRF := newRequest()
+	denied := httptest.NewRecorder()
+	server.Handler().ServeHTTP(denied, withoutCSRF)
+	if denied.Code != http.StatusForbidden || governanceService.decisionCalls != 0 {
+		t.Fatalf("Governance decision bypassed CSRF: status=%d calls=%d body=%s", denied.Code, governanceService.decisionCalls, denied.Body.String())
+	}
+
+	withCSRF := newRequest()
+	withCSRF.Header.Set("X-CSRF-Token", resolved.CSRFToken)
+	accepted := httptest.NewRecorder()
+	server.Handler().ServeHTTP(accepted, withCSRF)
+	if accepted.Code != http.StatusOK || governanceService.decisionCalls != 1 ||
+		governanceService.decisionCommand.Governor.UserID != resolved.Principal.ID ||
+		governanceService.decisionCommand.SourceAddress != "192.0.2.1" {
+		t.Fatalf("Governance decision did not use trusted session/capability: status=%d calls=%d command=%+v body=%s", accepted.Code, governanceService.decisionCalls, governanceService.decisionCommand, accepted.Body.String())
 	}
 }

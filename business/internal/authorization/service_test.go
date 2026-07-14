@@ -61,15 +61,16 @@ func (ids authorizationTestIDs) New() (string, error) { return ids.id, ids.err }
 func TestServiceResolveMapsClosedRoleAndRejectsUnknown(t *testing.T) {
 	userID := "019f0000-0000-7000-8000-000000000011"
 	repository := &authorizationTestRepository{resolution: RoleResolution{
-		SubjectActive: true, Roles: []RoleKey{RoleSkillReviewer, RoleSkillReviewer},
+		SubjectActive: true, Roles: []RoleKey{RoleSkillReviewer, RoleSkillGovernor, RoleSkillReviewer, RoleSkillGovernor},
 	}}
 	service, err := NewService(repository, authorizationTestClock{}, authorizationTestIDs{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	projection, err := service.Resolve(context.Background(), userID)
-	if err != nil || len(projection.Roles) != 1 || projection.Roles[0] != "skill_reviewer" ||
-		len(projection.Capabilities) != 1 || projection.Capabilities[0] != "skill.review" || repository.resolveUserID != userID {
+	if err != nil || len(projection.Roles) != 2 || projection.Roles[0] != "skill_governor" || projection.Roles[1] != "skill_reviewer" ||
+		len(projection.Capabilities) != 2 || projection.Capabilities[0] != "skill.govern" || projection.Capabilities[1] != "skill.review" ||
+		repository.resolveUserID != userID {
 		t.Fatalf("unexpected closed authorization projection: projection=%+v err=%v", projection, err)
 	}
 
@@ -108,6 +109,42 @@ func TestServiceGrantBuildsAuditedUUIDv7Assignment(t *testing.T) {
 		t.Fatalf("Grant did not freeze audited assignment: result=%+v input=%+v err=%v", result, repository.grantInput, err)
 	}
 }
+
+func TestServiceGrantAndRevokeAcceptGovernorRole(t *testing.T) {
+	now := time.Date(2026, 7, 14, 10, 30, 0, 0, time.UTC)
+	repository := &authorizationTestRepository{}
+	service, _ := NewService(repository, authorizationTestClock{now: now}, authorizationTestIDs{
+		id: "019f0000-0000-7000-8000-000000000014",
+	})
+	created, err := service.Grant(context.Background(), GrantCommand{
+		TargetUserID: "019f0000-0000-7000-8000-000000000011",
+		ActorUserID:  "019f0000-0000-7000-8000-000000000012",
+		Role:         RoleSkillGovernor, ReasonCode: "governor_onboarding", ApprovalReference: "DEPLOY-124",
+	})
+	if err != nil || created.Assignment.Role != RoleSkillGovernor || repository.grantInput.Role != RoleSkillGovernor {
+		t.Fatalf("Grant did not accept governor role: result=%+v input=%+v err=%v", created, repository.grantInput, err)
+	}
+	revokedAt := now.Add(time.Minute)
+	repository.revokeResult = MutationResult{Assignment: Assignment{
+		ID: created.Assignment.ID, UserID: created.Assignment.UserID, Role: RoleSkillGovernor,
+		Status: StatusRevoked, Version: 2, AssignedByUserID: created.Assignment.AssignedByUserID,
+		AssignmentReasonCode: created.Assignment.AssignmentReasonCode, ApprovalReference: created.Assignment.ApprovalReference,
+		AssignedAt: created.Assignment.AssignedAt, RevokedByUserID: stringPointer("019f0000-0000-7000-8000-000000000012"),
+		RevokeReasonCode: stringPointer("governor_offboarding"), RevocationApprovalReference: stringPointer("DEPLOY-125"),
+		RevokedAt: &revokedAt, UpdatedAt: revokedAt,
+	}}
+	result, err := service.Revoke(context.Background(), RevokeCommand{
+		AssignmentID: created.Assignment.ID, TargetUserID: created.Assignment.UserID,
+		ActorUserID: "019f0000-0000-7000-8000-000000000012", Role: RoleSkillGovernor,
+		ExpectedVersion: 1, ReasonCode: "governor_offboarding", ApprovalReference: "DEPLOY-125",
+	})
+	if err != nil || result.Assignment.Role != RoleSkillGovernor || repository.revokeInput.Role != RoleSkillGovernor {
+		t.Fatalf("Revoke did not accept governor role: result=%+v input=%+v err=%v", result, repository.revokeInput, err)
+	}
+}
+
+// stringPointer 为授权 Service 测试构造独立的可选审计字符串。
+func stringPointer(value string) *string { return &value }
 
 func TestServiceRejectsSelfGrantAndInvalidRevokeBeforeRepository(t *testing.T) {
 	repository := &authorizationTestRepository{}
