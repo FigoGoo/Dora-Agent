@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"testing"
 
 	"github.com/google/uuid"
@@ -22,6 +23,8 @@ const (
 
 //go:embed testdata/w2_r02/*.json
 var w2R02CorpusFS embed.FS
+
+var sessionLaneBusinessDigestPatternV1 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type sessionLaneManifestV1 struct {
 	SchemaVersion string                      `json:"schema_version"`
@@ -426,7 +429,7 @@ func applySessionLaneCommandV1(before sessionLaneSnapshotV1, command sessionLane
 			return before, reject("SESSION_INPUT_NOT_HEAD", "input_id")
 		}
 		previousStatus := input.Status
-		cancelClaim := input.CancelRequested && command.EvidenceKind == "cancel_request" && digestPattern.MatchString(command.EvidenceDigest)
+		cancelClaim := input.CancelRequested && command.EvidenceKind == "cancel_request" && sessionLaneBusinessDigestPatternV1.MatchString(command.EvidenceDigest)
 		if input.CancelRequested && !cancelClaim {
 			return before, reject("SESSION_INPUT_STATE_CONFLICT", "cancel-requested head requires cancel claim")
 		}
@@ -442,7 +445,7 @@ func applySessionLaneCommandV1(before sessionLaneSnapshotV1, command sessionLane
 		if after.Lease.OwnerID != "" {
 			return before, reject("SESSION_INPUT_STATE_CONFLICT", "expired held lease requires takeover")
 		}
-		if input.Status == "claimed" && (command.EvidenceKind != "durable_handoff" || !digestPattern.MatchString(command.EvidenceDigest)) {
+		if input.Status == "claimed" && (command.EvidenceKind != "durable_handoff" || !sessionLaneBusinessDigestPatternV1.MatchString(command.EvidenceDigest)) {
 			return before, reject("RECOVERY_EVIDENCE_REQUIRED", "handoff evidence")
 		}
 		if input.Status != "pending" && input.Status != "retry_wait" && input.Status != "quarantined" && input.Status != "claimed" {
@@ -520,7 +523,7 @@ func applySessionLaneCommandV1(before sessionLaneSnapshotV1, command sessionLane
 		if run.Status == "recovery_pending" && command.EvidenceKind != "recovery_safe_point" && command.EvidenceKind != "authoritative_no_effect_safe_point" {
 			return before, reject("RECOVERY_EVIDENCE_REQUIRED", "run resume evidence")
 		}
-		if run.Status == "recovery_pending" && !digestPattern.MatchString(command.EvidenceDigest) {
+		if run.Status == "recovery_pending" && !sessionLaneBusinessDigestPatternV1.MatchString(command.EvidenceDigest) {
 			return before, reject("RECOVERY_EVIDENCE_REQUIRED", "run resume digest")
 		}
 		if run.EffectState == "unknown" {
@@ -574,7 +577,7 @@ func applySessionLaneCommandV1(before sessionLaneSnapshotV1, command sessionLane
 		if run.EffectState == "resolved" {
 			return before, reject("RUN_STATE_CONFLICT", "resolved effect cannot retry")
 		}
-		if command.EvidenceKind != "no_side_effect" || !digestPattern.MatchString(command.EvidenceDigest) || command.RetryAtTick <= command.NowTick {
+		if command.EvidenceKind != "no_side_effect" || !sessionLaneBusinessDigestPatternV1.MatchString(command.EvidenceDigest) || command.RetryAtTick <= command.NowTick {
 			return before, reject("RECOVERY_EVIDENCE_REQUIRED", "retry evidence")
 		}
 		input.Status = "retry_wait"
@@ -603,7 +606,7 @@ func applySessionLaneCommandV1(before sessionLaneSnapshotV1, command sessionLane
 			if run.EffectState == "resolved" {
 				return before, reject("RUN_STATE_CONFLICT", "resolved effect cannot quarantine")
 			}
-			if command.EvidenceKind != "unknown_outcome" || !digestPattern.MatchString(command.EvidenceDigest) {
+			if command.EvidenceKind != "unknown_outcome" || !sessionLaneBusinessDigestPatternV1.MatchString(command.EvidenceDigest) {
 				return before, reject("RECOVERY_EVIDENCE_REQUIRED", "unknown evidence")
 			}
 			input.Status = "quarantined"
@@ -628,7 +631,7 @@ func applySessionLaneCommandV1(before sessionLaneSnapshotV1, command sessionLane
 		if run.EffectState == "resolved" {
 			return before, reject("RUN_STATE_CONFLICT", "resolved effect cannot quarantine")
 		}
-		if command.EvidenceKind != "unknown_outcome" || !digestPattern.MatchString(command.EvidenceDigest) {
+		if command.EvidenceKind != "unknown_outcome" || !sessionLaneBusinessDigestPatternV1.MatchString(command.EvidenceDigest) {
 			return before, reject("RECOVERY_EVIDENCE_REQUIRED", "unknown evidence")
 		}
 		input.Status = "quarantined"
@@ -707,7 +710,7 @@ func applySessionLaneCommandV1(before sessionLaneSnapshotV1, command sessionLane
 			run.Version++
 		}
 	case "record_cancel_request":
-		if _, err := parseCanonicalUUIDv7(command.CommandID); err != nil || !digestPattern.MatchString(command.RequestDigest) {
+		if _, err := parseCanonicalUUIDv7(command.CommandID); err != nil || !sessionLaneBusinessDigestPatternV1.MatchString(command.RequestDigest) {
 			return before, reject("CANCEL_REQUEST_CONFLICT", "cancel command identity")
 		}
 		if command.RunID != input.RunID {
@@ -749,7 +752,7 @@ func applySessionLaneCommandV1(before sessionLaneSnapshotV1, command sessionLane
 		if !input.CancelRequested {
 			return before, reject("CANCEL_REQUEST_REQUIRED", "cancel_requested")
 		}
-		if command.EvidenceKind != "cancellation_committed" || !digestPattern.MatchString(command.EvidenceDigest) {
+		if command.EvidenceKind != "cancellation_committed" || !sessionLaneBusinessDigestPatternV1.MatchString(command.EvidenceDigest) {
 			return before, reject("TERMINAL_EVIDENCE_REQUIRED", "cancellation evidence")
 		}
 		if input.RunID == "" {
@@ -776,7 +779,7 @@ func applySessionLaneCommandV1(before sessionLaneSnapshotV1, command sessionLane
 		if command.ExpectedInputVersion != input.Version {
 			return before, reject("SESSION_INPUT_VERSION_CONFLICT", "input.version")
 		}
-		if command.EvidenceKind != "frozen_receipt_projection_marker" || !digestPattern.MatchString(command.EvidenceDigest) {
+		if command.EvidenceKind != "frozen_receipt_projection_marker" || !sessionLaneBusinessDigestPatternV1.MatchString(command.EvidenceDigest) {
 			return before, reject("TERMINAL_EVIDENCE_REQUIRED", "result evidence")
 		}
 		target := command.TerminalTarget
@@ -805,7 +808,7 @@ func applySessionLaneCommandV1(before sessionLaneSnapshotV1, command sessionLane
 		if command.ExpectedInputVersion != input.Version {
 			return before, reject("SESSION_INPUT_VERSION_CONFLICT", "input.version")
 		}
-		if command.EvidenceKind != "durable_handoff_receipt" || !digestPattern.MatchString(command.EvidenceDigest) {
+		if command.EvidenceKind != "durable_handoff_receipt" || !sessionLaneBusinessDigestPatternV1.MatchString(command.EvidenceDigest) {
 			return before, reject("RECOVERY_EVIDENCE_REQUIRED", "handoff evidence")
 		}
 		turn := findSessionLaneTurnPtrV1(&after, input.TurnID)
@@ -918,7 +921,7 @@ func validateSessionLaneSnapshotV1(snapshot sessionLaneSnapshotV1) error {
 		if _, err := parseCanonicalUUIDv7(input.InputID); err != nil {
 			return fmt.Errorf("input_id: %w", err)
 		}
-		if _, err := parseCanonicalUUIDv7(input.SourceID); err != nil || !digestPattern.MatchString(input.SourceDigest) || input.Version <= 0 || input.EnqueueSeq <= lastSeq || input.Attempts < 0 || input.CancelVersion < 0 {
+		if _, err := parseCanonicalUUIDv7(input.SourceID); err != nil || !sessionLaneBusinessDigestPatternV1.MatchString(input.SourceDigest) || input.Version <= 0 || input.EnqueueSeq <= lastSeq || input.Attempts < 0 || input.CancelVersion < 0 {
 			return fmt.Errorf("非法 input %s", input.InputID)
 		}
 		if input.SourceType != "user_message" && input.SourceType != "approval_continuation_result" && input.SourceType != "batch_continuation_result" {
@@ -928,7 +931,7 @@ func validateSessionLaneSnapshotV1(snapshot sessionLaneSnapshotV1) error {
 			return fmt.Errorf("cancel command provenance 不完整")
 		}
 		if input.CancelCommandID != "" {
-			if _, err := parseCanonicalUUIDv7(input.CancelCommandID); err != nil || !digestPattern.MatchString(input.CancelRequestDigest) {
+			if _, err := parseCanonicalUUIDv7(input.CancelCommandID); err != nil || !sessionLaneBusinessDigestPatternV1.MatchString(input.CancelRequestDigest) {
 				return fmt.Errorf("cancel command provenance 非法")
 			}
 		}
@@ -1195,7 +1198,7 @@ func isTerminalInputStatusV1(status string) bool { return status == "resolved" |
 func validRecoveryEvidenceV1(command sessionLaneCommandV1) bool {
 	return command.EvidenceKind == "authoritative_reconciliation" &&
 		(command.ReconciliationOutcome == "effect_not_started" || command.ReconciliationOutcome == "effect_committed") &&
-		digestPattern.MatchString(command.EvidenceDigest)
+		sessionLaneBusinessDigestPatternV1.MatchString(command.EvidenceDigest)
 }
 
 func validClaimTriggerV1(trigger string) bool {

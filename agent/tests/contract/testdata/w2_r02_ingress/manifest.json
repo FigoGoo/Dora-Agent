@@ -1,0 +1,9 @@
+{
+  "schema_version": "w2_r02_ingress_manifest.v1",
+  "files": [
+    {
+      "file": "session_lane_ingress_v1.json",
+      "sha256": "sha256:8c30427814cd7400d0b02ca31152bcf12b6573b3f940224fd4b6e1a7bae31f81"
+    }
+  ]
+}
