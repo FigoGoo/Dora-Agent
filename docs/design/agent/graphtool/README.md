@@ -2,7 +2,7 @@
 
 > 状态：M0 设计草案已齐备，待跨角色评审
 >
-> 更新日期：2026-07-14
+> 更新日期：2026-07-15
 >
 > 注意：本索引不替代六份独立设计文档；任何一份未通过评审，对应 Tool 均不得实现。
 
@@ -60,11 +60,11 @@ plan_creation_spec
 2. 产品/Business/Agent/财务/安全评审四个同步模型 Tool；
 3. 加入 Worker/运维评审 `generate_media` 与 `assemble_output`；
 4. 测试负责人逐份确认契约、故障注入和 SMK-P0；
-5. 六份文档的复选项全部关闭，并把状态改为 Approved 后，才允许进入 M1/M2 对应实现。
+5. 共享 Runtime 只等待自身依赖契约；每个 Tool 仅由自身设计与依赖 Gate 门禁，Approved 后可进入对应纵切，不等待其余 Tool。六份文档全部 Approved 只门禁 M2 完整黄金闭环与最终全功能冒烟退出。
 
 ## 5. 当前未关闭的 M0 项目
 
-- 六份设计尚未完成跨角色评审，当前仍是实现硬门禁；
+- 六份设计尚未完成跨角色评审；当前每一份只门禁自身 Tool 实现，未 Approved 的 Tool 必须保持 `unavailable / DESIGN_REVIEW_PENDING`，不得阻塞已 Approved 的共享 Runtime 或其他独立 Tool；
 - AIGC 契约目录已起草，但支付回调、管理治理及完整 HTTP/A2UI 字段目录仍需在 P0-04 补齐；
 - Fixture、Fake/Sandbox Adapter、测试账号和冒烟证据格式已有独立草案，仍需跨角色评审和实现；
-- 历史 `main` 的顶层资产与 29 个 `internal/aigc` 一级包已完成包级归类；具体迁移 PR 仍需逐文件复核。
+- 历史 `main` 的顶层资产、`internal/aigc` 的 28 个一级目录及嵌套 `generation/handlers`（合计 29 个 Go package 目录）已完成包级归类；具体迁移 PR 仍需逐文件复核。

@@ -1,10 +1,12 @@
 # AIGC Generation Worker 详细设计
 
-> 状态：Implementation Sync（当前实现 + 目标架构）
+> 状态：Historical `main@6d0fc111fd49a874dad213a61389a6d83999ebc8` Implementation + Target Migration Reference
 > 日期：2026-07-14
 > 适用范围：Dora Agent 图片、视频、音频等异步媒体生成任务
 > 关联模块：`internal/aigc/generation`、`internal/aigc/server`、`internal/aigc/session`
 > 关联设计：[AIGC Tool 编排与动态故事板详细设计](./aigc-tool-storyboard-design.md)、[AIGC ChatModelAgent Demo 详细设计](./aigc-chatmodelagent-demo-design.md)、[AIGC A2UI 全栈详细设计](./aigc-a2ui-design.md)
+
+> 当前事实警告（2026-07-15）：本文后续“当前实现/已实现”只描述上述历史单体 Demo。当前 `business-worker` 只有独立 Module、依赖探针和 health Runtime，尚无 Job/Attempt/Claim/Lease/Provider/Finalize 主循环；目标能力不得作为当前 Worker 验收事实。
 
 ## 1. 文档目标
 

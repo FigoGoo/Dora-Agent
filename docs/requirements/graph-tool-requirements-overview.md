@@ -274,7 +274,7 @@ Worker 完成后只发布持久化 `generation.batch.*` 终态事件；Agent Inb
 
 ## 11. 当前设计与目标需求差距
 
-当前 `master` 尚无可运行的服务端实现。下表“历史设计状态”专指 `main` 分支及现有 AIGC 详细设计记录的迁移起点，不能视为当前分支能力，更不能直接视为本文需求已经实现。
+当前重构基线已有三个独立 Module 的 Foundation Runtime、W0/W1 Business 纵切和 Agent Session/Workspace 基础，但仍没有 Agent Runner、Executable Graph Tool、Approval/A2UI 生产链路或 Worker Job/Claim 主循环。下表“历史设计状态”专指 `main@6d0fc111fd49a874dad213a61389a6d83999ebc8` 单体 Demo 及现有 AIGC 详细设计记录的迁移起点，不能视为当前分支能力，更不能直接视为本文需求已经实现。
 
 | 目标需求 | 历史设计状态 | 必须补齐 |
 | --- | --- | --- |

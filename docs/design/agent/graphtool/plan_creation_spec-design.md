@@ -10,6 +10,8 @@
 >
 > 实现门禁：评审结论为“通过”前禁止创建生产代码。
 
+> 2026-07-15 架构审计补充：本文仍同时保留非 canonical 的 `approval_id + decision_version` 与 `tr:<child_receipt_id>:<ref_slot>:v1`、完整 billable Approval 与直接 Charge 两套候选，不是可实现基线。开工前必须按 [全功能冒烟架构审计](../../cross-module/full-function-smoke-architecture-audit-2026-07-15.md) 关闭 ref slot/observation、Action/Effect 命名、唯一公共 command key、Consumption Query 鉴权、执行授权模式和最小计费 ADR；不得从本文旧段落自行选一套实现。
+
 关联需求：`graph-tool-requirements-overview.md` 的 `plan_creation_spec`、Creation Spec、计费、审批、幂等、A2UI 与全功能冒烟条目。共同契约见 [`../../cross-module/aigc-contract-catalog.md`](../../cross-module/aigc-contract-catalog.md)。
 
 ## 1. 场景、目标与边界

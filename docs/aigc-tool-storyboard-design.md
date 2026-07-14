@@ -1,9 +1,11 @@
 # AIGC Tool 编排与动态故事板详细设计
 
-> 状态：Current Implementation + Target Gaps
+> 状态：Historical `main@6d0fc111fd49a874dad213a61389a6d83999ebc8` Implementation + Target Migration Reference
 > 日期：2026-07-14
 > 适用范围：Dora Agent 的 Agent Tool、UI 定向操作、Graph 内部节点、动态故事板、媒体生成衔接
 > 关联文档：[AIGC ChatModelAgent Demo 详细设计](./aigc-chatmodelagent-demo-design.md)、[AIGC Generation Worker 详细设计](./aigc-worker-design.md)、[AIGC A2UI 全栈详细设计](./aigc-a2ui-design.md)
+
+> 当前事实警告（2026-07-15）：本文后续“当前实现/已实现”只描述上述历史单体 Demo。当前产品目录有六个 Tool key，但设计 Approved 为 0/6、Executable Registry 为 0/6，六项生产 Catalog 均保持 `unavailable / DESIGN_REVIEW_PENDING`；不得把历史五 Tool Registry 当成当前能力。
 
 ## 1. 文档目标
 

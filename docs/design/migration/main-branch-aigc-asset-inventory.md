@@ -12,7 +12,7 @@
 
 ## 1. 审计结论
 
-`main` 是一个根 Go Module 的单体 AIGC Demo：一个 `cmd/aigc-agent` 同时持有 Session、Skill、Creation Spec、Storyboard、Asset、Billing、Generation、Worker Loop、HTTP/SSE 和数据库 AutoMigrate。它包含 216 个 Go 文件、80 个测试文件，其中 `internal/aigc` 有 212 个文件、29 个一级包。
+`main` 是一个根 Go Module 的单体 AIGC Demo：一个 `cmd/aigc-agent` 同时持有 Session、Skill、Creation Spec、Storyboard、Asset、Billing、Generation、Worker Loop、HTTP/SSE 和数据库 AutoMigrate。它包含 216 个 Go 文件、80 个测试文件，其中 `internal/aigc` 有 212 个文件、28 个一级目录；再计入嵌套 `generation/handlers`，合计 29 个 Go package 目录。
 
 这些代码有较高的行为样例和测试价值，但目录边界、表 Owner、Runtime、Migration、计费顺序、Job 消费和五 Tool Registry 与当前目标不一致。结论如下：
 
@@ -222,7 +222,7 @@ Requirement/Smoke IDs：<ids>
 
 ## 9. 当前结论与剩余审计
 
-本清单已覆盖 `main` 顶层生产资产和全部 29 个 `internal/aigc` 一级包，完成“选择性复用、重写、废弃、历史保留”的包级归类。它足以阻止单体目录整体回迁，并为 M1～M3 排定迁移来源。
+本清单已覆盖 `main` 顶层生产资产、`internal/aigc` 的 28 个一级目录和嵌套 `generation/handlers`，合计 29 个 Go package 目录，完成“选择性复用、重写、废弃、历史保留”的包级归类。它足以阻止单体目录整体回迁，并为 M1～M3 排定迁移来源。
 
 进入某个具体迁移 PR 前仍需：
 

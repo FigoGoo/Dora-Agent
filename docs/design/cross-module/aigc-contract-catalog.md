@@ -6,6 +6,8 @@
 >
 > 设计日期：2026-07-14
 >
+> 当前事实复核：2026-07-15
+>
 > 实现门禁：本文通过评审并冻结为 `v1` 前，不得创建对应生产表、IDL、事件消费者或 Graph Tool 生产代码。
 
 > Runner、PostgreSQL Session Lane、Receipt、Approval Continuation、Checkpoint 和 A2UI/Event 的运行契约详见 [Agent Runner 与 PostgreSQL Session Lane v1 设计评审](../agent/runner-session-lane-review-v1.md)。该文档同为 Draft，不能作为实现批准。
@@ -65,11 +67,11 @@
 
 ### 2.4 当前实现事实与目标边界
 
-截至 2026-07-14，Agent 仅具备 W0 Session/Input/Event 基础：`session_runtime_lease` 仍是空租约骨架；`session_input` 虽声明 `pending/claimed/running/retry_wait/resolved/dead`，生产路径只写入 `pending`，且 `source_type` 只允许 `user_message`。Turn、Run、ModelReceipt、ToolReceipt、Approval、Checkpoint、A2UI 后端、输入 Claim/处理器均尚未实现；`agent/go.mod` 也尚未引入 Eino。前端遗留 `/api/aigc/**` A2UI 资产没有匹配的当前后端，不能被当成目标契约或兼容承诺。
+截至 2026-07-15，Agent 具备 W0 Session/Input/Event/Workspace 基础、W1 Session Skill Snapshot v2 和六项静态不可用 Tool Catalog：`session_runtime_lease` 仍是空租约骨架；`session_input` 虽声明 `pending/claimed/running/retry_wait/resolved/dead`，生产路径只写入 `pending`，且 `source_type` 只允许 `user_message`。Turn、Run、ModelReceipt、ToolReceipt、Approval、Checkpoint、A2UI 后端、输入 Claim/处理器均尚未实现。独立依赖批已经在 `agent/go.mod` 精确锁定 Eino `v0.9.10` 与 DeepSeek Adapter `v0.1.6`，并通过独立 Module 兼容门禁，但生产 Runtime 尚未注册任何 Eino Agent/Runner/Graph。前端遗留 `/api/aigc/**` A2UI 资产没有匹配的当前后端，不能被当成目标契约或兼容承诺。
 
 后续实现必须遵守：
 
-- Eino 依赖通过独立依赖 PR 精确锁定 `github.com/cloudwego/eino v0.9.10` 与已审核 Adapter，并完成版本兼容验证，不能在业务实现 PR 中隐式追加；
+- Eino 依赖锁定批已经完成；后续业务实现必须复用已审核版本，任何升级或新增 Adapter 都要独立评审，不能在业务实现 PR 中隐式变更；
 - 现有 W0 Migration 不得回改，所有新表、字段、约束和索引只允许使用向前 Migration；
 - Runner/Session Lane 设计、本文以及所有受影响 HTTP/RPC/Event/DTO 契约先评审，之后才能进入 Go、SQL 或 IDL 实现；
 - 前端 A2UI 接入另行迁移到版本化 Event/Action 契约，不能让后端适配未冻结的遗留接口。
@@ -347,7 +349,7 @@ Agent Runner 边界内的模型、Tool、Business RPC、Approval Consumption、D
 
 1. 三方评审本文，冻结 `v1` 字段、状态、错误码和 Owner；
 2. 评审 `runner-session-lane-review-v1.md`，冻结 Session Lane、Input/Turn/Run、Receipt、Approval Continuation、Checkpoint、EventLog 和预算/取消规则；
-3. 通过独立依赖 PR 引入并验证 Eino，再以向前 Migration 实现 Agent 运行基础；
+3. 复核已锁定的 Eino 依赖与兼容门禁，再以向前 Migration 实现 Agent 运行基础；
 4. Business 先实现读契约、候选写入、计费与 Generation Preparation/Finalization；
 5. Agent 实现 Approval、Operation/Batch/Job、Outbox/Inbox、Job Contract V1；
 6. Worker 实现 V1 Claim/Fence/Receipt/Finalize，旧消费者不得直写新表；
@@ -369,7 +371,8 @@ Agent Runner 边界内的模型、Tool、Business RPC、Approval Consumption、D
 - [ ] Agent Runner/Session Lane 评审冻结 GraphToolResult、Receipt、HOL、Lease/Fence、Checkpoint、A2UI、预算和取消语义；
 - [ ] Agent/Business 契约测试确认四个 `Decide*`：approve 同时逐字段验证 Decision/Consumption Receipt，reject 只验证 Decision Receipt 并拒绝 Consumption Receipt；
 - [ ] ToolReceipt 契约测试确认 open execution ref slot 同义重放/异义冲突，结果字段只在 `open -> frozen` 从 execution refs 一次投影；
-- [ ] Eino 独立依赖 PR 和兼容验证方案已评审；所有数据库变化均规划为向前 Migration；
+- [x] Eino 独立依赖锁定与兼容验证已完成；生产 Runtime 尚未注册；
+- [ ] Agent 运行基础的所有数据库变化均已规划为向前 Migration 并通过受影响 Owner 评审；
 - [ ] Worker 确认持久化消费契约、最小权限、Attempt/Receipt 边界；
 - [ ] 三方冻结所有状态、错误码、幂等键、Fence 和 unknown-outcome 查询；
 - [ ] 安全评审确认素材访问、Secret、日志脱敏与数据保留；

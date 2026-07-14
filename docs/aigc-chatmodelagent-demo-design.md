@@ -1,8 +1,10 @@
 # AIGC ChatModelAgent Demo 详细设计
 
-> 状态：Current Implementation + Target Gaps
+> 状态：Historical `main@6d0fc111fd49a874dad213a61389a6d83999ebc8` Implementation + Target Migration Reference
 > 日期：2026-07-14
 > 关联文档：[AIGC Tool 编排与动态故事板详细设计](./aigc-tool-storyboard-design.md)、[AIGC Generation Worker 详细设计](./aigc-worker-design.md)、[AIGC A2UI 全栈详细设计](./aigc-a2ui-design.md)
+
+> 当前事实警告（2026-07-15）：本文后续所有“当前实现/已实现”只描述上述历史单体 Demo，不描述当前重构分支。当前 `agent-service` 只具备 Session/Workspace、Session Skill Snapshot v2 与静态 Tool Catalog 基础；Eino 仅完成依赖锁定与兼容测试，生产 Runner、ChatModelAgent、Graph、Approval 和 A2UI 均未注册。当前事实必须以生产代码、Migration、专项 Approved 契约和 [全功能冒烟架构审计](./design/cross-module/full-function-smoke-architecture-audit-2026-07-15.md) 为准。
 
 本文档记录 Dora Agent 当前 ChatModelAgent、Runner、持久化 Session Runtime、Capability Tool、A2UI 和后续目标。Tool 暴露面、动态故事板和局部操作以 `aigc-tool-storyboard-design.md` 为准；异步 Batch、Job、Worker 和 Finalization 以 `aigc-worker-design.md` 为准。当前产品定位是受信本地 Demo，没有面向公网的真实登录鉴权、租户授权或接口限流。
 
