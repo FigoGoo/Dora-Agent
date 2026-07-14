@@ -16,6 +16,7 @@
 - [`session-lane-postgresql-design-v1.md`](./session-lane-postgresql-design-v1.md) 的 Turn/Run、legacy 升级和第 10 节 P0；
 - [`session-lane-ingress-command-contract-v1.md`](./session-lane-ingress-command-contract-v1.md) 的 Ingress 原子创建与 `context_message_seq` 候选；
 - [`session-lane-legacy-upgrade-contract-v1.md`](./session-lane-legacy-upgrade-contract-v1.md) 的 prepared/applied/verified Ledger 与 Turn Context 门禁。
+- [`immutable-turn-context-decision-review-v1.md`](./immutable-turn-context-decision-review-v1.md) 将第 12 节 10 项 P0 转为逐项推荐结论、Owner、证据和签字清单；该评审包仍未 Approved，不关闭本文任何门禁。
 
 截至 2026-07-15，生产事实是：
 
@@ -26,7 +27,7 @@
 - Turn、Run、Turn Context、Prompt Bundle Registry、Executable Tool Registry、Model Route、Budget Snapshot、Access Scope Snapshot、Activation Policy 和 legacy Upgrade Helper 均未实现；
 - 现有 Ingress/legacy Corpus 只冻结 test-only 的稳定 Turn、`context_message_seq` 和最小计数关系，不能代替完整 Context Schema 或真实 PostgreSQL 证据。
 
-本文只收敛最小生产物理契约候选和评审问题，不创建 Go、SQL 或 Corpus。
+本文只收敛最小生产物理契约候选和评审问题，不创建生产 Go 或 SQL。测试专用 Corpus 必须作为独立变更，且不得被生产代码导入。
 
 ## 2. 核心候选决策
 
@@ -493,6 +494,8 @@ Message 不可变 Trigger 只有在 Context 为零、没有依赖其 append-only
 ## 15. 当前结论与下一步
 
 当前结论：**Draft，未 Approved，不通过生产实现门禁。**
+
+10 项 P0 的推荐选择、明确拒绝方案和逐角色签字入口已经集中到 [`immutable-turn-context-decision-review-v1.md`](./immutable-turn-context-decision-review-v1.md)。这只把讨论收敛为可审核决策，不表示任一 P0 已关闭。
 
 推荐下一步顺序：
 

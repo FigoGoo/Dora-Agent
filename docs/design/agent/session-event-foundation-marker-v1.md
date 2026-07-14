@@ -320,6 +320,19 @@ Down 是部署与 SQL 的共同门禁：
 
 测试还必须使用 `GOWORK=off /Users/figo/sdk/go1.26.3/bin/go -C agent test ./...` 验证 Agent Module 独立构建，并运行 `-race` 覆盖 Helper/Retention/Writer 的进程内协调代码。
 
+### 11.1 Test-only Canonical Corpus 当前证据
+
+独立测试批已新增 [`agent/tests/contract/testdata/w2_r02_marker/manifest.json`](../../../agent/tests/contract/testdata/w2_r02_marker/manifest.json) 与 [`session_event_marker_v1_corpus_test.go`](../../../agent/tests/contract/session_event_marker_v1_corpus_test.go)：
+
+- manifest 固定完整目录集合、3 个 fixture ID、19 条向量 ID、3 个合法 Marker golden 和 9 个必须执行的目标测试；
+- 三个合法 fixture 覆盖 `session.created + ensure_project_session`、`session.input.accepted + ensure_project_session` 与 `session.input.accepted + enqueue_input_v1`；
+- canonical exact-set 固定 14 个 semantic 字段、Marker/Source/Aggregate 组合、强类型 Payload 重编码、Payload Digest 与 domain-separated Semantic Digest；
+- Event fixture 逐值冻结 `event_id/marker_id`、Session、类型/Schema、Source、Projection、Aggregate、Seq 与发生时间绑定；
+- 失败向量覆盖未知字段、trailing JSON、UUID/数值/类型组合错误、Event/Marker 与 Payload 身份绑定、Digest 大小写/长度/字符集和 Payload/Semantic Digest 篡改；
+- `recorded_at`、migration run、attempt 和 claim owner 被明确证明不进入 semantic digest。
+
+该 Corpus 只把 Marker canonical 推进到可重复审核的 test-only 证据，不替代本节真实 PostgreSQL 16、不可变 Trigger、Writer/Helper/Retention、crash/race 或 CLI Down 测试，也不授权生产实现。
+
 ## 12. 候选实现切片与评审门禁
 
 Approved 后的最小实现应保持一个目的一个 Commit，并按以下路径落位；当前不得创建这些生产变更：
