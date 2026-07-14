@@ -27,6 +27,8 @@ const (
 	ScopeWorkspaceRead = "agent.session.workspace.read"
 	// ScopeEventsRead 允许读取单个已绑定 Session 的持久事件流。
 	ScopeEventsRead = "agent.session.events.read"
+	// ScopeToolsRead 允许读取单个已绑定 Session 的静态 Tool Definition Catalog。
+	ScopeToolsRead = "agent.session.tools.read"
 
 	assertionSchema              = "agent_http_identity_assertion.v1"
 	assertionIssuer              = "dora-business-service"
@@ -166,6 +168,7 @@ func validateIdentity(identity Identity) error {
 	}
 	workspaceTarget := "/api/v1/agent/sessions/" + identity.AgentSessionID + "/workspace"
 	eventsPrefix := "/api/v1/agent/sessions/" + identity.AgentSessionID + "/events?after_seq="
+	toolsTarget := "/api/v1/agent/sessions/" + identity.AgentSessionID + "/tools"
 	switch identity.Scope {
 	case ScopeWorkspaceRead:
 		if identity.CanonicalTarget != workspaceTarget {
@@ -174,6 +177,10 @@ func validateIdentity(identity Identity) error {
 	case ScopeEventsRead:
 		cursor := strings.TrimPrefix(identity.CanonicalTarget, eventsPrefix)
 		if cursor == identity.CanonicalTarget || !canonicalNonNegativeInt(cursor) {
+			return ErrInvalidAssertionInput
+		}
+	case ScopeToolsRead:
+		if identity.CanonicalTarget != toolsTarget {
 			return ErrInvalidAssertionInput
 		}
 	default:

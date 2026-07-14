@@ -31,6 +31,8 @@ const (
 	ScopeWorkspaceRead = "agent.session.workspace.read"
 	// ScopeEventsRead 仅允许读取指定 Session 的 EventLog SSE。
 	ScopeEventsRead = "agent.session.events.read"
+	// ScopeToolsRead 仅允许读取指定 Session 的静态 Tool Definition Catalog。
+	ScopeToolsRead = "agent.session.tools.read"
 
 	assertionSchema    = "agent_http_identity_assertion.v1"
 	assertionIssuer    = "dora-business-service"

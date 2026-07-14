@@ -372,6 +372,12 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     const quickCreateResponsePromise = page.waitForResponse((response) => (
       isSkillResponse(response, 'POST', '/api/v1/projects:quick-create')
     ));
+    const toolCatalogResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET'
+        && /^\/api\/v1\/agent\/sessions\/[0-9a-f-]{36}\/tools$/.test(url.pathname)
+        && url.search === '';
+    });
     await page.getByRole('button', { name: '开始创作' }).click();
     const quickCreateResponse = await quickCreateResponsePromise;
     expect(quickCreateResponse.status()).toBe(201);
@@ -391,10 +397,38 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     await expect(workspace).toHaveAttribute('data-project-id', projectID);
     const workspaceSessionID = String(await workspace.getAttribute('data-session-id') || '');
     expect(workspaceSessionID).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    const toolCatalogResponse = await toolCatalogResponsePromise;
+    expect(toolCatalogResponse.status()).toBe(200);
+    expect(new URL(toolCatalogResponse.url()).pathname).toBe(`/api/v1/agent/sessions/${workspaceSessionID}/tools`);
+    const toolCatalogPayload = await toolCatalogResponse.json();
+    expect(toolCatalogPayload).toEqual({
+      schema_version: 'tool_definition_catalog.v1',
+      request_id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+      items: [
+        unavailableTool('plan_creation_spec', '流程规划', 1),
+        unavailableTool('analyze_materials', '素材分析', 2),
+        unavailableTool('plan_storyboard', '故事板设计', 3),
+        unavailableTool('generate_media', '媒体生成', 4),
+        unavailableTool('write_prompts', '提示词写法', 5),
+        unavailableTool('assemble_output', '视频剪辑', 6)
+      ]
+    });
     await expect(page.getByText('工作台已就绪')).toBeVisible();
     const workspaceSnapshot = page.getByRole('region', { name: '工作台快照' });
     await expect(workspaceSnapshot.getByText(projectID, { exact: true })).toBeVisible();
     await expect(workspaceSnapshot.getByText(workspaceSessionID, { exact: true })).toBeVisible();
+    const toolCatalog = page.getByRole('region', { name: '工具目录' });
+    const toolItems = toolCatalog.getByRole('listitem');
+    await expect(toolItems).toHaveCount(6);
+    for (const [index, label] of capabilityLabels.entries()) {
+      const item = toolItems.nth(index);
+      await expect(item).toHaveAttribute('aria-disabled', 'true');
+      await expect(item).toHaveAttribute('data-tool-order', String(index + 1));
+      await expect(item).toHaveAttribute('data-tool-availability', 'unavailable');
+      await expect(item.getByText(label, { exact: true })).toBeVisible();
+      await expect(item.getByText('设计评审中', { exact: true })).toBeVisible();
+    }
+    await expect(toolCatalog.getByRole('button')).toHaveCount(0);
 
     expect(businessRequests.every((request) => request.origin === appOrigin)).toBe(true);
     expect(businessRequests.some((request) => request.pathname.startsWith('/api/aigc/'))).toBe(false);
@@ -404,7 +438,8 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
       expect.objectContaining({ method: 'PUT', pathname: `/api/v1/skills/${skillID}/draft` }),
       expect.objectContaining({ method: 'GET', pathname: '/api/v1/admin/skill-reviews' }),
       expect.objectContaining({ method: 'POST', pathname: `/api/v1/admin/skill-reviews/${reviewID}/decisions` }),
-      expect.objectContaining({ method: 'POST', pathname: '/api/v1/projects:quick-create' })
+      expect.objectContaining({ method: 'POST', pathname: '/api/v1/projects:quick-create' }),
+      expect.objectContaining({ method: 'GET', pathname: `/api/v1/agent/sessions/${workspaceSessionID}/tools` })
     ]));
 
     if (w1ResultPath) {
@@ -416,6 +451,9 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
         review_id: reviewID,
         published_snapshot_id: publishedSnapshotID,
         project_id: projectID,
+        tool_catalog_session_id: workspaceSessionID,
+        tool_catalog_request_id: toolCatalogPayload.request_id,
+        tool_catalog_exact_unavailable: true,
         submitted_summary: sentinelA,
         current_draft_summary: sentinelB
       }), { encoding: 'utf8', mode: 0o600 });
@@ -437,6 +475,16 @@ async function loginAs(page, userEmail, userPassword) {
   const payload = await loginResponse.json();
   await expect(page.getByRole('button', { name: '用户菜单' })).toBeVisible();
   return payload;
+}
+
+function unavailableTool(toolKey, displayName, order) {
+  return {
+    tool_key: toolKey,
+    display_name: displayName,
+    order,
+    availability: 'unavailable',
+    reason_code: 'DESIGN_REVIEW_PENDING'
+  };
 }
 
 async function logoutFromCurrentContext(page) {

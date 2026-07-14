@@ -187,13 +187,135 @@ func TestAgentProxyWorkspaceRebuildsRequestWithoutBrowserHeaders(t *testing.T) {
 		t.Fatalf("upstream request=%v", upstream)
 	}
 	if upstream.Header.Get("Cookie") != "" || upstream.Header.Get("Authorization") != "" || upstream.Header.Get("X-CSRF-Token") != "" ||
-		upstream.Header.Get(agentidentity.HeaderAssertion) != agentProxyAssertion || upstream.Header.Get("Accept") != "application/json" || len(upstream.Header) != 4 {
+		upstream.Header.Get(agentidentity.HeaderAssertion) != agentProxyAssertion || upstream.Header.Get(agentidentity.HeaderKeyVersion) != "active-v1" ||
+		upstream.Header.Get(agentidentity.HeaderSignature) != strings.Repeat("a", 64) || upstream.Header.Get("Accept") != "application/json" || len(upstream.Header) != 4 {
 		t.Fatalf("unsafe upstream headers=%v", upstream.Header)
 	}
 	if access.userID != agentProxyUserID || access.sessionID != agentProxySessionID ||
 		signer.identity.WebSessionID != agentProxyWebID || signer.identity.WebSessionVersion != 7 ||
 		signer.identity.ProjectID != agentProxyProjectID || signer.identity.Scope != agentidentity.ScopeWorkspaceRead {
 		t.Fatalf("identity/access mismatch: access=%+v identity=%+v", access, signer.identity)
+	}
+}
+
+func TestAgentProxyToolsRebuildsBoundedRequestWithoutBrowserHeaders(t *testing.T) {
+	catalog := `{"schema_version":"tool_definition_catalog.v1","request_id":"` + agentProxyRequestID + `","items":[]}`
+	var upstream *http.Request
+	client := agentProxyClientFunc(func(request *http.Request) (*http.Response, error) {
+		upstream = request
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json; charset=utf-8"}},
+			Body:       io.NopCloser(strings.NewReader(catalog)),
+		}, nil
+	})
+	handler, access, signer := newAgentProxyHandlerForTest(t, client)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/agent/sessions/"+agentProxySessionID+"/tools", nil)
+	request.Header.Set("Cookie", "dora_session=browser-secret")
+	request.Header.Set("Authorization", "Bearer browser-secret")
+	request.Header.Set("X-CSRF-Token", "browser-secret")
+	request.Header.Set(agentidentity.HeaderAssertion, "browser-forged")
+	request.Header.Set(agentidentity.HeaderKeyVersion, "browser-forged")
+	request.Header.Set(agentidentity.HeaderSignature, "browser-forged")
+	recorder := serveAgentProxyRequest(handler, request)
+	if recorder.Code != http.StatusOK || recorder.Body.String() != catalog {
+		t.Fatalf("tools status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Header().Get("Cache-Control") != "no-store" || recorder.Header().Get("Content-Type") != "application/json; charset=utf-8" {
+		t.Fatalf("tools response headers=%v", recorder.Header())
+	}
+	if upstream == nil || upstream.Method != http.MethodGet || upstream.URL.String() != "http://agent.internal/api/v1/agent/sessions/"+agentProxySessionID+"/tools" {
+		t.Fatalf("upstream request=%v", upstream)
+	}
+	if upstream.Header.Get("Cookie") != "" || upstream.Header.Get("Authorization") != "" || upstream.Header.Get("X-CSRF-Token") != "" ||
+		upstream.Header.Get(agentidentity.HeaderAssertion) != agentProxyAssertion || upstream.Header.Get(agentidentity.HeaderKeyVersion) != "active-v1" ||
+		upstream.Header.Get(agentidentity.HeaderSignature) != strings.Repeat("a", 64) || upstream.Header.Get("Accept") != "application/json" || len(upstream.Header) != 4 {
+		t.Fatalf("unsafe upstream headers=%v", upstream.Header)
+	}
+	if access.userID != agentProxyUserID || access.sessionID != agentProxySessionID ||
+		signer.identity.CanonicalTarget != "/api/v1/agent/sessions/"+agentProxySessionID+"/tools" ||
+		signer.identity.Scope != agentidentity.ScopeToolsRead || signer.identity.AgentSessionID != agentProxySessionID ||
+		signer.identity.ProjectID != agentProxyProjectID || signer.identity.PrincipalUserID != agentProxyUserID {
+		t.Fatalf("identity/access mismatch: access=%+v identity=%+v", access, signer.identity)
+	}
+}
+
+func TestAgentProxyToolsRejectsQueryBeforeAuthorizationOrUpstream(t *testing.T) {
+	clientCalls := 0
+	client := agentProxyClientFunc(func(*http.Request) (*http.Response, error) {
+		clientCalls++
+		return nil, nil
+	})
+	handler, access, signer := newAgentProxyHandlerForTest(t, client)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/agent/sessions/"+agentProxySessionID+"/tools?preview=1", nil)
+	recorder := serveAgentProxyRequest(handler, request)
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), `"code":"INVALID_ARGUMENT"`) ||
+		clientCalls != 0 || access.sessionID != "" || signer.identity.RequestID != "" {
+		t.Fatalf("query reached protected flow: status=%d calls=%d access=%+v identity=%+v body=%s",
+			recorder.Code, clientCalls, access, signer.identity, recorder.Body.String())
+	}
+}
+
+func TestAgentProxyToolsFailsClosedOnInvalidUpstream(t *testing.T) {
+	tests := []struct {
+		name     string
+		response *http.Response
+		err      error
+	}{
+		{
+			name: "non-200",
+			response: &http.Response{StatusCode: http.StatusCreated, Header: http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"unexpected":"created"}`))},
+		},
+		{
+			name: "wrong content type",
+			response: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/plain"}},
+				Body: io.NopCloser(strings.NewReader(`{}`))},
+		},
+		{
+			name: "duplicate content type",
+			response: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json", "application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{}`))},
+		},
+		{
+			name: "invalid json",
+			response: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"truncated":`))},
+		},
+		{name: "nil response", response: nil},
+		{name: "transport error", err: errors.New("agent unavailable")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := agentProxyClientFunc(func(*http.Request) (*http.Response, error) { return test.response, test.err })
+			handler, _, _ := newAgentProxyHandlerForTest(t, client)
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/agent/sessions/"+agentProxySessionID+"/tools", nil)
+			recorder := serveAgentProxyRequest(handler, request)
+			if recorder.Code != http.StatusServiceUnavailable || recorder.Header().Get("Cache-Control") != "no-store" ||
+				!strings.Contains(recorder.Body.String(), `"code":"DEPENDENCY_UNAVAILABLE"`) || strings.Contains(recorder.Body.String(), "truncated") {
+				t.Fatalf("invalid upstream status=%d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestAgentProxyToolsRejectsResponseBeyond16KiB(t *testing.T) {
+	reader := strings.NewReader(strings.Repeat("x", maximumToolCatalogResponseBytes+2))
+	client := agentProxyClientFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(reader),
+		}, nil
+	})
+	handler, _, _ := newAgentProxyHandlerForTest(t, client)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/agent/sessions/"+agentProxySessionID+"/tools", nil)
+	recorder := serveAgentProxyRequest(handler, request)
+	if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"code":"DEPENDENCY_UNAVAILABLE"`) {
+		t.Fatalf("oversized tools status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if consumed := reader.Size() - int64(reader.Len()); consumed != maximumToolCatalogResponseBytes+1 {
+		t.Fatalf("bounded reader consumed=%d", consumed)
 	}
 }
 
@@ -450,17 +572,19 @@ func TestAgentProxyWorkspaceRejectsResponseBeyondBoundedDefaultCapacity(t *testi
 }
 
 func TestAgentProxyHidesUnauthorizedOrUnreadyBinding(t *testing.T) {
-	clientCalls := 0
-	client := agentProxyClientFunc(func(*http.Request) (*http.Response, error) {
-		clientCalls++
-		return nil, nil
-	})
-	handler, access, signer := newAgentProxyHandlerForTest(t, client)
-	access.err = project.ErrAgentSessionNotFound
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/agent/sessions/"+agentProxyOtherID+"/workspace", nil)
-	recorder := serveAgentProxyRequest(handler, request)
-	if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), `"code":"SESSION_NOT_FOUND"`) || clientCalls != 0 || signer.identity.RequestID != "" {
-		t.Fatalf("authorization mapping status=%d body=%s calls=%d identity=%+v", recorder.Code, recorder.Body.String(), clientCalls, signer.identity)
+	for _, resource := range []string{"workspace", "tools"} {
+		clientCalls := 0
+		client := agentProxyClientFunc(func(*http.Request) (*http.Response, error) {
+			clientCalls++
+			return nil, nil
+		})
+		handler, access, signer := newAgentProxyHandlerForTest(t, client)
+		access.err = project.ErrAgentSessionNotFound
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/agent/sessions/"+agentProxyOtherID+"/"+resource, nil)
+		recorder := serveAgentProxyRequest(handler, request)
+		if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), `"code":"SESSION_NOT_FOUND"`) || clientCalls != 0 || signer.identity.RequestID != "" {
+			t.Fatalf("%s authorization mapping status=%d body=%s calls=%d identity=%+v", resource, recorder.Code, recorder.Body.String(), clientCalls, signer.identity)
+		}
 	}
 }
 
@@ -473,6 +597,7 @@ func TestAgentProxyRegistersOnlyFrozenGETAllowlist(t *testing.T) {
 	handler, _, _ := newAgentProxyHandlerForTest(t, client)
 	tests := []*http.Request{
 		httptest.NewRequest(http.MethodPost, "/api/v1/agent/sessions/"+agentProxySessionID+"/workspace", nil),
+		httptest.NewRequest(http.MethodPost, "/api/v1/agent/sessions/"+agentProxySessionID+"/tools", nil),
 		httptest.NewRequest(http.MethodGet, "/api/v1/agent/sessions/"+agentProxySessionID+"/event-window", nil),
 		httptest.NewRequest(http.MethodGet, "/api/v1/agent/sessions/"+agentProxySessionID+"/events/probe", nil),
 	}

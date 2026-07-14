@@ -10,6 +10,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/agent/internal/config"
 	"github.com/FigoGoo/Dora-Agent/agent/internal/health"
 	"github.com/FigoGoo/Dora-Agent/agent/internal/httpidentity"
+	"github.com/FigoGoo/Dora-Agent/agent/internal/tool"
 	"github.com/FigoGoo/Dora-Agent/agent/internal/workspace"
 )
 
@@ -55,10 +56,14 @@ func TestReadinessTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("创建测试 Workspace Handler 失败: %v", err)
 	}
+	toolCatalogHandler, err := NewToolCatalogHandler(serverTestVerifier{}, tool.NewCatalogProvider(), serverTestIDs{})
+	if err != nil {
+		t.Fatalf("创建测试 Tool Catalog Handler 失败: %v", err)
+	}
 	server, err := New(config.HTTPConfig{
 		Address: ":0", HeaderTimeout: time.Second, ReadTimeout: time.Second,
 		WriteTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 1024,
-	}, config.ServiceConfig{Name: "agent-test", Version: "test"}, state, workspaceHandler)
+	}, config.ServiceConfig{Name: "agent-test", Version: "test"}, state, workspaceHandler, toolCatalogHandler)
 	if err != nil {
 		t.Fatalf("创建测试服务器失败: %v", err)
 	}
@@ -73,5 +78,12 @@ func TestReadinessTransitions(t *testing.T) {
 	server.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("就绪状态码错误: got %d", recorder.Code)
+	}
+	catalogRequest := httptest.NewRequest(http.MethodGet,
+		"/api/v1/agent/sessions/019f0000-0000-7000-8000-000000000005/tools", nil)
+	catalogRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(catalogRecorder, catalogRequest)
+	if catalogRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("Tool Catalog 路由未显式装配: status=%d body=%s", catalogRecorder.Code, catalogRecorder.Body.String())
 	}
 }

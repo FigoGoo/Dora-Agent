@@ -27,9 +27,11 @@ import (
 const (
 	// 16 MiB 覆盖冻结默认 100 条、每条最多 65,536 bytes 正文及 PureJSON 转义开销，同时保持代理内存有界。
 	maximumWorkspaceResponseBytes = 16 << 20
-	maximumUpstreamErrorBytes     = 64 << 10
-	maximumSSEFrameBytes          = 128 << 10
-	maximumJavaScriptSafeInteger  = uint64(1<<53 - 1)
+	// 16 KiB 是冻结六项 Tool Definition Catalog 的双端传输上限，禁止借目录接口透传执行定义或大对象。
+	maximumToolCatalogResponseBytes = 16 << 10
+	maximumUpstreamErrorBytes       = 64 << 10
+	maximumSSEFrameBytes            = 128 << 10
+	maximumJavaScriptSafeInteger    = uint64(1<<53 - 1)
 )
 
 // AgentSessionAccessService 定义 BFF 签发断言前所需的最小资源级授权边界。
@@ -50,7 +52,7 @@ type AgentHTTPClient interface {
 	Do(request *http.Request) (*http.Response, error)
 }
 
-// AgentProxyHandler 负责两条固定 Agent GET 路由的同源认证、Cursor 规范化与安全代理。
+// AgentProxyHandler 负责固定 Agent GET 路由的同源认证、Cursor 规范化与安全代理。
 type AgentProxyHandler struct {
 	access            AgentSessionAccessService
 	signer            AgentIdentitySigner
@@ -104,10 +106,11 @@ func NewAgentProxyHandler(access AgentSessionAccessService, signer AgentIdentity
 	}, nil
 }
 
-// Register 仅注册 Workspace Snapshot 与 EventLog SSE 两条固定 GET 路由，并复用 Business Cookie Resolver。
+// Register 仅注册 Workspace Snapshot、EventLog SSE 与 Tool Definition Catalog 三条固定 GET 路由，并复用 Business Cookie Resolver。
 func (handler *AgentProxyHandler) Register(router gin.IRoutes, requireSession gin.HandlerFunc) {
 	router.GET("/api/v1/agent/sessions/:session_id/workspace", requireSession, handler.workspace)
 	router.GET("/api/v1/agent/sessions/:session_id/events", requireSession, handler.events)
+	router.GET("/api/v1/agent/sessions/:session_id/tools", requireSession, handler.tools)
 }
 
 // workspace 严格拒绝 Query，重新构造内部 Snapshot 请求，并对 JSON 响应执行有界复制。
@@ -146,6 +149,53 @@ func (handler *AgentProxyHandler) workspace(c *gin.Context) {
 	body, err := readBoundedBody(response.Body, maximumWorkspaceResponseBytes)
 	if err != nil || !json.Valid(body) {
 		handler.writeAgentError(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "工作台依赖暂时不可用", requestID, true)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Data(http.StatusOK, "application/json; charset=utf-8", body)
+}
+
+// tools 严格拒绝 Query，只代理 Agent 静态目录的有界合法 JSON，不解析或补齐任何 Tool 业务字段。
+func (handler *AgentProxyHandler) tools(c *gin.Context) {
+	requestID, ok := handler.newAgentRequestID(c)
+	if !ok {
+		return
+	}
+	sessionID := c.Param("session_id")
+	if !canonicalUUIDv7(sessionID) || c.Request.URL.RawQuery != "" {
+		handler.writeAgentError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "Session 标识无效", requestID, false)
+		return
+	}
+	target := "/api/v1/agent/sessions/" + sessionID + "/tools"
+	request, ok := handler.prepareUpstreamRequest(c, requestID, sessionID, target, agentidentity.ScopeToolsRead, "application/json")
+	if !ok {
+		return
+	}
+	requestContext, cancel := context.WithTimeout(request.Context(), handler.requestTimeout)
+	defer cancel()
+	response, err := handler.client.Do(request.WithContext(requestContext))
+	if err != nil || response == nil || response.Body == nil {
+		handler.writeAgentError(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "Tool 目录依赖暂时不可用", requestID, true)
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		handler.proxyUpstreamError(c, response, requestID)
+		return
+	}
+	contentTypes := response.Header.Values("Content-Type")
+	if len(contentTypes) != 1 {
+		handler.writeAgentError(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "Tool 目录依赖暂时不可用", requestID, true)
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(contentTypes[0])
+	if err != nil || mediaType != "application/json" {
+		handler.writeAgentError(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "Tool 目录依赖暂时不可用", requestID, true)
+		return
+	}
+	body, err := readBoundedBody(response.Body, maximumToolCatalogResponseBytes)
+	if err != nil || !json.Valid(body) {
+		handler.writeAgentError(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "Tool 目录依赖暂时不可用", requestID, true)
 		return
 	}
 	c.Header("Cache-Control", "no-store")

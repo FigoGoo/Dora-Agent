@@ -266,6 +266,8 @@ Production Producer 已由 [Project Skill Binding 与 Session Snapshot Producer 
 
 ## 9. 六 Tool 目录准备
 
+Agent/BFF/前端的正式只读纵切已由 [Agent Tool Definition Catalog v1 设计评审](../agent/tool-definition-catalog-v1.md) 冻结：路径为 `GET /api/v1/agent/sessions/:session_id/tools`，内部 Scope 为 `agent.session.tools.read`，成功 Envelope 为 `tool_definition_catalog.v1`。该评审只批准静态不可用投影，不批准 Executable Registry 或 Graph 实现。
+
 目录 exact-set 和产品顺序固定为：
 
 1. `plan_creation_spec`

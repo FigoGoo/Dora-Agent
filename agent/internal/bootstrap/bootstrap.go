@@ -22,6 +22,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/agent/internal/session"
 	"github.com/FigoGoo/Dora-Agent/agent/internal/sessionrpc"
 	"github.com/FigoGoo/Dora-Agent/agent/internal/skill"
+	"github.com/FigoGoo/Dora-Agent/agent/internal/tool"
 	"github.com/FigoGoo/Dora-Agent/agent/internal/workspace"
 	"github.com/FigoGoo/Dora-Agent/agent/kitex_gen/sessionv1"
 )
@@ -175,8 +176,15 @@ func Run(ctx context.Context, build BuildInfo) error {
 		_ = registry.Close(ctx)
 		return err
 	}
+	toolCatalogHandler, err := httpserver.NewToolCatalogHandler(
+		identityVerifier, tool.NewCatalogProvider(), idgen.UUIDv7{},
+	)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return err
+	}
 	state := health.NewState()
-	server, err := httpserver.New(cfg.HTTP, cfg.Service, state, workspaceHandler)
+	server, err := httpserver.New(cfg.HTTP, cfg.Service, state, workspaceHandler, toolCatalogHandler)
 	if err != nil {
 		_ = registry.Close(ctx)
 		return err

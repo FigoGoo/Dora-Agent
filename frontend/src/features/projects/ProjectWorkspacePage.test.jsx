@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -6,6 +6,8 @@ import {
   WORKSPACE_IDS,
   workspaceSnapshotFixture
 } from '../../test/workspaceFixtures.js';
+import { toolCatalogFixture } from '../../test/toolCatalogFixtures.js';
+import { parseToolCatalogResponse } from '../tools/toolCatalogContract.js';
 import { parseProjectBootstrap, ProjectWorkspacePage } from './ProjectWorkspacePage.jsx';
 
 describe('ProjectWorkspacePage', () => {
@@ -14,6 +16,7 @@ describe('ProjectWorkspacePage', () => {
       .mockResolvedValueOnce(projectBootstrapFixture({ creation_status: 'provisioning', session_id: null }))
       .mockResolvedValueOnce(projectBootstrapFixture());
     const loadSnapshot = vi.fn().mockResolvedValue(workspaceSnapshotFixture());
+    const loadToolCatalog = vi.fn().mockResolvedValue(parseToolCatalogResponse(toolCatalogFixture()));
     const openStream = vi.fn((options) => {
       options.onReady({ cursor: 1, latestSeq: 1, minAvailableSeq: 1 });
       return { close: vi.fn() };
@@ -24,6 +27,7 @@ describe('ProjectWorkspacePage', () => {
         projectID={WORKSPACE_IDS.project}
         bootstrap={bootstrap}
         loadSnapshot={loadSnapshot}
+        loadToolCatalog={loadToolCatalog}
         openStream={openStream}
         retryDelays={[0, 0]}
       />
@@ -35,7 +39,36 @@ describe('ProjectWorkspacePage', () => {
     expect(workspace).toHaveAttribute('data-project-id', WORKSPACE_IDS.project);
     expect(workspace).toHaveAttribute('data-session-id', WORKSPACE_IDS.session);
     expect(screen.getByText('还没有消息')).toBeInTheDocument();
+    const catalog = await screen.findByRole('region', { name: '工具目录' });
+    expect(within(catalog).getAllByRole('listitem')).toHaveLength(6);
+    expect(within(catalog).getAllByText('设计评审中')).toHaveLength(6);
+    expect(loadToolCatalog).toHaveBeenCalledWith(WORKSPACE_IDS.session, { signal: expect.any(AbortSignal) });
     expect(openStream).toHaveBeenCalledWith(expect.objectContaining({ cursor: 1 }));
+  });
+
+  it('does not read the Tool Catalog until a ready Project has a validated Snapshot', async () => {
+    let resolveSnapshot;
+    const pendingSnapshot = new Promise((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const loadToolCatalog = vi.fn().mockResolvedValue(parseToolCatalogResponse(toolCatalogFixture()));
+
+    render(
+      <ProjectWorkspacePage
+        projectID={WORKSPACE_IDS.project}
+        bootstrap={vi.fn().mockResolvedValue(projectBootstrapFixture())}
+        loadSnapshot={vi.fn().mockReturnValue(pendingSnapshot)}
+        loadToolCatalog={loadToolCatalog}
+        openStream={vi.fn(() => ({ close: vi.fn() }))}
+      />
+    );
+
+    expect(await screen.findByText('正在安全加载工作台快照…')).toBeInTheDocument();
+    expect(loadToolCatalog).not.toHaveBeenCalled();
+    await act(async () => resolveSnapshot(workspaceSnapshotFixture()));
+    await waitFor(() => expect(loadToolCatalog).toHaveBeenCalledWith(WORKSPACE_IDS.session, {
+      signal: expect.any(AbortSignal)
+    }));
   });
 
   it('maps an exhausted provisioning window to offline and supports an explicit full retry', async () => {

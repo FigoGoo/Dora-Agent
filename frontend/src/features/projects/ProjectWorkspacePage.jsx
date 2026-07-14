@@ -1,5 +1,6 @@
 import { useProjectWorkspace } from '../workspace/useProjectWorkspace.js';
 import { parseProjectBootstrap } from '../workspace/workspaceContract.js';
+import { ToolCatalogPanel } from '../tools/ToolCatalogPanel.jsx';
 
 export { parseProjectBootstrap };
 
@@ -13,9 +14,10 @@ const INPUT_STATUS_LABELS = Object.freeze({
 });
 
 // ProjectWorkspacePage 渲染冻结 W0.5 正式状态机，不读取 Demo Session 或浏览器持久化状态。
-export function ProjectWorkspacePage({ projectID, ...workspaceOptions }) {
+export function ProjectWorkspacePage({ projectID, loadToolCatalog, ...workspaceOptions }) {
   const { state, retry } = useProjectWorkspace({ projectID, ...normalizeLegacyOptions(workspaceOptions) });
   const hasSnapshot = Boolean(state.project && state.snapshot);
+  const canReadToolCatalog = state.kind === 'ready' && hasSnapshot;
   const sessionID = state.snapshot?.session?.id || '';
   const busy = state.kind === 'loading' || state.kind === 'reset';
 
@@ -51,6 +53,9 @@ export function ProjectWorkspacePage({ projectID, ...workspaceOptions }) {
       <h1 id="project-workspace-title">创作工作台</h1>
       <WorkspaceStatus state={state} retry={retry} />
       {hasSnapshot ? <WorkspaceSnapshotView project={state.project} snapshot={state.snapshot} /> : null}
+      {canReadToolCatalog ? (
+        <ToolCatalogPanel sessionID={sessionID} loadCatalog={loadToolCatalog} />
+      ) : null}
     </main>
   );
 }

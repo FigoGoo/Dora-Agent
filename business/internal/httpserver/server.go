@@ -35,7 +35,7 @@ type RouteHandlers struct {
 	Auth *AuthHandler
 	// Project 注册 Quick Create 与资源级 Bootstrap 路由。
 	Project *ProjectHandler
-	// Agent 注册同源 Workspace Snapshot 与 EventLog SSE 固定代理路由。
+	// Agent 注册同源 Workspace Snapshot、EventLog SSE 与 Tool Definition Catalog 固定代理路由。
 	Agent *AgentProxyHandler
 	// Skill 注册 W1 Skill Owner 草稿、列表、详情、替换和审核提交路由。
 	Skill *SkillHandler

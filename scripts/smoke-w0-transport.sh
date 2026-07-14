@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-umask 077
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/smoke-secret-transport.sh
+. "$repo_root/scripts/lib/smoke-secret-transport.sh"
+disable_shell_xtrace
+umask 077
 # shellcheck source=lib/w1-smoke-mode.sh
 . "$repo_root/scripts/lib/w1-smoke-mode.sh"
 env_file="${ENV_FILE:-$repo_root/.env.example}"
@@ -25,9 +28,11 @@ else
 fi
 pending_evidence_file="$evidence_dir/evidence-summary.pending.json"
 cookie_jar=""
+user_curl_config=""
 login_response_temp=""
 workspace_response_temp=""
 owner_b_cookie_jar=""
+owner_b_curl_config=""
 owner_b_seed_response_temp=""
 owner_b_login_response_temp=""
 owner_b_denied_response_temp=""
@@ -73,6 +78,9 @@ stop_processes() {
   if [[ -n "$cookie_jar" ]]; then
     rm -f "$cookie_jar"
   fi
+  if [[ -n "$user_curl_config" ]]; then
+    rm -f "$user_curl_config"
+  fi
   if [[ -n "$login_response_temp" ]]; then
     rm -f "$login_response_temp"
   fi
@@ -81,6 +89,9 @@ stop_processes() {
   fi
   if [[ -n "$owner_b_cookie_jar" ]]; then
     rm -f "$owner_b_cookie_jar"
+  fi
+  if [[ -n "$owner_b_curl_config" ]]; then
+    rm -f "$owner_b_curl_config"
   fi
   if [[ -n "$owner_b_seed_response_temp" ]]; then
     rm -f "$owner_b_seed_response_temp"
@@ -166,16 +177,15 @@ run_concurrent_quick_create() {
   local idempotency_key="$1"
   local payload="$2"
   local batch_dir="$3"
-  local csrf_token="$4"
+  local curl_config="$4"
   local request_pids=()
   local index=""
   mkdir -p "$batch_dir"
   for index in $(seq 1 100); do
-    curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    curl_with_body_stdin "$payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+      --config "$curl_config" \
       -H 'Content-Type: application/json' \
-      -H "X-CSRF-Token: $csrf_token" \
       -H "Idempotency-Key: $idempotency_key" \
-      --data-binary "$payload" \
       -o "$batch_dir/$index.json" -w '%{http_code}' \
       'http://127.0.0.1:18081/api/v1/projects:quick-create' >"$batch_dir/$index.status" &
     request_pids+=("$!")
@@ -234,7 +244,7 @@ assert_evidence_excludes_literal() {
   local value="$1"
   local label="$2"
   local scan_status=""
-  if rg -F --quiet -- "$value" "$evidence_scan_root"; then
+  if rg_with_pattern_stdin literal "$value" "$evidence_scan_root"; then
     fail "Evidence 中检测到${label}"
   else
     scan_status="$?"
@@ -246,7 +256,7 @@ assert_evidence_excludes_regex() {
   local pattern="$1"
   local label="$2"
   local scan_status=""
-  if rg --quiet -- "$pattern" "$evidence_scan_root"; then
+  if rg_with_pattern_stdin regex "$pattern" "$evidence_scan_root"; then
     fail "Evidence 中检测到${label}"
   else
     scan_status="$?"
@@ -349,9 +359,9 @@ run_w1_skill_smoke() {
   create_payload="$(build_w1_skill_payload "$w1_skill_name" "create")"
 
   : >"$headers_file"
-  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $create_key" \
-    --data-binary "$create_payload" -D "$headers_file" -o "$response_file" -w '%{http_code}' \
+  status="$(curl_with_body_stdin "$create_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$user_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: $create_key" \
+    -D "$headers_file" -o "$response_file" -w '%{http_code}' \
     'http://127.0.0.1:18081/api/v1/skills')"
   create_first_status="$status"
   [[ "$status" == "201" ]] || fail "W1 Skill 首次创建状态为 $status"
@@ -372,9 +382,9 @@ run_w1_skill_smoke() {
     and .skill.allowed_actions == ["edit_draft","submit_review"]' \
     "$response_file" >/dev/null || fail "W1 Skill 创建投影或 Canonical 规范化结果漂移"
 
-  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $create_key" \
-    --data-binary "$create_payload" -o "$response_file" -w '%{http_code}' \
+  status="$(curl_with_body_stdin "$create_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$user_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: $create_key" \
+    -o "$response_file" -w '%{http_code}' \
     'http://127.0.0.1:18081/api/v1/skills')"
   create_replay_status="$status"
   [[ "$status" == "200" ]] || fail "W1 Skill 同键同义重放状态为 $status"
@@ -383,9 +393,9 @@ run_w1_skill_smoke() {
     fail "W1 Skill 同义重放未返回首次冻结结果"
 
   conflict_payload="$(build_w1_skill_payload "W1 Skill conflicting ${run_id}" "conflict")"
-  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $create_key" \
-    --data-binary "$conflict_payload" -o "$response_file" -w '%{http_code}' \
+  status="$(curl_with_body_stdin "$conflict_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$user_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: $create_key" \
+    -o "$response_file" -w '%{http_code}' \
     'http://127.0.0.1:18081/api/v1/skills')"
   create_conflict_status="$status"
   [[ "$status" == "409" ]] || fail "W1 Skill 同键异义状态为 $status"
@@ -393,9 +403,9 @@ run_w1_skill_smoke() {
   jq -e '.error.code == "IDEMPOTENCY_CONFLICT"' "$response_file" >/dev/null || fail "W1 Skill 同键异义错误码漂移"
 
   missing_array_payload="$(jq -c 'del(.definition.tags)' <<<"$create_payload")"
-  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: w1-shape-missing-${run_id}" \
-    --data-binary "$missing_array_payload" -o "$response_file" -w '%{http_code}' \
+  status="$(curl_with_body_stdin "$missing_array_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$user_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: w1-shape-missing-${run_id}" \
+    -o "$response_file" -w '%{http_code}' \
     'http://127.0.0.1:18081/api/v1/skills')"
   missing_array_status="$status"
   [[ "$status" == "400" ]] || fail "W1 Skill 缺失数组字段未失败关闭，状态为 $status"
@@ -406,9 +416,9 @@ run_w1_skill_smoke() {
     "$response_file" >/dev/null || fail "W1 Skill 缺失数组字段错误契约漂移"
 
   null_array_payload="$(jq -c '.definition.examples = null' <<<"$create_payload")"
-  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: w1-shape-null-${run_id}" \
-    --data-binary "$null_array_payload" -o "$response_file" -w '%{http_code}' \
+  status="$(curl_with_body_stdin "$null_array_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$user_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: w1-shape-null-${run_id}" \
+    -o "$response_file" -w '%{http_code}' \
     'http://127.0.0.1:18081/api/v1/skills')"
   null_array_status="$status"
   [[ "$status" == "400" ]] || fail "W1 Skill null 数组字段未失败关闭，状态为 $status"
@@ -419,9 +429,9 @@ run_w1_skill_smoke() {
     "$response_file" >/dev/null || fail "W1 Skill null 数组字段错误契约漂移"
 
   cover_asset_payload="$(jq -c '.definition.market_listing.cover_asset_id = "019f0000-0000-7000-8000-000000000099"' <<<"$create_payload")"
-  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: w1-cover-unavailable-${run_id}" \
-    --data-binary "$cover_asset_payload" -o "$response_file" -w '%{http_code}' \
+  status="$(curl_with_body_stdin "$cover_asset_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$user_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: w1-cover-unavailable-${run_id}" \
+    -o "$response_file" -w '%{http_code}' \
     'http://127.0.0.1:18081/api/v1/skills')"
   cover_asset_status="$status"
   [[ "$status" == "400" ]] || fail "W1 Skill 非 null cover_asset_id 未失败关闭，状态为 $status"
@@ -448,9 +458,9 @@ run_w1_skill_smoke() {
 
   updated_payload="$(build_w1_skill_payload "$w1_updated_skill_name" "updated")"
   : >"$headers_file"
-  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -X PUT \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "If-Match: $initial_etag" \
-    --data-binary "$updated_payload" -D "$headers_file" -o "$response_file" -w '%{http_code}' \
+  status="$(curl_with_body_stdin "$updated_payload" --silent --show-error --max-time 10 -b "$cookie_jar" -X PUT \
+    --config "$user_curl_config" -H 'Content-Type: application/json' -H "If-Match: $initial_etag" \
+    -D "$headers_file" -o "$response_file" -w '%{http_code}' \
     "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/draft")"
   update_status="$status"
   [[ "$status" == "200" ]] || fail "W1 Skill If-Match 更新状态为 $status"
@@ -463,9 +473,9 @@ run_w1_skill_smoke() {
     '.skill.skill_id == $id and .skill.definition.name == $name and .skill.allowed_actions == ["edit_draft","submit_review"]' \
     "$response_file" >/dev/null || fail "W1 Skill 更新后 Owner 投影漂移"
 
-  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -X PUT \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "If-Match: $initial_etag" \
-    --data-binary "$updated_payload" -o "$response_file" -w '%{http_code}' \
+  status="$(curl_with_body_stdin "$updated_payload" --silent --show-error --max-time 10 -b "$cookie_jar" -X PUT \
+    --config "$user_curl_config" -H 'Content-Type: application/json' -H "If-Match: $initial_etag" \
+    -o "$response_file" -w '%{http_code}' \
     "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/draft")"
   stale_update_status="$status"
   [[ "$status" == "409" ]] || fail "W1 Skill 过期 ETag 更新状态为 $status"
@@ -473,9 +483,9 @@ run_w1_skill_smoke() {
   jq -e '.error.code == "SKILL_DRAFT_CONFLICT"' "$response_file" >/dev/null || fail "W1 Skill 过期 ETag 错误码漂移"
 
   tool_payload="$(jq -c '.definition.public_tool_refs = [{"tool_key":"unavailable"}]' <<<"$updated_payload")"
-  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -X PUT \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "If-Match: $updated_etag" \
-    --data-binary "$tool_payload" -o "$response_file" -w '%{http_code}' \
+  status="$(curl_with_body_stdin "$tool_payload" --silent --show-error --max-time 10 -b "$cookie_jar" -X PUT \
+    --config "$user_curl_config" -H 'Content-Type: application/json' -H "If-Match: $updated_etag" \
+    -o "$response_file" -w '%{http_code}' \
     "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/draft")"
   public_tool_status="$status"
   [[ "$status" == "400" ]] || fail "W1 Skill 非空 public_tool_refs 未失败关闭，状态为 $status"
@@ -486,7 +496,7 @@ run_w1_skill_smoke() {
     "$response_file" >/dev/null || fail "W1 Skill public_tool_refs 失败关闭错误契约漂移"
 
   status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -X POST \
-    -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $review_key" -H "If-Match: $updated_etag" \
+    --config "$user_curl_config" -H "Idempotency-Key: $review_key" -H "If-Match: $updated_etag" \
     -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/reviews")"
   review_first_status="$status"
   [[ "$status" == "201" ]] || fail "W1 Skill 首次提交审核状态为 $status"
@@ -498,7 +508,7 @@ run_w1_skill_smoke() {
     fail "W1 Skill 提交审核后 Owner 投影漂移"
 
   status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -X POST \
-    -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $review_key" -H "If-Match: $updated_etag" \
+    --config "$user_curl_config" -H "Idempotency-Key: $review_key" -H "If-Match: $updated_etag" \
     -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/reviews")"
   review_replay_status="$status"
   [[ "$status" == "200" ]] || fail "W1 Skill 提交审核同义重放状态为 $status"
@@ -636,10 +646,10 @@ run_w1_skill_smoke() {
     and .review.allowed_actions == ["approve_and_publish"]' \
     "$review_detail" >/dev/null || fail "W1 Reviewer 详情未使用提交时冻结 Definition"
 
-  status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -X POST \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $owner_b_csrf_token" \
+  status="$(curl_with_body_stdin '{"decision":"approved"}' --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -X POST \
+    --config "$owner_b_curl_config" -H 'Content-Type: application/json' \
     -H "Idempotency-Key: $decision_key" -H "If-Match: $review_etag" \
-    --data-binary '{"decision":"approved"}' -o "$publish_first" -w '%{http_code}' \
+    -o "$publish_first" -w '%{http_code}' \
     "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${w1_review_id}/decisions")"
   decision_status="$status"
   [[ "$status" == "200" ]] || fail "W1 Reviewer 首次批准状态为 $status"
@@ -651,10 +661,10 @@ run_w1_skill_smoke() {
     and .review.status == "approved" and .review.allowed_actions == []' \
     "$publish_first" >/dev/null || fail "W1 Reviewer 首次批准结果漂移"
 
-  status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -X POST \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $owner_b_csrf_token" \
+  status="$(curl_with_body_stdin '{"decision":"approved"}' --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -X POST \
+    --config "$owner_b_curl_config" -H 'Content-Type: application/json' \
     -H "Idempotency-Key: $decision_key" -H "If-Match: $review_etag" \
-    --data-binary '{"decision":"approved"}' -o "$publish_replay" -w '%{http_code}' \
+    -o "$publish_replay" -w '%{http_code}' \
     "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${w1_review_id}/decisions")"
   decision_replay_status="$status"
   [[ "$status" == "200" ]] || fail "W1 Reviewer 批准同义重放状态为 $status"
@@ -750,6 +760,7 @@ run_w1_skill_binding_smoke() {
   local intent_key="w1-binding-${run_id}"
   local batch_dir="$evidence_dir/responses/w1-binding-batch"
   local payload=""
+  local conflict_payload=""
   local replay_status=""
   local conflict_status=""
   local batch_request_count=""
@@ -764,7 +775,7 @@ run_w1_skill_binding_smoke() {
   payload="$(jq -cn --arg prompt "$w1_binding_prompt" --arg skill "$w1_skill_id" \
     '{schema_version:"project_quick_create.v2",initial_prompt:$prompt,enabled_skill_ids:[$skill]}')"
   w1_binding_project_id="$(run_concurrent_quick_create \
-    "$intent_key" "$payload" "$batch_dir" "$csrf_token")"
+    "$intent_key" "$payload" "$batch_dir" "$user_curl_config")"
   [[ "$w1_binding_project_id" =~ ^[0-9a-f-]{36}$ ]] || fail "W1 Binding Project ID 格式无效"
   batch_request_count="$(find "$batch_dir" -type f -name '*.status' | wc -l | tr -d '[:space:]')"
   batch_success_count="$(awk '$1 == "200" || $1 == "201" { count++ } END { print count + 0 }' "$batch_dir"/*.status)"
@@ -774,19 +785,19 @@ run_w1_skill_binding_smoke() {
   w1_binding_session_id="$(jq -er '.session_id | strings | select(length > 0)' "$evidence_dir/responses/w1-binding-bootstrap.json")"
   w1_binding_input_id="$(jq -er '.input_id | strings | select(length > 0)' "$evidence_dir/responses/w1-binding-bootstrap.json")"
 
-  replay_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $intent_key" \
-    --data-binary "$payload" -o "$evidence_dir/responses/w1-binding-replay.json" -w '%{http_code}' \
+  replay_status="$(curl_with_body_stdin "$payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$user_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: $intent_key" \
+    -o "$evidence_dir/responses/w1-binding-replay.json" -w '%{http_code}' \
     'http://127.0.0.1:18081/api/v1/projects:quick-create')"
   [[ "$replay_status" == "200" ]] || fail "W1 Binding 同义重放状态为 $replay_status"
   jq -e --arg project "$w1_binding_project_id" --arg session "$w1_binding_session_id" --arg input "$w1_binding_input_id" \
     '.project_id == $project and .session_id == $session and .input_id == $input and .creation_status == "ready"' \
     "$evidence_dir/responses/w1-binding-replay.json" >/dev/null || fail "W1 Binding 同义重放未返回冻结结果"
 
-  conflict_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
-    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $intent_key" \
-    --data-binary "$(jq -cn --arg prompt "$w1_binding_prompt" \
-      '{schema_version:"project_quick_create.v2",initial_prompt:$prompt,enabled_skill_ids:[]}')" \
+  conflict_payload="$(jq -cn --arg prompt "$w1_binding_prompt" \
+    '{schema_version:"project_quick_create.v2",initial_prompt:$prompt,enabled_skill_ids:[]}')"
+  conflict_status="$(curl_with_body_stdin "$conflict_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$user_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: $intent_key" \
     -o "$evidence_dir/responses/w1-binding-conflict.json" -w '%{http_code}' \
     'http://127.0.0.1:18081/api/v1/projects:quick-create')"
   [[ "$conflict_status" == "409" ]] || fail "W1 Binding 同键异义状态为 $conflict_status"
@@ -1035,6 +1046,9 @@ run_w1_browser_frozen_smoke() {
   local browser_review_id=""
   local browser_snapshot_id=""
   local browser_project_id=""
+  local browser_catalog_session_id=""
+  local browser_catalog_request_id=""
+  local browser_catalog_exact_unavailable=""
   local submitted_summary=""
   local current_draft_summary=""
   local submitted_summary_b64=""
@@ -1048,11 +1062,12 @@ run_w1_browser_frozen_smoke() {
 
   [[ -s "$browser_result_file" ]] || fail "W1 浏览器未产出结构化真实结果"
   jq -e --arg creator "$user_id" --arg reviewer "$owner_b_seed_user_id" '
-    keys == ["creator_id","current_draft_summary","project_id","published_snapshot_id","review_id","reviewer_id","schema_version","skill_id","submitted_summary"]
+    keys == ["creator_id","current_draft_summary","project_id","published_snapshot_id","review_id","reviewer_id","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
     and .schema_version == "w1.real-review-result.v1"
     and .creator_id == $creator and .reviewer_id == $reviewer and .creator_id != .reviewer_id
-    and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id]
+    and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id,.tool_catalog_session_id,.tool_catalog_request_id]
       | all(.[]; test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
+    and .tool_catalog_exact_unavailable == true
     and (.submitted_summary | type) == "string" and (.submitted_summary | length) > 0
     and (.current_draft_summary | type) == "string" and (.current_draft_summary | length) > 0
     and .submitted_summary != .current_draft_summary' "$browser_result_file" >/dev/null || \
@@ -1064,6 +1079,9 @@ run_w1_browser_frozen_smoke() {
   browser_review_id="$(jq -er '.review_id' "$browser_result_file")"
   browser_snapshot_id="$(jq -er '.published_snapshot_id' "$browser_result_file")"
   browser_project_id="$(jq -er '.project_id' "$browser_result_file")"
+  browser_catalog_session_id="$(jq -er '.tool_catalog_session_id' "$browser_result_file")"
+  browser_catalog_request_id="$(jq -er '.tool_catalog_request_id' "$browser_result_file")"
+  browser_catalog_exact_unavailable="$(jq -er '.tool_catalog_exact_unavailable' "$browser_result_file")"
   submitted_summary="$(jq -er '.submitted_summary' "$browser_result_file")"
   current_draft_summary="$(jq -er '.current_draft_summary' "$browser_result_file")"
   submitted_summary_b64="$(printf '%s' "$submitted_summary" | base64 | tr -d '\n')"
@@ -1077,10 +1095,14 @@ run_w1_browser_frozen_smoke() {
   [[ "$review_api_status" == "200" ]] || fail "W1 Browser Review 正式 Reviewer API 状态为 $review_api_status"
 
   jq -n --argjson owner_status "$owner_api_status" --argjson review_status "$review_api_status" \
+    --argjson tool_catalog_exact_unavailable "$browser_catalog_exact_unavailable" \
     --arg creator "$browser_creator_id" --arg skill "$browser_skill_id" --arg review "$browser_review_id" \
     --arg snapshot "$browser_snapshot_id" --arg submitted "$submitted_summary" --arg current "$current_draft_summary" \
+    --arg tool_catalog_session_id "$browser_catalog_session_id" --arg tool_catalog_request_id "$browser_catalog_request_id" \
     --slurpfile owner "$owner_api_raw" --slurpfile detail "$review_api_raw" '
     {owner_status:$owner_status,review_status:$review_status,skill_id:$skill,review_id:$review,published_snapshot_id:$snapshot,
+      tool_catalog_session_id:$tool_catalog_session_id,tool_catalog_request_id:$tool_catalog_request_id,
+      tool_catalog_exact_unavailable:$tool_catalog_exact_unavailable,
       owner_current_draft_is_b:($owner[0].skill.skill_id == $skill
         and $owner[0].skill.definition.summary == $current
         and $owner[0].skill.content_status == "published"
@@ -1106,6 +1128,7 @@ run_w1_browser_frozen_smoke() {
   poll_bootstrap_ready "$browser_project_id" "$bootstrap_file" || fail "W1 Browser QuickCreate Project 未进入 ready"
   browser_session_id="$(jq -er '.session_id | strings | select(test("^[0-9a-f-]{36}$"))' "$bootstrap_file")"
   browser_input_id="$(jq -er '.input_id | strings | select(test("^[0-9a-f-]{36}$"))' "$bootstrap_file")"
+  [[ "$browser_catalog_session_id" == "$browser_session_id" ]] || fail "W1 Browser Tool Catalog 未绑定 ready Session"
 
   business_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
     SELECT json_build_object(
@@ -1215,14 +1238,17 @@ run_w1_browser_frozen_smoke() {
         and $business[0].resolution_content_digest == $agent[0].content_digest
         and $agent[0].content_digest == $verifier[0].skills[0].content_digest
         and $business[0].resolution_runtime_digest == $agent[0].runtime_content_digest
-        and $agent[0].runtime_content_digest == $verifier[0].skills[0].runtime_content_digest)}
+        and $agent[0].runtime_content_digest == $verifier[0].skills[0].runtime_content_digest),
+      browser_tool_catalog_static_unavailable:($api[0].tool_catalog_exact_unavailable
+        and ($api[0].tool_catalog_session_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+        and ($api[0].tool_catalog_request_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))}
     | .browser_review_publish_quickcreate_v2 = (.browser_result_contract and .formal_api_frozen_revision
       and .business_frozen_revision and .agent_snapshot_matches_published
-      and .digest_business_agent_verifier_consistent)' \
+      and .digest_business_agent_verifier_consistent and .browser_tool_catalog_static_unavailable)' \
     >"$evidence_dir/responses/w1-browser-frozen-consistency.json"
   jq -e '.browser_result_contract and .formal_api_frozen_revision and .business_frozen_revision
     and .agent_snapshot_matches_published and .digest_business_agent_verifier_consistent
-    and .browser_review_publish_quickcreate_v2' \
+    and .browser_tool_catalog_static_unavailable and .browser_review_publish_quickcreate_v2' \
     "$evidence_dir/responses/w1-browser-frozen-consistency.json" >/dev/null || \
     fail "W1 Browser API/Business/Agent/verifier 冻结事实不一致"
 }
@@ -1239,7 +1265,9 @@ if [[ -n "$legacy_evidence_file" ]]; then
   rm -f "$legacy_evidence_file"
 fi
 cookie_jar="$(mktemp "${TMPDIR:-/tmp}/dora-w0-cookie.XXXXXX")"
+user_curl_config="$(mktemp "${TMPDIR:-/tmp}/dora-w0-curl-config.XXXXXX")"
 owner_b_cookie_jar="$(mktemp "${TMPDIR:-/tmp}/dora-w05-owner-b-cookie.XXXXXX")"
+owner_b_curl_config="$(mktemp "${TMPDIR:-/tmp}/dora-w05-owner-b-curl-config.XXXXXX")"
 login_response_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w0-login.XXXXXX")"
 workspace_response_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-workspace.XXXXXX")"
 owner_b_seed_response_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-owner-b-seed.XXXXXX")"
@@ -1251,7 +1279,8 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   w1_temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/dora-w1-skill.XXXXXX")"
   chmod 700 "$w1_temp_dir"
 fi
-chmod 600 "$cookie_jar" "$owner_b_cookie_jar" "$login_response_temp" "$workspace_response_temp" \
+chmod 600 "$cookie_jar" "$user_curl_config" "$owner_b_cookie_jar" "$owner_b_curl_config" \
+  "$login_response_temp" "$workspace_response_temp" \
   "$owner_b_seed_response_temp" "$owner_b_login_response_temp" "$owner_b_denied_response_temp" \
   "$owner_b_denied_headers_temp" "$source_manifest_temp"
 
@@ -1360,13 +1389,15 @@ agent_pid="$!"
 wait_ready 18081 "$business_pid"
 wait_ready 18082 "$agent_pid"
 
-login_status="$(curl --silent --show-error --max-time 10 -c "$cookie_jar" \
+login_payload="$(build_login_json "$DORA_SMOKE_USER_EMAIL" "$DORA_SMOKE_USER_PASSWORD")" || fail "用户 A 登录请求构造失败"
+login_status="$(curl_with_body_stdin "$login_payload" --silent --show-error --max-time 10 -c "$cookie_jar" \
   -H 'Content-Type: application/json' \
-  --data-binary "$(jq -cn --arg email "$DORA_SMOKE_USER_EMAIL" --arg password "$DORA_SMOKE_USER_PASSWORD" '{email:$email,password:$password}')" \
   -o "$login_response_temp" -w '%{http_code}' \
   'http://127.0.0.1:18081/api/v1/auth/session')"
+unset login_payload
 [[ "$login_status" == "200" ]] || fail "登录状态为 $login_status"
 csrf_token="$(jq -er '.csrf_token | strings | select(length > 0)' "$login_response_temp")"
+write_curl_header_config "$user_curl_config" 'X-CSRF-Token' "$csrf_token" || fail "用户 A curl 安全配置写入失败"
 user_id="$(jq -er '.principal.id | strings | select(length > 0)' "$login_response_temp")"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   [[ "$user_id" == "$reviewer_seed_creator_user_id" && "$user_id" != "$owner_b_seed_user_id" && "$user_id" != "$provisioner_user_id" ]] || \
@@ -1380,24 +1411,23 @@ login_response_temp=""
 
 intent_key="w0-prompt-$(date +%s)-$$"
 prompt_payload='{"initial_prompt":" W0 Transport é Smoke "}'
-project_id="$(run_concurrent_quick_create "$intent_key" "$prompt_payload" "$evidence_dir/responses/prompt-batch" "$csrf_token")"
+project_id="$(run_concurrent_quick_create "$intent_key" "$prompt_payload" "$evidence_dir/responses/prompt-batch" "$user_curl_config")"
 [[ "$project_id" =~ ^[0-9a-f-]{36}$ ]] || fail "Project ID 格式无效"
 poll_bootstrap_ready "$project_id" "$evidence_dir/responses/prompt-bootstrap.json" || fail "非空 Prompt Project 未进入 ready"
 session_id="$(jq -er '.session_id | strings | select(length > 0)' "$evidence_dir/responses/prompt-bootstrap.json")"
 input_id="$(jq -er '.input_id | strings | select(length > 0)' "$evidence_dir/responses/prompt-bootstrap.json")"
 
-replay_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
-  -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $intent_key" \
-  --data-binary "$prompt_payload" -o "$evidence_dir/responses/prompt-replay.json" -w '%{http_code}' \
+replay_status="$(curl_with_body_stdin "$prompt_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+  --config "$user_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: $intent_key" \
+  -o "$evidence_dir/responses/prompt-replay.json" -w '%{http_code}' \
   'http://127.0.0.1:18081/api/v1/projects:quick-create')"
 [[ "$replay_status" == "200" ]] || fail "同义重放状态为 $replay_status"
 jq -e --arg project "$project_id" --arg session "$session_id" --arg input "$input_id" \
   '.project_id == $project and .session_id == $session and .input_id == $input and .creation_status == "ready"' \
   "$evidence_dir/responses/prompt-replay.json" >/dev/null || fail "同义重放未返回冻结结果"
 
-conflict_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
-  -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $intent_key" \
-  --data-binary '{"initial_prompt":"different semantic prompt"}' \
+conflict_status="$(curl_with_body_stdin '{"initial_prompt":"different semantic prompt"}' --silent --show-error --max-time 10 -b "$cookie_jar" \
+  --config "$user_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: $intent_key" \
   -o "$evidence_dir/responses/prompt-conflict.json" -w '%{http_code}' \
   'http://127.0.0.1:18081/api/v1/projects:quick-create')"
 [[ "$conflict_status" == "409" ]] || fail "同键异义状态为 $conflict_status"
@@ -1405,9 +1435,9 @@ jq -e '.error.code == "IDEMPOTENCY_CONFLICT"' "$evidence_dir/responses/prompt-co
 
 blank_key="w0-blank-$(date +%s)-$$"
 blank_payload='{"initial_prompt":" \t\n　"}'
-blank_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
-  -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $blank_key" \
-  --data-binary "$blank_payload" -o "$evidence_dir/responses/blank-create.json" -w '%{http_code}' \
+blank_status="$(curl_with_body_stdin "$blank_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+  --config "$user_curl_config" -H 'Content-Type: application/json' -H "Idempotency-Key: $blank_key" \
+  -o "$evidence_dir/responses/blank-create.json" -w '%{http_code}' \
   'http://127.0.0.1:18081/api/v1/projects:quick-create')"
 [[ "$blank_status" == "201" ]] || fail "空 Prompt 创建状态为 $blank_status"
 blank_project_id="$(jq -er '.project_id | strings | select(length > 0)' "$evidence_dir/responses/blank-create.json")"
@@ -1417,14 +1447,16 @@ blank_session_id="$(jq -er '.session_id | strings | select(length > 0)' "$eviden
 jq -e '.input_id == null and .initial_prompt_status == "absent"' "$evidence_dir/responses/blank-bootstrap.json" >/dev/null || fail "空 Prompt 创建了 Input 或错误状态"
 
 # 第二个真实用户在 W1-C2 中同时作为正式 Reviewer 和跨 Owner 负向主体；登录 Principal 必须来自动态角色解析。
-owner_b_login_status="$(curl --silent --show-error --max-time 10 -c "$owner_b_cookie_jar" \
+owner_b_login_payload="$(build_login_json "$owner_b_email" "$owner_b_password")" || fail "第二用户登录请求构造失败"
+owner_b_login_status="$(curl_with_body_stdin "$owner_b_login_payload" --silent --show-error --max-time 10 -c "$owner_b_cookie_jar" \
   -H 'Content-Type: application/json' \
-  --data-binary "$(jq -cn --arg email "$owner_b_email" --arg password "$owner_b_password" '{email:$email,password:$password}')" \
   -o "$owner_b_login_response_temp" -w '%{http_code}' \
   'http://127.0.0.1:18081/api/v1/auth/session')"
+unset owner_b_login_payload
 [[ "$owner_b_login_status" == "200" ]] || fail "第二用户登录状态为 $owner_b_login_status"
 owner_b_user_id="$(jq -er '.principal.id | strings | select(length > 0)' "$owner_b_login_response_temp")"
 owner_b_csrf_token="$(jq -er '.csrf_token | strings | select(length > 0)' "$owner_b_login_response_temp")"
+write_curl_header_config "$owner_b_curl_config" 'X-CSRF-Token' "$owner_b_csrf_token" || fail "第二用户 curl 安全配置写入失败"
 [[ "$owner_b_user_id" == "$owner_b_seed_user_id" && "$owner_b_user_id" != "$user_id" ]] || fail "第二用户身份未与用户 A 隔离"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   jq -e '.principal.roles == ["skill_reviewer"] and .principal.capabilities == ["skill.review"]' \
@@ -1506,6 +1538,25 @@ jq '(.messages[]? |= del(.content))' "$workspace_response_temp" \
 rm -f "$workspace_response_temp"
 workspace_response_temp=""
 
+tool_catalog_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+  -o "$evidence_dir/responses/tool-definition-catalog.json" -w '%{http_code}' \
+  "http://127.0.0.1:18081/api/v1/agent/sessions/${session_id}/tools")"
+[[ "$tool_catalog_status" == "200" ]] || fail "Tool Definition Catalog 状态为 $tool_catalog_status"
+jq -e '
+  keys == ["items","request_id","schema_version"]
+  and .schema_version == "tool_definition_catalog.v1"
+  and (.request_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+  and (.items | length) == 6
+  and ([.items[].tool_key] == ["plan_creation_spec","analyze_materials","plan_storyboard","generate_media","write_prompts","assemble_output"])
+  and ([.items[].display_name] == ["流程规划","素材分析","故事板设计","媒体生成","提示词写法","视频剪辑"])
+  and ([.items[].order] == [1,2,3,4,5,6])
+  and all(.items[];
+    (keys == ["availability","display_name","order","reason_code","tool_key"])
+    and .availability == "unavailable"
+    and .reason_code == "DESIGN_REVIEW_PENDING")' \
+  "$evidence_dir/responses/tool-definition-catalog.json" >/dev/null || \
+  fail "Tool Definition Catalog exact-set、顺序或不可用原因漂移"
+
 blank_workspace_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
   -o "$evidence_dir/responses/blank-workspace-snapshot.json" -w '%{http_code}' \
   "http://127.0.0.1:18081/api/v1/agent/sessions/${blank_session_id}/workspace")"
@@ -1570,6 +1621,20 @@ assert_owner_safe_error "$owner_b_denied_response_temp" "SESSION_NOT_FOUND" \
   "$project_id" "$session_id" "$input_id" "W0 Transport é Smoke" || fail "跨 Owner Session 错误响应泄漏了权威资源事实"
 
 : >"$owner_b_denied_response_temp"
+owner_b_tools_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+  -o "$owner_b_denied_response_temp" -w '%{http_code}' \
+  "http://127.0.0.1:18081/api/v1/agent/sessions/${session_id}/tools")"
+[[ "$owner_b_tools_status" == "404" ]] || fail "第二用户访问用户 A Tool Catalog 未按 Owner-safe 404 关闭，状态为 $owner_b_tools_status"
+assert_owner_safe_error "$owner_b_denied_response_temp" "SESSION_NOT_FOUND" \
+  "$project_id" "$session_id" "$input_id" "plan_creation_spec" || fail "跨 Owner Tool Catalog 错误响应泄漏了资源或目录事实"
+owner_b_tools_code="$(jq -er '.error.code' "$owner_b_denied_response_temp")"
+owner_b_tools_facts_disclosed="$(jq -r \
+  --arg project "$project_id" --arg session "$session_id" --arg input "$input_id" \
+  '[.. | strings] | any(.[]; contains($project) or contains($session) or contains($input) or contains("plan_creation_spec"))' \
+  "$owner_b_denied_response_temp")"
+[[ "$owner_b_tools_facts_disclosed" == "false" ]] || fail "跨 Owner Tool Catalog 派生证据发现资源或目录事实"
+
+: >"$owner_b_denied_response_temp"
 : >"$owner_b_denied_headers_temp"
 owner_b_events_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
   -H 'Accept: text/event-stream' -D "$owner_b_denied_headers_temp" \
@@ -1589,8 +1654,16 @@ rm -f "$owner_b_denied_headers_temp"
 owner_b_denied_headers_temp=""
 
 jq -n \
-  '{project_bootstrap:{status:404,code:"PROJECT_NOT_FOUND"},session_workspace:{status:404,code:"SESSION_NOT_FOUND"},session_events:{status:404,code:"SESSION_NOT_FOUND",content_type:"application/json",sse_headers_committed:false},distinct_principals:true}' \
+  --argjson tools_status "$owner_b_tools_status" --arg tools_code "$owner_b_tools_code" \
+  --argjson tools_facts_disclosed "$owner_b_tools_facts_disclosed" \
+  '{project_bootstrap:{status:404,code:"PROJECT_NOT_FOUND"},session_workspace:{status:404,code:"SESSION_NOT_FOUND"},
+    session_tools:{status:$tools_status,code:$tools_code},
+    session_events:{status:404,code:"SESSION_NOT_FOUND",content_type:"application/json",sse_headers_committed:false},
+    distinct_principals:true,tool_catalog_resource_facts_disclosed:$tools_facts_disclosed,
+    tool_catalog_cross_owner_not_found:($tools_status == 404 and $tools_code == "SESSION_NOT_FOUND" and ($tools_facts_disclosed | not))}' \
   >"$evidence_dir/responses/cross-owner-access.json"
+jq -e '.tool_catalog_cross_owner_not_found' "$evidence_dir/responses/cross-owner-access.json" >/dev/null || \
+  fail "跨 Owner Tool Catalog canonical 派生证据不成立"
 
 direct_agent_status="$(curl --silent --show-error --max-time 10 \
   -o "$evidence_dir/responses/direct-agent-workspace.json" -w '%{http_code}' \
@@ -1728,12 +1801,12 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
 fi
 
 owner_b_logout_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -c "$owner_b_cookie_jar" \
-  -X DELETE -H "X-CSRF-Token: $owner_b_csrf_token" -o /dev/null -w '%{http_code}' \
+  --config "$owner_b_curl_config" -X DELETE -o /dev/null -w '%{http_code}' \
   'http://127.0.0.1:18081/api/v1/auth/session')"
 [[ "$owner_b_logout_status" == "204" ]] || fail "第二用户退出状态为 $owner_b_logout_status"
 
 logout_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -c "$cookie_jar" \
-  -X DELETE -H "X-CSRF-Token: $csrf_token" -o /dev/null -w '%{http_code}' \
+  --config "$user_curl_config" -X DELETE -o /dev/null -w '%{http_code}' \
   'http://127.0.0.1:18081/api/v1/auth/session')"
 [[ "$logout_status" == "204" ]] || fail "退出状态为 $logout_status"
 after_logout_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
@@ -1767,9 +1840,11 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
     --slurpfile publish "$evidence_dir/responses/w1-skill-publish.json" \
     --slurpfile publish_db "$evidence_dir/responses/w1-skill-publish-database.json" \
     --slurpfile cross_owner "$evidence_dir/responses/w1-skill-cross-owner.json" \
+    --slurpfile cross_owner_access "$evidence_dir/responses/cross-owner-access.json" \
     --slurpfile binding_api "$evidence_dir/responses/w1-binding-api.json" \
     --slurpfile binding_consistency "$evidence_dir/responses/w1-binding-consistency.json" \
     --slurpfile browser "$evidence_dir/responses/w1-browser-frozen-consistency.json" \
+    --slurpfile tool_catalog "$evidence_dir/responses/tool-definition-catalog.json" \
     --slurpfile revocation "$evidence_dir/responses/w1-reviewer-revocation.json" \
     --slurpfile transport_business "$evidence_dir/responses/business-prompt-assertion.json" \
     --slurpfile transport_agent "$evidence_dir/responses/agent-prompt-assertion.json" \
@@ -1811,6 +1886,10 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
         review_frozen_definition:$publish[0].frozen_definition,
         receipt_audit_request_id_consistent:$publish_db[0].receipt_audit_request_id_matches,
         cross_owner_not_found:$cross_owner[0].cross_owner_not_found,
+        tool_catalog_cross_owner_not_found:($cross_owner_access[0].tool_catalog_cross_owner_not_found
+          and $cross_owner_access[0].session_tools.status == 404
+          and $cross_owner_access[0].session_tools.code == "SESSION_NOT_FOUND"
+          and ($cross_owner_access[0].tool_catalog_resource_facts_disclosed | not)),
         revision_count:$skill_db[0].revision_count,
         review_count:$skill_db[0].review_count,
         published_snapshot_count:$publish_db[0].published_count,
@@ -1827,6 +1906,10 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
         content_digest_business_agent_verifier_consistent:$binding_consistency[0].content_digest_business_agent_verifier_consistent,
         skill_count_business_agent_verifier_consistent:$binding_consistency[0].skill_count_business_agent_verifier_consistent,
         browser_ui:$browser[0].browser_result_contract,
+        browser_tool_catalog_static_unavailable:($browser[0].browser_tool_catalog_static_unavailable
+          and $tool_catalog[0].schema_version == "tool_definition_catalog.v1"
+          and ($tool_catalog[0].items | length) == 6
+          and all($tool_catalog[0].items[]; .availability == "unavailable" and .reason_code == "DESIGN_REVIEW_PENDING")),
         browser_formal_api_frozen_revision:$browser[0].formal_api_frozen_revision,
         browser_business_frozen_revision:$browser[0].business_frozen_revision,
         browser_agent_snapshot_matches_published:$browser[0].agent_snapshot_matches_published,
@@ -1858,14 +1941,14 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
     and .assertions.published_snapshot_count == 1
     and .assertions.governance_audit_count == 1
     and .assertions.quick_create_v2_concurrent_requests == 100
-    and (.assertions | length) == 45
+    and (.assertions | length) == 47
     and ([.assertions | to_entries[]
       | select(.key != "revision_count"
         and .key != "review_count"
         and .key != "published_snapshot_count"
         and .key != "governance_audit_count"
         and .key != "quick_create_v2_concurrent_requests")] as $boolean_assertions
-      | ($boolean_assertions | length) == 40
+      | ($boolean_assertions | length) == 42
       and all($boolean_assertions[]; ((.value | type) == "boolean" and .value == true)))' \
     "$pending_evidence_file" >/dev/null || fail "W1 canonical Evidence 含未通过断言，禁止发布 passed summary"
 fi

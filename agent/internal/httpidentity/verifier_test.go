@@ -109,6 +109,35 @@ func TestVerifierFailsClosedAcrossBindingsAndDependency(t *testing.T) {
 	}
 }
 
+// TestVerifierBindsToolCatalogToExactScopeTargetAndMethod 验证 Tool Catalog 断言只能用于规范 GET、tools Target 和专用 Scope。
+func TestVerifierBindsToolCatalogToExactScopeTargetAndMethod(t *testing.T) {
+	const target = "/api/v1/agent/sessions/019f0000-0000-7000-8000-000000000005/tools"
+	canonical := strings.Replace(fixedCanonical,
+		"/api/v1/agent/sessions/019f0000-0000-7000-8000-000000000005/events?after_seq=42", target, 1)
+	canonical = strings.Replace(canonical, ScopeEventsRead, ScopeToolsRead, 1)
+	headers := fixedHeaders(canonical, "test-2026-07-a", signCanonical(fixedKey(), canonical))
+	request := fixedRequest(headers)
+	request.CanonicalTarget = target
+	request.Scope = ScopeToolsRead
+	claims, err := newFixedVerifier(t, &memoryReplayStore{seen: make(map[string]struct{})}).Verify(context.Background(), request)
+	if err != nil || claims.Scope != ScopeToolsRead || claims.AgentSessionID != request.AgentSessionID {
+		t.Fatalf("Tool Catalog exact assertion rejected: claims=%+v err=%v", claims, err)
+	}
+
+	for _, mutate := range []func(*Request){
+		func(candidate *Request) { candidate.Scope = ScopeWorkspaceRead },
+		func(candidate *Request) { candidate.CanonicalTarget += "/extra" },
+		func(candidate *Request) { candidate.Method = http.MethodPost },
+	} {
+		candidate := request
+		candidate.Headers = headers.Clone()
+		mutate(&candidate)
+		if _, err := newFixedVerifier(t, &memoryReplayStore{seen: make(map[string]struct{})}).Verify(context.Background(), candidate); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("cross-bound Tool Catalog assertion was accepted: request=%+v err=%v", candidate, err)
+		}
+	}
+}
+
 // TestVerifierConcurrentNonceOnlyOneSucceeds 验证一百个并发同 Nonce 中只有一次能通过原子重放保护。
 func TestVerifierConcurrentNonceOnlyOneSucceeds(t *testing.T) {
 	store := &memoryReplayStore{seen: make(map[string]struct{})}

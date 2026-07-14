@@ -28,15 +28,16 @@ type Server struct {
 	server *http.Server
 }
 
-// New 使用显式超时、请求头上限、可信代理配置和必需 Workspace Transport 创建 HTTP Server。
+// New 使用显式超时、请求头上限、可信代理配置和必需只读 Handler 创建 HTTP Server。
 func New(
 	httpCfg config.HTTPConfig,
 	serviceCfg config.ServiceConfig,
 	state *health.State,
 	workspaceHandler *WorkspaceHandler,
+	toolCatalogHandler *ToolCatalogHandler,
 ) (*Server, error) {
-	if state == nil || workspaceHandler == nil {
-		return nil, fmt.Errorf("create agent HTTP server: health state and Workspace handler are required")
+	if state == nil || workspaceHandler == nil || toolCatalogHandler == nil {
+		return nil, fmt.Errorf("create agent HTTP server: health state and read handlers are required")
 	}
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -55,6 +56,7 @@ func New(
 		c.JSON(http.StatusOK, HealthResponse{Status: "ready", Service: serviceCfg.Name, Version: serviceCfg.Version})
 	})
 	workspaceHandler.Register(router)
+	toolCatalogHandler.Register(router)
 	return &Server{server: &http.Server{
 		Addr:              httpCfg.Address,
 		Handler:           router,

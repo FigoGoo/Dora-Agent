@@ -18,6 +18,7 @@ test: test-smoke-contracts
 
 test-smoke-contracts:
 	@./scripts/tests/w1-smoke-mode-test.sh
+	@./scripts/tests/smoke-secret-transport-test.sh
 
 vet:
 	@for module in $(MODULES); do (cd $$module && GOWORK=off $(GO) vet ./...) || exit 1; done

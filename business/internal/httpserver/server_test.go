@@ -159,18 +159,20 @@ func TestServerRegistersAgentProxyBehindBusinessSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "/api/v1/agent/sessions/" + agentProxySessionID + "/workspace"
-	unauthenticated := httptest.NewRecorder()
-	server.Handler().ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, path, nil))
-	if unauthenticated.Code != http.StatusUnauthorized || !strings.Contains(unauthenticated.Body.String(), `"code":"UNAUTHENTICATED"`) {
-		t.Fatalf("anonymous Agent proxy status=%d body=%s", unauthenticated.Code, unauthenticated.Body.String())
-	}
-	authenticatedRequest := httptest.NewRequest(http.MethodGet, path, nil)
-	authenticatedRequest.AddCookie(&http.Cookie{Name: "dora_session", Value: "opaque-cookie-token"})
-	authenticated := httptest.NewRecorder()
-	server.Handler().ServeHTTP(authenticated, authenticatedRequest)
-	if authenticated.Code != http.StatusOK || authService.resolveCalls != 1 {
-		t.Fatalf("authenticated Agent proxy status=%d resolves=%d body=%s", authenticated.Code, authService.resolveCalls, authenticated.Body.String())
+	for index, resource := range []string{"workspace", "tools"} {
+		path := "/api/v1/agent/sessions/" + agentProxySessionID + "/" + resource
+		unauthenticated := httptest.NewRecorder()
+		server.Handler().ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, path, nil))
+		if unauthenticated.Code != http.StatusUnauthorized || !strings.Contains(unauthenticated.Body.String(), `"code":"UNAUTHENTICATED"`) {
+			t.Fatalf("anonymous Agent %s proxy status=%d body=%s", resource, unauthenticated.Code, unauthenticated.Body.String())
+		}
+		authenticatedRequest := httptest.NewRequest(http.MethodGet, path, nil)
+		authenticatedRequest.AddCookie(&http.Cookie{Name: "dora_session", Value: "opaque-cookie-token"})
+		authenticated := httptest.NewRecorder()
+		server.Handler().ServeHTTP(authenticated, authenticatedRequest)
+		if authenticated.Code != http.StatusOK || authService.resolveCalls != index+1 {
+			t.Fatalf("authenticated Agent %s proxy status=%d resolves=%d body=%s", resource, authenticated.Code, authService.resolveCalls, authenticated.Body.String())
+		}
 	}
 }
 

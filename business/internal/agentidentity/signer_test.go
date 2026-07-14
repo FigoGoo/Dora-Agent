@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,6 +50,53 @@ func TestSignerMatchesFrozenVector(t *testing.T) {
 	want := "agent_http_identity_assertion.v1\ndora-business-service\ndora.agent.http.v1\ntest-2026-07-a\n019f0000-0000-7000-8000-000000000001\nGET\n/api/v1/agent/sessions/019f0000-0000-7000-8000-000000000005/events?after_seq=42\n019f0000-0000-7000-8000-000000000002\n019f0000-0000-7000-8000-000000000003\n7\n019f0000-0000-7000-8000-000000000004\n019f0000-0000-7000-8000-000000000005\nagent.session.events.read\n1784011500123\n1784011530123\nAAECAwQFBgcICQoLDA0ODw"
 	if string(decoded) != want {
 		t.Fatalf("canonical mismatch:\n%s", decoded)
+	}
+}
+
+func TestSignerBindsToolsScopeToCanonicalTarget(t *testing.T) {
+	identity := Identity{
+		RequestID:       "019f0000-0000-7000-8000-000000000001",
+		CanonicalTarget: "/api/v1/agent/sessions/019f0000-0000-7000-8000-000000000005/tools",
+		PrincipalUserID: "019f0000-0000-7000-8000-000000000002",
+		WebSessionID:    "019f0000-0000-7000-8000-000000000003", WebSessionVersion: 7,
+		ProjectID:      "019f0000-0000-7000-8000-000000000004",
+		AgentSessionID: "019f0000-0000-7000-8000-000000000005", Scope: ScopeToolsRead,
+	}
+	signer, err := NewSigner(fixedClock{value: time.UnixMilli(1784011500123)}, bytes.NewReader(make([]byte, 16)), Config{
+		KeyVersion: "active", Secret: bytes.Repeat([]byte{1}, 32), TTL: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewSigner() error = %v", err)
+	}
+	assertion, err := signer.Sign(identity)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	canonical, err := base64.RawURLEncoding.DecodeString(assertion.EncodedCanonical)
+	if err != nil {
+		t.Fatalf("decode assertion: %v", err)
+	}
+	lines := strings.Split(string(canonical), "\n")
+	if len(lines) != 16 || lines[6] != identity.CanonicalTarget || lines[12] != ScopeToolsRead {
+		t.Fatalf("tools canonical mismatch: %q", canonical)
+	}
+
+	invalidTargets := []string{
+		identity.CanonicalTarget + "?preview=1",
+		"/api/v1/agent/sessions/019f0000-0000-7000-8000-000000000005/tool",
+		"/api/v1/agent/sessions/019f0000-0000-7000-8000-000000000006/tools",
+	}
+	for _, target := range invalidTargets {
+		invalid := identity
+		invalid.CanonicalTarget = target
+		if err := validateIdentity(invalid); !errors.Is(err, ErrInvalidAssertionInput) {
+			t.Fatalf("target=%q error=%v", target, err)
+		}
+	}
+	wrongScope := identity
+	wrongScope.Scope = ScopeWorkspaceRead
+	if err := validateIdentity(wrongScope); !errors.Is(err, ErrInvalidAssertionInput) {
+		t.Fatalf("wrong scope error=%v", err)
 	}
 }
 
