@@ -10,7 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -176,10 +181,13 @@ type messageSetPendingCallV1 struct {
 
 func TestW2R02TurnContextCorpusManifest(t *testing.T) {
 	manifest := loadMessageSetManifestV1(t)
-	if manifest.SchemaVersion != "w2_r02_turn_context_manifest.v1" || manifest.TotalVectorCount != 32 {
+	if manifest.SchemaVersion != "w2_r02_turn_context_manifest.v1" || manifest.TotalVectorCount != 70 {
 		t.Fatalf("Turn Context manifest schema=%q vectors=%d", manifest.SchemaVersion, manifest.TotalVectorCount)
 	}
-	wantFixtures := []string{"message_set.empty", "message_set.tool_pair", "message_set.unicode"}
+	wantFixtures := []string{
+		"message_set.empty", "message_set.tool_pair", "message_set.unicode",
+		"turn.approval.continuation", "turn.batch.empty", "turn.batch.summary", "turn.chat.single", "turn.chat.tool_pair",
+	}
 	wantVectors := []string{
 		"MS-CAN-001-empty-golden", "MS-CAN-002-unicode-golden", "MS-CAN-003-tool-pair-golden",
 		"MS-CAN-004-operational-metadata-excluded", "MS-CAN-005-later-message-isolated", "MS-CAN-006-physical-order-canonicalized",
@@ -191,8 +199,21 @@ func TestW2R02TurnContextCorpusManifest(t *testing.T) {
 		"MS-N19-tool-result-cross-turn", "MS-N20-tool-result-assistant-seq-mismatch", "MS-N21-tool-result-key-mismatch",
 		"MS-N22-tool-result-duplicate", "MS-N23-tool-receipt-owner-invalid", "MS-N24-tool-receipt-ref-mismatch",
 		"MS-N25-tool-receipt-digest-uppercase", "MS-N26-tool-call-request-digest-uppercase",
+		"TC-CAN-001-chat-single-golden", "TC-CAN-002-chat-tool-pair-golden", "TC-CAN-003-batch-empty-golden",
+		"TC-CAN-004-batch-summary-golden", "TC-CAN-005-approval-continuation-golden", "TC-CAN-006-config-update-isolated",
+		"TC-CAN-007-retry-isolated", "TC-CAN-008-resume-isolated", "TC-CAN-009-takeover-isolated",
+		"TC-CAN-010-later-message-isolated", "TC-CAN-011-later-event-isolated", "TC-CAN-012-runtime-metadata-isolated",
+		"TC-N01-schema-unknown", "TC-N02-turn-id-invalid", "TC-N03-turn-kind-unknown", "TC-N04-input-binding-mismatch",
+		"TC-N05-authority-ref-mismatch", "TC-N06-cutoff-after-locked-counter", "TC-N07-message-set-schema-unknown",
+		"TC-N08-message-count-mismatch", "TC-N09-message-set-digest-invalid", "TC-N10-summary-partial",
+		"TC-N11-summary-cutoff-after-context", "TC-N12-summary-owner-invalid", "TC-N13-summary-digest-invalid",
+		"TC-N14-chat-prompt-partial", "TC-N15-chat-model-partial", "TC-N16-approval-model-forbidden",
+		"TC-N17-continuation-partial", "TC-N18-common-owner-invalid", "TC-N19-common-ref-invalid",
+		"TC-N20-common-digest-invalid", "TC-N21-resolved-ref-mismatch", "TC-N22-context-digest-tamper",
+		"TC-N23-reason-priority-schema-before-identity",
+		"TC-N24-event-cutoff-after-locked-counter", "TC-N25-summary-schema-unknown", "TC-N26-summary-algorithm-unknown",
 	}
-	if len(wantVectors) != 32 {
+	if len(wantVectors) != 70 {
 		t.Fatalf("内部向量清单=%d", len(wantVectors))
 	}
 	if manifest.TotalVectorCount != len(wantVectors) {
@@ -208,9 +229,23 @@ func TestW2R02TurnContextCorpusManifest(t *testing.T) {
 		"TestSessionMessageSetFullArrayV1AllToolKeys", "TestSessionMessageSetFullArrayV1Limit",
 		"TestSessionMessageSetFullArrayV1CanonicalFieldSensitivity", "TestSessionMessageSetFullArrayV1OperationalMetadataExcluded",
 		"TestSessionMessageSetFullArrayV1StrictJSON",
+		"TestSessionTurnContextV1Corpus", "TestSessionTurnContextV1GoldenDigests", "TestSessionTurnContextV1ExactSets",
+		"TestSessionTurnContextV1ReasonPriority",
+		"TestSessionTurnContextV1ConditionalGroups", "TestSessionTurnContextV1FrozenReplay", "TestSessionTurnContextV1StrictJSON",
+		"TestSessionTurnContextV1CanonicalFieldCount", "TestSessionTurnContextV1OperationalMetadataExcluded",
+		"TestSessionTurnContextV1CanonicalFieldSensitivity", "TestSessionTurnContextV1SummaryCutoffIsolation",
+		"TestSessionTurnContextV1MessageSetBindings", "TestSessionTurnContextV1ContinuationStructuralGroups",
+		"TestSessionTurnContextV1AuthorityOwnerMatrix",
+		"TestSessionTurnContextV1LegacyAuthorityClassification", "TestSessionTurnContextV1DigestDomain",
 	}
 	if !reflect.DeepEqual(manifest.TargetTests, wantTests) {
 		t.Fatalf("manifest target tests=%v want=%v", manifest.TargetTests, wantTests)
+	}
+	actualTests := turnContextTargetTestNamesV1(t)
+	manifestTests := append([]string(nil), manifest.TargetTests...)
+	sort.Strings(manifestTests)
+	if !reflect.DeepEqual(actualTests, manifestTests) {
+		t.Fatalf("manifest target tests 未绑定实际 Test 函数 actual=%v manifest=%v", actualTests, manifestTests)
 	}
 	entries, err := w2R02TurnContextFS.ReadDir("testdata/w2_r02_turn_context")
 	if err != nil {
@@ -223,34 +258,79 @@ func TestW2R02TurnContextCorpusManifest(t *testing.T) {
 		}
 		names = append(names, entry.Name())
 	}
-	if want := []string{"manifest.json", "session_message_set_v1.json"}; !reflect.DeepEqual(names, want) {
+	if want := []string{"manifest.json", "session_message_set_v1.json", "session_turn_context_v1.json"}; !reflect.DeepEqual(names, want) {
 		t.Fatalf("Turn Context files=%v want=%v", names, want)
 	}
-	if len(manifest.Files) != 1 || manifest.Files[0].File != "session_message_set_v1.json" || manifest.Files[0].VectorCount != len(wantVectors) {
+	wantFiles := []messageSetManifestFileV1{
+		{File: "session_message_set_v1.json", VectorCount: 32},
+		{File: "session_turn_context_v1.json", VectorCount: 38},
+	}
+	if len(manifest.Files) != len(wantFiles) {
 		t.Fatalf("manifest files=%+v", manifest.Files)
 	}
-	raw, err := w2R02TurnContextFS.ReadFile("testdata/w2_r02_turn_context/" + manifest.Files[0].File)
-	if err != nil {
-		t.Fatal(err)
+	for index, file := range manifest.Files {
+		if file.File != wantFiles[index].File || file.VectorCount != wantFiles[index].VectorCount {
+			t.Fatalf("manifest file=%+v want=%+v", file, wantFiles[index])
+		}
+		raw, err := w2R02TurnContextFS.ReadFile("testdata/w2_r02_turn_context/" + file.File)
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(raw)
+		if got := "sha256:" + hex.EncodeToString(digest[:]); got != file.SHA256 {
+			t.Fatalf("corpus=%s sha=%s want=%s", file.File, got, file.SHA256)
+		}
 	}
-	digest := sha256.Sum256(raw)
-	if got := "sha256:" + hex.EncodeToString(digest[:]); got != manifest.Files[0].SHA256 {
-		t.Fatalf("Message Set corpus sha=%s want=%s", got, manifest.Files[0].SHA256)
+	messageCorpus := loadMessageSetCorpusV1(t)
+	contextCorpus := loadTurnContextCorpusV1(t)
+	fixtureIDs := make([]string, 0, len(messageCorpus.Fixtures)+len(contextCorpus.Fixtures))
+	for _, fixture := range messageCorpus.Fixtures {
+		fixtureIDs = append(fixtureIDs, fixture.FixtureID)
 	}
-	corpus := loadMessageSetCorpusV1(t)
-	fixtureIDs := make([]string, 0, len(corpus.Fixtures))
-	for _, fixture := range corpus.Fixtures {
+	for _, fixture := range contextCorpus.Fixtures {
 		fixtureIDs = append(fixtureIDs, fixture.FixtureID)
 	}
 	sort.Strings(fixtureIDs)
-	vectorIDs := make([]string, 0, len(corpus.Cases))
-	for _, testCase := range corpus.Cases {
+	vectorIDs := make([]string, 0, len(messageCorpus.Cases)+len(contextCorpus.Cases))
+	for _, testCase := range messageCorpus.Cases {
+		vectorIDs = append(vectorIDs, testCase.ID)
+	}
+	for _, testCase := range contextCorpus.Cases {
 		vectorIDs = append(vectorIDs, testCase.ID)
 	}
 	sort.Strings(vectorIDs)
 	if !reflect.DeepEqual(fixtureIDs, manifest.FixtureIDs) || !reflect.DeepEqual(vectorIDs, manifest.VectorIDs) {
 		t.Fatalf("Corpus IDs 未绑定 manifest fixtures=%v vectors=%v", fixtureIDs, vectorIDs)
 	}
+}
+
+func turnContextTargetTestNamesV1(t *testing.T) []string {
+	t.Helper()
+	directory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := []string{"session_message_set_v1_corpus_test.go", "session_turn_context_v1_corpus_test.go"}
+	result := make([]string, 0, 27)
+	for _, name := range files {
+		parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(directory, name), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Recv != nil {
+				continue
+			}
+			if function.Name.Name == "TestW2R02TurnContextCorpusManifest" ||
+				strings.HasPrefix(function.Name.Name, "TestSessionMessageSetFullArrayV1") ||
+				strings.HasPrefix(function.Name.Name, "TestSessionTurnContextV1") {
+				result = append(result, function.Name.Name)
+			}
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func TestSessionMessageSetFullArrayV1Corpus(t *testing.T) {
