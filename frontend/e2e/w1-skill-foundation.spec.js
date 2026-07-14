@@ -22,6 +22,44 @@ function isSkillResponse(response, method, pathname) {
   return response.request().method() === method && url.pathname === pathname;
 }
 
+function isStrictOwnerNotFoundResponse(result, pathname) {
+  const responseURL = new URL(result.responseURL);
+  const error = result.payload?.error;
+  return responseURL.pathname === pathname
+    && responseURL.search === ''
+    && result.status === 404
+    && result.contentType === 'application/json; charset=utf-8'
+    && result.cacheControl === 'no-store'
+    && Object.keys(result.payload || {}).join(',') === 'error'
+    && Object.keys(error || {}).sort().join(',') === 'code,details,message,request_id,retryable'
+    && error?.code === 'SKILL_NOT_FOUND'
+    && error?.message === 'Skill 不存在或不可访问'
+    && error?.retryable === false
+    && error?.details !== null
+    && typeof error?.details === 'object'
+    && !Array.isArray(error?.details)
+    && Object.keys(error.details).length === 0
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(error?.request_id || '');
+}
+
+async function ownerResponseObservation(response) {
+  const responseText = await response.text();
+  let payload = null;
+  try {
+    payload = JSON.parse(responseText);
+  } catch {
+    // Callers fail closed when the payload is not strict JSON.
+  }
+  return {
+    status: response.status(),
+    contentType: response.headers()['content-type'] || '',
+    cacheControl: response.headers()['cache-control'] || '',
+    responseURL: response.url(),
+    responseText,
+    payload
+  };
+}
+
 test.describe('W1 QuickCreate Skill binding browser contract', () => {
   test('@w1-skill selects an available Skill and sends only the explicit v2 variant', async ({ page }) => {
     const draftSkillID = '019f0000-0000-7000-8000-000000000124';
@@ -301,6 +339,7 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
       !creatorAdminAPIResponse.responseText.includes(value) && !creatorAdminDeniedPageText.includes(value)
     ));
     const creatorAdminAPIError = creatorAdminAPIResponse.payload?.error;
+    const creatorAdminDenialRequestID = String(creatorAdminAPIError?.request_id || '');
     const creatorAdminAPIForbidden = creatorAdminAPIResponse.status === 403
       && creatorAdminAPIResponse.contentType === 'application/json; charset=utf-8'
       && creatorAdminAPIResponse.cacheControl === 'no-store'
@@ -313,7 +352,7 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
       && typeof creatorAdminAPIError?.details === 'object'
       && !Array.isArray(creatorAdminAPIError?.details)
       && Object.keys(creatorAdminAPIError.details).length === 0
-      && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(creatorAdminAPIError?.request_id || '')
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(creatorAdminDenialRequestID)
       && creatorAdminDenialHasNoSensitiveData;
     expect(
       creatorAdminAPIForbidden,
@@ -364,6 +403,15 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     const postSubmitDraftPayload = await postSubmitDraftResponse.json();
     expect(postSubmitDraftPayload.skill?.definition?.summary).toBe(sentinelB);
     expect(postSubmitDraftPayload.skill?.review_status).toBe('reviewing');
+    const currentDraftDefinition = postSubmitDraftPayload.skill?.definition;
+    const currentDraftETag = String(postSubmitDraftPayload.skill?.draft_etag || '');
+    const currentDraftHeaderETag = String(postSubmitDraftResponse.headers().etag || '');
+    const currentDraftProbeReady = currentDraftDefinition !== null
+      && typeof currentDraftDefinition === 'object'
+      && !Array.isArray(currentDraftDefinition)
+      && currentDraftETag === currentDraftHeaderETag
+      && /^"[^"\r\n]+"$/.test(currentDraftETag);
+    expect(currentDraftProbeReady, 'Creator current draft must provide a valid opaque ETag and definition').toBe(true);
 
     await logoutFromCurrentContext(page);
     await page.goto('/');
@@ -375,6 +423,117 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     const reviewerCSRFToken = String(reviewerLogin.csrf_token || '');
     expect(Boolean(reviewerCSRFToken)).toBe(true);
     await expect(page.getByRole('button', { name: 'Skill 审核' })).toBeVisible();
+
+    const ownerDetailPath = `/api/v1/skills/${skillID}`;
+    const ownerDraftPath = `${ownerDetailPath}/draft`;
+    const ownerReadsBeforeReviewerRoute = businessRequests.filter((request) => (
+      request.method === 'GET' && request.pathname === ownerDetailPath
+    )).length;
+    const ownerWritesBeforeReviewerRoute = businessRequests.filter((request) => (
+      request.method === 'PUT' && request.pathname === ownerDraftPath
+    )).length;
+    const reviewerOwnerReadObservations = [];
+    const reviewerOwnerReadObservationPromises = [];
+    const observeReviewerOwnerRead = (response) => {
+      if (!isSkillResponse(response, 'GET', ownerDetailPath)) return;
+      const observationPromise = ownerResponseObservation(response).then((observation) => {
+        reviewerOwnerReadObservations.push(observation);
+      });
+      reviewerOwnerReadObservationPromises.push(observationPromise);
+    };
+    page.on('response', observeReviewerOwnerRead);
+    await page.goto(editPath);
+    const reviewerOwnerDeniedAlert = page.getByRole('alert');
+    await page.waitForLoadState('networkidle');
+    await page.waitForFunction(() => !document.body.innerText.includes('正在加载 Skill 草稿…'));
+    page.off('response', observeReviewerOwnerRead);
+    await Promise.all(reviewerOwnerReadObservationPromises);
+    const reviewerOwnerDeniedPageText = await page.locator('body').innerText();
+    const ownerReadsAfterReviewerRoute = businessRequests.filter((request) => (
+      request.method === 'GET' && request.pathname === ownerDetailPath
+    )).length;
+    const ownerWritesAfterReviewerRoute = businessRequests.filter((request) => (
+      request.method === 'PUT' && request.pathname === ownerDraftPath
+    )).length;
+    const reviewerOwnerReadDelta = ownerReadsAfterReviewerRoute - ownerReadsBeforeReviewerRoute;
+    const reviewerOwnerReadNotFound = reviewerOwnerReadDelta >= 1
+      && reviewerOwnerReadDelta <= 2
+      && reviewerOwnerReadObservations.length >= 1
+      && reviewerOwnerReadObservations.length <= reviewerOwnerReadDelta
+      && reviewerOwnerReadObservations.every((result) => isStrictOwnerNotFoundResponse(result, ownerDetailPath));
+    const reviewerOwnerRouteNotFound = await reviewerOwnerDeniedAlert.count() === 1
+      && await reviewerOwnerDeniedAlert.textContent() === 'Skill 不存在或不可访问'
+      && reviewerOwnerReadDelta >= 1
+      && reviewerOwnerReadDelta <= 2
+      && ownerWritesAfterReviewerRoute === ownerWritesBeforeReviewerRoute
+      && await page.getByRole('button', { name: '返回我的 Skill' }).count() === 1
+      && await page.locator('form.skill-builder-form').count() === 0
+      && await page.getByRole('heading', { name: '编辑 Skill 草稿' }).count() === 0
+      && await page.getByLabel('简介').count() === 0
+      && await page.getByRole('button', { name: '保存草稿' }).count() === 0
+      && await page.getByRole('button', { name: '提交审核' }).count() === 0;
+
+    const reviewerOwnerWriteResponse = await page.evaluate(async ({ path, csrfToken, draftETag, definition }) => {
+      const response = await fetch(path, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+          'If-Match': draftETag
+        },
+        body: JSON.stringify({ definition })
+      });
+      const responseText = await response.text();
+      let payload = null;
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        // The outer strict safe boolean fails closed for malformed JSON.
+      }
+      return {
+        status: response.status,
+        contentType: response.headers.get('content-type') || '',
+        cacheControl: response.headers.get('cache-control') || '',
+        responseURL: response.url,
+        responseText,
+        payload
+      };
+    }, {
+      path: ownerDraftPath,
+      csrfToken: reviewerCSRFToken,
+      draftETag: currentDraftETag,
+      definition: currentDraftDefinition
+    });
+    const ownerWritesAfterReviewerProbe = businessRequests.filter((request) => (
+      request.method === 'PUT' && request.pathname === ownerDraftPath
+    )).length;
+    let reviewerOwnerWriteNotFound = isStrictOwnerNotFoundResponse(reviewerOwnerWriteResponse, ownerDraftPath)
+      && ownerWritesAfterReviewerProbe === ownerWritesAfterReviewerRoute + 1;
+    const reviewerOwnerForbiddenValues = [
+      skillName,
+      sentinelA,
+      sentinelB,
+      reviewID,
+      email,
+      password,
+      reviewerEmail,
+      reviewerPassword
+    ].filter(Boolean);
+    const reviewerOwnerResourceFactsNotDisclosed = reviewerOwnerForbiddenValues.every((value) => (
+      reviewerOwnerReadObservations.every((result) => !result.responseText.includes(value))
+      && !reviewerOwnerWriteResponse.responseText.includes(value)
+      && !reviewerOwnerDeniedPageText.includes(value)
+    ));
+    await page.goto('/');
+    expect(reviewerOwnerRouteNotFound, 'Reviewer cross-owner edit route must fail closed without an implicit write').toBe(true);
+    expect(reviewerOwnerReadNotFound, 'Reviewer Owner detail read must match the strict safe 404 contract').toBe(true);
+    expect(reviewerOwnerWriteNotFound, 'Reviewer Owner draft write must match the strict safe 404 contract').toBe(true);
+    expect(
+      reviewerOwnerResourceFactsNotDisclosed,
+      'Reviewer Owner denial responses and UI must not disclose resource facts or login credentials'
+    ).toBe(true);
 
     const queueResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
@@ -434,6 +593,49 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     const creatorRelogin = await loginAs(page, email, password);
     expect(exactPrincipalID(creatorRelogin)).toBe(creatorID);
     expect(creatorRelogin.principal?.capabilities || []).not.toContain('skill.review');
+
+    const creatorPostProbeOwnerResponse = await page.evaluate(async (path) => {
+      const response = await fetch(path, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'application/json' }
+      });
+      const responseText = await response.text();
+      let payload = null;
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        // The outer safe boolean fails closed for malformed JSON.
+      }
+      return {
+        status: response.status,
+        contentType: response.headers.get('content-type') || '',
+        cacheControl: response.headers.get('cache-control') || '',
+        etag: response.headers.get('etag') || '',
+        responseURL: response.url,
+        payload
+      };
+    }, ownerDetailPath);
+    const creatorPostProbeOwnerURL = new URL(creatorPostProbeOwnerResponse.responseURL);
+    const creatorPostProbeOwnerUnchanged = creatorPostProbeOwnerResponse.status === 200
+      && creatorPostProbeOwnerResponse.contentType === 'application/json; charset=utf-8'
+      && creatorPostProbeOwnerResponse.cacheControl === 'no-store'
+      && creatorPostProbeOwnerResponse.etag === currentDraftETag
+      && creatorPostProbeOwnerURL.pathname === ownerDetailPath
+      && creatorPostProbeOwnerURL.search === ''
+      && creatorPostProbeOwnerResponse.payload?.skill?.skill_id === skillID
+      && creatorPostProbeOwnerResponse.payload?.skill?.draft_etag === currentDraftETag
+      && creatorPostProbeOwnerResponse.payload?.skill?.definition?.summary === sentinelB
+      && JSON.stringify(creatorPostProbeOwnerResponse.payload?.skill?.definition || null)
+        === JSON.stringify(currentDraftDefinition)
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        creatorPostProbeOwnerResponse.payload?.request_id || ''
+      );
+    reviewerOwnerWriteNotFound = reviewerOwnerWriteNotFound && creatorPostProbeOwnerUnchanged;
+    expect(
+      creatorPostProbeOwnerUnchanged,
+      'Creator draft ETag and definition must remain unchanged after the denied Reviewer write probe'
+    ).toBe(true);
 
     await page.getByRole('button', { name: 'Skill', exact: true }).click();
     const picker = page.getByRole('dialog', { name: '选择 QuickCreate Skill' });
@@ -506,6 +708,7 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     expect(businessRequests.some((request) => request.pathname.startsWith('/api/aigc/'))).toBe(false);
     expect(businessRequests).toEqual(expect.arrayContaining([
       expect.objectContaining({ method: 'POST', pathname: '/api/v1/skills' }),
+      expect.objectContaining({ method: 'GET', pathname: `/api/v1/skills/${skillID}` }),
       expect.objectContaining({ method: 'POST', pathname: `/api/v1/skills/${skillID}/reviews` }),
       expect.objectContaining({ method: 'PUT', pathname: `/api/v1/skills/${skillID}/draft` }),
       expect.objectContaining({ method: 'GET', pathname: '/api/v1/admin/skill-reviews' }),
@@ -516,12 +719,17 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
 
     if (w1ResultPath) {
       await writeFile(w1ResultPath, JSON.stringify({
-        schema_version: 'w1.real-review-result.v2',
+        schema_version: 'w1.real-review-result.v3',
         creator_id: creatorID,
         creator_admin_route_blocked: creatorAdminRouteBlocked,
         creator_admin_implicit_api_blocked: creatorAdminImplicitAPIBlocked,
         creator_admin_api_forbidden: creatorAdminAPIForbidden,
+        creator_admin_denial_request_id: creatorAdminDenialRequestID,
         reviewer_id: reviewerID,
+        reviewer_owner_route_not_found: reviewerOwnerRouteNotFound,
+        reviewer_owner_read_not_found: reviewerOwnerReadNotFound,
+        reviewer_owner_write_not_found: reviewerOwnerWriteNotFound,
+        reviewer_owner_resource_facts_not_disclosed: reviewerOwnerResourceFactsNotDisclosed,
         skill_id: skillID,
         review_id: reviewID,
         published_snapshot_id: publishedSnapshotID,

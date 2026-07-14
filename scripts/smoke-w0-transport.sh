@@ -1237,6 +1237,10 @@ run_w1_browser_frozen_smoke() {
   local browser_catalog_session_id=""
   local browser_catalog_request_id=""
   local browser_catalog_exact_unavailable=""
+  local creator_admin_denial_request_id=""
+  local creator_admin_denial_audit_fact=""
+  local creator_admin_denial_audit_count=""
+  local creator_admin_denial_audited="false"
   local submitted_summary=""
   local current_draft_summary=""
   local submitted_summary_b64=""
@@ -1250,13 +1254,17 @@ run_w1_browser_frozen_smoke() {
 
   [[ -s "$browser_result_file" ]] || fail "W1 浏览器未产出结构化真实结果"
   jq -e --arg creator "$user_id" --arg reviewer "$owner_b_seed_user_id" '
-    keys == ["creator_admin_api_forbidden","creator_admin_implicit_api_blocked","creator_admin_route_blocked","creator_id","current_draft_summary","project_id","published_snapshot_id","review_id","reviewer_id","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
-    and .schema_version == "w1.real-review-result.v2"
+    keys == ["creator_admin_api_forbidden","creator_admin_denial_request_id","creator_admin_implicit_api_blocked","creator_admin_route_blocked","creator_id","current_draft_summary","project_id","published_snapshot_id","review_id","reviewer_id","reviewer_owner_read_not_found","reviewer_owner_resource_facts_not_disclosed","reviewer_owner_route_not_found","reviewer_owner_write_not_found","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
+    and .schema_version == "w1.real-review-result.v3"
     and .creator_admin_route_blocked == true
     and .creator_admin_implicit_api_blocked == true
     and .creator_admin_api_forbidden == true
+    and .reviewer_owner_route_not_found == true
+    and .reviewer_owner_read_not_found == true
+    and .reviewer_owner_write_not_found == true
+    and .reviewer_owner_resource_facts_not_disclosed == true
     and .creator_id == $creator and .reviewer_id == $reviewer and .creator_id != .reviewer_id
-    and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id,.tool_catalog_session_id,.tool_catalog_request_id]
+    and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id,.tool_catalog_session_id,.tool_catalog_request_id,.creator_admin_denial_request_id]
       | all(.[]; test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
     and .tool_catalog_exact_unavailable == true
     and (.submitted_summary | type) == "string" and (.submitted_summary | length) > 0
@@ -1273,10 +1281,28 @@ run_w1_browser_frozen_smoke() {
   browser_catalog_session_id="$(jq -er '.tool_catalog_session_id' "$browser_result_file")"
   browser_catalog_request_id="$(jq -er '.tool_catalog_request_id' "$browser_result_file")"
   browser_catalog_exact_unavailable="$(jq -er '.tool_catalog_exact_unavailable' "$browser_result_file")"
+  creator_admin_denial_request_id="$(jq -er '.creator_admin_denial_request_id' "$browser_result_file")"
   submitted_summary="$(jq -er '.submitted_summary' "$browser_result_file")"
   current_draft_summary="$(jq -er '.current_draft_summary' "$browser_result_file")"
   submitted_summary_b64="$(printf '%s' "$submitted_summary" | base64 | tr -d '\n')"
   current_draft_summary_b64="$(printf '%s' "$current_draft_summary" | base64 | tr -d '\n')"
+
+  creator_admin_denial_audit_fact="$(sed -n '/^{/p' "$evidence_dir/business.log" \
+    | jq -cs --arg actor "$browser_creator_id" --arg request "$creator_admin_denial_request_id" '
+      map(select(.actor_id == $actor and .request_id == $request)) as $events
+      | {count:($events | length),audited:(($events | length) == 1
+          and $events[0].event_type == "security.authorization.v1"
+          and $events[0].route == "/api/v1/admin/skill-reviews"
+          and $events[0].action == "list"
+          and $events[0].decision == "denied"
+          and $events[0].actor_id == $actor
+          and $events[0].request_id == $request
+          and $events[0].error_code == "SKILL_REVIEW_CAPABILITY_REQUIRED")}'
+  )"
+  creator_admin_denial_audit_count="$(jq -er '.count' <<<"$creator_admin_denial_audit_fact")"
+  creator_admin_denial_audited="$(jq -er '.audited' <<<"$creator_admin_denial_audit_fact")"
+  [[ "$creator_admin_denial_audit_count" == "1" && "$creator_admin_denial_audited" == "true" ]] || \
+    fail "W1 Creator Reviewer API 拒绝未关联唯一结构化授权审计事件"
 
   owner_api_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
     -o "$owner_api_raw" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skills/${browser_skill_id}")"
@@ -1413,12 +1439,24 @@ run_w1_browser_frozen_smoke() {
     --slurpfile browser "$browser_result_file" \
     --slurpfile business "$evidence_dir/responses/w1-browser-frozen-business.json" \
     --slurpfile agent "$evidence_dir/responses/w1-browser-frozen-agent.json" \
-    --slurpfile verifier "$verifier_file" '
+    --slurpfile verifier "$verifier_file" \
+    --argjson creator_admin_denial_audited "$creator_admin_denial_audited" '
     {skill_id:$api[0].skill_id,review_id:$api[0].review_id,published_snapshot_id:$api[0].published_snapshot_id,
-      browser_result_contract:($browser[0].schema_version == "w1.real-review-result.v2"
+      creator_admin_denial_audited:$creator_admin_denial_audited,
+      reviewer_owner_route_not_found:$browser[0].reviewer_owner_route_not_found,
+      reviewer_owner_read_not_found:$browser[0].reviewer_owner_read_not_found,
+      reviewer_owner_write_not_found:$browser[0].reviewer_owner_write_not_found,
+      reviewer_owner_resource_facts_not_disclosed:$browser[0].reviewer_owner_resource_facts_not_disclosed,
+      browser_result_contract:($browser[0].schema_version == "w1.real-review-result.v3"
         and $browser[0].creator_admin_route_blocked == true
         and $browser[0].creator_admin_implicit_api_blocked == true
         and $browser[0].creator_admin_api_forbidden == true
+        and ($browser[0].creator_admin_denial_request_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+        and $creator_admin_denial_audited
+        and $browser[0].reviewer_owner_route_not_found == true
+        and $browser[0].reviewer_owner_read_not_found == true
+        and $browser[0].reviewer_owner_write_not_found == true
+        and $browser[0].reviewer_owner_resource_facts_not_disclosed == true
         and $api[0].owner_status == 200 and $api[0].review_status == 200),
       formal_api_frozen_revision:($api[0].owner_current_draft_is_b
         and $api[0].review_frozen_submission_is_a and $api[0].review_current_published_is_a),
@@ -1442,13 +1480,21 @@ run_w1_browser_frozen_smoke() {
       and $browser[0].creator_admin_route_blocked == true
       and $browser[0].creator_admin_implicit_api_blocked == true
       and $browser[0].creator_admin_api_forbidden == true
+      and $creator_admin_denial_audited
+      and $browser[0].reviewer_owner_route_not_found == true
+      and $browser[0].reviewer_owner_read_not_found == true
+      and $browser[0].reviewer_owner_write_not_found == true
+      and $browser[0].reviewer_owner_resource_facts_not_disclosed == true
       and .formal_api_frozen_revision
       and .business_frozen_revision and .agent_snapshot_matches_published
       and .digest_business_agent_verifier_consistent and .browser_tool_catalog_static_unavailable)' \
     >"$evidence_dir/responses/w1-browser-frozen-consistency.json"
   jq -e '.browser_result_contract and .formal_api_frozen_revision and .business_frozen_revision
     and .agent_snapshot_matches_published and .digest_business_agent_verifier_consistent
-    and .browser_tool_catalog_static_unavailable and .browser_review_publish_quickcreate_v2' \
+    and .browser_tool_catalog_static_unavailable and .creator_admin_denial_audited
+    and .reviewer_owner_route_not_found and .reviewer_owner_read_not_found
+    and .reviewer_owner_write_not_found and .reviewer_owner_resource_facts_not_disclosed
+    and .browser_review_publish_quickcreate_v2' \
     "$evidence_dir/responses/w1-browser-frozen-consistency.json" >/dev/null || \
     fail "W1 Browser API/Business/Agent/verifier 冻结事实不一致"
 }
