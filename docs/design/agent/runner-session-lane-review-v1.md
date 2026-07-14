@@ -756,7 +756,14 @@ Agent PostgreSQL EventLog 至少包含：
 
 ### 15.2 Session Lane 测试
 
-W2-R02 已新增独立 [`PostgreSQL Session Lane 与 Runner Runtime 可执行契约 v1`](./session-lane-runtime-contract-v1.md)、[`Session Lane Ingress 与 Command Receipt 可执行契约 v1`](./session-lane-ingress-command-contract-v1.md)、[`Session Lane PostgreSQL 物理设计与升级方案 v1`](./session-lane-postgresql-design-v1.md) 与测试专用 Corpus：前者以 60 条向量覆盖 Lane 纯状态迁移；Ingress 以 42 条向量固定 `enqueue_input_v1` 的全局 CommandID、Source/Class、alias Receipt、原子创建、重放与查询；Database Design Draft 推荐全局 Header + origin Result、内部 Session Version CAS、legacy fail-closed 升级、Turn/Run/Lease/HOL 与真实 PG 证据矩阵，但尚未 Approved，也没有 Migration/Repository。`evidence_kind/digest` 仍只是分支夹具，Ingress 也未执行真实事务/Redis；下列清单继续保持未勾选，不能用设计或纯模型冒充 PostgreSQL 集成、lost-wake 恢复或 `SMK-017` 证据。
+W2-R02 已新增独立 [`PostgreSQL Session Lane 与 Runner Runtime 可执行契约 v1`](./session-lane-runtime-contract-v1.md)、[`Session Lane Ingress 与 Command Receipt 可执行契约 v1`](./session-lane-ingress-command-contract-v1.md)、[`Session Lane PostgreSQL 物理设计与升级方案 v1`](./session-lane-postgresql-design-v1.md)、[`Session Lane legacy Authority 与升级分类可执行契约 v1`](./session-lane-legacy-upgrade-contract-v1.md) 与测试专用 Corpus：Lane 以 60 条向量覆盖纯状态迁移；Ingress 以 42 条向量固定 `enqueue_input_v1`；legacy upgrade 以 17 条 Authority + 90 条 blocker 向量固定 derived-only provenance、Session-rooted/global-orphan anti-join、升级 Ledger、Readiness 分层和 Down guard。它们均未 Approved，也没有生产 Migration/Repository/Helper/Runtime。`evidence_kind/digest` 和内容可读状态仍只是纯模型夹具；下列清单继续保持未勾选，不能用设计或纯模型冒充 PostgreSQL 集成、真实 Keyring、lost-wake 恢复或 `SMK-017` 证据。
+
+- [x] Legacy Authority canonical/digest、`derived_provenance_only + legacy_chat_only`、Receipt mutable 拒绝和敏感能力拒绝已有 17 条 test-only 向量；
+- [x] Preflight/Verify、72 blocker exact-set/order、empty prompt、Event 高低水位、Session-rooted/global-orphan anti-join 和 active/previous/unreadable 内容分类已有 90 条 test-only 向量；
+- [x] 升级 Ledger 的事务内 crash/commit response lost/replay/conflict、Foundation/Lane/Processor/Claim generation truth table 和 fail-safe Down guard 已有纯模型测试；
+- [ ] Receipt/Message/Event 数据库级不可变、created/accepted Event Retention/独立 Marker、immutable Turn Context 与 Activation Policy 完成设计审核；
+- [ ] 从真实 Migration 005 V1/V2/empty fixture 执行 forward Up/Helper/Verify/Down guard，并通过 PostgreSQL 锁、并发、崩溃与摘要重算证据；
+- [ ] 生产 Keyring、Lane Capability Readiness、旧 Writer drain、Processor/Scanner 零早启和脱敏 Evidence 通过 Runtime 集成测试；
 
 - [ ] 同 Session 100 个并发输入只按 `enqueue_seq` 执行；
 - [ ] 不同 Session 可并发且互不阻塞；
@@ -827,6 +834,10 @@ W2-R02 已新增独立 [`PostgreSQL Session Lane 与 Runner Runtime 可执行契
 
 - [ ] 不修改现有 W0 Migration；所有变化以向前 Migration 实现并有 Down 风险说明；
 - [ ] 从当前空 Lease、仅 pending Input 的真实数据状态升级通过；
+- [ ] Receipt 不可变触发器、legacy Authority Snapshot、升级 Ledger/Helper、Session-rooted anti-join 和 empty Prompt 在真实 PostgreSQL 通过；
+- [ ] `session.created/session.input.accepted` Retention/独立不可裁剪 Marker 方案通过并证明合法空 Prompt Session/非终态 Input 不会因裁剪被误判 orphan；
+- [ ] Foundation Ready 与 Lane Capability/Processor/Claim generation 分层接线，blocker 存在时旧 Ensure/Workspace 仍 Ready 且 Claim/Wake/Run 均为零；
+- [ ] 部署层取得全局 Migration Fence 并停止 Writer/Processor/Scanner；Expand-only pristine Down 成功；任一 Header/Result/Authority/Ledger/Turn/Context/Run/新状态存在时在首个 DDL 前拒绝，并用真实 golang-migrate CLI 冻结 dirty/version 与修复语义；
 - [ ] `source_type` 扩展、`quarantined` 非终态、Receipt 双摘要、append-only execution ref slot/result projection、Checkpoint epoch/provenance、唯一键、HOL Claim 索引、Fence CAS、保留/清理索引通过 PostgreSQL 集成测试；
 - [x] 独立 Eino 依赖批已按 [`eino-dependency-lock-review-v1.md`](./eino-dependency-lock-review-v1.md) 精确锁定 Eino `v0.9.10` / DeepSeek Adapter `v0.1.6`，完成经典 Message、DAG Compile/Invoke、直接/关键传递依赖许可证和现有三 Module 构建验证；该结论不授权 Runtime；
 - [x] Agent 单 Module 已在 `GOWORK=off` 下通过 test、race、vet 和 `agent-service` build，不依赖根 `go.work` 隐式解析；

@@ -23,7 +23,7 @@
 - `session_sequence_counter`、`session_event_counter`、`session_runtime_lease` 已存在；后者还没有 Claim/Heartbeat/Takeover Repository；
 - `session_input` 只允许 `user_message`，生产 Repository 只创建 `pending/attempts=0/无 owner/无 lease/fence=0`；Schema 虽允许其他状态，但当前没有合法生产 Writer；
 - `session_input` 自带 `lease_until`，若继续读取会与 `session_runtime_lease` 形成双 TTL 真源；
-- 已有 `session.input.accepted` EventLog，可作为持久 Marker；仓库没有独立 Marker、Turn 或 Run 表；
+- 已有 `session.input.accepted` EventLog，但它受 `min_available_seq` 在线保留水位约束，升级不能直接把它当不可裁剪 Marker；仓库没有独立 Marker、Turn 或 Run 表；
 - 当前 Claim partial index 只能发现 `pending/retry_wait`，不能证明每个 Session 的最早非终态 Head。
 
 本批推荐物理方案，但不新增 `.sql`、GORM Model 或 Repository。
@@ -34,7 +34,7 @@
 |---|---|---|
 | PG-D01 | 保留 `session_command_receipt` 为唯一全局 Command Header；新增 Enqueue Result 子表 | 避免 Ensure/Enqueue 各自一张全局表导致同 CommandID 双成功，也避免继续向 Header 堆全部结果字段 |
 | PG-D02 | alias 只新增 Header，指向首次 primary；结果子表只存一份 | 一个 Input 可以有多个 CommandID，但首次结果、版本和提交时间只有一份 |
-| PG-D03 | `session.input.accepted` EventLog 就是 Ingress Corpus 的持久 Marker | 当前已有 EventLog/Counter/AppendOnce 约束，不再创造第二套投影真源 |
+| PG-D03 | `session.input.accepted` 继续是 Ingress 投影事件；升级 Authority 是否复用 EventLog 或引入独立不可裁剪 Marker 仍是 P0 | EventLog 有 Retention 水位；在 created/accepted Event 的保留策略冻结前，缺失一律阻断，不能把可裁剪投影冒充永久 Authority |
 | PG-D04 | 外部 Enqueue DTO 不携带精确 `expected_session_version` | 100 个不同 Source 并发时，外部版本会让 99 个合法请求 stale；Session Version 只做事务内防御 CAS |
 | PG-D05 | `session_runtime_lease` 是唯一 TTL 真源 | Input owner/fence 只保留 Claim provenance；Input `lease_until` 退役且禁止读取 |
 | PG-D06 | 仅自动升级可严格证明的 legacy pending Input | claimed/running/retry/terminal 行缺权威 Run/Effect，重置会伪造恢复结论 |
@@ -176,17 +176,17 @@ claim_fence
 - `session_event_log.source_kind` 接受 `enqueue_input_v1`，`source_id=origin_command_id`，`projection_index=0`，aggregate 指向 Input 初始 Version；
 - `session.input.accepted` payload 继续是无正文安全投影，Message Ciphertext/Prompt 不进入 Event/Receipt/Trace。
 
-新 Ingress exact-set 使用 `authenticated_user/approval_decision/approval_invalidation/batch_terminal_event`。legacy 行不得伪装成历史已冻结的 `authenticated_user`，最小兼容映射候选为：
+新 Ingress exact-set 使用 `authenticated_user/approval_decision/approval_invalidation/batch_terminal_event`。legacy 行不得伪装成历史已冻结的 `authenticated_user`。W2-R02 可执行候选已收敛为内部不可变 `legacy_ensure_receipt_attestation`，详见 [`Session Lane legacy Authority 与升级分类可执行契约 v1`](./session-lane-legacy-upgrade-contract-v1.md)：
 
 - `source_contract_version` 明确为 `legacy.ensure_project_session.v1` 或 `legacy.ensure_project_session.v2`；
 - `source_digest=Ensure Receipt.request_digest`；
 - `content_digest=Message.content_digest`；
 - `execution_class=chat`；
-- `authority_ref_type=ensure_project_session_receipt`（仅 legacy 内部允许）；
-- `authority_ref_id=Ensure command_id`；
-- `authority_ref_digest=Ensure request_digest`。
+- `authority_ref_type=legacy_ensure_receipt_attestation`（仅内部存量升级允许）；
+- `authority_ref_id=prepared Ledger 冻结的 Attestation UUIDv7`；
+- `authority_ref_digest=derived_provenance_only canonical digest`。
 
-`ensure_project_session_receipt` 不进入新 Enqueue DTO/Policy exact-set。若安全评审拒绝该兼容类型，则必须新增不可变 Authority Snapshot，由应用生成 UUIDv7 和 canonical digest 后回填；现有数据不足以用 SQL 还原历史认证决策。
+该 Authority 不进入新 Enqueue DTO/Policy exact-set，只允许 `legacy_chat_only`，不能授权审批、扣费或其他敏感动作。现有数据不足以还原历史认证决策；生成 Attestation 前必须先有数据库级 Receipt 不可变保护，并由应用独立重算 Ensure V1/V2 canonical digest。
 
 ### 5.2 可自动升级集合
 
@@ -197,6 +197,8 @@ claim_fence
 - SourceID 对应 Ensure V1/V2 Receipt，Receipt 的 Session/Message/Input 全匹配；
 - Sequence Counter、Event Counter、`session.input.accepted` Event 无矛盾；Runtime Lease 行必须存在且严格为 `owner=NULL/until=NULL/fence=0/version=1`；
 - 同 Session 的序号、Source 和 Message 唯一约束无缺口。
+
+Preflight/Verify、72 个稳定 blocker、Session-rooted/global-orphan anti-join、active/previous Keyring 分类和空 Prompt 规则由 legacy upgrade Corpus 的 90 条向量冻结。`session.created/session.input.accepted` 若已被 Retention 裁剪或位于 `last_seq` 之后，不得猜测或补造，当前一律 fail-closed；不可裁剪 Marker/Retention 方案仍是第 10 节 P0。
 
 claimed/running/retry_wait/resolved/dead、archived Session pending、缺 Receipt/Message/Event、非空旧 Lease 等行一律进入 upgrade-block 清单，`Runtime Ready=false`。不得重置为 pending、清零 Fence、伪造 Run 或猜测 Effect State。
 
@@ -285,9 +287,9 @@ Scanner 只能发现候选 Session；Claim 事务必须重新锁定 Session Leas
 - 先部署会为 Ensure Header 显式写 `primary/origin/recorded_at` 的兼容应用；
 - 排空所有旧实例后，再次回填部署窗口内新增的 NULL Header 并证明数量为零；
 - 分批锁定 eligible pending；
-- 回填 Source/Authority/Content/Version；
-- 生成 UUIDv7 Turn；
-- 写可重复运行的进度/审计证据；
+- 用 `absent -> prepared -> applied -> verified` Ledger 冻结 facts/plan/Authority/Turn/Context digest、Attestation ID、Turn ID 与 Message cutoff；
+- 在同一事务回填 Source/Authority/Content/Version、插入 Authority 与 UUIDv7 Turn/Context，并推进 `applied`；
+- 写不含正文、密文、DSN 的可重复运行进度/审计证据；
 - 不创建 Run，不处理 upgrade-block 行。
 
 ### D. Verify
@@ -310,9 +312,9 @@ Scanner 只能发现候选 Session；Claim 事务必须重新锁定 Session Leas
 
 - 从 Migration 005 的真实旧数据执行 Up；
 - 通过第 8 节 PG contract/race/crash 证据；
-- 跨角色批准后才 enable Ingress，再单独 enable Processor/Scanner。
+- 跨角色批准后才 enable Ingress；Foundation Ready 与 Lane Capability Ready 分开，后者满足后再单独 enable Processor/Scanner，并由 Claim 事务精确校验 upgrade generation。
 
-Down Migration 只在不存在 Enqueue Header/alias/Result/Turn/Run/新状态时允许移除新增结构；存在任一新事实必须在首段显式拒绝。禁止 DROP 后静默丢失已提交事实。
+Down 只在部署层取得全局 Migration Fence，确认兼容 Writer/Processor/Scanner 已全部停止，且不存在 Enqueue Header/alias/Result/Authority/Turn/Context/Run/新状态/任意 upgrade ledger 时允许进入 SQL。SQL 首段只负责持久事实 guard；当前 `scripts/migrate.sh` 直接使用 golang-migrate，SQL 抛错后的 dirty/version 语义必须由真实 CLI 测试冻结，纯模型不得声称 migration metadata 原样。禁止 DROP 后静默丢失已提交事实。
 
 ## 8. 真实 PostgreSQL 测试矩阵
 
@@ -380,14 +382,15 @@ Repository 测试只证明持久化顺序和事务原子性，不证明 Adapter 
 
 ## 10. 生产实现前仍需关闭的 P0
 
-1. Turn 完整执行上下文：Prompt/Message cutoff、Skill Snapshot、Tool Registry、Runtime Policy、Budget/Approval 引用与摘要；同时补齐 cutoff/version 不可变绑定和系统 Turn cutoff 篡改拒绝测试；
-2. legacy-only `ensure_project_session_receipt` Authority 类型的安全审核，或不可变 Authority Snapshot 替代方案；
-3. unsupported legacy/archived pending 的运维隔离、处置和 Runtime Readiness 协议；
-4. Header/Result DDL、字段组 CHECK、alias 时间和 Query 错误优先级的 Agent/安全/运维/数据联合评审；
-5. Claim/Heartbeat/Takeover/Terminal SQL 的锁顺序、DB time、Fence/CAS、cancel-specific no-Run 例外与 RowsAffected 规范；
-6. Run Effect State、权威 Receipt/Marker/Checkpoint 和 quarantine reconciliation 物理引用；
-7. forward Migration、应用辅助回填命令、fail-safe Down 和真实 PG 升级演练；
-8. durable pending/strict HOL Scanner 的有界发现结构、Query 计划和 Claim 二次校验；
-9. 第 8 节全部 PG contract/race/crash/unknown-outcome 证据。
+1. Turn 完整执行上下文：Prompt/Message cutoff、Message-set digest、Skill Snapshot、Tool Registry、Runtime Policy、Model Route、Budget/Approval/Access Scope 引用与摘要；同时补齐 cutoff/version 不可变绑定和系统 Turn cutoff 篡改拒绝测试；
+2. `legacy_ensure_receipt_attestation` 的数据库级 Receipt 不可变 DDL、安全审核、物理表与 canonical 重算路径；17 条纯模型 Authority 向量不能替代真实 PG 证据；
+3. created/accepted Event Retention：升级审计依赖的 `session.created/session.input.accepted` 不可裁剪，或新增独立不可裁剪 Marker；按 `[min_available_seq,last_seq]` 验证在线区间，选择前缺 Event 一律阻断；
+4. unsupported legacy/archived pending 的运维隔离、处置，以及 Foundation/Lane/Processor/Claim generation 分层 Readiness 协议；
+5. Header/Result DDL、字段组 CHECK、alias 时间和 Query 错误优先级的 Agent/安全/运维/数据联合评审；
+6. Claim/Heartbeat/Takeover/Terminal SQL 的锁顺序、DB time、Fence/CAS、cancel-specific no-Run 例外与 RowsAffected 规范；
+7. Run Effect State、权威 Receipt/Marker/Checkpoint 和 quarantine reconciliation 物理引用；
+8. forward Migration、升级 Ledger/Helper、fail-safe Down 和真实 PG 升级演练；
+9. durable pending/strict HOL Scanner 的有界发现结构、Query 计划和 Claim 二次校验；
+10. 第 8 节全部 PG contract/race/crash/unknown-outcome 证据。
 
 关闭这些 P0 前，下一步只能继续设计和测试基础设施，不得直接落生产 Runtime。
