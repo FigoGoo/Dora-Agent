@@ -1,0 +1,63 @@
+{
+  "schema_version": "w2_r02_turn_context_manifest.v1",
+  "files": [
+    {
+      "file": "session_message_set_v1.json",
+      "sha256": "sha256:5e1b435b750748afd78a965191ed89e6b48466e45b76bee00a0ea3d43a917360",
+      "vector_count": 32
+    }
+  ],
+  "fixture_ids": [
+    "message_set.empty",
+    "message_set.tool_pair",
+    "message_set.unicode"
+  ],
+  "vector_ids": [
+    "MS-CAN-001-empty-golden",
+    "MS-CAN-002-unicode-golden",
+    "MS-CAN-003-tool-pair-golden",
+    "MS-CAN-004-operational-metadata-excluded",
+    "MS-CAN-005-later-message-isolated",
+    "MS-CAN-006-physical-order-canonicalized",
+    "MS-N01-schema-unknown",
+    "MS-N02-session-invalid",
+    "MS-N03-cutoff-negative",
+    "MS-N04-cutoff-after-counter",
+    "MS-N05-sequence-gap",
+    "MS-N06-sequence-duplicate",
+    "MS-N07-cross-session",
+    "MS-N08-message-id-invalid",
+    "MS-N09-role-invalid",
+    "MS-N10-content-schema-invalid",
+    "MS-N11-content-digest-uppercase",
+    "MS-N12-source-invalid",
+    "MS-N13-tool-result-before-call",
+    "MS-N14-tool-call-duplicate",
+    "MS-N15-tool-result-call-mismatch",
+    "MS-N16-unpaired-tool-call",
+    "MS-N17-digest-tamper",
+    "MS-N18-reason-priority-order-before-leaf",
+    "MS-N19-tool-result-cross-turn",
+    "MS-N20-tool-result-assistant-seq-mismatch",
+    "MS-N21-tool-result-key-mismatch",
+    "MS-N22-tool-result-duplicate",
+    "MS-N23-tool-receipt-owner-invalid",
+    "MS-N24-tool-receipt-ref-mismatch",
+    "MS-N25-tool-receipt-digest-uppercase",
+    "MS-N26-tool-call-request-digest-uppercase"
+  ],
+  "total_vector_count": 32,
+  "target_tests": [
+    "TestW2R02TurnContextCorpusManifest",
+    "TestSessionMessageSetFullArrayV1Corpus",
+    "TestSessionMessageSetFullArrayV1ExactSets",
+    "TestSessionMessageSetFullArrayV1GoldenDigests",
+    "TestSessionMessageSetFullArrayV1ToolCausality",
+    "TestSessionMessageSetFullArrayV1CutoffIsolation",
+    "TestSessionMessageSetFullArrayV1AllToolKeys",
+    "TestSessionMessageSetFullArrayV1Limit",
+    "TestSessionMessageSetFullArrayV1CanonicalFieldSensitivity",
+    "TestSessionMessageSetFullArrayV1OperationalMetadataExcluded",
+    "TestSessionMessageSetFullArrayV1StrictJSON"
+  ]
+}
