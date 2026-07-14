@@ -1,0 +1,293 @@
+{
+  "schema_version": "graph_tool_result_v1_corpus.v1",
+  "result_code_policies": [
+    {"result_code": "APPROVAL_REQUIRED", "status": "waiting_user", "retryable": false, "effect_class": "approval_wait"},
+    {"result_code": "DEPENDENCY_UNAVAILABLE", "status": "failed", "retryable": true, "effect_class": "safe_failure_before_side_effect"},
+    {"result_code": "GENERATION_DISPATCHED", "status": "accepted", "retryable": false, "effect_class": "async_dispatch"},
+    {"result_code": "INVALID_ARGUMENT", "status": "failed", "retryable": false, "effect_class": "permanent_failure"},
+    {"result_code": "MATERIAL_ANALYSIS_SAVED", "status": "completed", "retryable": false, "effect_class": "bounded_success"},
+    {"result_code": "PROMPTS_PARTIALLY_SAVED", "status": "partial", "retryable": false, "effect_class": "partial_success"},
+    {"result_code": "RUN_CANCELLED_AFTER_SIDE_EFFECTS_RESOLVED", "status": "cancelled", "retryable": false, "effect_class": "cancelled_after_side_effects_resolved", "cancellation_stage": "after_side_effects_resolved"},
+    {"result_code": "RUN_CANCELLED_BEFORE_SIDE_EFFECT", "status": "cancelled", "retryable": false, "effect_class": "cancelled_before_side_effect", "cancellation_stage": "before_side_effect"}
+  ],
+  "warning_code_policies": [
+    {
+      "code": "TARGET_VERSION_CONFLICT",
+      "params": [{"key": "failed_count", "type": "integer", "required": true, "min_integer": 1, "max_integer": 64}],
+      "require_target_refs": true,
+      "allowed_statuses": ["partial"],
+      "effect_class": "failed_target"
+    }
+  ],
+  "resource_types": ["material_analysis", "prompt_revision"],
+  "cases": [
+    {
+      "id": "GTR-P01-completed",
+      "expect": "accept",
+      "error_code": "",
+      "expected_result_digest": "sha256:048a16261bd8cb531132c420effe33db42af762241b296fe96fb8838896735bc",
+      "payload": {
+        "schema_version": "graph_tool_result.v1",
+        "status": "completed",
+        "result_code": "MATERIAL_ANALYSIS_SAVED",
+        "summary": "素材分析已保存。",
+        "resource_refs": [{"resource_type": "material_analysis", "resource_id": "019f0000-0000-7000-8000-000000000101", "resource_version": 3, "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}],
+        "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000103"},
+        "warnings": [],
+        "retryable": false
+      }
+    },
+    {
+      "id": "GTR-P02-accepted",
+      "expect": "accept",
+      "error_code": "",
+      "expected_result_digest": "sha256:02ce413e1f0904a303b6c16f02e58b283042beba30f5fa4bb0764c88bbad9d2d",
+      "payload": {
+        "schema_version": "graph_tool_result.v1",
+        "status": "accepted",
+        "result_code": "GENERATION_DISPATCHED",
+        "summary": "媒体生成任务已受理。",
+        "resource_refs": [],
+        "operation_ref": {"operation_id": "019f0000-0000-7000-8000-000000000201", "operation_version": 1, "operation_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "batch_id": "019f0000-0000-7000-8000-000000000202", "batch_version": 1, "batch_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"},
+        "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000204", "dispatch_receipt_id": "019f0000-0000-7000-8000-000000000203", "dispatch_receipt_version": 1, "dispatch_receipt_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"},
+        "warnings": [],
+        "retryable": false
+      }
+    },
+    {
+      "id": "GTR-P03-waiting-user",
+      "expect": "accept",
+      "error_code": "",
+      "expected_result_digest": "sha256:0041b6caecabf27b660791adbe5b948099df01ae54748b75a8475d40ef10c8cf",
+      "payload": {
+        "schema_version": "graph_tool_result.v1",
+        "status": "waiting_user",
+        "result_code": "APPROVAL_REQUIRED",
+        "summary": "需要确认后才能继续。",
+        "resource_refs": [],
+        "approval_ref": {"approval_id": "019f0000-0000-7000-8000-000000000301", "approval_version": 1, "approval_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "card_id": "019f0000-0000-7000-8000-000000000302"},
+        "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000303"},
+        "warnings": [],
+        "retryable": false
+      }
+    },
+    {
+      "id": "GTR-P04-partial",
+      "expect": "accept",
+      "error_code": "",
+      "expected_result_digest": "sha256:2fc1916c44f207a015fd83294408bfc9867a88609ed40440ff4ec566780323cc",
+      "payload": {
+        "schema_version": "graph_tool_result.v1",
+        "status": "partial",
+        "result_code": "PROMPTS_PARTIALLY_SAVED",
+        "summary": "部分提示词已保存。",
+        "resource_refs": [{"resource_type": "prompt_revision", "resource_id": "019f0000-0000-7000-8000-000000000401", "resource_version": 2, "content_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"}],
+        "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000403"},
+        "warnings": [{"code": "TARGET_VERSION_CONFLICT", "params": [{"key": "failed_count", "integer_value": 1}], "target_refs": [{"target_type": "storyboard_slot", "target_id": "019f0000-0000-7000-8000-000000000402", "target_version": 4, "input_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"}]}],
+        "retryable": false
+      }
+    },
+    {
+      "id": "GTR-P05-failed",
+      "expect": "accept",
+      "error_code": "",
+      "expected_result_digest": "sha256:a5ff1e6080df79d0faf53860e795319daac7e4b3449c0a5f8c0dedb627e4c1b6",
+      "payload": {
+        "schema_version": "graph_tool_result.v1",
+        "status": "failed",
+        "result_code": "DEPENDENCY_UNAVAILABLE",
+        "summary": "依赖暂时不可用，且尚未发生副作用。",
+        "resource_refs": [],
+        "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000501"},
+        "warnings": [],
+        "retryable": true
+      }
+    },
+    {
+      "id": "GTR-P06-cancelled",
+      "expect": "accept",
+      "error_code": "",
+      "expected_result_digest": "sha256:e4c510e179924e04b58355b9008c13bccc2aad984da012fde6e342d248eea515",
+      "payload": {
+        "schema_version": "graph_tool_result.v1",
+        "status": "cancelled",
+        "result_code": "RUN_CANCELLED_BEFORE_SIDE_EFFECT",
+        "summary": "调用已在副作用前取消。",
+        "resource_refs": [],
+        "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000601"},
+        "warnings": [],
+        "cancellation_stage": "before_side_effect",
+        "retryable": false
+      }
+    },
+    {
+      "id": "GTR-P07-unicode-canonical",
+      "expect": "accept",
+      "error_code": "",
+      "expected_result_digest": "sha256:ec0e539165ea8fadfdb3cefd845968987a487ee2bee478b5c18655cee8fb9b25",
+      "raw_json": "{\"schema_version\":\"graph_tool_result.v1\",\"status\":\"failed\",\"result_code\":\"INVALID_ARGUMENT\",\"summary\":\"边界\\u2028段落\\u2029<>&\",\"resource_refs\":[],\"receipt_ref\":{\"receipt_id\":\"019f0000-0000-7000-8000-000000000746\"},\"warnings\":[],\"retryable\":false}"
+    },
+    {
+      "id": "GTR-P08-cancelled-after-side-effects",
+      "expect": "accept",
+      "error_code": "",
+      "expected_result_digest": "sha256:6cffafc9911f35e39ba3ee5293ef4682e32919accb7a9b95835544e71dbd5bf8",
+      "payload": {
+        "schema_version": "graph_tool_result.v1",
+        "status": "cancelled",
+        "result_code": "RUN_CANCELLED_AFTER_SIDE_EFFECTS_RESOLVED",
+        "summary": "已核对并收口取消前发生的副作用。",
+        "resource_refs": [],
+        "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000754"},
+        "warnings": [],
+        "cancellation_stage": "after_side_effects_resolved",
+        "retryable": false
+      }
+    },
+    {"id": "GTR-N01-malformed", "expect": "reject", "error_code": "INVALID_JSON", "expected_result_digest": "", "raw_json": "{\"schema_version\":"},
+    {"id": "GTR-N02-duplicate-top-level", "expect": "reject", "error_code": "DUPLICATE_KEY", "expected_result_digest": "", "raw_json": "{\"schema_version\":\"graph_tool_result.v1\",\"schema_version\":\"graph_tool_result.v1\"}"},
+    {"id": "GTR-N03-duplicate-nested", "expect": "reject", "error_code": "DUPLICATE_KEY", "expected_result_digest": "", "raw_json": "{\"schema_version\":\"graph_tool_result.v1\",\"status\":\"failed\",\"result_code\":\"INVALID_ARGUMENT\",\"summary\":\"参数错误。\",\"resource_refs\":[],\"receipt_ref\":{\"receipt_id\":\"019f0000-0000-7000-8000-000000000701\",\"receipt_id\":\"019f0000-0000-7000-8000-000000000701\"},\"warnings\":[],\"retryable\":false}"},
+    {"id": "GTR-N04-trailing-value", "expect": "reject", "error_code": "TRAILING_VALUE", "expected_result_digest": "", "raw_json": "{} {}"},
+    {"id": "GTR-N05-null", "expect": "reject", "error_code": "NULL_NOT_ALLOWED", "expected_result_digest": "", "raw_json": "null"},
+    {
+      "id": "GTR-N06-unknown-field", "expect": "reject", "error_code": "UNKNOWN_FIELD", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "INVALID_ARGUMENT", "summary": "参数错误。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000706"}, "warnings": [], "retryable": false, "provider_payload": "forbidden"}
+    },
+    {
+      "id": "GTR-N07-unknown-version", "expect": "reject", "error_code": "UNKNOWN_VERSION", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v2", "status": "failed", "result_code": "INVALID_ARGUMENT", "summary": "参数错误。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000707"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N08-missing-summary", "expect": "reject", "error_code": "MISSING_REQUIRED_FIELD", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "INVALID_ARGUMENT", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000708"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N09-unknown-status", "expect": "reject", "error_code": "UNKNOWN_ENUM", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "running", "result_code": "INVALID_ARGUMENT", "summary": "仍在运行。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000709"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N10-unregistered-code", "expect": "reject", "error_code": "RESULT_CODE_POLICY_MISMATCH", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "SOMETHING_FAILED", "summary": "执行失败。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000710"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N11-forbidden-internal-outcome", "expect": "reject", "error_code": "FORBIDDEN_INTERNAL_OUTCOME", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "UNKNOWN_OUTCOME", "summary": "结果未知。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000711"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N12-retryable-policy-mismatch", "expect": "reject", "error_code": "RESULT_CODE_POLICY_MISMATCH", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "completed", "result_code": "MATERIAL_ANALYSIS_SAVED", "summary": "素材分析已保存。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000712"}, "warnings": [], "retryable": true}
+    },
+    {
+      "id": "GTR-N13-accepted-missing-operation", "expect": "reject", "error_code": "ILLEGAL_STATUS_FIELD_COMBINATION", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "accepted", "result_code": "GENERATION_DISPATCHED", "summary": "任务已受理。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000713", "dispatch_receipt_id": "019f0000-0000-7000-8000-000000000714", "dispatch_receipt_version": 1, "dispatch_receipt_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N14-accepted-missing-dispatch", "expect": "reject", "error_code": "ILLEGAL_STATUS_FIELD_COMBINATION", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "accepted", "result_code": "GENERATION_DISPATCHED", "summary": "任务已受理。", "resource_refs": [], "operation_ref": {"operation_id": "019f0000-0000-7000-8000-000000000715", "operation_version": 1, "operation_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "batch_id": "019f0000-0000-7000-8000-000000000716", "batch_version": 1, "batch_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"}, "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000717"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N15-waiting-missing-approval", "expect": "reject", "error_code": "ILLEGAL_STATUS_FIELD_COMBINATION", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "waiting_user", "result_code": "APPROVAL_REQUIRED", "summary": "需要确认。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000718"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N16-waiting-with-operation", "expect": "reject", "error_code": "ILLEGAL_STATUS_FIELD_COMBINATION", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "waiting_user", "result_code": "APPROVAL_REQUIRED", "summary": "需要确认。", "resource_refs": [], "approval_ref": {"approval_id": "019f0000-0000-7000-8000-000000000719", "approval_version": 1, "approval_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "card_id": "019f0000-0000-7000-8000-000000000720"}, "operation_ref": {"operation_id": "019f0000-0000-7000-8000-000000000721", "operation_version": 1, "operation_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "batch_id": "019f0000-0000-7000-8000-000000000722", "batch_version": 1, "batch_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"}, "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000723"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N17-partial-without-success", "expect": "reject", "error_code": "ILLEGAL_STATUS_FIELD_COMBINATION", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "partial", "result_code": "PROMPTS_PARTIALLY_SAVED", "summary": "部分保存。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000724"}, "warnings": [{"code": "TARGET_VERSION_CONFLICT", "params": [{"key": "failed_count", "integer_value": 1}], "target_refs": [{"target_type": "storyboard_slot", "target_id": "019f0000-0000-7000-8000-000000000725", "target_version": 1, "input_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"}]}], "retryable": false}
+    },
+    {
+      "id": "GTR-N18-partial-without-warning", "expect": "reject", "error_code": "ILLEGAL_STATUS_FIELD_COMBINATION", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "partial", "result_code": "PROMPTS_PARTIALLY_SAVED", "summary": "部分保存。", "resource_refs": [{"resource_type": "prompt_revision", "resource_id": "019f0000-0000-7000-8000-000000000726", "resource_version": 1, "content_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000727"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N19-failed-with-resource", "expect": "reject", "error_code": "ILLEGAL_STATUS_FIELD_COMBINATION", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "INVALID_ARGUMENT", "summary": "参数错误。", "resource_refs": [{"resource_type": "material_analysis", "resource_id": "019f0000-0000-7000-8000-000000000728", "resource_version": 1, "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000729"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N20-cancelled-without-stage", "expect": "reject", "error_code": "ILLEGAL_STATUS_FIELD_COMBINATION", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "cancelled", "result_code": "RUN_CANCELLED_BEFORE_SIDE_EFFECT", "summary": "调用已取消。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000730"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N21-missing-receipt", "expect": "reject", "error_code": "MISSING_REQUIRED_FIELD", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "INVALID_ARGUMENT", "summary": "参数错误。", "resource_refs": [], "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N22-invalid-resource-id", "expect": "reject", "error_code": "INVALID_VALUE", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "completed", "result_code": "MATERIAL_ANALYSIS_SAVED", "summary": "素材分析已保存。", "resource_refs": [{"resource_type": "material_analysis", "resource_id": "550e8400-e29b-41d4-a716-446655440000", "resource_version": 1, "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000732"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N23-invalid-digest", "expect": "reject", "error_code": "INVALID_VALUE", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "completed", "result_code": "MATERIAL_ANALYSIS_SAVED", "summary": "素材分析已保存。", "resource_refs": [{"resource_type": "material_analysis", "resource_id": "019f0000-0000-7000-8000-000000000733", "resource_version": 1, "content_digest": "sha256:ABC"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000734"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N24-unsorted-resources", "expect": "reject", "error_code": "NON_CANONICAL_ORDER", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "completed", "result_code": "MATERIAL_ANALYSIS_SAVED", "summary": "素材分析已保存。", "resource_refs": [{"resource_type": "prompt_revision", "resource_id": "019f0000-0000-7000-8000-000000000735", "resource_version": 1, "content_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"}, {"resource_type": "material_analysis", "resource_id": "019f0000-0000-7000-8000-000000000736", "resource_version": 1, "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000737"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N25-duplicate-resource", "expect": "reject", "error_code": "NON_CANONICAL_ORDER", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "completed", "result_code": "MATERIAL_ANALYSIS_SAVED", "summary": "素材分析已保存。", "resource_refs": [{"resource_type": "material_analysis", "resource_id": "019f0000-0000-7000-8000-000000000738", "resource_version": 1, "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}, {"resource_type": "material_analysis", "resource_id": "019f0000-0000-7000-8000-000000000738", "resource_version": 1, "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000739"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N26-warning-param-shape", "expect": "reject", "error_code": "TYPE_MISMATCH", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "partial", "result_code": "PROMPTS_PARTIALLY_SAVED", "summary": "部分保存。", "resource_refs": [{"resource_type": "prompt_revision", "resource_id": "019f0000-0000-7000-8000-000000000740", "resource_version": 1, "content_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000741"}, "warnings": [{"code": "TARGET_VERSION_CONFLICT", "params": {"failed_count": 1}, "target_refs": []}], "retryable": false}
+    },
+    {
+      "id": "GTR-N27-null-array", "expect": "reject", "error_code": "NULL_NOT_ALLOWED", "expected_result_digest": "",
+      "raw_json": "{\"schema_version\":\"graph_tool_result.v1\",\"status\":\"failed\",\"result_code\":\"INVALID_ARGUMENT\",\"summary\":\"参数错误。\",\"resource_refs\":null,\"receipt_ref\":{\"receipt_id\":\"019f0000-0000-7000-8000-000000000742\"},\"warnings\":[],\"retryable\":false}"
+    },
+    {
+      "id": "GTR-N28-warning-param-extra", "expect": "reject", "error_code": "INVALID_VALUE", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "partial", "result_code": "PROMPTS_PARTIALLY_SAVED", "summary": "部分保存。", "resource_refs": [{"resource_type": "prompt_revision", "resource_id": "019f0000-0000-7000-8000-000000000743", "resource_version": 1, "content_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000744"}, "warnings": [{"code": "TARGET_VERSION_CONFLICT", "params": [{"key": "provider_message", "string_value": "forbidden"}], "target_refs": [{"target_type": "storyboard_slot", "target_id": "019f0000-0000-7000-8000-000000000745", "target_version": 1, "input_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"}]}], "retryable": false}
+    },
+    {
+      "id": "GTR-N29-invalid-uuid-variant", "expect": "reject", "error_code": "INVALID_VALUE", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "INVALID_ARGUMENT", "summary": "参数错误。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-0000-000000000746"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N30-unpaired-surrogate", "expect": "reject", "error_code": "INVALID_UNICODE_ESCAPE", "expected_result_digest": "",
+      "raw_json": "{\"schema_version\":\"graph_tool_result.v1\",\"status\":\"failed\",\"result_code\":\"INVALID_ARGUMENT\",\"summary\":\"\\ud800\",\"resource_refs\":[],\"receipt_ref\":{\"receipt_id\":\"019f0000-0000-7000-8000-000000000747\"},\"warnings\":[],\"retryable\":false}"
+    },
+    {
+      "id": "GTR-N31-unknown-field-precedes-version", "expect": "reject", "error_code": "UNKNOWN_FIELD", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v2", "status": "failed", "result_code": "INVALID_ARGUMENT", "summary": "参数错误。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000748"}, "warnings": [], "retryable": false, "provider_payload": "forbidden"}
+    },
+    {
+      "id": "GTR-N32-missing-precedes-version", "expect": "reject", "error_code": "MISSING_REQUIRED_FIELD", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v2", "status": "failed", "result_code": "INVALID_ARGUMENT", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000749"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N33-forbidden-code-precedes-summary", "expect": "reject", "error_code": "FORBIDDEN_INTERNAL_OUTCOME", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "RESULT_DIGEST_MISMATCH", "summary": " ", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000750"}, "warnings": [], "retryable": false}
+    },
+    {
+      "id": "GTR-N34-warning-integer-overflow", "expect": "reject", "error_code": "INVALID_VALUE", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "partial", "result_code": "PROMPTS_PARTIALLY_SAVED", "summary": "部分保存。", "resource_refs": [{"resource_type": "prompt_revision", "resource_id": "019f0000-0000-7000-8000-000000000751", "resource_version": 1, "content_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000752"}, "warnings": [{"code": "TARGET_VERSION_CONFLICT", "params": [{"key": "failed_count", "integer_value": 65}], "target_refs": [{"target_type": "storyboard_slot", "target_id": "019f0000-0000-7000-8000-000000000753", "target_version": 1, "input_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"}]}], "retryable": false}
+    },
+    {
+      "id": "GTR-N35-warning-js-safe-integer-overflow", "expect": "reject", "error_code": "INVALID_VALUE", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "partial", "result_code": "PROMPTS_PARTIALLY_SAVED", "summary": "部分保存。", "resource_refs": [{"resource_type": "prompt_revision", "resource_id": "019f0000-0000-7000-8000-000000000755", "resource_version": 1, "content_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000756"}, "warnings": [{"code": "TARGET_VERSION_CONFLICT", "params": [{"key": "failed_count", "integer_value": 9007199254740992}], "target_refs": [{"target_type": "storyboard_slot", "target_id": "019f0000-0000-7000-8000-000000000757", "target_version": 1, "input_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"}]}], "retryable": false}
+    },
+    {
+      "id": "GTR-N36-null-precedes-duplicate", "expect": "reject", "error_code": "NULL_NOT_ALLOWED", "expected_result_digest": "",
+      "raw_json": "{\"schema_version\":null,\"status\":\"failed\",\"status\":\"failed\"}"
+    },
+    {
+      "id": "GTR-N37-duplicate-precedes-null", "expect": "reject", "error_code": "DUPLICATE_KEY", "expected_result_digest": "",
+      "raw_json": "{\"schema_version\":\"graph_tool_result.v1\",\"schema_version\":\"graph_tool_result.v1\",\"summary\":null}"
+    },
+    {
+      "id": "GTR-N38-unknown-precedes-type", "expect": "reject", "error_code": "UNKNOWN_FIELD", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "INVALID_ARGUMENT", "summary": "参数错误。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000758"}, "warnings": [], "provider_payload": "forbidden", "retryable": "false"}
+    },
+    {
+      "id": "GTR-N39-type-precedes-unknown", "expect": "reject", "error_code": "TYPE_MISMATCH", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "INVALID_ARGUMENT", "summary": "参数错误。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000759"}, "warnings": [], "retryable": "false", "provider_payload": "forbidden"}
+    },
+    {
+      "id": "GTR-N40-cancellation-code-stage-mismatch", "expect": "reject", "error_code": "RESULT_CODE_POLICY_MISMATCH", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "cancelled", "result_code": "RUN_CANCELLED_BEFORE_SIDE_EFFECT", "summary": "取消阶段与结果码冲突。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000760"}, "warnings": [], "cancellation_stage": "after_side_effects_resolved", "retryable": false}
+    }
+  ]
+}

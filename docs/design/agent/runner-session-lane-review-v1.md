@@ -47,7 +47,7 @@
 | Turn/Run | 未实现 | 没有稳定 Turn/Run 重试或取消语义 |
 | Receipt | ModelReceipt、ToolReceipt 未实现 | 不能安全宣称模型/Tool 可回放或可解决 unknown outcome |
 | Approval | 未实现 | 前端确认、自然语言确认均不是正式授权 |
-| Checkpoint | 未实现 | `agent/go.mod` 尚未引入 Eino，也没有 PostgreSQL CheckpointStore |
+| Checkpoint | 未实现 | 已独立锁定 Eino 依赖，但没有 Runner 或 PostgreSQL CheckpointStore |
 | A2UI | Agent 后端未实现 | 前端遗留 `/api/aigc/**` 资产没有匹配后端，不是目标契约承诺 |
 
 ### 2.2 目标形态
@@ -132,81 +132,15 @@ flowchart LR
 
 ### 4.2 固定结果向量
 
-以下是契约测试使用的最小固定向量；实现可增加已评审的可选字段，不能改变状态含义。
+占位符示例已由独立 [`GraphToolResultV1 与 ToolReceipt 可执行契约 v1`](./graph-tool-result-receipt-contract-v1.md) 和共享 raw Corpus 取代。六个合法状态、一个 Unicode canonical edge 和一个已解决副作用取消向量共八个合法向量现在全部使用真实 UUIDv7、typed Warning、exact Ref、Canonical JSON 和 `dora.graph_tool_result.v1` 结果摘要；同一 Corpus 由 Go 测试消费，后续供 TS 投影测试复用。
 
-```json
-{
-  "status": "completed",
-  "result_code": "MATERIAL_ANALYSIS_SAVED",
-  "resource_refs": [{"resource_type": "material_analysis", "resource_id": "...", "resource_version": 3, "content_digest": "sha256:..."}],
-  "receipt_ref": {"receipt_id": "..."},
-  "retryable": false
-}
-```
-
-```json
-{
-  "status": "accepted",
-  "result_code": "GENERATION_DISPATCHED",
-  "operation_ref": {"operation_id": "...", "batch_id": "..."},
-  "receipt_ref": {"receipt_id": "...", "dispatch_receipt_id": "..."},
-  "retryable": false
-}
-```
-
-```json
-{
-  "status": "waiting_user",
-  "result_code": "APPROVAL_REQUIRED",
-  "approval_ref": {"approval_id": "...", "approval_version": 1, "card_id": "..."},
-  "receipt_ref": {"receipt_id": "..."},
-  "retryable": false
-}
-```
-
-```json
-{
-  "status": "partial",
-  "result_code": "PROMPTS_PARTIALLY_SAVED",
-  "resource_refs": [{"resource_type": "prompt_revision", "resource_id": "...", "resource_version": 2, "content_digest": "sha256:..."}],
-  "warnings": [{"code": "TARGET_VERSION_CONFLICT", "params": {"failed_count": 1}}],
-  "receipt_ref": {"receipt_id": "..."},
-  "retryable": false
-}
-```
-
-```json
-{
-  "status": "failed",
-  "result_code": "DEPENDENCY_UNAVAILABLE",
-  "warnings": [],
-  "receipt_ref": {"receipt_id": "..."},
-  "retryable": true
-}
-```
-
-```json
-{
-  "status": "cancelled",
-  "result_code": "RUN_CANCELLED_BEFORE_SIDE_EFFECT",
-  "warnings": [],
-  "receipt_ref": {"receipt_id": "..."},
-  "retryable": false
-}
-```
+本节不再允许“同版本增加可选字段”。`graph_tool_result.v1` 是 exact-set；新增字段、状态、枚举或参数必须升级 Schema/Registry 并重新评审。
 
 ### 4.3 非法组合
 
-| 编号 | 非法组合 | 原因 |
-|---|---|---|
-| `GTR-ILLEGAL-001` | `accepted` 无 `operation_ref` | 无权威异步跟踪对象 |
-| `GTR-ILLEGAL-002` | `waiting_user` 无 `approval_ref` | 无正式授权聚合 |
-| `GTR-ILLEGAL-003` | `waiting_user` 同时含待执行动作的 `operation_ref` | 未批准动作已经启动 |
-| `GTR-ILLEGAL-004` | `completed` 引用 pending Approval 或活动 Operation | 混淆调用完成与业务等待 |
-| `GTR-ILLEGAL-005` | `partial` 无成功引用或稳定 Warning | 无法证明“部分成功” |
-| `GTR-ILLEGAL-006` | 永久错误却 `retryable=true` | 会造成无效或有害自动重试 |
-| `GTR-ILLEGAL-007` | 缺少 `receipt_ref` | 无法回放、审计或恢复投影 |
-| `GTR-ILLEGAL-008` | 用 Result status 更新 Approval/Operation | 混用独立状态机 |
+原八类候选已扩展为可执行契约中的 `GTR-N01..N40`、`TR-N01..N13` 与 `TR-E01..E13`，覆盖严格 JSON、Unicode/UUID、跨层与同层稳定错误优先级、JS safe integer、版本/字段、ResultCode/取消阶段 Registry、typed Warning、状态矩阵、pinned prepared/resolved slot 与 effect class、Fence/Version、全状态 result digest/ref evidence 和 frozen write guard。完整表见 [`graph-tool-result-receipt-contract-v1.md` 第 5 节](./graph-tool-result-receipt-contract-v1.md#5-非法组合与固定拒绝分类)。
+
+`completed` 仍关联 pending Approval/活动 Operation、Approval 在 freeze 前失效、unknown outcome 错误终结、Result status 更新其他聚合等依赖权威状态的组合，必须在后续 Repository/PostgreSQL 集成测试拒绝，不能只靠 JSON 校验器代替。
 
 ### 4.4 ToolReceipt first-write-wins
 
@@ -217,6 +151,10 @@ ToolReceipt 的稳定业务键为：
 ```
 
 用户和项目由可信 Session/Turn 冻结上下文校验，不从模型输入取值。ToolReceipt 必须把请求语义和执行结果拆成两个不可互改的摘要空间。
+
+每个外部副作用阶段还必须在调用前持久化 `execution_slot`：稳定 `ref_slot/slot_ordinal/ref_type/ref_schema_version/authority_owner/idempotency_key/request_digest/query_contract`，状态先为 `prepared`。pinned Definition 的 slot policy 还必须固定 `effect_class=side_effect/evidence_only`；失败/取消检查按该 policy 分类，不能用硬编码 ref type 猜测。只有外部响应或权威查询确认后，原 slot 才能一次性进入 `resolved` 并生成 `resolved_ref_digest`。`execution_refs` 是 resolved slot 的权威投影；不存在 prepared slot 时不得发送副作用。
+
+reserve、resolve 和 freeze 必须在同一 Agent PostgreSQL 事务里共同锁定父 Receipt 的 `write_state=open + expected receipt_version + stored owner fence` 并令 version `+1`；命令 Fence 必须与父行精确相等，任意自行提高的 Fence 也拒绝。合法更高 Fence 接管是 W2-R02 的独立 Lease/恢复 CAS，不由普通 Receipt 命令隐式完成。同义 slot/ref 重放只读且不增版本；该父行互斥是禁止 frozen 后 late append 的必要条件。精确 Snapshot、摘要域和状态向量见 [`graph-tool-result-receipt-contract-v1.md`](./graph-tool-result-receipt-contract-v1.md)。
 
 `request_semantic_digest` 在任何 Tool/Graph 副作用前冻结，至少覆盖：
 
@@ -229,7 +167,7 @@ ToolReceipt 的稳定业务键为：
 
 `execution_refs` 是 Receipt 处于 `open` 时的追加式阶段权威引用账本。PromptArtifact、ModelReceipt、Quote、Approval、ApprovalConsumptionReceipt、Charge、Business Write Receipt、Resource Version、Operation/Batch、Dispatch 等在执行中产生或核对出的权威引用，必须先以稳定 `ref_slot` 写入 `execution_refs`；唯一键候选为 `(tool_receipt_id, ref_slot)`。只有数据库当前有效最高 Fence owner 可以 CAS append-once：同 slot 且同 `ref_digest` 返回原引用，同 slot 但不同 digest 返回 `TOOL_EXECUTION_REF_CONFLICT`，不得覆盖、删除或换 slot 规避冲突。`execution_refs` 不进入也不重算 `request_semantic_digest`，但为恢复阶段和冻结结果提供权威证据。
 
-`result_status/result_digest/result_refs` 只能在 `open -> frozen` 的同一次 CAS 中写入一次。`result_digest` 覆盖规范化结果状态、结果码、Warnings 和 `result_refs`；每个 `result_ref` 必须是冻结时从既有 `execution_refs` 按结果 Schema 白名单确定性投影出的逐值相等引用，允许只公开其中安全且与结果有关的子集，禁止凭内存结果、模型文本或新下游调用临时补造。冻结后 `execution_refs` 和结果字段都不可再追加。Continuation 子 Receipt 的 `request_semantic_digest` 必须覆盖签名 Decision/Source、新 Turn/Run 因果身份及 `parent_request_semantic_digest`，因此不要求与父 Receipt 字节相等；但父 Intent、Tool Pin、Definition/Schema、业务 `execution_digest` 和资源 exact-set 必须逐值继承，不得借机改变原动作。
+`result_status/result_digest/result_refs` 只能在 `open -> frozen` 的同一次 CAS 中写入一次。`result_digest` 覆盖完整 Canonical Result：Schema、status、code、summary、retryable、Warnings、所有嵌套 Ref 和当前 ToolReceipt ID，不只覆盖状态/ref 子集；每个 `result_ref` 必须是冻结时从既有 `execution_refs` 按结果 Schema 白名单确定性投影出的逐值相等引用，允许只公开其中安全且与结果有关的子集，禁止凭内存结果、模型文本或新下游调用临时补造。`waiting_user/completed/partial` 与 `accepted` 一样必须逐值验证 evidence；`failed` 与副作用前取消必须证明 ledger 不含已提交副作用，副作用后取消则必须把全部已解决副作用 slot 作为内部 result refs exact-set；冻结后 `execution_refs` 和结果字段都不可再追加。Continuation 子 Receipt 的 `request_semantic_digest` 必须覆盖签名 Decision/Source、新 Turn/Run 因果身份及 `parent_request_semantic_digest`，因此不要求与父 Receipt 字节相等；但父 Intent、Tool Pin、Definition/Schema、业务 `execution_digest` 和资源 exact-set 必须逐值继承，不得借机改变原动作。
 
 回执写入规则：
 
@@ -255,7 +193,7 @@ ToolReceipt 的稳定业务键为：
 | ToolReceipt / Agent | Agent PostgreSQL | `open` | 形成合法 `completed/partial` GraphToolResult | Runner Receipt Service | 校验全部结果引用已存在于 `execution_refs` 且逐值一致；一次写 `result_status/result_refs/result_digest` | `frozen` | 终态；只读同义重放 | `open -> frozen` CAS；原 Receipt key | 当前 fence + expected receipt version；同事务 EventLog/Projection Marker | 引用缺失/冲突不得冻结；无 unknown 且可证明安全则冻结失败结果，否则隔离 |
 | ToolReceipt / Agent | Agent PostgreSQL | `open` | pending Approval 已持久化，形成合法 `waiting_user` Result | Runner Receipt Service | Approval ref 必须已 append 到 `execution_refs`；禁止同时存在待执行 Operation ref | `frozen` | 终态；只读同义重放 | `open -> frozen` CAS；原 Receipt key | 当前 fence/version；Approval/Event Projection 同事务或 Marker | Approval 非 pending、版本/摘要不符则不冻结 waiting_user；按是否存在 unknown 决定安全失败或隔离 |
 | ToolReceipt / Agent | Agent PostgreSQL | `open` | Operation/Dispatch 已原子提交，形成合法 `accepted` Result | Runner Receipt Service | Operation/Batch/Dispatch refs 必须已 append 到 `execution_refs`；不得把 Redis 唤醒当证据 | `frozen` | 终态；只读同义重放 | `open -> frozen` CAS；原 Receipt key | 当前 fence/version；Dispatch Outbox 与 Operation 权威事务已可查询 | 派发未知立即隔离；只有权威查询确认提交后才冻结 accepted |
-| ToolReceipt / Agent | Agent PostgreSQL | `open` | 形成确定性 `failed/cancelled` Result | Runner Receipt Service | 必须证明不存在未决/未知副作用；结果引用只取既有 `execution_refs` | `frozen` | 终态；只读同义重放 | `open -> frozen` CAS；原 Receipt key | 当前 fence/version；EventLog/Projection Marker | 无法证明安全终结则不得冻结 failed/cancelled，保持 open 并隔离 Input/Run |
+| ToolReceipt / Agent | Agent PostgreSQL | `open` | 形成确定性 `failed/cancelled` Result | Runner Receipt Service | 必须证明不存在未决/未知副作用；failed/副作用前取消要求空副作用账本，副作用后取消要求全部 resolved slot 的内部 result refs exact-set | `frozen` | 终态；只读同义重放 | `open -> frozen` CAS；原 Receipt key | 当前 fence/version；EventLog/Projection Marker | 无法证明安全终结则不得冻结 failed/cancelled，保持 open 并隔离 Input/Run |
 | ToolReceipt / Agent | Agent PostgreSQL | `open` | 瞬时技术失败且权威证据证明没有副作用发送或提交 | Runner/Recovery Owner | 保存技术失败证据和 `retry_at`；不改请求、execution/result 字段 | `open` | 非终态；有界技术重试 | 原 Receipt/Run/Input 身份 | 当前 fence/version；无业务 Outbox | Input 可进 `retry_wait`、Run `recovery_pending`；若后来发现 unknown，立即转 quarantined，不等待预算耗尽 |
 | ToolReceipt / Agent | Agent PostgreSQL | `frozen` | 同 key 同 `request_semantic_digest` 重放 | Query/Runner | 校验冻结结果重新计算后匹配 `result_digest`，只读返回 | `frozen` | 终态；可无限同义读取 | 原 Receipt key；不写新回执 | 不需要新 fence 写入；不得重发 Event/Outbox，投影缺失由 Marker 补投 | 摘要损坏/不一致 fail closed 并告警，不重跑 Model/Tool |
 | ToolReceipt / Agent | Agent PostgreSQL | `open/frozen` | 同 key 异 `request_semantic_digest`、旧 fence 或非法状态写入 | 任意调用方 | 不执行、不覆盖、不追加 execution/result refs | 原状态 | 否 | 原唯一键和 CAS 条件 | fence/version 校验失败；不发 Outbox | 返回稳定 conflict/stale-fence，记录最小审计；若原执行仍 unknown 维持隔离 |
@@ -807,8 +745,8 @@ Agent PostgreSQL EventLog 至少包含：
 
 ### 15.1 GraphToolResult/Receipt 契约测试
 
-- [ ] 六个固定结果向量逐字段校验；
-- [ ] 八类非法组合全部拒绝；
+- [x] 八个合法向量覆盖六状态、Unicode canonical edge 与已解决副作用取消，并逐字段/摘要校验；
+- [x] 测试专用 Corpus 已拒绝 `GTR-N01..N40`、`TR-N01..N13` 并执行 `TR-E01..E13`，覆盖严格 JSON、状态矩阵、Registry、slot/ref/effect class、Fence/Version、全状态 evidence、digest 和 frozen guard；依赖权威数据库状态的组合仍待 Repository 集成测试；
 - [ ] 同 ToolReceipt key + 同 `request_semantic_digest` 返回字节级等价语义结果；
 - [ ] 同 key + 不同 `request_semantic_digest` 返回冲突且不覆盖；
 - [ ] 后生成 PromptArtifact/Model/Approval/Consumption/Quote/Charge/Business Write/Operation/Resource 先按稳定 slot append-once 写 `execution_refs`；同 slot 同 digest 重放、异 digest 冲突；不能改变请求摘要；
@@ -910,7 +848,7 @@ Agent PostgreSQL EventLog 至少包含：
 ### 16.2 未关闭决策
 
 1. 新表、字段、唯一键、HOL Claim SQL、Fence CAS、分区/清理索引的精确向前 Migration；
-2. Eino `v0.9.10`、普通 DeepSeek Adapter `v0.1.6` 与当前 Go、Kitex、Telemetry 的兼容验证结论；
+2. W2-R01 可执行契约已达到 Agent-owned Review Ready，但仍需 Agent/Business/安全/运维/财务和跨 Module 目录审核；测试专用 DTO 不得直接转为生产 GORM/HTTP/IDL；
 3. `BatchContinuationResult` 进入确定性无 Turn 投影或 `batch_explanation` 模型 Turn 的版本化服务端分类规则；
 4. 各模型 Provider 的 request/idempotency 查询能力，以及不支持查询时的人工 unknown-outcome 流程；
 5. `protected_intent_ref` 的存储介质、加密密钥轮换、访问审计和保留期限；

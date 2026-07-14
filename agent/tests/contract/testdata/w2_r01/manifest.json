@@ -1,0 +1,7 @@
+{
+  "schema_version": "w2_r01_contract_corpus_manifest.v1",
+  "files": [
+    {"file": "graph_tool_result_v1.json", "sha256": "sha256:0217f80689927017541fa07e7f78fd40eede77ff82bed94c6f8c30172ec5a63a"},
+    {"file": "tool_receipt_v1.json", "sha256": "sha256:045cd4ebcc39cba1d669f1eb477210fd699b56feb03e1652b6ed0d0ecc5c3ab9"}
+  ]
+}
