@@ -43,7 +43,7 @@ export function AuthSessionProvider({
     return () => window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, expireSession);
   }, []);
 
-  const bootstrap = useCallback(async () => {
+  const bootstrap = useCallback(async ({ deniedCapability = '' } = {}) => {
     const operation = ++operationRef.current;
     setSession(bootstrappingSession());
     try {
@@ -51,7 +51,7 @@ export function AuthSessionProvider({
       if (operation !== operationRef.current) {
         return null;
       }
-      const next = authenticatedSessionFromPayload(payload);
+      const next = withCapabilityDenial(authenticatedSessionFromPayload(payload), deniedCapability);
       setSession(next);
       return next;
     } catch (error) {
@@ -128,6 +128,7 @@ export function AuthSessionProvider({
     () => ({
       ...session,
       isAuthenticated: session.status === AUTH_SESSION_STATUS.AUTHENTICATED,
+      hasCapability: (capability) => hasCapability(session, capability),
       bootstrap,
       login,
       logout,
@@ -157,7 +158,12 @@ function initialState(initialSession, autoBootstrap) {
 
 function normalizeSession(session) {
   if (session?.status === AUTH_SESSION_STATUS.AUTHENTICATED && session.user) {
-    return authenticatedSession(session.user, session.csrfToken, session.sessionExpiresAt);
+    return authenticatedSession(
+      session.user,
+      session.csrfToken,
+      session.sessionExpiresAt,
+      session.deniedCapabilities
+    );
   }
   if (session?.status === AUTH_SESSION_STATUS.UNAVAILABLE) {
     return unavailableSession(session.error);
@@ -203,7 +209,14 @@ function authenticatedSessionFromPayload(payload) {
 }
 
 function bootstrappingSession() {
-  return { status: AUTH_SESSION_STATUS.BOOTSTRAPPING, user: null, csrfToken: '', sessionExpiresAt: '', error: null };
+  return {
+    status: AUTH_SESSION_STATUS.BOOTSTRAPPING,
+    user: null,
+    csrfToken: '',
+    sessionExpiresAt: '',
+    deniedCapabilities: [],
+    error: null
+  };
 }
 
 function anonymousSession(error) {
@@ -212,18 +225,43 @@ function anonymousSession(error) {
     user: null,
     csrfToken: '',
     sessionExpiresAt: '',
+    deniedCapabilities: [],
     error: error ? publicError(error) : null
   };
 }
 
-function authenticatedSession(user, csrfToken = '', sessionExpiresAt = '') {
+function authenticatedSession(user, csrfToken = '', sessionExpiresAt = '', deniedCapabilities = []) {
   return {
     status: AUTH_SESSION_STATUS.AUTHENTICATED,
     user: sanitizeUser(user),
     csrfToken: String(csrfToken || ''),
     sessionExpiresAt: String(sessionExpiresAt || ''),
+    deniedCapabilities: stringList(deniedCapabilities),
     error: null
   };
+}
+
+// withCapabilityDenial keeps the authoritative Bootstrap Principal intact while separately latching
+// an endpoint capability rejection. The latch prevents a stale Bootstrap projection from remounting
+// the rejected page in a loop and is cleared by the next ordinary Bootstrap/Login authority epoch.
+function withCapabilityDenial(session, capability) {
+  if (
+    session.status !== AUTH_SESSION_STATUS.AUTHENTICATED
+    || typeof capability !== 'string'
+    || !capability
+  ) return session;
+  return {
+    ...session,
+    deniedCapabilities: [capability]
+  };
+}
+
+function hasCapability(session, capability) {
+  return session.status === AUTH_SESSION_STATUS.AUTHENTICATED
+    && typeof capability === 'string'
+    && Boolean(capability)
+    && session.user.capabilities.includes(capability)
+    && !session.deniedCapabilities.includes(capability);
 }
 
 function unavailableSession(error) {
@@ -232,6 +270,7 @@ function unavailableSession(error) {
     user: null,
     csrfToken: '',
     sessionExpiresAt: '',
+    deniedCapabilities: [],
     error: publicError(error)
   };
 }

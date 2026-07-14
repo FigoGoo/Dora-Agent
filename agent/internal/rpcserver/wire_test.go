@@ -33,8 +33,28 @@ var wireSecret = []byte("0123456789abcdef0123456789abcdef")
 
 // wireHandler 是线级测试最小生成 Handler，用调用次数证明认证中间件在业务代码之前失败关闭。
 type wireHandler struct {
-	ensureCalls atomic.Int32
-	queryCalls  atomic.Int32
+	ensureCalls   atomic.Int32
+	queryCalls    atomic.Int32
+	ensureV2Calls atomic.Int32
+	queryV2Calls  atomic.Int32
+}
+
+func (handler *wireHandler) EnsureProjectSessionV2(
+	_ context.Context,
+	request *sessionv1.EnsureProjectSessionRequestV2,
+) (*sessionv1.EnsureProjectSessionResponseV2, error) {
+	handler.ensureV2Calls.Add(1)
+	return &sessionv1.EnsureProjectSessionResponseV2{
+		SchemaVersion: sessionv1.ENSURE_PROJECT_SESSION_SCHEMA_VERSION_V2,
+		RequestId:     request.RequestId,
+		Disposition:   sessionv1.EnsureDispositionV1_CREATED,
+		Receipt: &sessionv1.ProjectSessionReceiptV2{
+			CommandId: request.CommandId, SessionId: "0190f4d4-0001-7000-8000-000000000002",
+			ResultVersion: 2, CompletedAtUnixMs: time.Now().UnixMilli(),
+			SkillSnapshotDigest: request.SkillSnapshot.SnapshotSetDigest,
+			SkillCount:          request.SkillSnapshot.SkillCount,
+		},
+	}, nil
 }
 
 func (handler *wireHandler) EnsureProjectSessionV1(
@@ -60,6 +80,17 @@ func (handler *wireHandler) QueryProjectSessionCommandV1(
 	handler.queryCalls.Add(1)
 	return &sessionv1.QueryProjectSessionCommandResponseV1{
 		SchemaVersion: sessionv1.QUERY_PROJECT_SESSION_COMMAND_SCHEMA_VERSION,
+		RequestId:     request.RequestId, Status: sessionv1.QueryProjectSessionCommandStatusV1_NOT_FOUND,
+	}, nil
+}
+
+func (handler *wireHandler) QueryProjectSessionCommandV2(
+	_ context.Context,
+	request *sessionv1.QueryProjectSessionCommandRequestV2,
+) (*sessionv1.QueryProjectSessionCommandResponseV2, error) {
+	handler.queryV2Calls.Add(1)
+	return &sessionv1.QueryProjectSessionCommandResponseV2{
+		SchemaVersion: sessionv1.QUERY_PROJECT_SESSION_COMMAND_SCHEMA_VERSION_V2,
 		RequestId:     request.RequestId, Status: sessionv1.QueryProjectSessionCommandStatusV1_NOT_FOUND,
 	}, nil
 }
@@ -176,6 +207,44 @@ func TestAuthenticatedTTHeaderWire(t *testing.T) {
 	}
 	if handler.queryCalls.Load() != 1 {
 		t.Fatalf("合法 Query Handler 调用数=%d，want 1", handler.queryCalls.Load())
+	}
+
+	emptySnapshotDigest := "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+	ensureV2RequestID := "0190f4d4-0000-7000-8000-000000000006"
+	ensureV2Request := &sessionv1.EnsureProjectSessionRequestV2{
+		SchemaVersion: sessionv1.ENSURE_PROJECT_SESSION_SCHEMA_VERSION_V2,
+		RequestId:     ensureV2RequestID, CommandId: wireCommandID, RequestDigest: wireDigest,
+		ProjectId: "0190f4d4-0000-7000-8000-000000000002", OwnerUserId: "0190f4d4-0000-7000-8000-000000000003",
+		CreationSource: sessionv1.CreationSourceV1_QUICK_CREATE, PromptDigest: "",
+		SkillSnapshot: &sessionv1.SessionSkillSnapshotV1{
+			SchemaVersion: sessionv1.SESSION_SKILL_SNAPSHOT_SCHEMA_VERSION_V1,
+			SnapshotKind:  sessionv1.SessionSkillSnapshotKindV1_EMPTY,
+			SkillCount:    0, SnapshotSetDigest: emptySnapshotDigest, Skills: []*sessionv1.PublishedSkillSnapshotRefV1{},
+		},
+		RequestedAtUnixMs: time.Now().UnixMilli(),
+	}
+	signedEnsureV2Ctx := withWireAssertion(requestCtx, "EnsureProjectSessionV2", ensureV2RequestID, wireCommandID, wireDigest, time.Now())
+	ensureV2Response, err := client.EnsureProjectSessionV2(signedEnsureV2Ctx, ensureV2Request)
+	if err != nil || ensureV2Response == nil || ensureV2Response.Receipt == nil ||
+		ensureV2Response.Receipt.SkillSnapshotDigest != emptySnapshotDigest {
+		t.Fatalf("合法 Ensure v2 线级调用失败: response=%+v err=%v", ensureV2Response, err)
+	}
+	if handler.ensureV2Calls.Load() != 1 {
+		t.Fatalf("合法 Ensure v2 Handler 调用数=%d，want 1", handler.ensureV2Calls.Load())
+	}
+
+	queryV2RequestID := "0190f4d4-0000-7000-8000-000000000007"
+	queryV2Request := &sessionv1.QueryProjectSessionCommandRequestV2{
+		SchemaVersion: sessionv1.QUERY_PROJECT_SESSION_COMMAND_SCHEMA_VERSION_V2,
+		RequestId:     queryV2RequestID, CommandId: wireCommandID, ExpectedRequestDigest: wireDigest,
+	}
+	signedQueryV2Ctx := withWireAssertion(requestCtx, "QueryProjectSessionCommandV2", queryV2RequestID, wireCommandID, wireDigest, time.Now())
+	queryV2Response, err := client.QueryProjectSessionCommandV2(signedQueryV2Ctx, queryV2Request)
+	if err != nil || queryV2Response == nil || queryV2Response.Status != sessionv1.QueryProjectSessionCommandStatusV1_NOT_FOUND {
+		t.Fatalf("合法 Query v2 线级调用失败: response=%+v err=%v", queryV2Response, err)
+	}
+	if handler.queryV2Calls.Load() != 1 {
+		t.Fatalf("合法 Query v2 Handler 调用数=%d，want 1", handler.queryV2Calls.Load())
 	}
 }
 

@@ -130,3 +130,9 @@ func idempotencyKeyDigest(value string) (Digest, error) {
 	}
 	return SHA256Digest([]byte(value)), nil
 }
+
+// CalculateIdempotencyKeyDigest 为同属 Business 的版本化 Project 创建用例提供统一幂等键规范化。
+// 返回值只包含摘要，原始 Header 不得进入持久化、日志、Trace 或跨 Module DTO。
+func CalculateIdempotencyKeyDigest(value string) (Digest, error) {
+	return idempotencyKeyDigest(value)
+}

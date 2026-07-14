@@ -8,13 +8,16 @@ THRIFTGO_VERSION := v0.4.5
 MIGRATE_VERSION := v4.19.0
 W0_ENV_FILE ?= .env.example
 
-.PHONY: verify test vet race build test-frontend build-frontend check-frontend rpc-tools foundation-rpc-tools migration-tools generate-foundation-rpc generate-session-rpc generate-rpc check-generated check-migrations check-database-contracts local-up local-down local-reset migrate-up migrate-down seed-local-smoke-user foundation-smoke w0-smoke w0-browser-smoke w05-smoke w05-browser-smoke run-business run-agent run-worker
+.PHONY: verify test test-smoke-contracts vet race build test-frontend build-frontend check-frontend rpc-tools foundation-rpc-tools migration-tools generate-foundation-rpc generate-session-rpc generate-rpc check-generated check-migrations check-database-contracts local-up local-down local-reset migrate-up migrate-down seed-local-smoke-user foundation-smoke w0-smoke w0-browser-smoke w05-smoke w05-browser-smoke w1-smoke w1-browser-smoke run-business run-agent run-worker
 
 verify:
 	@for module in $(MODULES); do (cd $$module && GOWORK=off $(GO) mod verify) || exit 1; done
 
-test:
+test: test-smoke-contracts
 	@for module in $(MODULES); do (cd $$module && GOWORK=off $(GO) test ./...) || exit 1; done
+
+test-smoke-contracts:
+	@./scripts/tests/w1-smoke-mode-test.sh
 
 vet:
 	@for module in $(MODULES); do (cd $$module && GOWORK=off $(GO) vet ./...) || exit 1; done
@@ -98,6 +101,13 @@ w0-browser-smoke: migration-tools build check-frontend
 w05-smoke: w0-smoke
 
 w05-browser-smoke: w0-browser-smoke
+
+# W1-C2 canonical Evidence 必须包含 @w1-real-review 真实浏览器链路。
+# 保留 w1-smoke 作为兼容命令，但它与 w1-browser-smoke 执行同一完整门禁。
+w1-smoke: w1-browser-smoke
+
+w1-browser-smoke: migration-tools build check-frontend
+	@ENV_FILE=$(W0_ENV_FILE) GO_BIN=$(GO) MIGRATE_BIN=$(TOOLS_DIR)/migrate W1_RUN_SKILL_SMOKE=1 W1_RUN_BROWSER_SMOKE=1 ./scripts/smoke-w0-transport.sh
 
 run-business:
 	@set -a; . ./$(ENV_FILE); set +a; cd business && $(GO) run ./cmd/business-service

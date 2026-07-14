@@ -10,7 +10,32 @@ const PAGE_TITLE_CONFIG = {
   skills: {
     icon: Blocks,
     id: 'skills-title',
-    label: 'Skill'
+    label: 'Skill 市场'
+  },
+  skillDetail: {
+    icon: Blocks,
+    id: 'skills-title',
+    label: 'Skill 市场'
+  },
+  mySkills: {
+    icon: Blocks,
+    id: 'my-skills-title',
+    label: '我的 Skill'
+  },
+  skillBuilder: {
+    icon: Blocks,
+    id: 'skill-builder-context-title',
+    label: 'Skill Builder'
+  },
+  skillReviews: {
+    icon: Blocks,
+    id: 'skill-reviews-title',
+    label: 'Skill 审核'
+  },
+  skillReviewDetail: {
+    icon: Blocks,
+    id: 'skill-review-detail-title',
+    label: 'Skill 审核'
   }
 };
 

@@ -100,6 +100,9 @@ func (repository *memoryRepository) Ensure(_ context.Context, plan EnsurePlan) (
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 	if existing, ok := repository.receipts[plan.Receipt.CommandID]; ok {
+		if existing.CommandType != plan.Receipt.CommandType {
+			return EnsureResult{}, ErrCommandVersionConflict
+		}
 		if existing.RequestDigest != plan.Receipt.RequestDigest {
 			return EnsureResult{}, ErrCommandConflict
 		}
@@ -122,11 +125,33 @@ func (repository *memoryRepository) Query(_ context.Context, command QueryComman
 	if !exists {
 		return QueryCommandResult{Status: QueryCommandStatusNotFound}, nil
 	}
+	if receipt.CommandType != command.ExpectedCommandType {
+		return QueryCommandResult{}, ErrCommandVersionConflict
+	}
 	if receipt.RequestDigest != command.ExpectedRequestDigest {
 		return QueryCommandResult{Status: QueryCommandStatusConflict}, nil
 	}
 	result := resultFromTestReceipt(receipt, EnsureDispositionReplayed)
 	return QueryCommandResult{Status: QueryCommandStatusCompleted, Receipt: &result}, nil
+}
+
+// LoadSkillSnapshot 返回内存创建计划中的冻结 Snapshot，用于满足双版本 Repository 读取契约。
+func (repository *memoryRepository) LoadSkillSnapshot(
+	_ context.Context,
+	sessionID string,
+	maxItems int,
+) (StoredSkillSnapshot, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	for _, plan := range repository.createdPlans {
+		if plan.Session.ID == sessionID {
+			if len(plan.SkillSnapshotItems) > maxItems {
+				return StoredSkillSnapshot{}, ErrSnapshotLimitExceeded
+			}
+			return StoredSkillSnapshot{Header: plan.SkillSnapshot, Items: plan.SkillSnapshotItems}, nil
+		}
+	}
+	return StoredSkillSnapshot{}, ErrSnapshotNotFound
 }
 
 // resultFromTestReceipt 将内存冻结回执映射为测试结果 DTO。
@@ -135,6 +160,7 @@ func resultFromTestReceipt(receipt CommandReceipt, disposition EnsureDisposition
 		CommandID: receipt.CommandID, SessionID: receipt.SessionID,
 		MessageID: receipt.MessageID, InputID: receipt.InputID,
 		Disposition: disposition, ResultVersion: receipt.ResultVersion, AcceptedAt: receipt.CompletedAt,
+		SkillSnapshotDigest: receipt.SkillSnapshotDigest, SkillCount: receipt.SkillCount,
 	}
 }
 

@@ -39,6 +39,8 @@ const (
 	EnsureSessionEventType = "agent.session.ensure"
 	// EnsureSessionSchemaVersion 默认 Session 初始化 Outbox 使用的契约版本。
 	EnsureSessionSchemaVersion = "agent.session-bootstrap.v1"
+	// EnsureSessionSchemaVersionV2 是完整加密 Session Bootstrap v2 Outbox plaintext 版本。
+	EnsureSessionSchemaVersionV2 = "session_bootstrap_outbox_payload.v2"
 	// PromptEncryptionAlgorithm 首提示词密文当前允许使用的认证加密算法。
 	PromptEncryptionAlgorithm = "aes-256-gcm"
 	// EnsureSessionCanonicalSchemaV1 Agent Session 初始化请求摘要使用的冻结 Canonical Schema。
@@ -351,6 +353,14 @@ type SessionOutbox struct {
 	HasInitialPrompt bool
 	// EncryptedPayload 首提示词密文元数据；空提示词时必须为空。
 	EncryptedPayload *EncryptedPayload
+	// SkillSnapshotDigest 是 v2 冻结的 Snapshot set 摘要；v1 为零值且由数据库兼容列审计 empty digest。
+	SkillSnapshotDigest Digest
+	// SkillCount 是 v2 冻结的 Skill 数量；v1 固定零。
+	SkillCount int32
+	// BindingSetVersion 是 v2 冻结的 Project Skill Binding Set 版本；v1 为空。
+	BindingSetVersion *int64
+	// ResolutionID 是 v2 不可变解析头逻辑引用；v1 为空。
+	ResolutionID *string
 	// PayloadClearedAt Agent Receipt 确认后清除密文的 UTC 时间；仅 delivered 状态可存在。
 	PayloadClearedAt *time.Time
 	// Status Outbox 权威派发状态。
@@ -573,7 +583,9 @@ func (o SessionOutbox) Validate() error {
 	if !isUUIDv7(o.ID) || !isUUIDv7(o.AggregateID) || !isUUIDv7(o.OwnerUserID) || isZeroDigest(o.RequestDigest) {
 		return ErrInvalidQuickCreate
 	}
-	if o.EventType != EnsureSessionEventType || o.SchemaVersion != EnsureSessionSchemaVersion || o.MaxAttempts <= 0 || o.AttemptCount < 0 || o.LeaseVersion < 0 {
+	if o.EventType != EnsureSessionEventType ||
+		(o.SchemaVersion != EnsureSessionSchemaVersion && o.SchemaVersion != EnsureSessionSchemaVersionV2) ||
+		o.MaxAttempts <= 0 || o.AttemptCount < 0 || o.LeaseVersion < 0 {
 		return ErrInvalidQuickCreate
 	}
 	if o.Status != OutboxStatusPending && o.Status != OutboxStatusProcessing && o.Status != OutboxStatusRetry && o.Status != OutboxStatusDelivered && o.Status != OutboxStatusDead {
@@ -601,12 +613,37 @@ func (o SessionOutbox) Validate() error {
 		return ErrInvalidQuickCreate
 	}
 
-	// 三种保留形态互斥：无 Prompt 全空；未清理 Prompt 具有完整密文；已清理 Prompt 仅在 delivered 后保留 Digest。
+	if o.SchemaVersion == EnsureSessionSchemaVersionV2 {
+		return o.validateV2Payload()
+	}
+	if !isZeroDigest(o.SkillSnapshotDigest) || o.SkillCount != 0 || o.BindingSetVersion != nil || o.ResolutionID != nil {
+		return ErrInvalidQuickCreate
+	}
+	// V1 三种保留形态互斥：无 Prompt 全空；未清理 Prompt 具有完整密文；已清理 Prompt 仅在 delivered 后保留 Digest。
 	if !o.HasInitialPrompt {
 		if o.EncryptedPayload != nil || o.PayloadClearedAt != nil {
 			return ErrInvalidQuickCreate
 		}
 		return nil
+	}
+	if o.PayloadClearedAt == nil {
+		if !validEncryptedPayload(o.EncryptedPayload) {
+			return ErrInvalidQuickCreate
+		}
+		return nil
+	}
+	if o.Status != OutboxStatusDelivered || o.DeliveredAt == nil || o.PayloadClearedAt.Before(*o.DeliveredAt) || !validClearedPayload(o.EncryptedPayload) {
+		return ErrInvalidQuickCreate
+	}
+	return nil
+}
+
+// validateV2Payload 校验完整 Bootstrap v2 envelope、Snapshot metadata 与 delivered 清理三态。
+func (o SessionOutbox) validateV2Payload() error {
+	if isZeroDigest(o.SkillSnapshotDigest) || o.SkillCount < 0 || o.SkillCount > 32 ||
+		o.BindingSetVersion == nil || *o.BindingSetVersion < 1 || o.ResolutionID == nil || !isUUIDv7(*o.ResolutionID) ||
+		o.EncryptedPayload == nil {
+		return ErrInvalidQuickCreate
 	}
 	if o.PayloadClearedAt == nil {
 		if !validEncryptedPayload(o.EncryptedPayload) {

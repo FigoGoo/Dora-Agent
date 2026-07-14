@@ -7,6 +7,7 @@ import {
   resolveQuickCreateIntent,
   submitQuickCreateIntent
 } from './quickCreateIntent.js';
+import { PROJECT_QUICK_CREATE_MAX_SKILL_COUNT } from './projectQuickCreate.js';
 
 describe('Quick Create intent', () => {
   it('reuses one key across duplicate submit, provisioning and retry', () => {
@@ -25,6 +26,35 @@ describe('Quick Create intent', () => {
       status: QUICK_CREATE_STATUS.PROVISIONING
     });
     expect(retry).toMatchObject({ idempotencyKey: 'idem-1', attempts: 2 });
+  });
+
+  it('freezes a canonical Skill selection across submit and retry', () => {
+    const selected = [
+      '019f0000-0000-7000-8000-000000000122',
+      '019f0000-0000-7000-8000-000000000121'
+    ];
+    const original = createQuickCreateIntent('使用 Skill', {
+      enabledSkillIDs: selected,
+      keyFactory: () => 'idem-skills'
+    });
+    selected.pop();
+    const retry = submitQuickCreateIntent(rejectQuickCreateIntent(
+      submitQuickCreateIntent(original),
+      { status: 503, retryable: true }
+    ));
+
+    expect(retry.enabledSkillIDs).toEqual([
+      '019f0000-0000-7000-8000-000000000121',
+      '019f0000-0000-7000-8000-000000000122'
+    ]);
+    expect(retry.idempotencyKey).toBe('idem-skills');
+  });
+
+  it('refuses to freeze a selection above the 16-item contract limit', () => {
+    expect(() => createQuickCreateIntent('超限', {
+      enabledSkillIDs: skillIDs(PROJECT_QUICK_CREATE_MAX_SKILL_COUNT + 1),
+      keyFactory: () => 'idem-too-many-skills'
+    })).toThrow('最多选择 16 个');
   });
 
   it('becomes created only after workspace bootstrap returns the session', () => {
@@ -66,6 +96,20 @@ describe('Quick Create intent', () => {
     expect(replacement).toMatchObject({ idempotencyKey: 'idem-2', prompt: 'B', attempts: 0 });
   });
 
+  it('preserves the frozen Skill set when replacing a conflicted key', () => {
+    const original = submitQuickCreateIntent(createQuickCreateIntent('A', {
+      keyFactory: () => 'idem-1',
+      enabledSkillIDs: ['019f0000-0000-7000-8000-000000000121']
+    }));
+    const conflict = rejectQuickCreateIntent(original, { status: 409, code: 'IDEMPOTENCY_CONFLICT' });
+    const replacement = replaceConflictedQuickCreateIntent(conflict, 'A', { keyFactory: () => 'idem-2' });
+
+    expect(replacement).toMatchObject({
+      idempotencyKey: 'idem-2',
+      enabledSkillIDs: ['019f0000-0000-7000-8000-000000000121']
+    });
+  });
+
   it('does not relabel a stable non-retryable failure as retryable', () => {
     const original = submitQuickCreateIntent(createQuickCreateIntent('A', { keyFactory: () => 'idem-1' }));
     const failed = rejectQuickCreateIntent(original, {
@@ -78,3 +122,9 @@ describe('Quick Create intent', () => {
     expect(() => submitQuickCreateIntent(failed)).toThrow('不能重试');
   });
 });
+
+function skillIDs(count) {
+  return Array.from({ length: count }, (_, index) => (
+    `019f0000-0000-7000-8000-${String(index + 1).padStart(12, '0')}`
+  ));
+}

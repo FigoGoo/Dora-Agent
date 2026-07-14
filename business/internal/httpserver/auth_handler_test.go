@@ -1,9 +1,11 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +16,16 @@ import (
 	"github.com/FigoGoo/Dora-Agent/business/internal/config"
 	"github.com/gin-gonic/gin"
 )
+
+// captureHTTPTestLogs 临时捕获默认结构化日志并在测试结束恢复，供拒绝路径断言日志白名单。
+func captureHTTPTestLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var output bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+	return &output
+}
 
 // authHandlerTestService 捕获 HTTP 协议对认证用例的调用并返回预置结果。
 type authHandlerTestService struct {
@@ -248,5 +260,45 @@ func TestAuthProtectionMiddlewareResolvesOnceAndWritesPrivatePrincipal(t *testin
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden || service.resolveCalls != 2 || !strings.Contains(recorder.Body.String(), `"code":"CSRF_INVALID"`) {
 		t.Fatalf("invalid middleware CSRF reached route: status=%d resolves=%d body=%s", recorder.Code, service.resolveCalls, recorder.Body.String())
+	}
+}
+
+func TestAuthProtectionMiddlewareAuditsDenialsWithoutSensitiveValues(t *testing.T) {
+	_, resolved := validAuthHandlerSession()
+	service := &authHandlerTestService{resolveResult: resolved}
+	handler, _ := newAuthHandlerTestRouter(t, service)
+	router := gin.New()
+	router.POST("/protected", handler.RequireSessionAndCSRF(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	logs := captureHTTPTestLogs(t)
+
+	missingCookie := httptest.NewRecorder()
+	router.ServeHTTP(missingCookie, httptest.NewRequest(http.MethodPost, "/protected", nil))
+	if missingCookie.Code != http.StatusUnauthorized || !strings.Contains(logs.String(), `"route":"/protected"`) ||
+		!strings.Contains(logs.String(), `"action":"auth.require_session"`) || !strings.Contains(logs.String(), `"error_code":"UNAUTHENTICATED"`) {
+		t.Fatalf("missing-cookie denial was not safely audited: status=%d logs=%s", missingCookie.Code, logs.String())
+	}
+
+	logs.Reset()
+	service.resolveErr = errors.New("postgres password=resolver-secret SQL=SELECT")
+	unavailableRequest := httptest.NewRequest(http.MethodPost, "/protected", nil)
+	unavailableRequest.AddCookie(&http.Cookie{Name: "dora_session", Value: "sensitive-cookie"})
+	unavailable := httptest.NewRecorder()
+	router.ServeHTTP(unavailable, unavailableRequest)
+	if unavailable.Code != http.StatusServiceUnavailable || !strings.Contains(logs.String(), `"error_code":"AUTH_UNAVAILABLE"`) ||
+		strings.Contains(logs.String(), "resolver-secret") || strings.Contains(logs.String(), "SELECT") || strings.Contains(logs.String(), "sensitive-cookie") {
+		t.Fatalf("resolver denial audit leaked sensitive details: status=%d logs=%s", unavailable.Code, logs.String())
+	}
+
+	logs.Reset()
+	service.resolveErr = nil
+	csrfRequest := httptest.NewRequest(http.MethodPost, "/protected", nil)
+	csrfRequest.AddCookie(&http.Cookie{Name: "dora_session", Value: "sensitive-cookie"})
+	csrfRequest.Header.Set("X-CSRF-Token", "sensitive-wrong-csrf")
+	csrfDenied := httptest.NewRecorder()
+	router.ServeHTTP(csrfDenied, csrfRequest)
+	if csrfDenied.Code != http.StatusForbidden || !strings.Contains(logs.String(), `"error_code":"CSRF_INVALID"`) ||
+		!strings.Contains(logs.String(), `"actor_id":"`+resolved.Principal.ID+`"`) || strings.Contains(logs.String(), "sensitive-wrong-csrf") ||
+		strings.Contains(logs.String(), "bound-csrf-token") || strings.Contains(logs.String(), "sensitive-cookie") {
+		t.Fatalf("CSRF denial was not safely audited: status=%d logs=%s", csrfDenied.Code, logs.String())
 	}
 }

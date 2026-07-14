@@ -13,6 +13,8 @@ import (
 type Client interface {
 	EnsureProjectSessionV1(ctx context.Context, request *sessionv1.EnsureProjectSessionRequestV1, callOptions ...callopt.Option) (r *sessionv1.EnsureProjectSessionResponseV1, err error)
 	QueryProjectSessionCommandV1(ctx context.Context, request *sessionv1.QueryProjectSessionCommandRequestV1, callOptions ...callopt.Option) (r *sessionv1.QueryProjectSessionCommandResponseV1, err error)
+	EnsureProjectSessionV2(ctx context.Context, request *sessionv1.EnsureProjectSessionRequestV2, callOptions ...callopt.Option) (r *sessionv1.EnsureProjectSessionResponseV2, err error)
+	QueryProjectSessionCommandV2(ctx context.Context, request *sessionv1.QueryProjectSessionCommandRequestV2, callOptions ...callopt.Option) (r *sessionv1.QueryProjectSessionCommandResponseV2, err error)
 }
 
 // NewClient creates a client for the service defined in IDL.
@@ -52,4 +54,14 @@ func (p *kAgentSessionServiceV1Client) EnsureProjectSessionV1(ctx context.Contex
 func (p *kAgentSessionServiceV1Client) QueryProjectSessionCommandV1(ctx context.Context, request *sessionv1.QueryProjectSessionCommandRequestV1, callOptions ...callopt.Option) (r *sessionv1.QueryProjectSessionCommandResponseV1, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.QueryProjectSessionCommandV1(ctx, request)
+}
+
+func (p *kAgentSessionServiceV1Client) EnsureProjectSessionV2(ctx context.Context, request *sessionv1.EnsureProjectSessionRequestV2, callOptions ...callopt.Option) (r *sessionv1.EnsureProjectSessionResponseV2, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.EnsureProjectSessionV2(ctx, request)
+}
+
+func (p *kAgentSessionServiceV1Client) QueryProjectSessionCommandV2(ctx context.Context, request *sessionv1.QueryProjectSessionCommandRequestV2, callOptions ...callopt.Option) (r *sessionv1.QueryProjectSessionCommandResponseV2, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.QueryProjectSessionCommandV2(ctx, request)
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/FigoGoo/Dora-Agent/business/internal/authorization"
 	"github.com/FigoGoo/Dora-Agent/business/internal/user"
 	"golang.org/x/crypto/argon2"
 )
@@ -31,6 +32,21 @@ type authServiceTestUsers struct {
 	record user.AuthenticationRecord
 	err    error
 	email  string
+}
+
+// authServiceTestAuthorizer 为登录和 Session Resolve 注入动态角色投影或稳定错误。
+type authServiceTestAuthorizer struct {
+	projection authorization.Projection
+	err        error
+	calls      int
+	userID     string
+}
+
+// Resolve 捕获用户并返回当前预置投影，模拟撤权后下一次解析立即变化。
+func (resolver *authServiceTestAuthorizer) Resolve(_ context.Context, userID string) (authorization.Projection, error) {
+	resolver.calls++
+	resolver.userID = userID
+	return resolver.projection, resolver.err
 }
 
 // FindAuthenticationRecord 记录规范化邮箱并返回测试事实。
@@ -148,9 +164,17 @@ func validAuthServiceRecord(now time.Time) user.AuthenticationRecord {
 
 // newAuthServiceForTest 用可预测但仅存在于测试的随机字节创建会话用例。
 func newAuthServiceForTest(t *testing.T, users *authServiceTestUsers, sessions *authServiceTestSessions, verifier *authServiceTestVerifier, now time.Time) *Service {
+	return newAuthServiceWithAuthorizerForTest(t, users, sessions, verifier, &authServiceTestAuthorizer{
+		projection: authorization.Projection{Roles: []string{}, Capabilities: []string{}},
+	}, now)
+}
+
+// newAuthServiceWithAuthorizerForTest 允许测试动态 capability、撤权和 Resolver 故障语义。
+func newAuthServiceWithAuthorizerForTest(t *testing.T, users *authServiceTestUsers, sessions *authServiceTestSessions, verifier *authServiceTestVerifier, authorizer *authServiceTestAuthorizer, now time.Time) *Service {
 	t.Helper()
 	service, err := NewService(
-		users, sessions, authServiceTestClock{now: now}, authServiceTestIDs{id: "019f0000-0000-7000-8000-000000000021"},
+		users, sessions, authorizer,
+		authServiceTestClock{now: now}, authServiceTestIDs{id: "019f0000-0000-7000-8000-000000000021"},
 		bytes.NewReader(bytes.Repeat([]byte{7}, opaqueTokenBytes)), verifier, &authServiceTestLimiter{allowed: true},
 		SessionConfig{
 			IdleTTL: 30 * time.Minute, AbsoluteTTL: 24 * time.Hour,
@@ -161,6 +185,67 @@ func newAuthServiceForTest(t *testing.T, users *authServiceTestUsers, sessions *
 		t.Fatalf("create auth service: %v", err)
 	}
 	return service
+}
+
+func TestLoginAndResolveUseCurrentAuthorizationProjection(t *testing.T) {
+	now := time.Date(2026, 7, 14, 8, 0, 0, 0, time.UTC)
+	users := &authServiceTestUsers{record: validAuthServiceRecord(now)}
+	sessions := &authServiceTestSessions{}
+	authorizer := &authServiceTestAuthorizer{projection: authorization.Projection{
+		Roles: []string{"skill_reviewer"}, Capabilities: []string{"skill.review"},
+	}}
+	service := newAuthServiceWithAuthorizerForTest(t, users, sessions, &authServiceTestVerifier{matched: true}, authorizer, now)
+
+	login, err := service.Login(context.Background(), "user@example.com", "correct-password")
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if len(login.Principal.Roles) != 1 || login.Principal.Roles[0] != "skill_reviewer" ||
+		len(login.Principal.Capabilities) != 1 || login.Principal.Capabilities[0] != "skill.review" || authorizer.calls != 1 {
+		t.Fatalf("Login did not project dynamic authorization: login=%+v resolver=%+v", login.Principal, authorizer)
+	}
+	sessions.identity = SessionIdentity{
+		Session: sessions.created, UserID: sessions.created.UserID, DisplayName: "测试用户",
+		NormalizedEmail: "user@example.com", AccountStatus: string(user.StatusActive),
+	}
+	resolved, err := service.Resolve(context.Background(), login.CookieToken)
+	if err != nil || len(resolved.Principal.Capabilities) != 1 || authorizer.calls != 2 {
+		t.Fatalf("Resolve did not refresh authorization: resolved=%+v err=%v calls=%d", resolved, err, authorizer.calls)
+	}
+
+	// 同一 Cookie 不保存 capability；下一次请求使用当前空投影，证明撤权无需重新登录即可生效。
+	authorizer.projection = authorization.Projection{Roles: []string{}, Capabilities: []string{}}
+	resolved, err = service.Resolve(context.Background(), login.CookieToken)
+	if err != nil || len(resolved.Principal.Roles) != 0 || len(resolved.Principal.Capabilities) != 0 ||
+		resolved.Principal.Roles == nil || resolved.Principal.Capabilities == nil || authorizer.calls != 3 {
+		t.Fatalf("same-cookie revocation did not take effect: resolved=%+v err=%v resolver=%+v", resolved, err, authorizer)
+	}
+}
+
+func TestAuthorizationFailuresFailClosedForLoginAndResolve(t *testing.T) {
+	now := time.Date(2026, 7, 14, 8, 0, 0, 0, time.UTC)
+	users := &authServiceTestUsers{record: validAuthServiceRecord(now)}
+	sessions := &authServiceTestSessions{}
+	authorizer := &authServiceTestAuthorizer{err: authorization.ErrUnavailable}
+	service := newAuthServiceWithAuthorizerForTest(t, users, sessions, &authServiceTestVerifier{matched: true}, authorizer, now)
+	if _, err := service.Login(context.Background(), "user@example.com", "correct-password"); !errors.Is(err, ErrUnavailable) || sessions.created.ID != "" {
+		t.Fatalf("authorization outage created login session: err=%v session=%+v", err, sessions.created)
+	}
+
+	authorizer.err = nil
+	authorizer.projection = authorization.Projection{Roles: []string{}, Capabilities: []string{}}
+	login, err := service.Login(context.Background(), "user@example.com", "correct-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions.identity = SessionIdentity{
+		Session: sessions.created, UserID: sessions.created.UserID, DisplayName: "测试用户",
+		NormalizedEmail: "user@example.com", AccountStatus: string(user.StatusActive),
+	}
+	authorizer.err = authorization.ErrSubjectInactive
+	if _, err := service.Resolve(context.Background(), login.CookieToken); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("inactive authorization subject did not invalidate session: %v", err)
+	}
 }
 
 func TestLoginNormalizesEmailAndStoresOnlyDigests(t *testing.T) {
@@ -201,7 +286,8 @@ func TestLoginRateLimitStopsBeforePasswordLookup(t *testing.T) {
 	verifier := &authServiceTestVerifier{matched: true}
 	limiter := &authServiceTestLimiter{allowed: false}
 	service, err := NewService(
-		users, sessions, authServiceTestClock{now: now}, authServiceTestIDs{id: "019f0000-0000-7000-8000-000000000021"},
+		users, sessions, &authServiceTestAuthorizer{projection: authorization.Projection{Roles: []string{}, Capabilities: []string{}}},
+		authServiceTestClock{now: now}, authServiceTestIDs{id: "019f0000-0000-7000-8000-000000000021"},
 		bytes.NewReader(bytes.Repeat([]byte{7}, opaqueTokenBytes)), verifier, limiter,
 		SessionConfig{
 			IdleTTL: 30 * time.Minute, AbsoluteTTL: 24 * time.Hour,
@@ -226,7 +312,8 @@ func TestLoginResetsRateWindowOnlyAfterPasswordMatch(t *testing.T) {
 	verifier := &authServiceTestVerifier{matched: true}
 	limiter := &authServiceTestLimiter{allowed: true}
 	service, err := NewService(
-		users, sessions, authServiceTestClock{now: now}, authServiceTestIDs{id: "019f0000-0000-7000-8000-000000000021"},
+		users, sessions, &authServiceTestAuthorizer{projection: authorization.Projection{Roles: []string{}, Capabilities: []string{}}},
+		authServiceTestClock{now: now}, authServiceTestIDs{id: "019f0000-0000-7000-8000-000000000021"},
 		bytes.NewReader(bytes.Repeat([]byte{7}, opaqueTokenBytes)), verifier, limiter,
 		SessionConfig{
 			IdleTTL: 30 * time.Minute, AbsoluteTTL: 24 * time.Hour,

@@ -23,6 +23,8 @@ type SkillSnapshotKind string
 const (
 	// SkillSnapshotKindEmpty 表示 W0 显式冻结空 Skill 集合，而不是省略冻结事实。
 	SkillSnapshotKindEmpty SkillSnapshotKind = "empty"
+	// SkillSnapshotKindPublishedRefs 表示 W1 冻结一个或多个不可变 Published Skill 引用与加密 Runtime Content。
+	SkillSnapshotKindPublishedRefs SkillSnapshotKind = "published_refs"
 )
 
 // MessageRole 表示持久化会话消息的受控角色。
@@ -62,6 +64,9 @@ const (
 // CommandTypeEnsureProjectSessionV1 是 W0 Business→Agent 建会话命令类型。
 const CommandTypeEnsureProjectSessionV1 = "ensure_project_session_v1"
 
+// CommandTypeEnsureProjectSessionV2 是 W1 Business→Agent 携带冻结 Skill Snapshot 的建会话命令类型。
+const CommandTypeEnsureProjectSessionV2 = "ensure_project_session_v2"
+
 // EnsureCommandSchemaVersionV1 是 W0 EnsureProjectSession RPC 请求的冻结契约版本。
 const EnsureCommandSchemaVersionV1 = "ensure_project_session.v1"
 
@@ -70,6 +75,12 @@ const CreationSourceQuickCreate = "quick_create"
 
 // ResultVersionV1 是 Ensure 命令冻结回执结构版本。
 const ResultVersionV1 = 1
+
+// ResultVersionV2 是携带 Skill Snapshot 摘要与数量的 Ensure v2 冻结回执结构版本。
+const ResultVersionV2 = 2
+
+// SkillSnapshotSchemaVersionV1 是 Agent 持久化 Header 与 Item 共同遵循的快照 Schema 版本。
+const SkillSnapshotSchemaVersionV1 = "session_skill_snapshot.v1"
 
 // EmptySkillSnapshotDigest 是规范化空 JSON 数组 `[]` 的 SHA-256 摘要。
 const EmptySkillSnapshotDigest = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
@@ -94,18 +105,76 @@ type Session struct {
 	ArchivedAt *time.Time
 }
 
-// SkillSnapshot 是 Session 创建时不可变冻结的 Skill 引用集合。
+// SkillSnapshot 是 Session 创建时不可变冻结的 Skill Snapshot Header。
 type SkillSnapshot struct {
 	// SessionID 是所属 Session UUIDv7。
 	SessionID string
+	// SchemaVersion 是快照持久化 Schema 版本；W0 回填与 W1 新写入均固定为 v1。
+	SchemaVersion string
 	// Kind 是快照类型；W0 必须为 empty。
 	Kind SkillSnapshotKind
+	// SkillCount 是冻结 Item 数量；empty 为 0，published_refs 必须大于 0。
+	SkillCount int
 	// Digest 是规范化快照内容摘要。
 	Digest string
 	// PublishedSnapshotRefsJSON 是稳定 JSON 数组；W0 固定为 `[]`。
 	PublishedSnapshotRefsJSON string
 	// CreatedAt 是快照冻结 UTC 时间。
 	CreatedAt time.Time
+}
+
+// SkillSnapshotItem 是 Session 创建时冻结的单个 Published Skill 持久化事实。
+// RuntimeContent 只允许保存使用 Agent Skill Snapshot 专用 purpose/AAD 生成的 AEAD Envelope，不保存明文。
+type SkillSnapshotItem struct {
+	// SessionID 是所属 Session UUIDv7。
+	SessionID string
+	// LoadOrder 是 Business 冻结的稠密加载顺序，从 1 开始。
+	LoadOrder int
+	// Priority 是 Business 冻结的非负优先级，Agent 不重新排序。
+	Priority int
+	// Namespace 是 system 或 user 稳定 token。
+	Namespace string
+	// SkillID 是 Business Skill UUIDv7 逻辑引用。
+	SkillID string
+	// PublisherUserID 是 Business 发布者 User UUIDv7 逻辑引用。
+	PublisherUserID string
+	// PublishedSnapshotID 是不可变 Published Snapshot UUIDv7 逻辑引用。
+	PublishedSnapshotID string
+	// PublicationRevision 是从 1 开始的冻结发布修订号。
+	PublicationRevision int64
+	// DefinitionSchemaVersion 是完整 Published Definition 的 Schema 版本。
+	DefinitionSchemaVersion string
+	// ContentDigest 是完整 Published Definition 的不透明 SHA-256 摘要。
+	ContentDigest string
+	// RuntimeContentSchemaVersion 是加密 Runtime Content 的 Schema 版本。
+	RuntimeContentSchemaVersion string
+	// RuntimeContentDigest 是 Runtime Content canonical 明文摘要，解密后必须重验。
+	RuntimeContentDigest string
+	// RuntimeContent 是带独立密钥版本的专用 AAD AEAD Envelope。
+	RuntimeContent ProtectedContent
+	// AllowedGraphToolKeysJSON 是冻结声明数组的稳定 JSON，不代表 Tool 已注册或可执行。
+	AllowedGraphToolKeysJSON string
+	// PublicToolRefsJSON 是冻结 Public Tool 引用数组；W1 必须为 `[]`。
+	PublicToolRefsJSON string
+	// PermissionSnapshotDigest 是 Business 权限快照的不透明 SHA-256 摘要。
+	PermissionSnapshotDigest string
+	// RuntimePolicyRef 是冻结的 Runtime Policy 版本引用。
+	RuntimePolicyRef string
+	// GovernanceEpoch 是冻结时治理纪元。
+	GovernanceEpoch int64
+	// PublishedAtUnixMS 是 Published Snapshot 发布时间的 Unix 毫秒原值。
+	PublishedAtUnixMS int64
+	// CreatedAt 是 Item 冻结 UTC 时间。
+	CreatedAt time.Time
+}
+
+// StoredSkillSnapshot 是 Repository 至多两条 SQL 读取出的 Header 与有界 Item 集合。
+// 该结构仍含密文，只有 Session Service 可以通过专用保护器解密并重验全部摘要。
+type StoredSkillSnapshot struct {
+	// Header 是不可变 Snapshot Header。
+	Header SkillSnapshot
+	// Items 按 load_order 升序排列，数量不得超过读取上限。
+	Items []SkillSnapshotItem
 }
 
 // SequenceCounter 是 Message 和 Input 各自独立的会话级单调序号边界。
@@ -215,17 +284,23 @@ type CommandReceipt struct {
 	InputID *string
 	// ResultVersion 是冻结结果结构版本。
 	ResultVersion int
+	// SkillSnapshotDigest 是命令冻结的 Snapshot set digest；V1 为规范空集合摘要。
+	SkillSnapshotDigest string
+	// SkillCount 是冻结 Snapshot Item 数量；V1 固定为 0。
+	SkillCount int
 	// CompletedAt 是本地事务成功使用的冻结 UTC 时间。
 	CompletedAt time.Time
 }
 
-// EnsurePlan 是 Repository 在一个 Agent 本地事务内提交的完整创建计划。
-// 计划中的 Message/Input 必须同时存在或同时为空，Events 必须按固定投影顺序批量写入。
+// EnsurePlan 是 Repository 在一个 Agent 本地事务内提交的 V1/V2 完整创建计划。
+// 计划中的 Snapshot Items 已在事务前加密，Message/Input 必须同时存在或同时为空，Events 按固定投影顺序批量写入。
 type EnsurePlan struct {
 	// Session 是待创建 Session 聚合。
 	Session Session
 	// SkillSnapshot 是必须原子冻结的显式空快照。
 	SkillSnapshot SkillSnapshot
+	// SkillSnapshotItems 是一次批量写入的已加密 Snapshot Items；空 Snapshot 时为空切片。
+	SkillSnapshotItems []SkillSnapshotItem
 	// SequenceCounter 是 Message/Input 初始序号事实。
 	SequenceCounter SequenceCounter
 	// RuntimeLease 是 Session Lane 初始空租约事实。

@@ -29,8 +29,10 @@ const (
 	IssuedAtMetadataKey  = "dora-session-auth-issued-at-unix-ms"
 	SignatureMetadataKey = "dora-session-auth-signature"
 
-	ensureMethod = "EnsureProjectSessionV1"
-	queryMethod  = "QueryProjectSessionCommandV1"
+	ensureMethod   = "EnsureProjectSessionV1"
+	queryMethod    = "QueryProjectSessionCommandV1"
+	ensureMethodV2 = "EnsureProjectSessionV2"
+	queryMethodV2  = "QueryProjectSessionCommandV2"
 )
 
 // Authenticator 保存启动时冻结的服务认证 Secret、时间窗口和可测试时钟。
@@ -143,6 +145,24 @@ func transportBinding(ctx context.Context, req interface{}) (binding, string, bo
 			method: queryMethod, requestID: request.RequestId, commandID: request.CommandId,
 			semanticDigest: request.ExpectedRequestDigest,
 		}, request.RequestId, true
+	case *sessionv1.AgentSessionServiceV1EnsureProjectSessionV2Args:
+		if args == nil || args.Request == nil || rpc.Invocation().MethodName() != ensureMethodV2 {
+			return binding{}, "", false
+		}
+		request := args.Request
+		return binding{
+			method: ensureMethodV2, requestID: request.RequestId, commandID: request.CommandId,
+			semanticDigest: request.RequestDigest,
+		}, request.RequestId, true
+	case *sessionv1.AgentSessionServiceV1QueryProjectSessionCommandV2Args:
+		if args == nil || args.Request == nil || rpc.Invocation().MethodName() != queryMethodV2 {
+			return binding{}, "", false
+		}
+		request := args.Request
+		return binding{
+			method: queryMethodV2, requestID: request.RequestId, commandID: request.CommandId,
+			semanticDigest: request.ExpectedRequestDigest,
+		}, request.RequestId, true
 	default:
 		return binding{}, "", false
 	}
@@ -174,6 +194,12 @@ func setUnauthenticated(resp interface{}, requestID string) bool {
 		result.ServiceError = serviceError
 		return true
 	case *sessionv1.AgentSessionServiceV1QueryProjectSessionCommandV1Result:
+		result.ServiceError = serviceError
+		return true
+	case *sessionv1.AgentSessionServiceV1EnsureProjectSessionV2Result:
+		result.ServiceError = serviceError
+		return true
+	case *sessionv1.AgentSessionServiceV1QueryProjectSessionCommandV2Result:
 		result.ServiceError = serviceError
 		return true
 	default:

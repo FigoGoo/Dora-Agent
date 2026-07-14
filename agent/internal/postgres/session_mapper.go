@@ -17,9 +17,65 @@ func mapSessionModel(entity session.Session) sessionModel {
 // mapSessionSkillSnapshotModel 将不可变 Skill Snapshot 显式映射为 GORM Model。
 func mapSessionSkillSnapshotModel(entity session.SkillSnapshot) sessionSkillSnapshotModel {
 	return sessionSkillSnapshotModel{
-		SessionID: entity.SessionID, SnapshotKind: string(entity.Kind), SnapshotDigest: entity.Digest,
+		SessionID: entity.SessionID, SchemaVersion: entity.SchemaVersion,
+		SnapshotKind: string(entity.Kind), SkillCount: entity.SkillCount, SnapshotDigest: entity.Digest,
 		PublishedSnapshotRefs: entity.PublishedSnapshotRefsJSON, CreatedAt: entity.CreatedAt,
 	}
+}
+
+// mapSessionSkillSnapshotItemModels 把全部已加密 Item 映射为一次 batch insert 使用的 GORM Models。
+// 该函数只复制 Envelope，不执行加密、解密、排序或数据库访问。
+func mapSessionSkillSnapshotItemModels(items []session.SkillSnapshotItem) []sessionSkillSnapshotItemModel {
+	models := make([]sessionSkillSnapshotItemModel, len(items))
+	for index, item := range items {
+		models[index] = sessionSkillSnapshotItemModel{
+			SessionID: item.SessionID, LoadOrder: item.LoadOrder, Priority: item.Priority,
+			Namespace: item.Namespace, SkillID: item.SkillID, PublisherUserID: item.PublisherUserID,
+			PublishedSnapshotID: item.PublishedSnapshotID, PublicationRevision: item.PublicationRevision,
+			DefinitionSchemaVersion: item.DefinitionSchemaVersion, ContentDigest: item.ContentDigest,
+			RuntimeContentSchemaVersion: item.RuntimeContentSchemaVersion,
+			RuntimeContentDigest:        item.RuntimeContentDigest,
+			RuntimeContentCiphertext:    append([]byte(nil), item.RuntimeContent.Ciphertext...),
+			RuntimeContentKeyVersion:    item.RuntimeContent.KeyVersion,
+			AllowedGraphToolKeys:        item.AllowedGraphToolKeysJSON, PublicToolRefs: item.PublicToolRefsJSON,
+			PermissionSnapshotDigest: item.PermissionSnapshotDigest, RuntimePolicyRef: item.RuntimePolicyRef,
+			GovernanceEpoch: item.GovernanceEpoch, PublishedAtUnixMS: item.PublishedAtUnixMS,
+			CreatedAt: item.CreatedAt,
+		}
+	}
+	return models
+}
+
+// mapStoredSkillSnapshot 把 Repository 两条 SQL 的 Header/Item Models 显式映射为仍含密文的领域读取结果。
+func mapStoredSkillSnapshot(header sessionSkillSnapshotModel, items []sessionSkillSnapshotItemModel) session.StoredSkillSnapshot {
+	result := session.StoredSkillSnapshot{
+		Header: session.SkillSnapshot{
+			SessionID: header.SessionID, SchemaVersion: header.SchemaVersion,
+			Kind: session.SkillSnapshotKind(header.SnapshotKind), SkillCount: header.SkillCount,
+			Digest: header.SnapshotDigest, PublishedSnapshotRefsJSON: header.PublishedSnapshotRefs,
+			CreatedAt: header.CreatedAt,
+		},
+		Items: make([]session.SkillSnapshotItem, len(items)),
+	}
+	for index, item := range items {
+		result.Items[index] = session.SkillSnapshotItem{
+			SessionID: item.SessionID, LoadOrder: item.LoadOrder, Priority: item.Priority,
+			Namespace: item.Namespace, SkillID: item.SkillID, PublisherUserID: item.PublisherUserID,
+			PublishedSnapshotID: item.PublishedSnapshotID, PublicationRevision: item.PublicationRevision,
+			DefinitionSchemaVersion: item.DefinitionSchemaVersion, ContentDigest: item.ContentDigest,
+			RuntimeContentSchemaVersion: item.RuntimeContentSchemaVersion,
+			RuntimeContentDigest:        item.RuntimeContentDigest,
+			RuntimeContent: session.ProtectedContent{
+				Ciphertext: append([]byte(nil), item.RuntimeContentCiphertext...),
+				KeyVersion: item.RuntimeContentKeyVersion,
+			},
+			AllowedGraphToolKeysJSON: item.AllowedGraphToolKeys, PublicToolRefsJSON: item.PublicToolRefs,
+			PermissionSnapshotDigest: item.PermissionSnapshotDigest, RuntimePolicyRef: item.RuntimePolicyRef,
+			GovernanceEpoch: item.GovernanceEpoch, PublishedAtUnixMS: item.PublishedAtUnixMS,
+			CreatedAt: item.CreatedAt,
+		}
+	}
+	return result
 }
 
 // mapSessionSequenceCounterModel 映射 Message/Input 初始单调序号事实。
@@ -64,7 +120,8 @@ func mapSessionCommandReceiptModel(entity session.CommandReceipt) sessionCommand
 	return sessionCommandReceiptModel{
 		CommandID: entity.CommandID, CommandType: entity.CommandType, RequestDigest: entity.RequestDigest,
 		SessionID: entity.SessionID, MessageID: cloneStringPointer(entity.MessageID), InputID: cloneStringPointer(entity.InputID),
-		ResultVersion: entity.ResultVersion, CompletedAt: entity.CompletedAt,
+		ResultVersion: entity.ResultVersion, SkillSnapshotDigest: entity.SkillSnapshotDigest,
+		SkillCount: entity.SkillCount, CompletedAt: entity.CompletedAt,
 	}
 }
 
@@ -89,7 +146,8 @@ func mapReceiptResult(model sessionCommandReceiptModel, disposition session.Ensu
 	return session.EnsureResult{
 		CommandID: model.CommandID, SessionID: model.SessionID,
 		MessageID: cloneStringPointer(model.MessageID), InputID: cloneStringPointer(model.InputID),
-		Disposition: disposition, ResultVersion: model.ResultVersion, AcceptedAt: model.CompletedAt,
+		Disposition: disposition, ResultVersion: model.ResultVersion,
+		SkillSnapshotDigest: model.SkillSnapshotDigest, SkillCount: model.SkillCount, AcceptedAt: model.CompletedAt,
 	}
 }
 

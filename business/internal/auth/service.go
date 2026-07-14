@@ -15,6 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/FigoGoo/Dora-Agent/business/internal/authorization"
 	"github.com/FigoGoo/Dora-Agent/business/internal/user"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/text/unicode/norm"
@@ -109,27 +110,28 @@ type ResolvedSession struct {
 
 // Service 实现 W0 密码登录、会话解析与幂等退出，并统一防止账号枚举。
 type Service struct {
-	users    UserRepository
-	sessions Repository
-	clock    Clock
-	ids      IDGenerator
-	random   io.Reader
-	verifier PasswordVerifier
-	limiter  LoginRateLimiter
-	config   SessionConfig
-	fake     user.PasswordCredential
+	users      UserRepository
+	sessions   Repository
+	authorizer authorization.Resolver
+	clock      Clock
+	ids        IDGenerator
+	random     io.Reader
+	verifier   PasswordVerifier
+	limiter    LoginRateLimiter
+	config     SessionConfig
+	fake       user.PasswordCredential
 }
 
 // NewService 校验依赖与会话安全参数并创建用例；任一依赖缺失都会阻止 Runtime 启动。
-func NewService(users UserRepository, sessions Repository, clock Clock, ids IDGenerator, random io.Reader, verifier PasswordVerifier, limiter LoginRateLimiter, cfg SessionConfig) (*Service, error) {
-	if users == nil || sessions == nil || clock == nil || ids == nil || random == nil || verifier == nil || limiter == nil {
+func NewService(users UserRepository, sessions Repository, authorizer authorization.Resolver, clock Clock, ids IDGenerator, random io.Reader, verifier PasswordVerifier, limiter LoginRateLimiter, cfg SessionConfig) (*Service, error) {
+	if users == nil || sessions == nil || authorizer == nil || clock == nil || ids == nil || random == nil || verifier == nil || limiter == nil {
 		return nil, fmt.Errorf("create auth service: dependency is nil")
 	}
 	if cfg.IdleTTL <= 0 || cfg.AbsoluteTTL <= 0 || cfg.IdleTTL > cfg.AbsoluteTTL || len(cfg.CSRFSecret) < 32 || cfg.MaxConcurrentSessions <= 0 {
 		return nil, fmt.Errorf("create auth service: invalid session security config")
 	}
 	return &Service{
-		users: users, sessions: sessions, clock: clock, ids: ids, random: random, verifier: verifier, limiter: limiter,
+		users: users, sessions: sessions, authorizer: authorizer, clock: clock, ids: ids, random: random, verifier: verifier, limiter: limiter,
 		config: SessionConfig{
 			IdleTTL: cfg.IdleTTL, AbsoluteTTL: cfg.AbsoluteTTL,
 			CSRFSecret: append([]byte(nil), cfg.CSRFSecret...), MaxConcurrentSessions: cfg.MaxConcurrentSessions,
@@ -188,6 +190,18 @@ func (s *Service) Login(ctx context.Context, email string, password string) (Log
 		}
 		return LoginResult{}, ErrUnavailable
 	}
+	authorizationProjection, err := s.authorizer.Resolve(ctx, record.Account.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			return LoginResult{}, err
+		case errors.Is(err, authorization.ErrSubjectInactive):
+			// 密码验证与角色解析之间账户可能失效；登录仍使用统一凭据失败语义，避免枚举账户状态。
+			return LoginResult{}, ErrInvalidCredentials
+		default:
+			return LoginResult{}, ErrUnavailable
+		}
+	}
 
 	now := s.clock.Now().UTC()
 	sessionID, err := s.ids.New()
@@ -211,7 +225,7 @@ func (s *Service) Login(ctx context.Context, email string, password string) (Log
 		return LoginResult{}, ErrUnavailable
 	}
 	return LoginResult{
-		Principal: principalFromAuthenticationRecord(record), CookieToken: cookieToken, CSRFToken: csrfToken,
+		Principal: principalFromAuthenticationRecord(record, authorizationProjection), CookieToken: cookieToken, CSRFToken: csrfToken,
 		SessionExpiresAt: earliestExpiry(session),
 	}, nil
 }
@@ -282,8 +296,19 @@ func (s *Service) Resolve(ctx context.Context, cookieToken string) (ResolvedSess
 			return ResolvedSession{}, ErrUnavailable
 		}
 	}
+	authorizationProjection, err := s.authorizer.Resolve(ctx, identity.UserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			return ResolvedSession{}, err
+		case errors.Is(err, authorization.ErrSubjectInactive):
+			return ResolvedSession{}, ErrUnauthenticated
+		default:
+			return ResolvedSession{}, ErrUnavailable
+		}
+	}
 	return ResolvedSession{
-		Principal: principalFromSessionIdentity(identity), WebSessionID: identity.Session.ID,
+		Principal: principalFromSessionIdentity(identity, authorizationProjection), WebSessionID: identity.Session.ID,
 		WebSessionVersion: identity.Session.SessionVersion, CSRFToken: csrfToken,
 		SessionExpiresAt: earliestExpiry(identity.Session),
 	}, nil
@@ -410,19 +435,21 @@ func digestToken(token string) Digest {
 	return sha256.Sum256([]byte(token))
 }
 
-// principalFromAuthenticationRecord 从已完成密码校验的认证事实构造不含凭据的前端投影。
-func principalFromAuthenticationRecord(record user.AuthenticationRecord) Principal {
+// principalFromAuthenticationRecord 从已完成密码校验与动态授权解析的事实构造不含凭据的前端投影。
+func principalFromAuthenticationRecord(record user.AuthenticationRecord, projection authorization.Projection) Principal {
 	return Principal{
 		ID: record.Account.ID, DisplayName: record.Account.DisplayName, Email: maskEmail(record.Identity.NormalizedIdentifier),
-		AccountStatus: string(record.Account.Status), Roles: []string{}, Capabilities: []string{},
+		AccountStatus: string(record.Account.Status), Roles: append([]string{}, projection.Roles...),
+		Capabilities: append([]string{}, projection.Capabilities...),
 	}
 }
 
-// principalFromSessionIdentity 从会话 JOIN 记录构造不含密码凭据的可信投影。
-func principalFromSessionIdentity(identity SessionIdentity) Principal {
+// principalFromSessionIdentity 从会话 JOIN 与本次动态授权结果构造不含密码凭据的可信投影。
+func principalFromSessionIdentity(identity SessionIdentity, projection authorization.Projection) Principal {
 	return Principal{
 		ID: identity.UserID, DisplayName: identity.DisplayName, Email: maskEmail(identity.NormalizedEmail),
-		AccountStatus: identity.AccountStatus, Roles: []string{}, Capabilities: []string{},
+		AccountStatus: identity.AccountStatus, Roles: append([]string{}, projection.Roles...),
+		Capabilities: append([]string{}, projection.Capabilities...),
 	}
 }
 

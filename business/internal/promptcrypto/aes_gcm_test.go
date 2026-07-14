@@ -100,3 +100,34 @@ func TestAESGCMProtectorRevealRejectsTamperingAndWrongKeyVersion(t *testing.T) {
 		t.Fatal("expected digest mismatch rejection")
 	}
 }
+
+func TestAESGCMProtectorReadsPreviousKeyAndWritesActiveKey(t *testing.T) {
+	activeKey := bytes.Repeat([]byte{0x42}, aes256KeyBytes)
+	previousKey := bytes.Repeat([]byte{0x31}, aes256KeyBytes)
+	oldProtector, err := NewAESGCMProtector(previousKey, "key-v1", strings.NewReader("123456789012"))
+	if err != nil {
+		t.Fatalf("create old protector: %v", err)
+	}
+	prompt := "historical prompt"
+	payload, err := oldProtector.Protect(context.Background(), prompt, project.SHA256Digest([]byte(prompt)))
+	if err != nil {
+		t.Fatalf("protect old prompt: %v", err)
+	}
+	keyring, err := NewAESGCMProtectorWithPreviousSystemRandom(activeKey, "key-v2", previousKey, "key-v1")
+	if err != nil {
+		t.Fatalf("create prompt keyring: %v", err)
+	}
+	revealed, err := keyring.Reveal(context.Background(), *payload)
+	if err != nil || revealed != prompt {
+		t.Fatalf("reveal previous prompt=%q err=%v", revealed, err)
+	}
+	newPayload, err := keyring.Protect(context.Background(), prompt, project.SHA256Digest([]byte(prompt)))
+	if err != nil || newPayload.KeyVersion != "key-v2" {
+		t.Fatalf("new prompt did not use active key: payload=%+v err=%v", newPayload, err)
+	}
+	if _, err := NewAESGCMProtectorWithPreviousSystemRandom(
+		activeKey, "key-v2", append([]byte(nil), activeKey...), "key-v1",
+	); err == nil {
+		t.Fatal("prompt keyring accepted the same root key under two versions")
+	}
+}

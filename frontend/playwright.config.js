@@ -9,7 +9,7 @@ const businessAPITarget = process.env.DORA_E2E_BUSINESS_API_TARGET
 export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.spec.js',
-  outputDir: '../.local/playwright/w0',
+  outputDir: process.env.DORA_E2E_OUTPUT_DIR || '../.local/playwright/w0',
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,

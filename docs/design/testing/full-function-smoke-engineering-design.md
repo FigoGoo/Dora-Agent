@@ -285,7 +285,7 @@ Evidence Collector 默认脱敏：Authorization、Cookie、Secret、完整 Promp
 | 分组 | Smoke | 核心依赖 |
 |---|---|---|
 | 身份/工作台/Skill | `SMK-001`～`SMK-006` | Business auth/project/skill、Agent session、前端路由/SSE |
-| Tool 目录与同步创作 | `SMK-007`～`SMK-012` | Tool Registry、四个同步 Graph、Approval、模型 Adapter |
+| Tool 目录与同步创作 | `SMK-007`～`SMK-012` | Definition Catalog、Graph 审核后形成的 Executable Registry、四个同步 Graph、Approval、模型 Adapter |
 | 异步生成与恢复 | `SMK-013`～`SMK-020` | Preparation、Operation/Job、Worker、媒体/存储 Adapter |
 | 计费与收益 | `SMK-021`～`SMK-023` | Business 追加式账本、归因和冲正 |
 | 支付充值 | `SMK-024`～`SMK-028` | 商品/订单/通知/查单/履约、支付 Adapter |
@@ -318,6 +318,35 @@ make smoke-down
 - `smoke-down` 不删除失败 Evidence；
 - CI 合并任务至少上传 JUnit、run manifest 和失败 Evidence；
 - Provider Sandbox 使用独立手动/受保护任务，不把真实 Secret 暴露给普通 PR。
+
+### 11.1 当前已落地的渐进式命令
+
+独立 `smoke/` 工程和 35 条 Scenario 尚未全部建立，但当前仓库已有以下真实基础门禁；它们是最终工程的前向子集，不得被误写成 SMK-P0 全绿：
+
+```bash
+make foundation-smoke
+make w0-smoke
+make w05-smoke
+make w05-browser-smoke
+make w1-smoke
+make w1-browser-smoke
+```
+
+`w1-smoke` 是 `w1-browser-smoke` 的兼容别名，两者必须执行同一套 W1-C2 canonical 门禁：使用真实 PostgreSQL、Redis、etcd、Business Runtime 与 Agent Runtime，显式开启默认关闭的 Project Skill Snapshot v2 feature/capability 双门禁，并执行 `@w1-real-review` 真实 Chromium 链路。仅 `localsmoke` 可编译的 Seeder 只负责通过正式密码用户与 Authorization Service 创建相互隔离的 Creator、Reviewer、Provisioner 及持久化 `skill_reviewer` 分配；之后 Reviewer 必须通过真实 Login 和每次 Session Resolve 的生产权限投影访问正式队列/冻结详情/批准发布 HTTP，再执行 100 个同幂等键的非空 Skill QuickCreate v2。在单一真实 Chromium context 中还必须证明 Creator 提交、Reviewer 批准、Creator 选择已发布 Skill 并进入 Workspace，不得拦截业务请求或注入 capability。任何只执行 API/数据库链路的 W1 调用都必须失败关闭，不得生成 `w1.skill-foundation.smoke.evidence.v3` passed Evidence。Evidence 必须同时证明：
+
+- Skill 审核、发布指针、命令回执和治理审计各自唯一；
+- Business Receipt、Binding、Resolution、Outbox 与 Agent Header/Receipt/Item 使用逐值相同的 Snapshot digest、Runtime digest、Content digest 和 count；
+- Agent Runtime Content 只以专用 AES-GCM envelope 保存，且 `localsmoke` verifier 必须通过正式 Session Service Load 路径完成解密、Canonical 与 Runtime/set digest 重算；Business 交付后清除完整 Bootstrap envelope；
+- 同键重放返回同一 Project/Session/Input，同键异义稳定冲突；
+- 已存在的 V1 Session 仍保持 empty Snapshot，不被 W1 发布或绑定回写；
+- Reviewer 角色与 `skill.review` capability 来自持久化分配；队列、冻结详情、强 ETag、批准发布和同义重放均走正式 HTTP；
+- 部署控制的窄权限角色管理 CLI 撤销分配后，同一 Cookie 再次 Resolve 必须投影为空，管理 API 必须以 `SKILL_REVIEW_CAPABILITY_REQUIRED` 返回 403；
+- Browser Driver 必须真实完成 Creator → Reviewer → Published Skill 选择 → QuickCreate v2，不得使用 API mock、请求拦截或 skip；
+- Browser Driver 必须输出仅含 ID 与 A/B sentinel 的权限 `0600` 临时结果；Smoke 随后通过正式 Owner/Reviewer API、Business/Agent 数据库和 Agent Service Load 解密重验，证明提交 A 后保存的草稿 B 未替换本次发布，Project/Session 冻结的 Published Snapshot 仍精确引用 A；
+- Smoke 脚本从当前 worktree 强制重建 Business/Agent Runtime 后再计算二进制摘要和启动，不能接受旧预构建产物；
+- Evidence 不包含 Cookie、CSRF、密码、完整 Prompt、完整 Skill Definition、密文/Nonce、密钥材料或内部身份断言。
+
+本地 Seeder 只允许 `DORA_ENV=local`、loopback、专用本地库/角色和 Creator/Reviewer/Provisioner 三身份分离，不注册 HTTP、RPC 或生产 Runtime 路由，也不得直接发布 Skill。生产 Runtime 的权限解析、审核事务、内容摘要重算、CAS、不可变快照和原子审计均走正式路径；生产角色写入只由部署控制的窄权限离线 CLI 承担，不在本阶段暴露角色管理 HTTP。Evidence Schema 固定为 `w1.skill-foundation.smoke.evidence.v3`，其中 `reviewer_rbac`、`reviewer_revocation`、`browser_formal_api_frozen_revision`、`browser_business_frozen_revision`、`browser_agent_snapshot_matches_published` 与 `browser_review_publish_quickcreate_v2` 必须从脱敏响应、数据库和验证器结果派生为 `true`，不得硬编码。
 
 ## 12. 通过、重试与清理规则
 

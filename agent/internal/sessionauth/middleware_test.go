@@ -117,6 +117,66 @@ func TestMiddlewareAuthenticatesBoundQuery(t *testing.T) {
 	}
 }
 
+// TestMiddlewareAuthenticatesBoundV2Methods 验证 V2 Ensure/Query 使用各自方法名与语义摘要签名，不能复用 V1 断言。
+func TestMiddlewareAuthenticatesBoundV2Methods(t *testing.T) {
+	authenticator := newTestAuthenticator(t)
+	tests := []struct {
+		name   string
+		method string
+		args   interface{}
+		result interface{}
+	}{
+		{
+			name: "ensure v2", method: ensureMethodV2,
+			args: &sessionv1.AgentSessionServiceV1EnsureProjectSessionV2Args{Request: &sessionv1.EnsureProjectSessionRequestV2{
+				SchemaVersion: sessionv1.ENSURE_PROJECT_SESSION_SCHEMA_VERSION_V2,
+				RequestId:     testRequestID, CommandId: testCommandID, RequestDigest: testDigest,
+			}},
+			result: sessionv1.NewAgentSessionServiceV1EnsureProjectSessionV2Result(),
+		},
+		{
+			name: "query v2", method: queryMethodV2,
+			args: &sessionv1.AgentSessionServiceV1QueryProjectSessionCommandV2Args{Request: &sessionv1.QueryProjectSessionCommandRequestV2{
+				SchemaVersion: sessionv1.QUERY_PROJECT_SESSION_COMMAND_SCHEMA_VERSION_V2,
+				RequestId:     testRequestID, CommandId: testCommandID, ExpectedRequestDigest: testDigest,
+			}},
+			result: sessionv1.NewAgentSessionServiceV1QueryProjectSessionCommandV2Result(),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			authBinding := binding{method: test.method, requestID: testRequestID, commandID: testCommandID, semanticDigest: testDigest}
+			ctx := signedTestContext(authBinding, testSecret, testNow)
+			called := false
+			next := endpoint.Endpoint(func(_ context.Context, _, _ interface{}) error { called = true; return nil })
+			if err := authenticator.Middleware()(next)(ctx, test.args, test.result); err != nil || !called {
+				t.Fatalf("V2 合法认证失败: err=%v called=%v result=%+v", err, called, test.result)
+			}
+		})
+	}
+}
+
+// TestMiddlewareRejectsCrossVersionMethodReplay 验证相同 request/command/digest 的 V1 签名不能重放到 V2 Ensure。
+func TestMiddlewareRejectsCrossVersionMethodReplay(t *testing.T) {
+	authenticator := newTestAuthenticator(t)
+	v1Binding := binding{method: ensureMethod, requestID: testRequestID, commandID: testCommandID, semanticDigest: testDigest}
+	ctx := signedTestContext(v1Binding, testSecret, testNow)
+	args := &sessionv1.AgentSessionServiceV1EnsureProjectSessionV2Args{Request: &sessionv1.EnsureProjectSessionRequestV2{
+		SchemaVersion: sessionv1.ENSURE_PROJECT_SESSION_SCHEMA_VERSION_V2,
+		RequestId:     testRequestID, CommandId: testCommandID, RequestDigest: testDigest,
+	}}
+	result := sessionv1.NewAgentSessionServiceV1EnsureProjectSessionV2Result()
+	called := false
+	next := endpoint.Endpoint(func(_ context.Context, _, _ interface{}) error { called = true; return nil })
+
+	if err := authenticator.Middleware()(next)(ctx, args, result); err != nil {
+		t.Fatalf("跨版本失败未编码为 declared exception: %v", err)
+	}
+	if called || result.ServiceError == nil || result.ServiceError.Code != "UNAUTHENTICATED" {
+		t.Fatalf("V1 签名可重放到 V2: called=%v result=%+v", called, result)
+	}
+}
+
 func newTestAuthenticator(t *testing.T) *Authenticator {
 	t.Helper()
 	authenticator, err := newWithClock(testSecret, 30*time.Second, func() time.Time { return testNow })

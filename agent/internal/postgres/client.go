@@ -15,7 +15,7 @@ import (
 
 const schemaName = "agent"
 
-// requiredAgentTables 返回 W0 Agent Runtime Ready 前必须存在的权威基础表。
+// requiredAgentTables 返回 W1-B1 Agent Runtime Ready 前必须存在的权威基础表。
 // 列表保持稳定顺序，使缺表错误和测试证据可重复；新增必需表时必须同步 Migration 与契约测试。
 func requiredAgentTables() []string {
 	return []string{
@@ -28,6 +28,7 @@ func requiredAgentTables() []string {
 		"session_runtime_lease",
 		"session_sequence_counter",
 		"session_skill_snapshot",
+		"session_skill_snapshot_item",
 	}
 }
 

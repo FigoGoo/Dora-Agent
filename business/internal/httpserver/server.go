@@ -37,6 +37,10 @@ type RouteHandlers struct {
 	Project *ProjectHandler
 	// Agent 注册同源 Workspace Snapshot 与 EventLog SSE 固定代理路由。
 	Agent *AgentProxyHandler
+	// Skill 注册 W1 Skill Owner 草稿、列表、详情、替换和审核提交路由。
+	Skill *SkillHandler
+	// SkillReview 注册 W1-C2 Reviewer 待审队列、冻结详情和批准决定路由。
+	SkillReview *SkillReviewHandler
 }
 
 // New 使用显式超时、请求头上限和可信代理配置创建 HTTP Server；可选 RouteHandlers 用于完整 Runtime 接线。
@@ -52,12 +56,14 @@ func New(httpCfg config.HTTPConfig, serviceCfg config.ServiceConfig, state *heal
 	}
 	if len(routeHandlers) == 1 {
 		handlers := routeHandlers[0]
-		if handlers.Auth == nil || handlers.Project == nil || handlers.Agent == nil {
-			return nil, fmt.Errorf("register business HTTP handlers: Auth, Project, and Agent handlers are required together")
+		if handlers.Auth == nil || handlers.Project == nil || handlers.Agent == nil || handlers.Skill == nil || handlers.SkillReview == nil {
+			return nil, fmt.Errorf("register business HTTP handlers: Auth, Project, Agent, Skill, and SkillReview handlers are required together")
 		}
 		handlers.Auth.Register(router)
 		handlers.Project.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
 		handlers.Agent.Register(router, handlers.Auth.RequireSession())
+		handlers.Skill.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
+		handlers.SkillReview.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
 	}
 
 	router.GET("/livez", func(c *gin.Context) {

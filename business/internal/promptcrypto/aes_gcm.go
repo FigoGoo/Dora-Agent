@@ -6,6 +6,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +23,7 @@ type AESGCMProtector struct {
 	aead       cipher.AEAD
 	keyVersion string
 	random     io.Reader
+	readKeys   map[string]cipher.AEAD
 }
 
 // NewAESGCMProtector 校验 AES-256 Key、Key Version 与随机源并创建可并发复用的保护器。
@@ -29,6 +31,48 @@ func NewAESGCMProtector(key []byte, keyVersion string, random io.Reader) (*AESGC
 	if len(key) != aes256KeyBytes || strings.TrimSpace(keyVersion) == "" || len(keyVersion) > 64 || random == nil {
 		return nil, errors.New("create prompt protector: invalid key configuration")
 	}
+	aead, err := newPromptAEAD(key)
+	if err != nil {
+		return nil, err
+	}
+	return &AESGCMProtector{
+		aead: aead, keyVersion: keyVersion, random: random,
+		readKeys: map[string]cipher.AEAD{keyVersion: aead},
+	}, nil
+}
+
+// NewAESGCMProtectorWithSystemRandom 使用 crypto/rand 创建生产保护器。
+func NewAESGCMProtectorWithSystemRandom(key []byte, keyVersion string) (*AESGCMProtector, error) {
+	return NewAESGCMProtector(key, keyVersion, rand.Reader)
+}
+
+// NewAESGCMProtectorWithPreviousSystemRandom 创建 active-write、active/previous-read 的 Prompt Keyring。
+func NewAESGCMProtectorWithPreviousSystemRandom(
+	key []byte,
+	keyVersion string,
+	previousKey []byte,
+	previousKeyVersion string,
+) (*AESGCMProtector, error) {
+	protector, err := NewAESGCMProtector(key, keyVersion, rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if len(previousKey) == 0 && previousKeyVersion == "" {
+		return protector, nil
+	}
+	if len(previousKey) != aes256KeyBytes || !validBootstrapKeyVersion(previousKeyVersion) ||
+		previousKeyVersion == protector.keyVersion || subtle.ConstantTimeCompare(key, previousKey) == 1 {
+		return nil, errors.New("create prompt protector: previous key pair is invalid")
+	}
+	previousAEAD, err := newPromptAEAD(previousKey)
+	if err != nil {
+		return nil, err
+	}
+	protector.readKeys[previousKeyVersion] = previousAEAD
+	return protector, nil
+}
+
+func newPromptAEAD(key []byte) (cipher.AEAD, error) {
 	block, err := aes.NewCipher(append([]byte(nil), key...))
 	if err != nil {
 		return nil, fmt.Errorf("create prompt AES block: %w", err)
@@ -37,12 +81,7 @@ func NewAESGCMProtector(key []byte, keyVersion string, random io.Reader) (*AESGC
 	if err != nil {
 		return nil, fmt.Errorf("create prompt AES-GCM: %w", err)
 	}
-	return &AESGCMProtector{aead: aead, keyVersion: keyVersion, random: random}, nil
-}
-
-// NewAESGCMProtectorWithSystemRandom 使用 crypto/rand 创建生产保护器。
-func NewAESGCMProtectorWithSystemRandom(key []byte, keyVersion string) (*AESGCMProtector, error) {
-	return NewAESGCMProtector(key, keyVersion, rand.Reader)
+	return aead, nil
 }
 
 // Protect 核对调用方已经执行冻结的 Prompt 规范化与 Digest，再返回 AES-256-GCM 密文元数据。
@@ -76,11 +115,12 @@ func (protector *AESGCMProtector) Reveal(ctx context.Context, payload project.En
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if payload.Algorithm != project.PromptEncryptionAlgorithm || payload.KeyVersion != protector.keyVersion ||
-		len(payload.Nonce) != protector.aead.NonceSize() || len(payload.Ciphertext) <= protector.aead.Overhead() {
+	aead, keyAvailable := protector.readKeys[payload.KeyVersion]
+	if payload.Algorithm != project.PromptEncryptionAlgorithm || !keyAvailable ||
+		len(payload.Nonce) != aead.NonceSize() || len(payload.Ciphertext) <= aead.Overhead() {
 		return "", errors.New("reveal prompt: invalid encryption metadata")
 	}
-	plaintext, err := protector.aead.Open(nil, payload.Nonce, payload.Ciphertext, nil)
+	plaintext, err := aead.Open(nil, payload.Nonce, payload.Ciphertext, nil)
 	if err != nil {
 		return "", errors.New("reveal prompt: authentication failed")
 	}

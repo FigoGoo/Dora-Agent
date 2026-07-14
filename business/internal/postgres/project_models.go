@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 
@@ -120,6 +121,14 @@ type projectSessionOutboxModel struct {
 	PayloadCiphertext []byte `gorm:"column:payload_ciphertext"`
 	// PayloadDigest 规范化首提示词明文摘要。
 	PayloadDigest []byte `gorm:"column:payload_digest"`
+	// SkillSnapshotDigest 是 v2 Snapshot set 摘要；v1 数据库审计值固定 empty digest。
+	SkillSnapshotDigest []byte `gorm:"column:skill_snapshot_digest"`
+	// SkillCount 是 v2 Snapshot Item 数量；v1 固定零。
+	SkillCount int32 `gorm:"column:skill_count"`
+	// BindingSetVersion 是 v2 初始绑定集合版本；v1 为空。
+	BindingSetVersion *int64 `gorm:"column:binding_set_version"`
+	// ResolutionID 是 v2 不可变解析头逻辑引用；v1 为空。
+	ResolutionID *string `gorm:"column:resolution_id;type:uuid"`
 	// PayloadClearedAt Agent Receipt 确认后清除首提示词密文的时间。
 	PayloadClearedAt *time.Time `gorm:"column:payload_cleared_at"`
 	// Status Outbox 派发状态。
@@ -289,6 +298,7 @@ func projectSessionBindingModelFromEntity(entity project.SessionBinding) project
 
 // projectSessionOutboxModelFromEntity 显式映射 Outbox，并保证空 Prompt 不产生任何加密负载列。
 func projectSessionOutboxModelFromEntity(entity project.SessionOutbox) projectSessionOutboxModel {
+	emptySnapshotDigest := project.SHA256Digest([]byte("[]"))
 	model := projectSessionOutboxModel{
 		ID: entity.ID, EventType: entity.EventType, SchemaVersion: entity.SchemaVersion,
 		AggregateID: entity.AggregateID, OwnerUserID: entity.OwnerUserID,
@@ -297,6 +307,14 @@ func projectSessionOutboxModelFromEntity(entity project.SessionOutbox) projectSe
 		LeaseVersion: entity.LeaseVersion, LeaseExpiresAt: entity.LeaseExpiresAt, AttemptCount: entity.AttemptCount,
 		MaxAttempts: entity.MaxAttempts, DeliveredAt: entity.DeliveredAt, PayloadClearedAt: entity.PayloadClearedAt,
 		CreatedAt: entity.CreatedAt, UpdatedAt: entity.UpdatedAt,
+	}
+	if entity.SchemaVersion == project.EnsureSessionSchemaVersionV2 {
+		model.SkillSnapshotDigest = append([]byte(nil), entity.SkillSnapshotDigest[:]...)
+		model.SkillCount = entity.SkillCount
+		model.BindingSetVersion = entity.BindingSetVersion
+		model.ResolutionID = entity.ResolutionID
+	} else {
+		model.SkillSnapshotDigest = append([]byte(nil), emptySnapshotDigest[:]...)
 	}
 	if entity.EncryptedPayload != nil {
 		model.PayloadDigest = append([]byte(nil), entity.EncryptedPayload.PayloadDigest[:]...)
@@ -314,7 +332,7 @@ func projectSessionOutboxModelFromEntity(entity project.SessionOutbox) projectSe
 
 // projectSessionOutboxEntity 将数据库 Outbox 深拷贝为领域实体，并拒绝摘要长度、状态或密文三态异常。
 func projectSessionOutboxEntity(model projectSessionOutboxModel) (project.SessionOutbox, error) {
-	if len(model.RequestDigest) != len(project.Digest{}) {
+	if len(model.RequestDigest) != len(project.Digest{}) || len(model.SkillSnapshotDigest) != len(project.Digest{}) {
 		return project.SessionOutbox{}, fmt.Errorf("map project session outbox: %w", project.ErrInvalidQuickCreate)
 	}
 	entity := project.SessionOutbox{
@@ -326,7 +344,34 @@ func projectSessionOutboxEntity(model projectSessionOutboxModel) (project.Sessio
 		CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt,
 	}
 	copy(entity.RequestDigest[:], model.RequestDigest)
-	if model.HasInitialPrompt {
+	if model.SchemaVersion == project.EnsureSessionSchemaVersionV2 {
+		if len(model.PayloadDigest) != len(project.Digest{}) {
+			return project.SessionOutbox{}, fmt.Errorf("map project v2 session outbox payload digest: %w", project.ErrInvalidQuickCreate)
+		}
+		copy(entity.SkillSnapshotDigest[:], model.SkillSnapshotDigest)
+		entity.SkillCount = model.SkillCount
+		entity.BindingSetVersion = model.BindingSetVersion
+		entity.ResolutionID = model.ResolutionID
+		payload := &project.EncryptedPayload{}
+		copy(payload.PayloadDigest[:], model.PayloadDigest)
+		if model.PayloadClearedAt == nil {
+			if model.PayloadEncryptionAlgorithm == nil || model.PayloadKeyVersion == nil {
+				return project.SessionOutbox{}, fmt.Errorf("map project v2 session outbox encryption metadata: %w", project.ErrInvalidQuickCreate)
+			}
+			payload.Algorithm = *model.PayloadEncryptionAlgorithm
+			payload.KeyVersion = *model.PayloadKeyVersion
+			payload.Nonce = append([]byte(nil), model.PayloadNonce...)
+			payload.Ciphertext = append([]byte(nil), model.PayloadCiphertext...)
+		}
+		entity.EncryptedPayload = payload
+	} else {
+		emptySnapshotDigest := project.SHA256Digest([]byte("[]"))
+		if !bytes.Equal(model.SkillSnapshotDigest, emptySnapshotDigest[:]) || model.SkillCount != 0 ||
+			model.BindingSetVersion != nil || model.ResolutionID != nil {
+			return project.SessionOutbox{}, fmt.Errorf("map project v1 session outbox empty snapshot metadata: %w", project.ErrInvalidQuickCreate)
+		}
+	}
+	if model.SchemaVersion != project.EnsureSessionSchemaVersionV2 && model.HasInitialPrompt {
 		if len(model.PayloadDigest) != len(project.Digest{}) {
 			return project.SessionOutbox{}, fmt.Errorf("map project session outbox payload digest: %w", project.ErrInvalidQuickCreate)
 		}

@@ -29,8 +29,12 @@ func (sessionModel) TableName() string { return "agent.session" }
 type sessionSkillSnapshotModel struct {
 	// SessionID 是 Session 逻辑引用和本表主键。
 	SessionID string `gorm:"column:session_id;type:uuid;primaryKey"`
+	// SchemaVersion 是快照 Header Schema 版本。
+	SchemaVersion string `gorm:"column:schema_version"`
 	// SnapshotKind 是快照类型，W0 固定 empty。
 	SnapshotKind string `gorm:"column:snapshot_kind"`
+	// SkillCount 是不可变 Snapshot Item 数量。
+	SkillCount int `gorm:"column:skill_count"`
 	// SnapshotDigest 是规范化快照摘要。
 	SnapshotDigest string `gorm:"column:snapshot_digest"`
 	// PublishedSnapshotRefs 是冻结的 Published Skill 引用 JSON 数组。
@@ -41,6 +45,57 @@ type sessionSkillSnapshotModel struct {
 
 // TableName 返回 Skill Snapshot 的显式 Agent Schema 表名。
 func (sessionSkillSnapshotModel) TableName() string { return "agent.session_skill_snapshot" }
+
+// sessionSkillSnapshotItemModel 映射不可变 Published Skill 元数据及 Agent 专用 AAD 加密 Runtime Content。
+type sessionSkillSnapshotItemModel struct {
+	// SessionID 是 Session 逻辑引用，与 LoadOrder 组成主键。
+	SessionID string `gorm:"column:session_id;type:uuid;primaryKey"`
+	// LoadOrder 是从 1 开始的稠密加载顺序。
+	LoadOrder int `gorm:"column:load_order;primaryKey"`
+	// Priority 是 Business 冻结的非负优先级。
+	Priority int `gorm:"column:priority"`
+	// Namespace 是 system 或 user 稳定 token。
+	Namespace string `gorm:"column:namespace"`
+	// SkillID 是 Business Skill 逻辑引用。
+	SkillID string `gorm:"column:skill_id;type:uuid"`
+	// PublisherUserID 是 Business 发布者 User 逻辑引用。
+	PublisherUserID string `gorm:"column:publisher_user_id;type:uuid"`
+	// PublishedSnapshotID 是不可变 Published Snapshot 逻辑引用。
+	PublishedSnapshotID string `gorm:"column:published_snapshot_id;type:uuid"`
+	// PublicationRevision 是冻结发布修订号。
+	PublicationRevision int64 `gorm:"column:publication_revision"`
+	// DefinitionSchemaVersion 是完整 Published Definition Schema 版本。
+	DefinitionSchemaVersion string `gorm:"column:definition_schema_version"`
+	// ContentDigest 是完整 Published Definition 的不透明摘要。
+	ContentDigest string `gorm:"column:content_digest"`
+	// RuntimeContentSchemaVersion 是加密 Runtime Content Schema 版本。
+	RuntimeContentSchemaVersion string `gorm:"column:runtime_content_schema_version"`
+	// RuntimeContentDigest 是 Runtime Content canonical 明文摘要。
+	RuntimeContentDigest string `gorm:"column:runtime_content_digest"`
+	// RuntimeContentCiphertext 是专用 AAD 认证的 DRAE v1 Envelope。
+	RuntimeContentCiphertext []byte `gorm:"column:runtime_content_ciphertext"`
+	// RuntimeContentKeyVersion 是 Agent Skill Snapshot 专用密钥版本引用。
+	RuntimeContentKeyVersion string `gorm:"column:runtime_content_key_version"`
+	// AllowedGraphToolKeys 是冻结 Graph Tool 声明 JSON 数组。
+	AllowedGraphToolKeys string `gorm:"column:allowed_graph_tool_keys;type:jsonb"`
+	// PublicToolRefs 是 Public Tool 引用 JSON 数组；W1 必须为空。
+	PublicToolRefs string `gorm:"column:public_tool_refs;type:jsonb"`
+	// PermissionSnapshotDigest 是 Business 权限快照不透明摘要。
+	PermissionSnapshotDigest string `gorm:"column:permission_snapshot_digest"`
+	// RuntimePolicyRef 是冻结 Runtime Policy 引用。
+	RuntimePolicyRef string `gorm:"column:runtime_policy_ref"`
+	// GovernanceEpoch 是冻结时治理纪元。
+	GovernanceEpoch int64 `gorm:"column:governance_epoch"`
+	// PublishedAtUnixMS 是 Published Snapshot 发布时间 Unix 毫秒原值。
+	PublishedAtUnixMS int64 `gorm:"column:published_at_unix_ms"`
+	// CreatedAt 是 Item 冻结 UTC 时间。
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+// TableName 返回 Session Skill Snapshot Item 的显式 Agent Schema 表名。
+func (sessionSkillSnapshotItemModel) TableName() string {
+	return "agent.session_skill_snapshot_item"
+}
 
 // sessionSequenceCounterModel 映射 Message 与 Input 的独立会话级序号计数器。
 type sessionSequenceCounterModel struct {
@@ -154,6 +209,10 @@ type sessionCommandReceiptModel struct {
 	InputID *string `gorm:"column:input_id;type:uuid"`
 	// ResultVersion 是冻结结果结构版本。
 	ResultVersion int `gorm:"column:result_version"`
+	// SkillSnapshotDigest 是冻结 Session Skill Snapshot set digest。
+	SkillSnapshotDigest string `gorm:"column:skill_snapshot_digest"`
+	// SkillCount 是冻结 Snapshot Item 数量。
+	SkillCount int `gorm:"column:skill_count"`
 	// CompletedAt 是事务冻结 UTC 时间。
 	CompletedAt time.Time `gorm:"column:completed_at"`
 }

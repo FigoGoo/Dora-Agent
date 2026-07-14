@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/FigoGoo/Dora-Agent/agent/internal/session"
+	"github.com/FigoGoo/Dora-Agent/agent/internal/skill"
 	"github.com/FigoGoo/Dora-Agent/agent/kitex_gen/sessionv1"
 	"github.com/google/uuid"
 )
@@ -28,6 +29,8 @@ const (
 type Service interface {
 	// EnsureProjectSession 幂等建立 Session 基础事实并返回冻结 Receipt。
 	EnsureProjectSession(ctx context.Context, command session.EnsureCommand) (session.EnsureResult, error)
+	// EnsureProjectSessionV2 幂等建立携带不可变 Skill Snapshot 的 Session 基础事实。
+	EnsureProjectSessionV2(ctx context.Context, command session.EnsureCommandV2) (session.EnsureResult, error)
 	// QueryProjectSessionCommand 只读核对原命令的 not_found/completed/conflict 状态。
 	QueryProjectSessionCommand(ctx context.Context, command session.QueryCommand) (session.QueryCommandResult, error)
 }
@@ -35,15 +38,24 @@ type Service interface {
 // Handler 严格映射 Session Thrift DTO，独立复核 Prompt Canonical Digest，并把领域错误收敛为安全业务异常。
 // Handler 不记录 Prompt、Digest、密钥、Envelope 或完整 RPC Payload，也不执行框架自动重试。
 type Handler struct {
-	service Service
+	service             Service
+	skillSnapshotLimits skill.LimitsProfileV1
 }
 
 // NewHandler 创建 Session RPC Handler；Session 用例缺失时阻止 Transport 启动。
 func NewHandler(service Service) (*Handler, error) {
+	return NewHandlerWithSkillSnapshotLimits(service, skill.DefaultLimitsProfileV1())
+}
+
+// NewHandlerWithSkillSnapshotLimits 使用启动时冻结的 Agent 接收剖面创建双版本 RPC Handler。
+func NewHandlerWithSkillSnapshotLimits(service Service, limits skill.LimitsProfileV1) (*Handler, error) {
 	if service == nil {
 		return nil, fmt.Errorf("Session RPC Handler 依赖缺失")
 	}
-	return &Handler{service: service}, nil
+	if err := limits.Validate(); err != nil {
+		return nil, fmt.Errorf("Session RPC Handler Skill Snapshot limits 无效: %w", err)
+	}
+	return &Handler{service: service, skillSnapshotLimits: limits}, nil
 }
 
 // EnsureProjectSessionV1 显式映射、独立重算摘要并调用幂等 Session 用例。

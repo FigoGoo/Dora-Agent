@@ -43,6 +43,73 @@ func TestLoadValidConfig(t *testing.T) {
 		t.Fatalf("Agent HTTP 默认值不一致: base_url=%q timeout=%s kid=%q ttl=%s",
 			cfg.AgentHTTP.BaseURL, cfg.AgentHTTP.RequestTimeout, cfg.AgentHTTP.AssertionKeyVersion, cfg.AgentHTTP.AssertionTTL)
 	}
+	if cfg.Skill.MaxRequestBodyBytes != 524288 {
+		t.Fatalf("Skill Builder 请求体默认上限不一致: %+v", cfg.Skill)
+	}
+	if cfg.Project.SkillSnapshotV2Enabled || cfg.Project.AgentSessionV2CapabilityConfirmed ||
+		cfg.Project.SkillSnapshotLimitsProfile != "session_skill_snapshot_limits.v1" ||
+		cfg.Project.SkillSnapshotLimits.MaxItems != 16 {
+		t.Fatalf("QuickCreate v2 默认门禁或 limits 漂移: %+v", cfg.Project)
+	}
+}
+
+func TestLoadRequiresAgentCapabilityAndSafeSkillSnapshotLimitsForV2(t *testing.T) {
+	setValidAuthSecret(t)
+	t.Setenv("BUSINESS_INSTANCE_ID", "business-test-1")
+	t.Setenv("BUSINESS_ADVERTISED_ADDRESS", "host.docker.internal:18081")
+	t.Setenv("BUSINESS_RPC_ADVERTISED_ADDRESS", "host.docker.internal:19081")
+	t.Setenv("BUSINESS_DATABASE_URL", "postgres://user:password@127.0.0.1:5432/business?sslmode=disable")
+	t.Setenv("BUSINESS_REDIS_ADDR", "127.0.0.1:6379")
+	t.Setenv("BUSINESS_ETCD_ENDPOINTS", "127.0.0.1:2379")
+	t.Setenv("BUSINESS_PROJECT_SKILL_SNAPSHOT_V2_ENABLED", "true")
+	if _, err := Load("test"); err == nil {
+		t.Fatal("未确认 Agent v2 capability 时开启新流量未失败关闭")
+	}
+	t.Setenv("BUSINESS_AGENT_SESSION_V2_CAPABILITY_CONFIRMED", "true")
+	if _, err := Load("test"); err != nil {
+		t.Fatalf("已确认 capability 的默认 v2 limits 未通过: %v", err)
+	}
+	t.Setenv("BUSINESS_SKILL_SNAPSHOT_MAX_ITEMS", "33")
+	if _, err := Load("test"); err == nil {
+		t.Fatal("超过协议 ceiling 的 Business Producer limits 被接受")
+	}
+}
+
+func TestLoadValidatesProjectPromptPreviousKeyPair(t *testing.T) {
+	setValidAuthSecret(t)
+	t.Setenv("BUSINESS_INSTANCE_ID", "business-test-1")
+	t.Setenv("BUSINESS_ADVERTISED_ADDRESS", "host.docker.internal:18081")
+	t.Setenv("BUSINESS_RPC_ADVERTISED_ADDRESS", "host.docker.internal:19081")
+	t.Setenv("BUSINESS_DATABASE_URL", "postgres://user:password@127.0.0.1:5432/business?sslmode=disable")
+	t.Setenv("BUSINESS_REDIS_ADDR", "127.0.0.1:6379")
+	t.Setenv("BUSINESS_ETCD_ENDPOINTS", "127.0.0.1:2379")
+
+	t.Setenv("BUSINESS_PROJECT_PROMPT_PREVIOUS_KEY_VERSION", "project-prompt-test-v0")
+	if _, err := Load("test"); err == nil {
+		t.Fatal("只配置 previous KeyVersion 未失败关闭")
+	}
+	t.Setenv("BUSINESS_PROJECT_PROMPT_PREVIOUS_KEY_BASE64", "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA=")
+	if _, err := Load("test"); err != nil {
+		t.Fatalf("合法 previous key pair 未通过: %v", err)
+	}
+	t.Setenv("BUSINESS_PROJECT_PROMPT_PREVIOUS_KEY_BASE64", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	if _, err := Load("test"); err == nil {
+		t.Fatal("previous KeyVersion 复用 active 根密钥未失败关闭")
+	}
+}
+
+func TestLoadRejectsUnsafeSkillRequestBodyLimit(t *testing.T) {
+	setValidAuthSecret(t)
+	t.Setenv("BUSINESS_INSTANCE_ID", "business-test-1")
+	t.Setenv("BUSINESS_ADVERTISED_ADDRESS", "host.docker.internal:18081")
+	t.Setenv("BUSINESS_RPC_ADVERTISED_ADDRESS", "host.docker.internal:19081")
+	t.Setenv("BUSINESS_DATABASE_URL", "postgres://user:password@127.0.0.1:5432/business?sslmode=disable")
+	t.Setenv("BUSINESS_REDIS_ADDR", "127.0.0.1:6379")
+	t.Setenv("BUSINESS_ETCD_ENDPOINTS", "127.0.0.1:2379")
+	t.Setenv("BUSINESS_SKILL_MAX_REQUEST_BODY_BYTES", "1048577")
+	if _, err := Load("test"); err == nil {
+		t.Fatal("期望超过上限的 Skill Builder 请求体配置被拒绝")
+	}
 }
 
 // TestLoadRejectsLoopbackAdvertisedAddress 验证服务注册不会发布回环地址。

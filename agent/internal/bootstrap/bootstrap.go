@@ -21,6 +21,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/agent/internal/rpcserver"
 	"github.com/FigoGoo/Dora-Agent/agent/internal/session"
 	"github.com/FigoGoo/Dora-Agent/agent/internal/sessionrpc"
+	"github.com/FigoGoo/Dora-Agent/agent/internal/skill"
 	"github.com/FigoGoo/Dora-Agent/agent/internal/workspace"
 	"github.com/FigoGoo/Dora-Agent/agent/kitex_gen/sessionv1"
 )
@@ -105,17 +106,32 @@ func Run(ctx context.Context, build BuildInfo) error {
 		_ = registry.Close(ctx)
 		return err
 	}
+	skillSnapshotProtector, err := contentcrypto.NewSkillSnapshotAES256GCMProtectorWithPrevious(
+		cfg.ContentProtection.Key, cfg.ContentProtection.KeyVersion,
+		cfg.ContentProtection.PreviousKey, cfg.ContentProtection.PreviousKeyVersion,
+	)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return err
+	}
 	sessionRepository, err := postgres.NewSessionRepository(postgresClient)
 	if err != nil {
 		_ = registry.Close(ctx)
 		return err
 	}
-	sessionService, err := session.NewService(sessionRepository, idgen.UUIDv7{}, clock.System{}, contentProtector)
+	if err := skill.ValidateProducerLimitsV1(cfg.SkillSnapshotLimits, cfg.SkillSnapshotLimits); err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("validate Agent Skill Snapshot limits: %w", err)
+	}
+	sessionService, err := session.NewServiceWithSkillSnapshot(
+		sessionRepository, idgen.UUIDv7{}, clock.System{}, contentProtector,
+		skillSnapshotProtector, cfg.SkillSnapshotLimits,
+	)
 	if err != nil {
 		_ = registry.Close(ctx)
 		return err
 	}
-	sessionHandler, err := sessionrpc.NewHandler(sessionService)
+	sessionHandler, err := sessionrpc.NewHandlerWithSkillSnapshotLimits(sessionService, cfg.SkillSnapshotLimits)
 	if err != nil {
 		_ = registry.Close(ctx)
 		return err

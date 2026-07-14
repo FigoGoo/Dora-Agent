@@ -1,3 +1,5 @@
+import { PROJECT_QUICK_CREATE_MAX_SKILL_COUNT } from './projectQuickCreate.js';
+
 export const QUICK_CREATE_STATUS = Object.freeze({
   EDITING: 'editing',
   AWAITING_AUTH: 'awaiting_auth',
@@ -8,11 +10,14 @@ export const QUICK_CREATE_STATUS = Object.freeze({
   RETRYABLE_ERROR: 'retryable_error',
   FAILED: 'failed'
 });
+const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-// createQuickCreateIntent 在用户首次提交时冻结原始 Prompt 与幂等键。
-export function createQuickCreateIntent(prompt, { keyFactory = createIdempotencyKey } = {}) {
+// createQuickCreateIntent 在用户首次提交时冻结原始 Prompt、Skill 集合与幂等键。
+export function createQuickCreateIntent(prompt, { keyFactory = createIdempotencyKey, enabledSkillIDs = [] } = {}) {
+  const frozenSkillIDs = normalizeSkillIDs(enabledSkillIDs);
   return {
     prompt: prompt == null ? '' : String(prompt),
+    enabledSkillIDs: frozenSkillIDs,
     idempotencyKey: keyFactory(),
     status: QUICK_CREATE_STATUS.EDITING,
     attempts: 0,
@@ -20,6 +25,21 @@ export function createQuickCreateIntent(prompt, { keyFactory = createIdempotency
     sessionID: '',
     error: null
   };
+}
+
+function normalizeSkillIDs(skillIDs) {
+  if (!Array.isArray(skillIDs)) throw new TypeError('Quick Create Skill 集合必须为数组');
+  if (skillIDs.some((skillID) => typeof skillID !== 'string' || !UUID_V7_PATTERN.test(skillID))) {
+    throw new TypeError('Quick Create Skill 集合只能包含规范小写 UUIDv7');
+  }
+  const normalized = [...skillIDs];
+  if (new Set(normalized).size !== normalized.length) {
+    throw new TypeError('Quick Create Skill 集合包含重复项');
+  }
+  if (normalized.length > PROJECT_QUICK_CREATE_MAX_SKILL_COUNT) {
+    throw new TypeError(`Quick Create 最多选择 ${PROJECT_QUICK_CREATE_MAX_SKILL_COUNT} 个 Skill`);
+  }
+  return Object.freeze([...normalized].sort());
 }
 
 // submitQuickCreateIntent 对重复点击和网络重试始终复用原意图的 key。
@@ -85,7 +105,10 @@ export function replaceConflictedQuickCreateIntent(intent, prompt = intent?.prom
   if (intent.status !== QUICK_CREATE_STATUS.CONFLICT) {
     throw new Error('只有 IDEMPOTENCY_CONFLICT 才能替换 Quick Create 意图');
   }
-  return createQuickCreateIntent(prompt, options);
+  return createQuickCreateIntent(prompt, {
+    ...options,
+    enabledSkillIDs: options?.enabledSkillIDs ?? intent.enabledSkillIDs
+  });
 }
 
 export function createIdempotencyKey() {

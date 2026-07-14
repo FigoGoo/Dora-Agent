@@ -197,7 +197,11 @@ func TestClientMapsStableServiceExceptions(t *testing.T) {
 	for code, expected := range map[string]error{
 		"IDEMPOTENCY_CONFLICT":     project.ErrAgentSessionConflict,
 		"PROJECT_SESSION_CONFLICT": project.ErrAgentSessionConflict,
+		"COMMAND_CONFLICT":         project.ErrAgentSessionConflict,
+		"COMMAND_VERSION_CONFLICT": project.ErrAgentSessionConflict,
 		"INVALID_ARGUMENT":         project.ErrAgentSessionInvalid,
+		"SNAPSHOT_DIGEST_MISMATCH": project.ErrAgentSessionInvalid,
+		"SNAPSHOT_LIMIT_EXCEEDED":  project.ErrAgentSessionInvalid,
 		"PERSISTENCE_UNAVAILABLE":  project.ErrAgentSessionUnavailable,
 	} {
 		err := mapAgentServiceError(&sessionv1.SessionServiceExceptionV1{Code: code, Message: "safe", RequestId: "", Retryable: true})

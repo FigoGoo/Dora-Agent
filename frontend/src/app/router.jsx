@@ -3,7 +3,15 @@ import { AgentWorkspacePage } from '../pages/AgentWorkspacePage.jsx';
 import { ClientAppPage } from '../pages/ClientAppPage.jsx';
 import { ProjectWorkspacePage } from '../features/projects/ProjectWorkspacePage.jsx';
 import { AUTH_SESSION_STATUS, useAuthSession } from '../platform/auth/authSession.js';
-import { matchProjectWorkspacePath, normalizePath, PUBLIC_PAGES, WORKSPACE_ROUTE, getPageFromPath } from './routes.js';
+import {
+  canAccessPage,
+  getPageFromPath,
+  LEGACY_SKILLS_ROUTE,
+  matchProjectWorkspacePath,
+  normalizePath,
+  PUBLIC_PAGES,
+  WORKSPACE_ROUTE
+} from './routes.js';
 
 export function AppRouter() {
   const [currentPath, setCurrentPath] = useState(() => (typeof window === 'undefined' ? '/' : normalizePath(window.location.pathname)));
@@ -22,6 +30,12 @@ export function AppRouter() {
     };
   }, []);
 
+  useEffect(() => {
+    if (currentPath !== LEGACY_SKILLS_ROUTE) return;
+    window.history.replaceState({}, '', '/skills');
+    setCurrentPath('/skills');
+  }, [currentPath]);
+
   if (currentPath === WORKSPACE_ROUTE) {
     return import.meta.env.DEV
       ? <div data-legacy-demo-workspace="true"><AgentWorkspacePage /></div>
@@ -33,11 +47,24 @@ export function AppRouter() {
   if (isProtected && auth.status !== AUTH_SESSION_STATUS.AUTHENTICATED) {
     return <ProtectedRouteState auth={auth} />;
   }
+  if (!canAccessPage(page, auth.user?.capabilities, auth.deniedCapabilities)) {
+    return <ForbiddenRouteState />;
+  }
   if (projectWorkspace) {
     return <ProjectWorkspacePage key={projectWorkspace.projectID} projectID={projectWorkspace.projectID} />;
   }
 
   return <ClientAppPage />;
+}
+
+function ForbiddenRouteState() {
+  return (
+    <main className="route-state">
+      <h1>无 Skill 审核权限</h1>
+      <p role="alert">当前会话不能使用 skill.review，未加载任何审核数据。</p>
+      <button type="button" className="start-button" onClick={() => navigate('/')}>返回首页</button>
+    </main>
+  );
 }
 
 function ProtectedRouteState({ auth }) {

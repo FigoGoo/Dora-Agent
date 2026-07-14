@@ -25,14 +25,25 @@ const (
 
 // fakeService 捕获 Mapper 输出并允许测试驱动所有领域状态与安全错误。
 type fakeService struct {
-	ensureCommand session.EnsureCommand
-	ensureResult  session.EnsureResult
-	ensureErr     error
-	ensureCalls   int
-	queryCommand  session.QueryCommand
-	queryResult   session.QueryCommandResult
-	queryErr      error
-	queryCalls    int
+	ensureCommand   session.EnsureCommand
+	ensureResult    session.EnsureResult
+	ensureErr       error
+	ensureCalls     int
+	ensureCommandV2 session.EnsureCommandV2
+	ensureResultV2  session.EnsureResult
+	ensureErrV2     error
+	ensureCallsV2   int
+	queryCommand    session.QueryCommand
+	queryResult     session.QueryCommandResult
+	queryErr        error
+	queryCalls      int
+}
+
+// EnsureProjectSessionV2 为共享 Handler 测试替身补齐 V2 用例边界；V1 测试断言它不会被调用。
+func (f *fakeService) EnsureProjectSessionV2(_ context.Context, command session.EnsureCommandV2) (session.EnsureResult, error) {
+	f.ensureCallsV2++
+	f.ensureCommandV2 = command
+	return f.ensureResultV2, f.ensureErrV2
 }
 
 // EnsureProjectSession 捕获显式领域 DTO，不读取生成类型。

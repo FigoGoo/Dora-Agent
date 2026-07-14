@@ -247,12 +247,19 @@ func (r *ProjectRepository) MarkDelivered(ctx context.Context, outbox project.Se
 		receipt.CommandID != outbox.ID || receipt.RequestDigest != outbox.RequestDigest || receipt.SessionID == "" {
 		return project.ErrInvalidQuickCreate
 	}
+	if outbox.SchemaVersion == project.EnsureSessionSchemaVersionV2 {
+		if receipt.SkillSnapshotDigest != outbox.SkillSnapshotDigest || receipt.SkillCount != outbox.SkillCount {
+			return project.ErrInvalidQuickCreate
+		}
+	} else if receipt.SkillSnapshotDigest != (project.Digest{}) || receipt.SkillCount != 0 {
+		return project.ErrInvalidQuickCreate
+	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		outboxUpdates := map[string]any{
 			"status": string(project.OutboxStatusDelivered), "delivered_at": deliveredAt,
 			"lease_owner": nil, "lease_expires_at": nil, "updated_at": deliveredAt,
 		}
-		if outbox.HasInitialPrompt {
+		if outbox.HasInitialPrompt || outbox.SchemaVersion == project.EnsureSessionSchemaVersionV2 {
 			outboxUpdates["payload_encryption_algorithm"] = nil
 			outboxUpdates["payload_key_version"] = nil
 			outboxUpdates["payload_nonce"] = nil
@@ -269,9 +276,16 @@ func (r *ProjectRepository) MarkDelivered(ctx context.Context, outbox project.Se
 			return project.ErrOutboxLeaseLost
 		}
 
-		bindingUpdated := tx.Session(&gorm.Session{SkipDefaultTransaction: true}).Model(&projectSessionBindingModel{}).
+		bindingWhere := tx.Session(&gorm.Session{SkipDefaultTransaction: true}).Model(&projectSessionBindingModel{}).
 			Where("command_id = ? AND request_digest = ? AND provisioning_status IN ?", outbox.ID, outbox.RequestDigest[:],
-				[]string{string(project.ProvisioningStatusPending), string(project.ProvisioningStatusReconciling)}).
+				[]string{string(project.ProvisioningStatusPending), string(project.ProvisioningStatusReconciling)})
+		if outbox.SchemaVersion == project.EnsureSessionSchemaVersionV2 {
+			bindingWhere = bindingWhere.Where(
+				"request_schema_version = ? AND skill_snapshot_digest = ? AND skill_count = ?",
+				"ensure_project_session.v2", outbox.SkillSnapshotDigest[:], outbox.SkillCount,
+			)
+		}
+		bindingUpdated := bindingWhere.
 			Updates(map[string]any{
 				"agent_session_id": receipt.SessionID, "agent_input_id": receipt.InputID,
 				"provisioning_status": string(project.ProvisioningStatusReady), "last_error_code": nil,

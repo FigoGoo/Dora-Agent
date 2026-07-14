@@ -242,7 +242,9 @@ func mapAgentServiceError(err error) error {
 		switch serviceErr.Code {
 		case "IDEMPOTENCY_CONFLICT", "PROJECT_SESSION_CONFLICT":
 			return project.ErrAgentSessionConflict
-		case "INVALID_ARGUMENT":
+		case "COMMAND_CONFLICT", "COMMAND_VERSION_CONFLICT":
+			return project.ErrAgentSessionConflict
+		case "INVALID_ARGUMENT", "SNAPSHOT_DIGEST_MISMATCH", "SNAPSHOT_LIMIT_EXCEEDED":
 			return project.ErrAgentSessionInvalid
 		default:
 			return project.ErrAgentSessionUnavailable

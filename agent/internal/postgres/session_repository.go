@@ -2,8 +2,12 @@ package postgres
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/FigoGoo/Dora-Agent/agent/internal/event"
 	"github.com/FigoGoo/Dora-Agent/agent/internal/session"
@@ -11,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// SessionRepository 使用 GORM 在 Agent PostgreSQL 中原子持久化 W0 Session 基础事实。
+// SessionRepository 使用 GORM 在 Agent PostgreSQL 中原子持久化 V1/V2 Session 与 Skill Snapshot 基础事实。
 // 同一 CommandID 通过事务级 Advisory Lock 串行化；不同 Command 仍由 Project 唯一约束防止双 Session。
 type SessionRepository struct {
 	db *gorm.DB
@@ -26,7 +30,7 @@ func NewSessionRepository(client *Client) (*SessionRepository, error) {
 	return &SessionRepository{db: client.db}, nil
 }
 
-// Ensure 在一个短事务内完成回执判定、Session、空 Skill Snapshot、可选 Message/Input、Receipt 与 EventLog。
+// Ensure 在一个短事务内完成回执判定、Session、Snapshot Header/批量 Items、可选 Message/Input、Receipt 与 EventLog。
 // 事务不调用 RPC、Redis、模型或 Runner；失败时全部回滚，调用方只能在提交成功后发送非权威唤醒。
 func (r *SessionRepository) Ensure(ctx context.Context, plan session.EnsurePlan) (session.EnsureResult, error) {
 	if err := validateEnsurePlan(plan); err != nil {
@@ -44,9 +48,19 @@ func (r *SessionRepository) Ensure(ctx context.Context, plan session.EnsurePlan)
 		receiptErr := tx.Where("command_id = ?", plan.Receipt.CommandID).Take(&existingReceipt).Error
 		switch {
 		case receiptErr == nil:
-			// 同键只能重放完全相同的语义；Digest 不同必须失败关闭，绝不能覆盖旧 Session/Input。
+			// CommandID 在 V1/V2 间全局唯一；必须先判定版本再比较摘要，禁止 V2 失败后伪装成 V1 重放。
+			if existingReceipt.CommandType != plan.Receipt.CommandType {
+				return session.ErrCommandVersionConflict
+			}
+			// 同版本同键只能重放完全相同的语义；Digest 不同必须失败关闭，绝不能覆盖旧 Session/Input。
 			if existingReceipt.RequestDigest != plan.Receipt.RequestDigest {
 				return session.ErrCommandConflict
+			}
+			if !validStoredReceipt(existingReceipt) ||
+				existingReceipt.SkillSnapshotDigest != plan.Receipt.SkillSnapshotDigest ||
+				existingReceipt.SkillCount != plan.Receipt.SkillCount ||
+				existingReceipt.ResultVersion != plan.Receipt.ResultVersion {
+				return session.ErrSnapshotIntegrity
 			}
 			result = mapReceiptResult(existingReceipt, session.EnsureDispositionReplayed)
 			return nil
@@ -69,6 +83,13 @@ func (r *SessionRepository) Ensure(ctx context.Context, plan session.EnsurePlan)
 		}
 		if err := tx.Create(modelPointer(mapSessionSkillSnapshotModel(plan.SkillSnapshot))).Error; err != nil {
 			return fmt.Errorf("create session skill snapshot: %w", err)
+		}
+		if len(plan.SkillSnapshotItems) > 0 {
+			// Runtime Content 已在事务外批量加密；事务内只执行一次 batch INSERT，禁止按 Skill 形成 N 次同构 SQL。
+			itemModels := mapSessionSkillSnapshotItemModels(plan.SkillSnapshotItems)
+			if err := tx.Create(&itemModels).Error; err != nil {
+				return fmt.Errorf("create session skill snapshot items: %w", err)
+			}
 		}
 		if err := tx.Create(modelPointer(mapSessionSequenceCounterModel(plan.SequenceCounter))).Error; err != nil {
 			return fmt.Errorf("create session sequence counter: %w", err)
@@ -116,6 +137,10 @@ func (r *SessionRepository) Ensure(ctx context.Context, plan session.EnsurePlan)
 // Query 只读取原命令 Receipt 并在 Repository 内比较摘要，避免把已冻结摘要或其他命令回执扩散到协议层。
 // Query 不获取写锁、不创建事实，也不执行框架或数据库层自动重试。
 func (r *SessionRepository) Query(ctx context.Context, command session.QueryCommand) (session.QueryCommandResult, error) {
+	if command.ExpectedCommandType != session.CommandTypeEnsureProjectSessionV1 &&
+		command.ExpectedCommandType != session.CommandTypeEnsureProjectSessionV2 {
+		return session.QueryCommandResult{}, session.ErrInvalidCommand
+	}
 	var receipt sessionCommandReceiptModel
 	err := r.db.WithContext(ctx).Where("command_id = ?", command.CommandID).Take(&receipt).Error
 	switch {
@@ -123,13 +148,83 @@ func (r *SessionRepository) Query(ctx context.Context, command session.QueryComm
 		return session.QueryCommandResult{Status: session.QueryCommandStatusNotFound}, nil
 	case err != nil:
 		return session.QueryCommandResult{}, mapSessionRepositoryError(err)
+	case receipt.CommandType != command.ExpectedCommandType:
+		return session.QueryCommandResult{}, session.ErrCommandVersionConflict
 	case !sameRepositoryDigest(receipt.RequestDigest, command.ExpectedRequestDigest):
 		// Conflict 不返回已存在 Receipt，避免查询方借猜测 CommandID 读取另一语义的结果引用。
 		return session.QueryCommandResult{Status: session.QueryCommandStatusConflict}, nil
+	case !validStoredReceipt(receipt):
+		return session.QueryCommandResult{}, session.ErrSnapshotIntegrity
 	default:
 		result := mapReceiptResult(receipt, session.EnsureDispositionReplayed)
 		return session.QueryCommandResult{Status: session.QueryCommandStatusCompleted, Receipt: &result}, nil
 	}
+}
+
+// validStoredReceipt 复核数据库冻结结果的版本、Snapshot 与可选 Message/Input 组合，损坏行不得作为 completed 重放。
+func validStoredReceipt(receipt sessionCommandReceiptModel) bool {
+	if receipt.CommandID == "" || receipt.SessionID == "" || !validLowerSHA256(receipt.RequestDigest) ||
+		!validLowerSHA256(receipt.SkillSnapshotDigest) || receipt.SkillCount < 0 || receipt.SkillCount > 32 ||
+		(receipt.MessageID == nil) != (receipt.InputID == nil) {
+		return false
+	}
+	switch receipt.CommandType {
+	case session.CommandTypeEnsureProjectSessionV1:
+		return receipt.ResultVersion == session.ResultVersionV1 && receipt.SkillCount == 0 &&
+			receipt.SkillSnapshotDigest == session.EmptySkillSnapshotDigest
+	case session.CommandTypeEnsureProjectSessionV2:
+		return receipt.ResultVersion == session.ResultVersionV2 &&
+			((receipt.SkillCount == 0 && receipt.SkillSnapshotDigest == session.EmptySkillSnapshotDigest) ||
+				(receipt.SkillCount > 0 && receipt.SkillSnapshotDigest != session.EmptySkillSnapshotDigest))
+	default:
+		return false
+	}
+}
+
+// validLowerSHA256 校验数据库摘要使用唯一小写 64 位十六进制表示。
+func validLowerSHA256(value string) bool {
+	if len(value) != 64 || strings.ToLower(value) != value {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == 32
+}
+
+// LoadSkillSnapshot 使用 Header 一条 SQL，并仅在 count>0 时使用第二条有界 SQL 批量读取 Items。
+// Item 查询按主键顺序且额外读取 maxItems+1 行，用于把数据库损坏与配置超限稳定识别为完整失败。
+func (r *SessionRepository) LoadSkillSnapshot(
+	ctx context.Context,
+	sessionID string,
+	maxItems int,
+) (session.StoredSkillSnapshot, error) {
+	if sessionID == "" || maxItems <= 0 || maxItems > 32 {
+		return session.StoredSkillSnapshot{}, session.ErrInvalidCommand
+	}
+	var header sessionSkillSnapshotModel
+	if err := r.db.WithContext(ctx).Where("session_id = ?", sessionID).Take(&header).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return session.StoredSkillSnapshot{}, session.ErrSnapshotNotFound
+		}
+		return session.StoredSkillSnapshot{}, mapSessionRepositoryError(err)
+	}
+	if header.SkillCount == 0 {
+		return mapStoredSkillSnapshot(header, nil), nil
+	}
+	if header.SkillCount < 0 || header.SkillCount > maxItems {
+		return session.StoredSkillSnapshot{}, session.ErrSnapshotLimitExceeded
+	}
+	var items []sessionSkillSnapshotItemModel
+	if err := r.db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
+		Order("load_order ASC").
+		Limit(maxItems + 1).
+		Find(&items).Error; err != nil {
+		return session.StoredSkillSnapshot{}, mapSessionRepositoryError(err)
+	}
+	if len(items) > maxItems {
+		return session.StoredSkillSnapshot{}, session.ErrSnapshotLimitExceeded
+	}
+	return mapStoredSkillSnapshot(header, items), nil
 }
 
 // sameRepositoryDigest 比较已完成 Receipt 与调用方预期摘要；两个值都由领域/Schema 约束为固定长度小写十六进制。
@@ -137,14 +232,37 @@ func sameRepositoryDigest(left, right string) bool {
 	return left == right
 }
 
-// validateEnsurePlan 对 Service→Repository 内部边界执行失败关闭校验，避免未来调用方绕过 W0 不变量。
+// validateEnsurePlan 对 Service→Repository 内部边界执行失败关闭校验，避免未来调用方绕过 V1/V2 不变量。
 func validateEnsurePlan(plan session.EnsurePlan) error {
 	if plan.Session.ID == "" || plan.Session.ProjectID == "" || plan.Session.UserID == "" {
 		return fmt.Errorf("%w: session identity is incomplete", session.ErrInvalidCommand)
 	}
-	if plan.SkillSnapshot.SessionID != plan.Session.ID || plan.SkillSnapshot.Kind != session.SkillSnapshotKindEmpty ||
-		plan.SkillSnapshot.Digest != session.EmptySkillSnapshotDigest || plan.SkillSnapshot.PublishedSnapshotRefsJSON != "[]" {
-		return fmt.Errorf("%w: explicit empty skill snapshot is invalid", session.ErrInvalidCommand)
+	if plan.SkillSnapshot.SessionID != plan.Session.ID ||
+		plan.SkillSnapshot.SchemaVersion != session.SkillSnapshotSchemaVersionV1 ||
+		plan.SkillSnapshot.SkillCount != len(plan.SkillSnapshotItems) ||
+		plan.SkillSnapshot.SkillCount < 0 || plan.SkillSnapshot.SkillCount > 32 {
+		return fmt.Errorf("%w: skill snapshot header is invalid", session.ErrInvalidCommand)
+	}
+	switch plan.SkillSnapshot.Kind {
+	case session.SkillSnapshotKindEmpty:
+		if plan.SkillSnapshot.SkillCount != 0 || plan.SkillSnapshot.Digest != session.EmptySkillSnapshotDigest ||
+			plan.SkillSnapshot.PublishedSnapshotRefsJSON != "[]" {
+			return fmt.Errorf("%w: explicit empty skill snapshot is invalid", session.ErrInvalidCommand)
+		}
+	case session.SkillSnapshotKindPublishedRefs:
+		if plan.SkillSnapshot.SkillCount == 0 || !validJSONArray(plan.SkillSnapshot.PublishedSnapshotRefsJSON) {
+			return fmt.Errorf("%w: published skill snapshot header is invalid", session.ErrInvalidCommand)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported skill snapshot kind", session.ErrInvalidCommand)
+	}
+	for index, item := range plan.SkillSnapshotItems {
+		// 稠密顺序、同 Session 身份和完整 Envelope 是批量 INSERT 前的最后防线；摘要与业务字段已由 skill canonical 层验证。
+		if item.SessionID != plan.Session.ID || item.LoadOrder != index+1 ||
+			item.RuntimeContent.KeyVersion == "" || session.ValidateEnvelopeV1(item.RuntimeContent.Ciphertext) != nil ||
+			!validJSONArray(item.AllowedGraphToolKeysJSON) || item.PublicToolRefsJSON != "[]" {
+			return fmt.Errorf("%w: skill snapshot item is invalid", session.ErrInvalidCommand)
+		}
 	}
 	if plan.SequenceCounter.SessionID != plan.Session.ID || plan.RuntimeLease.SessionID != plan.Session.ID {
 		return fmt.Errorf("%w: session counter or lease identity mismatch", session.ErrInvalidCommand)
@@ -181,9 +299,22 @@ func validateEnsurePlan(plan session.EnsurePlan) error {
 			return fmt.Errorf("%w: initial message envelope is invalid", session.ErrInvalidCommand)
 		}
 	}
-	if plan.Receipt.SessionID != plan.Session.ID || plan.Receipt.CommandType != session.CommandTypeEnsureProjectSessionV1 ||
-		plan.Receipt.ResultVersion != session.ResultVersionV1 {
+	if plan.Receipt.SessionID != plan.Session.ID ||
+		plan.Receipt.SkillSnapshotDigest != plan.SkillSnapshot.Digest ||
+		plan.Receipt.SkillCount != plan.SkillSnapshot.SkillCount {
 		return fmt.Errorf("%w: command receipt is inconsistent", session.ErrInvalidCommand)
+	}
+	switch plan.Receipt.CommandType {
+	case session.CommandTypeEnsureProjectSessionV1:
+		if plan.Receipt.ResultVersion != session.ResultVersionV1 || plan.SkillSnapshot.Kind != session.SkillSnapshotKindEmpty {
+			return fmt.Errorf("%w: v1 command receipt is inconsistent", session.ErrInvalidCommand)
+		}
+	case session.CommandTypeEnsureProjectSessionV2:
+		if plan.Receipt.ResultVersion != session.ResultVersionV2 {
+			return fmt.Errorf("%w: v2 command receipt is inconsistent", session.ErrInvalidCommand)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported command receipt type", session.ErrInvalidCommand)
 	}
 	if plan.Events[0].Type != event.TypeSessionCreated || plan.Events[0].ProjectionIndex != 0 ||
 		plan.Events[0].SessionID != plan.Session.ID || plan.Events[0].SourceID != plan.Receipt.CommandID ||
@@ -200,6 +331,17 @@ func validateEnsurePlan(plan session.EnsurePlan) error {
 	return nil
 }
 
+// validJSONArray 验证持久化投影必须是非 nil JSON 数组，拒绝对象、null、trailing bytes 和畸形编码。
+func validJSONArray(encoded string) bool {
+	var values []json.RawMessage
+	decoder := json.NewDecoder(strings.NewReader(encoded))
+	if err := decoder.Decode(&values); err != nil || values == nil {
+		return false
+	}
+	var trailing json.RawMessage
+	return errors.Is(decoder.Decode(&trailing), io.EOF)
+}
+
 // mapSessionRepositoryError 将 PostgreSQL/GORM 错误收敛为稳定领域错误，避免协议层依赖约束或 SQL 原文。
 func mapSessionRepositoryError(err error) error {
 	// 请求取消和 Deadline 是传输层决定重试、499/超时映射与资源回收的控制信号，
@@ -210,8 +352,10 @@ func mapSessionRepositoryError(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return context.DeadlineExceeded
 	}
-	if errors.Is(err, session.ErrCommandConflict) || errors.Is(err, session.ErrProjectSessionConflict) ||
-		errors.Is(err, session.ErrInvalidCommand) {
+	if errors.Is(err, session.ErrCommandConflict) || errors.Is(err, session.ErrCommandVersionConflict) ||
+		errors.Is(err, session.ErrProjectSessionConflict) || errors.Is(err, session.ErrInvalidCommand) ||
+		errors.Is(err, session.ErrSnapshotLimitExceeded) || errors.Is(err, session.ErrSnapshotIntegrity) ||
+		errors.Is(err, session.ErrSnapshotNotFound) {
 		return err
 	}
 	var pgError *pgconn.PgError

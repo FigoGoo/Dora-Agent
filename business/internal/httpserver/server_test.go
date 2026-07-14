@@ -93,7 +93,8 @@ func TestServerRegistersProjectRouteBehindSessionAndCSRF(t *testing.T) {
 		WriteTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 1024,
 	}, config.ServiceConfig{Name: "business-test", Version: "test"}, state, RouteHandlers{
 		Auth: authHandler, Project: projectHandler,
-		Agent: mustAgentProxyHandlerForServerTest(t),
+		Agent: mustAgentProxyHandlerForServerTest(t), Skill: mustSkillHandlerForServerTest(t),
+		SkillReview: mustSkillReviewHandlerForServerTest(t),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -125,6 +126,15 @@ func mustAgentProxyHandlerForServerTest(t *testing.T) *AgentProxyHandler {
 	return handler
 }
 
+func mustSkillReviewHandlerForServerTest(t *testing.T) *SkillReviewHandler {
+	t.Helper()
+	handler, err := NewSkillReviewHandler(&skillReviewHTTPService{}, authHandlerTestIDs{})
+	if err != nil {
+		t.Fatalf("NewSkillReviewHandler() error = %v", err)
+	}
+	return handler
+}
+
 func TestServerRegistersAgentProxyBehindBusinessSession(t *testing.T) {
 	_, resolved := validAuthHandlerSession()
 	authService := &authHandlerTestService{resolveResult: resolved}
@@ -144,6 +154,7 @@ func TestServerRegistersAgentProxyBehindBusinessSession(t *testing.T) {
 		WriteTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 1024,
 	}, config.ServiceConfig{Name: "business-test", Version: "test"}, state, RouteHandlers{
 		Auth: authHandler, Project: projectHandler, Agent: mustAgentProxyHandlerForServerTest(t),
+		Skill: mustSkillHandlerForServerTest(t), SkillReview: mustSkillReviewHandlerForServerTest(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -160,5 +171,56 @@ func TestServerRegistersAgentProxyBehindBusinessSession(t *testing.T) {
 	server.Handler().ServeHTTP(authenticated, authenticatedRequest)
 	if authenticated.Code != http.StatusOK || authService.resolveCalls != 1 {
 		t.Fatalf("authenticated Agent proxy status=%d resolves=%d body=%s", authenticated.Code, authService.resolveCalls, authenticated.Body.String())
+	}
+}
+
+func TestServerRegistersSkillWriteBehindSessionAndCSRF(t *testing.T) {
+	_, resolved := validAuthHandlerSession()
+	authService := &authHandlerTestService{resolveResult: resolved}
+	authHandler, err := NewAuthHandler(authService, config.AuthConfig{
+		CookieName: "dora_session", CookieSameSite: "lax", MaxRequestBodyBytes: 4096,
+	}, authHandlerTestIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectHandler, err := NewProjectHandler(&projectHTTPService{}, authHandlerTestIDs{}, project.MaxInitialPromptBytes+1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skillService := &skillHTTPService{}
+	skillHandler, err := NewSkillHandler(skillService, authHandlerTestIDs{}, 256*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(config.HTTPConfig{
+		Address: ":0", HeaderTimeout: time.Second, ReadTimeout: time.Second,
+		WriteTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 1024,
+	}, config.ServiceConfig{Name: "business-test", Version: "test"}, health.NewState(), RouteHandlers{
+		Auth: authHandler, Project: projectHandler, Agent: mustAgentProxyHandlerForServerTest(t),
+		Skill: skillHandler, SkillReview: mustSkillReviewHandlerForServerTest(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := definitionRequestJSON(t, validSkillHTTPDefinition())
+	withoutCSRF := httptest.NewRequest(http.MethodPost, "/api/v1/skills", strings.NewReader(body))
+	withoutCSRF.Header.Set("Content-Type", "application/json")
+	withoutCSRF.Header.Set("Idempotency-Key", "server-skill-1")
+	withoutCSRF.AddCookie(&http.Cookie{Name: "dora_session", Value: "opaque-cookie-token"})
+	denied := httptest.NewRecorder()
+	server.Handler().ServeHTTP(denied, withoutCSRF)
+	if denied.Code != http.StatusForbidden || skillService.createCommand.OwnerUserID != "" {
+		t.Fatalf("Skill write bypassed CSRF: status=%d command=%+v body=%s", denied.Code, skillService.createCommand, denied.Body.String())
+	}
+
+	withCSRF := httptest.NewRequest(http.MethodPost, "/api/v1/skills", strings.NewReader(body))
+	withCSRF.Header.Set("Content-Type", "application/json")
+	withCSRF.Header.Set("Idempotency-Key", "server-skill-1")
+	withCSRF.Header.Set("X-CSRF-Token", resolved.CSRFToken)
+	withCSRF.AddCookie(&http.Cookie{Name: "dora_session", Value: "opaque-cookie-token"})
+	accepted := httptest.NewRecorder()
+	server.Handler().ServeHTTP(accepted, withCSRF)
+	if accepted.Code != http.StatusCreated || skillService.createCommand.OwnerUserID != resolved.Principal.ID {
+		t.Fatalf("Skill write did not use trusted session: status=%d command=%+v body=%s", accepted.Code, skillService.createCommand, accepted.Body.String())
 	}
 }

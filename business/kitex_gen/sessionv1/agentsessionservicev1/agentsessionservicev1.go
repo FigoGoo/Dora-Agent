@@ -27,6 +27,20 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"EnsureProjectSessionV2": kitex.NewMethodInfo(
+		ensureProjectSessionV2Handler,
+		newAgentSessionServiceV1EnsureProjectSessionV2Args,
+		newAgentSessionServiceV1EnsureProjectSessionV2Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"QueryProjectSessionCommandV2": kitex.NewMethodInfo(
+		queryProjectSessionCommandV2Handler,
+		newAgentSessionServiceV1QueryProjectSessionCommandV2Args,
+		newAgentSessionServiceV1QueryProjectSessionCommandV2Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 }
 
 var (
@@ -141,6 +155,54 @@ func newAgentSessionServiceV1QueryProjectSessionCommandV1Result() interface{} {
 	return sessionv1.NewAgentSessionServiceV1QueryProjectSessionCommandV1Result()
 }
 
+func ensureProjectSessionV2Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*sessionv1.AgentSessionServiceV1EnsureProjectSessionV2Args)
+	realResult := result.(*sessionv1.AgentSessionServiceV1EnsureProjectSessionV2Result)
+	success, err := handler.(sessionv1.AgentSessionServiceV1).EnsureProjectSessionV2(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *sessionv1.SessionServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newAgentSessionServiceV1EnsureProjectSessionV2Args() interface{} {
+	return sessionv1.NewAgentSessionServiceV1EnsureProjectSessionV2Args()
+}
+
+func newAgentSessionServiceV1EnsureProjectSessionV2Result() interface{} {
+	return sessionv1.NewAgentSessionServiceV1EnsureProjectSessionV2Result()
+}
+
+func queryProjectSessionCommandV2Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*sessionv1.AgentSessionServiceV1QueryProjectSessionCommandV2Args)
+	realResult := result.(*sessionv1.AgentSessionServiceV1QueryProjectSessionCommandV2Result)
+	success, err := handler.(sessionv1.AgentSessionServiceV1).QueryProjectSessionCommandV2(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *sessionv1.SessionServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newAgentSessionServiceV1QueryProjectSessionCommandV2Args() interface{} {
+	return sessionv1.NewAgentSessionServiceV1QueryProjectSessionCommandV2Args()
+}
+
+func newAgentSessionServiceV1QueryProjectSessionCommandV2Result() interface{} {
+	return sessionv1.NewAgentSessionServiceV1QueryProjectSessionCommandV2Result()
+}
+
 type kClient struct {
 	c client.Client
 }
@@ -170,6 +232,34 @@ func (p *kClient) QueryProjectSessionCommandV1(ctx context.Context, request *ses
 	_args.Request = request
 	var _result sessionv1.AgentSessionServiceV1QueryProjectSessionCommandV1Result
 	if err = p.c.Call(ctx, "QueryProjectSessionCommandV1", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) EnsureProjectSessionV2(ctx context.Context, request *sessionv1.EnsureProjectSessionRequestV2) (r *sessionv1.EnsureProjectSessionResponseV2, err error) {
+	var _args sessionv1.AgentSessionServiceV1EnsureProjectSessionV2Args
+	_args.Request = request
+	var _result sessionv1.AgentSessionServiceV1EnsureProjectSessionV2Result
+	if err = p.c.Call(ctx, "EnsureProjectSessionV2", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) QueryProjectSessionCommandV2(ctx context.Context, request *sessionv1.QueryProjectSessionCommandRequestV2) (r *sessionv1.QueryProjectSessionCommandResponseV2, err error) {
+	var _args sessionv1.AgentSessionServiceV1QueryProjectSessionCommandV2Args
+	_args.Request = request
+	var _result sessionv1.AgentSessionServiceV1QueryProjectSessionCommandV2Result
+	if err = p.c.Call(ctx, "QueryProjectSessionCommandV2", &_args, &_result); err != nil {
 		return
 	}
 	switch {

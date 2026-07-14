@@ -67,8 +67,21 @@ type AuthSessionResponse struct {
 	SessionExpiresAt string `json:"session_expires_at"`
 }
 
-// ErrorDetails 是 W0 错误 Envelope 的稳定空详情对象，避免输出 null。
-type ErrorDetails struct{}
+// FieldErrorDetail 是 Builder 等结构化请求可选返回的稳定字段错误。
+type FieldErrorDetail struct {
+	// Field 是请求 DTO 中的稳定 JSON 字段路径。
+	Field string `json:"field"`
+	// Code 是前端可稳定分支的字段错误代码。
+	Code string `json:"code"`
+	// Message 是不包含内部实现或原始敏感输入的安全说明。
+	Message string `json:"message"`
+}
+
+// ErrorDetails 是统一错误 Envelope 的向前兼容结构化详情；无字段错误时仍编码为 {}。
+type ErrorDetails struct {
+	// FieldErrors 是可选字段错误数组，旧 W0 错误不设置该字段。
+	FieldErrors []FieldErrorDetail `json:"field_errors,omitempty"`
+}
 
 // ErrorBody 是错误 Envelope 内层的稳定错误 DTO。
 type ErrorBody struct {
@@ -131,17 +144,20 @@ func (h *AuthHandler) requireSession(requireCSRF bool) gin.HandlerFunc {
 		}
 		cookieToken, err := c.Cookie(h.config.CookieName)
 		if err != nil {
+			h.audit(c, "auth.require_session", "denied", "", requestID, "UNAUTHENTICATED")
 			h.writeError(c, http.StatusUnauthorized, "UNAUTHENTICATED", "未认证或会话已失效", requestID, false)
 			c.Abort()
 			return
 		}
 		resolved, err := h.service.Resolve(c.Request.Context(), cookieToken)
 		if err != nil {
+			h.audit(c, "auth.require_session", "denied", "", requestID, authErrorCode(err))
 			h.writeMappedAuthError(c, err, requestID)
 			c.Abort()
 			return
 		}
 		if requireCSRF && subtle.ConstantTimeCompare([]byte(c.GetHeader("X-CSRF-Token")), []byte(resolved.CSRFToken)) != 1 {
+			h.audit(c, "auth.require_session", "denied", resolved.Principal.ID, requestID, "CSRF_INVALID")
 			h.writeError(c, http.StatusForbidden, "CSRF_INVALID", "请求安全校验失败", requestID, false)
 			c.Abort()
 			return
@@ -297,6 +313,7 @@ func (h *AuthHandler) audit(c *gin.Context, action string, decision string, acto
 	}
 	slog.Log(c.Request.Context(), level, "鉴权审计事件",
 		"event_type", "security.auth.v1",
+		"route", safeAuditRoute(c),
 		"action", action,
 		"decision", decision,
 		"actor_id", actorID,
@@ -304,6 +321,15 @@ func (h *AuthHandler) audit(c *gin.Context, action string, decision string, acto
 		"trace_id", "",
 		"error_code", errorCode,
 	)
+}
+
+// safeAuditRoute 只记录已注册模板路由；无法解析时使用稳定占位符，禁止把原始 URL 或 Query 写入安全日志。
+func safeAuditRoute(c *gin.Context) string {
+	route := c.FullPath()
+	if route == "" {
+		return "unmatched"
+	}
+	return route
 }
 
 // authErrorCode 将内部认证错误收敛为可审计的稳定代码，不写入底层错误文本。

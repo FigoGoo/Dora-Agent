@@ -6,9 +6,10 @@ import (
 	"fmt"
 
 	"github.com/FigoGoo/Dora-Agent/agent/internal/event"
+	"github.com/FigoGoo/Dora-Agent/agent/internal/skill"
 )
 
-// Service 编排 Session W0 创建用例，负责规范化、摘要复核、正文保护和完整原子创建计划。
+// Service 编排 Session V1/V2 创建用例，负责规范化、摘要复核、正文保护和完整原子创建计划。
 // Service 不调用 RPC、Redis、模型或 Runner；所有数据库事实由 Repository 在一个本地事务中提交。
 type Service struct {
 	// repository 在单个 Agent PostgreSQL 事务中提交完整 Session 基础事实。
@@ -19,6 +20,10 @@ type Service struct {
 	clock Clock
 	// protector 在事务前保护非空 Prompt，避免明文落库。
 	protector ContentProtector
+	// skillSnapshotProtector 使用独立 purpose/AAD 批量保护非空 Snapshot Runtime Content；W0 与 V2 empty 不调用。
+	skillSnapshotProtector SkillSnapshotContentProtector
+	// skillSnapshotLimits 是启动时冻结并通过协议 ceiling 校验的 Agent 接收剖面。
+	skillSnapshotLimits skill.LimitsProfileV1
 }
 
 // NewService 创建 Session 基础用例并校验全部强依赖。
@@ -36,7 +41,35 @@ func NewService(repository Repository, idGenerator IDGenerator, clock Clock, pro
 	if protector == nil {
 		return nil, fmt.Errorf("create session service: content protector is required")
 	}
-	return &Service{repository: repository, idGenerator: idGenerator, clock: clock, protector: protector}, nil
+	return &Service{
+		repository: repository, idGenerator: idGenerator, clock: clock, protector: protector,
+		skillSnapshotLimits: skill.DefaultLimitsProfileV1(),
+	}, nil
+}
+
+// NewServiceWithSkillSnapshot 创建同时支持 V1 与 V2 非空 Snapshot 的 Session Service。
+// snapshotProtector 必须使用 Agent Skill Snapshot 专用 purpose/AAD；limits 在启动阶段校验且在 Service 生命周期内不可变。
+func NewServiceWithSkillSnapshot(
+	repository Repository,
+	idGenerator IDGenerator,
+	clock Clock,
+	promptProtector ContentProtector,
+	snapshotProtector SkillSnapshotContentProtector,
+	limits skill.LimitsProfileV1,
+) (*Service, error) {
+	service, err := NewService(repository, idGenerator, clock, promptProtector)
+	if err != nil {
+		return nil, err
+	}
+	if snapshotProtector == nil {
+		return nil, fmt.Errorf("create session service: Skill Snapshot content protector is required")
+	}
+	if err := limits.Validate(); err != nil {
+		return nil, fmt.Errorf("create session service: invalid Skill Snapshot limits: %w", err)
+	}
+	service.skillSnapshotProtector = snapshotProtector
+	service.skillSnapshotLimits = limits
+	return service, nil
 }
 
 // EnsureProjectSession 幂等建立默认 Session、显式空 Skill Snapshot、可选 Message/Input、Receipt 和 EventLog。
@@ -55,6 +88,7 @@ func (s *Service) EnsureProjectSession(ctx context.Context, command EnsureComman
 		RequestID:             canonical.requestID,
 		CommandID:             canonical.commandID,
 		ExpectedRequestDigest: canonical.requestDigest,
+		ExpectedCommandType:   CommandTypeEnsureProjectSessionV1,
 	})
 	if err != nil {
 		return EnsureResult{}, err
@@ -99,7 +133,8 @@ func (s *Service) EnsureProjectSession(ctx context.Context, command EnsureComman
 			Status: StatusActive, Version: 1, CreatedAt: now, UpdatedAt: now,
 		},
 		SkillSnapshot: SkillSnapshot{
-			SessionID: sessionID, Kind: SkillSnapshotKindEmpty, Digest: EmptySkillSnapshotDigest,
+			SessionID: sessionID, SchemaVersion: SkillSnapshotSchemaVersionV1,
+			Kind: SkillSnapshotKindEmpty, SkillCount: 0, Digest: EmptySkillSnapshotDigest,
 			PublishedSnapshotRefsJSON: "[]", CreatedAt: now,
 		},
 		SequenceCounter: SequenceCounter{SessionID: sessionID, UpdatedAt: now},
@@ -107,7 +142,8 @@ func (s *Service) EnsureProjectSession(ctx context.Context, command EnsureComman
 		Receipt: CommandReceipt{
 			CommandID: canonical.commandID, CommandType: CommandTypeEnsureProjectSessionV1,
 			RequestDigest: canonical.requestDigest, SessionID: sessionID,
-			ResultVersion: ResultVersionV1, CompletedAt: now,
+			ResultVersion: ResultVersionV1, SkillSnapshotDigest: EmptySkillSnapshotDigest,
+			SkillCount: 0, CompletedAt: now,
 		},
 	}
 
@@ -173,7 +209,13 @@ func (s *Service) EnsureProjectSession(ctx context.Context, command EnsureComman
 // QueryProjectSessionCommand 查询原 Ensure 命令的权威状态，用于 Unknown Outcome 恢复。
 // 查询只读取 Receipt：同摘要返回 completed，摘要不同返回 conflict，不存在返回 not_found；任何状态都不会触发创建或重试。
 func (s *Service) QueryProjectSessionCommand(ctx context.Context, command QueryCommand) (QueryCommandResult, error) {
-	if command.SchemaVersion != QueryCommandSchemaVersionV1 {
+	var expectedCommandType string
+	switch command.SchemaVersion {
+	case QueryCommandSchemaVersionV1:
+		expectedCommandType = CommandTypeEnsureProjectSessionV1
+	case QueryCommandSchemaVersionV2:
+		expectedCommandType = CommandTypeEnsureProjectSessionV2
+	default:
 		return QueryCommandResult{}, fmt.Errorf("%w: unsupported query schema_version", ErrInvalidCommand)
 	}
 	requestID, err := normalizeUUIDv7(command.RequestID)
@@ -187,9 +229,13 @@ func (s *Service) QueryProjectSessionCommand(ctx context.Context, command QueryC
 	if !validSHA256Hex(command.ExpectedRequestDigest) {
 		return QueryCommandResult{}, fmt.Errorf("%w: expected_request_digest must be lowercase SHA-256", ErrInvalidCommand)
 	}
+	if command.SchemaVersion == QueryCommandSchemaVersionV2 &&
+		(requestID != command.RequestID || commandID != command.CommandID) {
+		return QueryCommandResult{}, ErrInvalidCommand
+	}
 	return s.repository.Query(ctx, QueryCommand{
 		SchemaVersion: command.SchemaVersion, RequestID: requestID, CommandID: commandID,
-		ExpectedRequestDigest: command.ExpectedRequestDigest,
+		ExpectedRequestDigest: command.ExpectedRequestDigest, ExpectedCommandType: expectedCommandType,
 	})
 }
 

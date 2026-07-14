@@ -75,6 +75,10 @@ type EnsureSessionReceipt struct {
 	InputID *string
 	// Replayed 表示 Agent 是否重放既有 Receipt，不改变业务结果。
 	Replayed bool
+	// SkillSnapshotDigest 是 v2 Receipt 冻结的 Snapshot set 摘要；v1 为零值。
+	SkillSnapshotDigest Digest
+	// SkillCount 是 v2 Receipt 冻结的 Snapshot Item 数量；v1 为零。
+	SkillCount int32
 }
 
 // QuerySessionResult 是 QueryProjectSessionCommandV1 的应用层安全结果。
@@ -111,6 +115,12 @@ type DispatchRepository interface {
 	MarkDead(ctx context.Context, outbox SessionOutbox, stableErrorCode string, updatedAt time.Time) error
 }
 
+// ClaimedV2Dispatcher 处理已经由共享 Repository 领取并加 Fence 的 Bootstrap v2 命令。
+// 实现只能解密同一 Outbox 并调用 Agent v2，不得重新解析当前 Binding 或降级到 v1。
+type ClaimedV2Dispatcher interface {
+	DispatchClaimedV2(ctx context.Context, outbox SessionOutbox, claimedAt time.Time) error
+}
+
 // DispatcherConfig 冻结单实例派发 Owner、短租约和退避参数。
 type DispatcherConfig struct {
 	// LeaseOwner 是可审计且不含 Secret 的实例 Owner。
@@ -129,6 +139,28 @@ type Dispatcher struct {
 	clock      Clock
 	idgen      IDGenerator
 	config     DispatcherConfig
+	v2         ClaimedV2Dispatcher
+}
+
+// NewDispatcherWithV2 创建共享 Claim/Fence、按 schema 分流的双版本 Dispatcher。
+func NewDispatcherWithV2(
+	repository DispatchRepository,
+	client AgentSessionClient,
+	revealer PromptRevealer,
+	clock Clock,
+	idgen IDGenerator,
+	config DispatcherConfig,
+	v2 ClaimedV2Dispatcher,
+) (*Dispatcher, error) {
+	dispatcher, err := NewDispatcher(repository, client, revealer, clock, idgen, config)
+	if err != nil {
+		return nil, err
+	}
+	if v2 == nil {
+		return nil, errors.New("create project session dispatcher: v2 dispatcher is missing")
+	}
+	dispatcher.v2 = v2
+	return dispatcher, nil
 }
 
 // NewDispatcher 校验派发依赖和所有有界时间参数，缺失时阻止启动。
@@ -151,6 +183,13 @@ func (d *Dispatcher) DispatchNext(ctx context.Context) error {
 	}
 	if outbox.AttemptCount > outbox.MaxAttempts {
 		return d.repository.MarkDead(ctx, outbox, dispatchErrorAttemptsExceeded, now)
+	}
+	if outbox.SchemaVersion == EnsureSessionSchemaVersionV2 {
+		if d.v2 == nil {
+			// 双版本 binary 未装配 v2 时保留同一密文并释放重试，绝不转调 V1。
+			return d.repository.MarkRetry(ctx, outbox, now.Add(d.config.RetryDelay), now)
+		}
+		return d.v2.DispatchClaimedV2(ctx, outbox, now)
 	}
 	if outbox.RecoveryRequired {
 		// retry 或过期 processing 代表上一次 Ensure 结果未知；禁止跨 Attempt 再次先写。

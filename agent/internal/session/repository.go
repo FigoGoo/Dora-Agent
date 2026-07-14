@@ -13,6 +13,8 @@ type Repository interface {
 	Ensure(ctx context.Context, plan EnsurePlan) (EnsureResult, error)
 	// Query 按 CommandID 只读核对冻结 Receipt；摘要不同返回 conflict 且不返回 Receipt。
 	Query(ctx context.Context, command QueryCommand) (QueryCommandResult, error)
+	// LoadSkillSnapshot 使用至多两条 SQL 读取 Header 和有界 Item 集合；maxItems 必须来自已校验配置。
+	LoadSkillSnapshot(ctx context.Context, sessionID string, maxItems int) (StoredSkillSnapshot, error)
 }
 
 // IDGenerator 生成应用侧 UUIDv7；失败时用例必须停止且不能提交降级标识。
@@ -33,4 +35,41 @@ type Clock interface {
 type ContentProtector interface {
 	// Protect 加密敏感正文并返回非空自描述 AEAD Envelope 与独立密钥版本引用。
 	Protect(ctx context.Context, plaintext []byte) (ProtectedContent, error)
+}
+
+// SkillSnapshotContentIdentity 是 Runtime Content AEAD AAD 的稳定身份字段，任何字段变化都必须导致认证失败。
+type SkillSnapshotContentIdentity struct {
+	// SessionID 是冻结快照所属 Session UUIDv7。
+	SessionID string
+	// SkillID 是 Business Skill UUIDv7。
+	SkillID string
+	// PublishedSnapshotID 是不可变 Published Snapshot UUIDv7。
+	PublishedSnapshotID string
+	// RuntimeContentDigest 是 canonical Runtime Content SHA-256 摘要。
+	RuntimeContentDigest string
+}
+
+// SkillSnapshotPlaintext 是一次批量保护所需的有界 Runtime Content 明文和 AAD 身份。
+type SkillSnapshotPlaintext struct {
+	// Identity 是该 Item 唯一且不可互换的 AAD 身份。
+	Identity SkillSnapshotContentIdentity
+	// CanonicalBytes 是通过 skill canonical 验证后的 Runtime Content UTF-8 JSON。
+	CanonicalBytes []byte
+}
+
+// SkillSnapshotCiphertext 是批量保护结果，顺序必须与输入保持一致。
+type SkillSnapshotCiphertext struct {
+	// Identity 是输入 AAD 身份副本，Service 用于防止实现重排或串线。
+	Identity SkillSnapshotContentIdentity
+	// Protected 是专用 AAD 认证后的 DRAE v1 Envelope 与 KeyVersion。
+	Protected ProtectedContent
+}
+
+// SkillSnapshotContentProtector 使用 Agent Skill Snapshot 专用 key purpose/AAD 批量保护和读取 Runtime Content。
+// 实现不得记录明文、AAD 全量、密钥或密文；任一 Item 失败不得返回部分成功结果。
+type SkillSnapshotContentProtector interface {
+	// ProtectBatch 在数据库事务前一次性保护全部有界明文，返回与输入一一对应的完整结果。
+	ProtectBatch(ctx context.Context, plaintexts []SkillSnapshotPlaintext) ([]SkillSnapshotCiphertext, error)
+	// OpenBatch 在数据库读取完成后认证解密全部 Item；任一损坏、AAD 或 key 错误时不返回部分明文。
+	OpenBatch(ctx context.Context, ciphertexts []SkillSnapshotCiphertext) ([][]byte, error)
 }

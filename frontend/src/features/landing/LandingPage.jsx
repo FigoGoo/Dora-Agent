@@ -21,10 +21,18 @@ import { PageHeader } from '../../components/common/PageHeader.jsx';
 import { WorkPreviewModal } from '../../components/common/WorkPreviewModal.jsx';
 import { ContextHeader } from '../../components/layout/ContextHeader.jsx';
 import { SideNav } from '../../components/layout/SideNav.jsx';
-import { getPageFromPath, getPathForPage, getProjectWorkspacePath, normalizePath } from '../../app/routes.js';
+import {
+  getPageFromPath,
+  getPathForPage,
+  getProjectWorkspacePath,
+  matchOwnerSkillBuilderPath,
+  matchSkillReviewDetailPath,
+  normalizePath
+} from '../../app/routes.js';
 import { AUTH_SESSION_STATUS, useAuthSession } from '../../platform/auth/authSession.js';
 import { ProjectsPage } from '../projects/ProjectsPage.jsx';
 import { quickCreateProject } from '../projects/projectQuickCreate.js';
+import { QuickCreateSkillPicker } from '../projects/QuickCreateSkillPicker.jsx';
 import {
   createQuickCreateIntent,
   QUICK_CREATE_STATUS,
@@ -33,6 +41,10 @@ import {
   submitQuickCreateIntent
 } from '../projects/quickCreateIntent.js';
 import { SkillsPage } from '../skills/SkillsPage.jsx';
+import { MySkillsPage } from '../skills/MySkillsPage.jsx';
+import { SkillBuilderPage } from '../skills/SkillBuilderPage.jsx';
+import { SkillReviewDetailPage } from '../skillReviews/SkillReviewDetailPage.jsx';
+import { SkillReviewQueuePage } from '../skillReviews/SkillReviewQueuePage.jsx';
 import {
   agentWorkspaceMock,
   assetMocks,
@@ -114,7 +126,16 @@ function createMasonryColumns(items, columnCount, cardWidth) {
   return columns.map((column) => column.works);
 }
 
-function PromptComposer({ prompt, onPromptChange, onLogin, onCreate, quickCreateIntent }) {
+function PromptComposer({
+  prompt,
+  onPromptChange,
+  onLogin,
+  onCreate,
+  quickCreateIntent,
+  isAuthenticated,
+  selectedSkillIDs,
+  onSkillSelectionChange
+}) {
   const isSubmitting = quickCreateIntent?.status === QUICK_CREATE_STATUS.SUBMITTING;
   return (
     <section className="prompt-composer" aria-label="快速创作">
@@ -126,10 +147,18 @@ function PromptComposer({ prompt, onPromptChange, onLogin, onCreate, quickCreate
         placeholder="由一个想法或故事开始..."
       />
       <div className="prompt-composer__tools" aria-label="创作工具">
-        {promptTools.map((tool) => (
+        {promptTools.map((tool) => tool.label === 'Skill' ? (
+          <QuickCreateSkillPicker
+            key={tool.label}
+            isAuthenticated={isAuthenticated}
+            isDisabled={isSubmitting}
+            selectedSkillIDs={selectedSkillIDs}
+            onChange={onSkillSelectionChange}
+            onLogin={onLogin}
+          />
+        ) : (
           <button className="prompt-tool" key={tool.label} type="button" aria-label={`打开${tool.label}`} onClick={() => onLogin(tool.label)}>
             {tool.label === '模型' ? <SlidersHorizontal aria-hidden="true" size={15} /> : null}
-            {tool.label === 'Skill' ? <Sparkles aria-hidden="true" size={15} /> : null}
             {tool.label === '资产库' ? <Images aria-hidden="true" size={15} /> : null}
             <span>{tool.label}</span>
             {tool.badge ? <em>{tool.badge}</em> : null}
@@ -724,6 +753,7 @@ export function LandingPage() {
     isAuthenticated: isLoggedIn,
     login,
     logout,
+    hasCapability,
     retryBootstrap,
     status: authStatus,
     user: authenticatedUser
@@ -737,6 +767,7 @@ export function LandingPage() {
   const [mutedWorks, setMutedWorks] = useState([]);
   const [activeCategory, setActiveCategory] = useState('全部');
   const [quickCreateIntent, setQuickCreateIntent] = useState(null);
+  const [selectedQuickCreateSkillIDs, setSelectedQuickCreateSkillIDs] = useState([]);
   const quickCreateIntentRef = useRef(null);
   const quickCreateRequestRef = useRef(null);
   const quickCreateOperationRef = useRef(0);
@@ -780,6 +811,7 @@ export function LandingPage() {
       try {
         const payload = await quickCreateProject({
           prompt: submitted.prompt,
+          enabledSkillIDs: submitted.enabledSkillIDs,
           idempotencyKey: submitted.idempotencyKey,
           csrfToken: activeCSRFToken,
           signal: controller.signal
@@ -818,7 +850,7 @@ export function LandingPage() {
       )) {
         return;
       }
-      intent = createQuickCreateIntent(promptValue);
+      intent = createQuickCreateIntent(promptValue, { enabledSkillIDs: selectedQuickCreateSkillIDs });
       commitQuickCreateIntent(intent);
     }
     if (!isLoggedIn) {
@@ -841,7 +873,9 @@ export function LandingPage() {
 
       if (window.location.pathname !== path) {
         window.history.pushState({}, '', path);
-        window.dispatchEvent(new Event('dora:navigate'));
+        window.dispatchEvent(new CustomEvent('dora:navigate', {
+          detail: { targetId: options.targetId || null }
+        }));
       }
     }
   }
@@ -858,7 +892,7 @@ export function LandingPage() {
         submitStableQuickCreate(intent, nextSession?.csrfToken).catch(() => {});
       }
     } else if (targetPage === 'workspace') {
-      const intent = createQuickCreateIntent(prompt);
+      const intent = createQuickCreateIntent(prompt, { enabledSkillIDs: selectedQuickCreateSkillIDs });
       commitQuickCreateIntent(intent);
       submitStableQuickCreate(intent, nextSession?.csrfToken).catch(() => {});
     } else if (targetPage) {
@@ -889,6 +923,7 @@ export function LandingPage() {
     } finally {
       cancelQuickCreateRequest();
       commitQuickCreateIntent(null);
+      setSelectedQuickCreateSkillIDs([]);
     }
   }
 
@@ -909,12 +944,15 @@ export function LandingPage() {
   }
 
   useEffect(() => {
-    function syncPageFromPath() {
+    function syncPageFromPath(event) {
       const normalizedPath = normalizePath(window.location.pathname);
+      const targetId = normalizedPath === '/explore'
+        ? HOME_FEATURED_SECTION_ID
+        : event?.type === 'dora:navigate' ? event.detail?.targetId || null : null;
 
       setActivePage(getPageFromPath(window.location.pathname));
-      setPendingScrollTarget(normalizedPath === '/explore' ? HOME_FEATURED_SECTION_ID : null);
-      setActiveNavTarget(normalizedPath === '/explore' ? HOME_FEATURED_SECTION_ID : null);
+      setPendingScrollTarget(targetId);
+      setActiveNavTarget(targetId);
       setIsAccountMenuOpen(false);
 
       if (normalizedPath === '/explore') {
@@ -923,9 +961,11 @@ export function LandingPage() {
     }
 
     window.addEventListener('popstate', syncPageFromPath);
+    window.addEventListener('dora:navigate', syncPageFromPath);
 
     return () => {
       window.removeEventListener('popstate', syncPageFromPath);
+      window.removeEventListener('dora:navigate', syncPageFromPath);
     };
   }, []);
 
@@ -935,6 +975,7 @@ export function LandingPage() {
     if (previous === AUTH_SESSION_STATUS.AUTHENTICATED && authStatus !== AUTH_SESSION_STATUS.AUTHENTICATED) {
       cancelQuickCreateRequest();
       commitQuickCreateIntent(null);
+      setSelectedQuickCreateSkillIDs([]);
       setIsAccountMenuOpen(false);
     }
   }, [authStatus]);
@@ -978,9 +1019,18 @@ export function LandingPage() {
   const mainClassName =
     activePage === 'projects'
       ? 'landing-main landing-main--projects'
-      : activePage === 'skills'
+      : ['skills', 'skillDetail', 'mySkills', 'skillBuilder', 'skillReviews', 'skillReviewDetail'].includes(activePage)
         ? 'landing-main landing-main--skills'
         : 'landing-main';
+  const skillBuilderRoute = activePage === 'skillBuilder'
+    ? matchOwnerSkillBuilderPath(window.location.pathname)
+    : null;
+  const skillReviewRoute = activePage === 'skillReviewDetail'
+    ? matchSkillReviewDetailPath(window.location.pathname)
+    : null;
+  const visibleNavItems = navItems.filter((item) => (
+    !item.requiredCapability || hasCapability(item.requiredCapability)
+  ));
 
   return (
     <div className="doraigc-shell" style={themeStyle} data-testid="doraigc-shell">
@@ -988,7 +1038,7 @@ export function LandingPage() {
         activePage={activePage}
         activeNavTarget={activeNavTarget}
         isLoggedIn={isLoggedIn}
-        navItems={navItems}
+        navItems={visibleNavItems}
         onNavigate={handleNavigate}
         onLogin={requestLogin}
         onToggleAccountMenu={() => setIsAccountMenuOpen((value) => !value)}
@@ -1024,6 +1074,9 @@ export function LandingPage() {
                     onLogin={requestLogin}
                     onCreate={requestQuickCreate}
                     quickCreateIntent={quickCreateIntent}
+                    isAuthenticated={isLoggedIn}
+                    selectedSkillIDs={selectedQuickCreateSkillIDs}
+                    onSkillSelectionChange={setSelectedQuickCreateSkillIDs}
                   />
                 </div>
                 <HotSkills onUse={(skill) => requestLogin(skill.title, skill.title)} />
@@ -1044,7 +1097,35 @@ export function LandingPage() {
         {activePage === 'workspace' ? <WorkspacePage onIntent={requestLogin} /> : null}
         {activePage === 'projects' ? <ProjectsPage onIntent={requestLogin} /> : null}
         {activePage === 'assets' ? <AssetsPage onIntent={requestLogin} /> : null}
-        {activePage === 'skills' ? <SkillsPage onIntent={requestLogin} /> : null}
+        {activePage === 'skills' || activePage === 'skillDetail' ? (
+          <SkillsPage isLoggedIn={isLoggedIn} onLogin={requestLogin} />
+        ) : null}
+        {activePage === 'mySkills' ? <MySkillsPage /> : null}
+        {activePage === 'skillBuilder' && skillBuilderRoute ? (
+          <SkillBuilderPage skillID={skillBuilderRoute.skillID} csrfToken={csrfToken} />
+        ) : null}
+        {activePage === 'skillBuilder' && !skillBuilderRoute ? (
+          <section className="route-state" aria-labelledby="invalid-skill-route-title">
+            <h2 id="invalid-skill-route-title">Skill 编辑路径无效</h2>
+            <p role="alert">链接中的 skill_id 不是有效的 UUIDv7，未发起草稿请求。</p>
+            <button type="button" className="secondary-button" onClick={() => navigateToPage('mySkills')}>
+              返回我的 Skill
+            </button>
+          </section>
+        ) : null}
+        {activePage === 'skillReviews' ? <SkillReviewQueuePage /> : null}
+        {activePage === 'skillReviewDetail' && skillReviewRoute ? (
+          <SkillReviewDetailPage reviewID={skillReviewRoute.reviewID} csrfToken={csrfToken} />
+        ) : null}
+        {activePage === 'skillReviewDetail' && !skillReviewRoute ? (
+          <section className="route-state" aria-labelledby="invalid-skill-review-route-title">
+            <h2 id="invalid-skill-review-route-title">Skill 审核路径无效</h2>
+            <p role="alert">链接中的 review_id 不是有效的规范 UUIDv7，未发起审核请求。</p>
+            <button type="button" className="secondary-button" onClick={() => navigateToPage('skillReviews')}>
+              返回审核队列
+            </button>
+          </section>
+        ) : null}
         {activePage === 'works' ? <WorksPage onIntent={requestLogin} /> : null}
         {activePage === 'credits' ? <CreditsPage onIntent={requestLogin} /> : null}
       </main>

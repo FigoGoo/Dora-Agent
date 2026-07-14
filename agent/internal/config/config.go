@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/FigoGoo/Dora-Agent/agent/internal/skill"
 )
 
 const serviceName = "dora-agent-service"
@@ -33,6 +35,8 @@ type Config struct {
 	BusinessRPC BusinessRPCConfig
 	// ContentProtection 保存 Session Prompt 加密密钥与非秘密版本引用。
 	ContentProtection ContentProtectionConfig
+	// SkillSnapshotLimits 保存 Agent 接收 Session Skill Snapshot 的版本化资源剖面。
+	SkillSnapshotLimits skill.LimitsProfileV1
 	// HTTPIdentity 保存 Business→Agent 用户级 HTTP 身份断言校验参数。
 	HTTPIdentity HTTPIdentityConfig
 	// Workspace 保存一次一致性工作台快照的集合上限。
@@ -263,6 +267,19 @@ func Load(version string) (Config, error) {
 			PreviousKey:        decodeOptionalBase64Secret(os.Getenv("AGENT_CONTENT_PREVIOUS_KEY_BASE64")),
 			PreviousKeyVersion: strings.TrimSpace(os.Getenv("AGENT_CONTENT_PREVIOUS_KEY_VERSION")),
 		},
+		SkillSnapshotLimits: skill.LimitsProfileV1{
+			ProfileVersion:                 envOrDefault("AGENT_SKILL_SNAPSHOT_LIMITS_PROFILE_VERSION", "session_skill_snapshot_limits.v1"),
+			MaxItems:                       mustPositiveInt("AGENT_SKILL_SNAPSHOT_MAX_ITEMS", 16),
+			MaxRuntimeContentBytesPerItem:  mustPositiveInt("AGENT_SKILL_SNAPSHOT_MAX_RUNTIME_CONTENT_BYTES_PER_ITEM", 64*1024),
+			MaxTotalRuntimeContentBytes:    mustPositiveInt("AGENT_SKILL_SNAPSHOT_MAX_TOTAL_RUNTIME_CONTENT_BYTES", 256*1024),
+			MaxSnapshotMetadataBytes:       mustPositiveInt("AGENT_SKILL_SNAPSHOT_MAX_METADATA_BYTES", 128*1024),
+			MaxExamplesPerItem:             mustPositiveInt("AGENT_SKILL_SNAPSHOT_MAX_EXAMPLES_PER_ITEM", 16),
+			MaxStarterPromptsPerItem:       mustPositiveInt("AGENT_SKILL_SNAPSHOT_MAX_STARTER_PROMPTS_PER_ITEM", 16),
+			MaxAllowedGraphToolKeysPerItem: mustPositiveInt("AGENT_SKILL_SNAPSHOT_MAX_ALLOWED_GRAPH_TOOL_KEYS_PER_ITEM", 6),
+			MaxPublicToolRefsPerItem:       mustNonNegativeInt("AGENT_SKILL_SNAPSHOT_MAX_PUBLIC_TOOL_REFS_PER_ITEM", 0),
+			MaxRPCRequestBytes:             mustPositiveInt("AGENT_SKILL_SNAPSHOT_MAX_RPC_REQUEST_BYTES", 2*1024*1024),
+			MaxOutboxPlaintextBytes:        mustPositiveInt("AGENT_SKILL_SNAPSHOT_MAX_OUTBOX_PLAINTEXT_BYTES", 2*1024*1024),
+		},
 		HTTPIdentity: HTTPIdentityConfig{
 			ActiveKeyVersion:   strings.TrimSpace(os.Getenv("AGENT_HTTP_ASSERTION_ACTIVE_KEY_VERSION")),
 			ActiveSecret:       decodeBase64Secret(os.Getenv("AGENT_HTTP_ASSERTION_ACTIVE_SECRET_BASE64")),
@@ -365,6 +382,9 @@ func (c Config) Validate() error {
 	if len(c.ContentProtection.Key) != 32 {
 		// 不回显原始环境变量或解码错误，避免 Secret 进入启动日志。
 		return fmt.Errorf("AGENT_CONTENT_KEY_BASE64 must decode to exactly 32 bytes")
+	}
+	if err := c.SkillSnapshotLimits.Validate(); err != nil {
+		return fmt.Errorf("agent Skill Snapshot limits are invalid: %w", err)
 	}
 	if !validKeyVersion(c.ContentProtection.KeyVersion) {
 		return fmt.Errorf("AGENT_CONTENT_KEY_VERSION must contain 1 to 64 bytes")

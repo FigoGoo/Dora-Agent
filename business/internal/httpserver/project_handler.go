@@ -14,6 +14,8 @@ import (
 
 	"github.com/FigoGoo/Dora-Agent/business/internal/auth"
 	"github.com/FigoGoo/Dora-Agent/business/internal/project"
+	"github.com/FigoGoo/Dora-Agent/business/internal/projectcreation"
+	"github.com/FigoGoo/Dora-Agent/business/internal/projectskillbinding"
 	"github.com/gin-gonic/gin"
 )
 
@@ -28,10 +30,23 @@ type ProjectService interface {
 	Bootstrap(ctx context.Context, projectID string, ownerUserID string) (project.BootstrapResult, error)
 }
 
+// ProjectSkillBindingV2Service 是 HTTP Handler 消费的显式 QuickCreate v2 最小应用边界。
+type ProjectSkillBindingV2Service interface {
+	// QuickCreateV2 冻结初始 Skill 选择并可靠接受 Session Bootstrap v2。
+	QuickCreateV2(ctx context.Context, command projectcreation.QuickCreateV2Command) (projectskillbinding.QuickCreateV2Result, error)
+}
+
 // QuickCreateRequest 是 POST /api/v1/projects:quick-create 唯一接受的 JSON DTO。
 type QuickCreateRequest struct {
 	// InitialPrompt 是可选首提示词；缺失或 null 与空工作台语义一致，服务端仍权威执行 Unicode 规范化。
 	InitialPrompt *string `json:"initial_prompt"`
+}
+
+// QuickCreateRequestV2 是同一路径显式选择的严格 v2 variant；EnabledSkillIDs 必须存在且非 null。
+type QuickCreateRequestV2 struct {
+	SchemaVersion   string    `json:"schema_version"`
+	InitialPrompt   *string   `json:"initial_prompt"`
+	EnabledSkillIDs *[]string `json:"enabled_skill_ids"`
 }
 
 // QuickCreateResponse 是首次接受与同键重放共用的 Frozen v1 安全响应。
@@ -77,16 +92,29 @@ type ProjectBootstrapResponse struct {
 // ProjectHandler 负责 W0 QuickCreate/Bootstrap 的严格 DTO、可信 Principal、幂等 Header 和错误映射。
 type ProjectHandler struct {
 	service             ProjectService
+	serviceV2           ProjectSkillBindingV2Service
 	requestIDs          auth.IDGenerator
 	maxRequestBodyBytes int64
 }
 
 // NewProjectHandler 校验应用服务、Request ID Generator 和请求体上限后创建 Project Handler。
 func NewProjectHandler(service ProjectService, requestIDs auth.IDGenerator, maxRequestBodyBytes int64) (*ProjectHandler, error) {
+	return newProjectHandler(service, nil, requestIDs, maxRequestBodyBytes)
+}
+
+// NewProjectHandlerWithV2 创建同时接受 Frozen v1 与显式 v2 variant 的 Project Handler。
+func NewProjectHandlerWithV2(service ProjectService, serviceV2 ProjectSkillBindingV2Service, requestIDs auth.IDGenerator, maxRequestBodyBytes int64) (*ProjectHandler, error) {
+	if serviceV2 == nil {
+		return nil, fmt.Errorf("create Project HTTP handler: QuickCreate v2 service is required")
+	}
+	return newProjectHandler(service, serviceV2, requestIDs, maxRequestBodyBytes)
+}
+
+func newProjectHandler(service ProjectService, serviceV2 ProjectSkillBindingV2Service, requestIDs auth.IDGenerator, maxRequestBodyBytes int64) (*ProjectHandler, error) {
 	if service == nil || requestIDs == nil || maxRequestBodyBytes <= 0 {
 		return nil, fmt.Errorf("create project HTTP handler: invalid dependency or config")
 	}
-	return &ProjectHandler{service: service, requestIDs: requestIDs, maxRequestBodyBytes: maxRequestBodyBytes}, nil
+	return &ProjectHandler{service: service, serviceV2: serviceV2, requestIDs: requestIDs, maxRequestBodyBytes: maxRequestBodyBytes}, nil
 }
 
 // Register 使用读/写两种认证中间件注册 Frozen v1 路由；写中间件必须同时校验 Session 与 CSRF。
@@ -117,20 +145,33 @@ func (h *ProjectHandler) quickCreate(c *gin.Context) {
 		h.writeProjectError(c, http.StatusBadRequest, "INVALID_REQUEST", "请求格式无效", requestID, false)
 		return
 	}
-	decoder := json.NewDecoder(bytes.NewReader(rawBody))
-	decoder.DisallowUnknownFields()
-	var request QuickCreateRequest
-	if err := decoder.Decode(&request); err != nil {
-		h.writeProjectError(c, http.StatusBadRequest, "INVALID_REQUEST", "请求格式无效", requestID, false)
-		return
-	}
-	if err := ensureJSONEOF(decoder); err != nil {
+	requestV1, requestV2, err := decodeQuickCreateVariant(rawBody)
+	if err != nil {
 		h.writeProjectError(c, http.StatusBadRequest, "INVALID_REQUEST", "请求格式无效", requestID, false)
 		return
 	}
 	prompt := ""
-	if request.InitialPrompt != nil {
-		prompt = *request.InitialPrompt
+	if requestV2 != nil {
+		if requestV2.InitialPrompt != nil {
+			prompt = *requestV2.InitialPrompt
+		}
+		if h.serviceV2 == nil {
+			h.writeProjectError(c, http.StatusServiceUnavailable, "PROJECT_SKILL_SNAPSHOT_V2_UNAVAILABLE", "项目技能快照功能暂时不可用", requestID, true)
+			return
+		}
+		result, createErr := h.serviceV2.QuickCreateV2(c.Request.Context(), projectcreation.QuickCreateV2Command{
+			OwnerUserID: principal.ID, IdempotencyKey: c.GetHeader("Idempotency-Key"), InitialPrompt: prompt,
+			EnabledSkillIDs: append([]string{}, (*requestV2.EnabledSkillIDs)...),
+		})
+		if createErr != nil {
+			h.writeMappedProjectError(c, createErr, requestID)
+			return
+		}
+		h.writeQuickCreateSuccess(c, result.ProjectID, result.IdempotentReplay, principal.ID, requestID)
+		return
+	}
+	if requestV1.InitialPrompt != nil {
+		prompt = *requestV1.InitialPrompt
 	}
 	result, err := h.service.QuickCreate(c.Request.Context(), project.QuickCreateCommand{
 		OwnerUserID: principal.ID, IdempotencyKey: c.GetHeader("Idempotency-Key"), InitialPrompt: prompt,
@@ -140,15 +181,45 @@ func (h *ProjectHandler) quickCreate(c *gin.Context) {
 		return
 	}
 
+	h.writeQuickCreateSuccess(c, result.ProjectID, result.IdempotentReplay, principal.ID, requestID)
+}
+
+// decodeQuickCreateVariant 先只读取 schema_version presence，再按唯一版本 DTO 严格拒绝未知字段和 trailing JSON。
+func decodeQuickCreateVariant(rawBody []byte) (QuickCreateRequest, *QuickCreateRequestV2, error) {
+	var fields map[string]json.RawMessage
+	probe := json.NewDecoder(bytes.NewReader(rawBody))
+	if err := probe.Decode(&fields); err != nil || fields == nil || ensureJSONEOF(probe) != nil {
+		return QuickCreateRequest{}, nil, errors.New("invalid QuickCreate JSON")
+	}
+	_, hasSchemaVersion := fields["schema_version"]
+	decoder := json.NewDecoder(bytes.NewReader(rawBody))
+	decoder.DisallowUnknownFields()
+	if !hasSchemaVersion {
+		var request QuickCreateRequest
+		if err := decoder.Decode(&request); err != nil || ensureJSONEOF(decoder) != nil {
+			return QuickCreateRequest{}, nil, errors.New("invalid QuickCreate v1 JSON")
+		}
+		return request, nil, nil
+	}
+	var request QuickCreateRequestV2
+	if err := decoder.Decode(&request); err != nil || ensureJSONEOF(decoder) != nil ||
+		request.SchemaVersion != projectskillbinding.QuickCreateSchemaVersionV2 || request.EnabledSkillIDs == nil {
+		return QuickCreateRequest{}, nil, errors.New("invalid QuickCreate v2 JSON")
+	}
+	return QuickCreateRequest{}, &request, nil
+}
+
+// writeQuickCreateSuccess 统一 v1/v2 首次接受和幂等重放响应；首次接受不等待 Agent RPC。
+func (h *ProjectHandler) writeQuickCreateSuccess(c *gin.Context, projectID string, replay bool, ownerUserID string, requestID string) {
 	response := QuickCreateResponse{
-		ProjectID: result.ProjectID, CreationStatus: "provisioning",
-		WorkspaceRef: "/projects/" + result.ProjectID + "/workspace", RequestID: requestID,
+		ProjectID: projectID, CreationStatus: "provisioning",
+		WorkspaceRef: "/projects/" + projectID + "/workspace", RequestID: requestID,
 	}
 	status := http.StatusCreated
-	if result.IdempotentReplay {
+	if replay {
 		status = http.StatusOK
 		// 重放可以安全读取跨服务最终一致投影并返回 ready；首次提交仍不等待 Agent RPC。
-		bootstrap, bootstrapErr := h.service.Bootstrap(c.Request.Context(), result.ProjectID, principal.ID)
+		bootstrap, bootstrapErr := h.service.Bootstrap(c.Request.Context(), projectID, ownerUserID)
 		if bootstrapErr != nil {
 			h.writeMappedProjectError(c, bootstrapErr, requestID)
 			return
@@ -278,6 +349,18 @@ func (h *ProjectHandler) writeMappedProjectError(c *gin.Context, err error, requ
 		h.writeProjectError(c, http.StatusConflict, "IDEMPOTENCY_CONFLICT", "幂等键已用于不同的创建请求", requestID, false)
 	case errors.Is(err, project.ErrProjectNotFound):
 		h.writeProjectError(c, http.StatusNotFound, "PROJECT_NOT_FOUND", "项目不存在或不可访问", requestID, false)
+	case errors.Is(err, projectcreation.ErrV2Disabled):
+		h.writeProjectError(c, http.StatusServiceUnavailable, "PROJECT_SKILL_SNAPSHOT_V2_UNAVAILABLE", "项目技能快照功能暂时不可用", requestID, true)
+	case errors.Is(err, projectskillbinding.ErrInvalidBinding):
+		h.writeProjectError(c, http.StatusBadRequest, "PROJECT_SKILL_BINDING_INVALID", "项目技能选择无效", requestID, false)
+	case errors.Is(err, projectskillbinding.ErrSkillUnavailable), errors.Is(err, projectskillbinding.ErrGovernanceUnavailable), errors.Is(err, projectskillbinding.ErrPublicToolUnavailable):
+		h.writeProjectError(c, http.StatusConflict, "PROJECT_SKILL_UNAVAILABLE", "所选技能不可用于项目", requestID, false)
+	case errors.Is(err, projectskillbinding.ErrSnapshotInvalid):
+		h.writeProjectError(c, http.StatusConflict, "PROJECT_SKILL_SNAPSHOT_INVALID", "项目技能快照无效", requestID, false)
+	case errors.Is(err, projectskillbinding.ErrSnapshotLimitExceeded):
+		h.writeProjectError(c, http.StatusRequestEntityTooLarge, "SNAPSHOT_LIMIT_EXCEEDED", "项目技能快照超过大小或数量上限", requestID, false)
+	case errors.Is(err, projectskillbinding.ErrContentProtection):
+		h.writeProjectError(c, http.StatusServiceUnavailable, "PROJECT_SKILL_SNAPSHOT_PROTECTION_UNAVAILABLE", "项目技能快照保护暂时不可用", requestID, true)
 	default:
 		h.writeProjectError(c, http.StatusServiceUnavailable, "PROJECT_UNAVAILABLE", "项目服务暂时不可用", requestID, true)
 	}

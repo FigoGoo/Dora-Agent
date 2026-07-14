@@ -14,16 +14,23 @@ import (
 
 const schemaName = "business"
 
-// requiredBusinessTables 是 Business Runtime 进入 Ready 前必须存在的 W0 权威表固定集合。
+// requiredBusinessTables 是 Business Runtime 进入 Ready 前必须存在的 W0 与 W1 Foundation 权威表固定集合。
 var requiredBusinessTables = [...]string{
 	"user_account",
 	"user_login_identity",
 	"user_password_credential",
 	"auth_web_session",
+	"user_role_assignment",
 	"project",
 	"project_creation_receipt",
 	"project_session_binding",
 	"project_session_outbox",
+	"skill",
+	"skill_content_revision",
+	"skill_review_submission",
+	"skill_published_snapshot",
+	"skill_command_receipt",
+	"skill_governance_audit",
 }
 
 // Client 封装 Business PostgreSQL 连接和底层连接池生命周期。
@@ -79,30 +86,57 @@ func (c *Client) VerifySchema(ctx context.Context, timeout time.Duration) error 
 	if err := c.verifyRequiredAuthColumns(checkCtx); err != nil {
 		return err
 	}
+	if err := c.verifyAuthorizationIntegrity(checkCtx); err != nil {
+		return err
+	}
 	if err := c.verifySchemaContract(checkCtx); err != nil {
 		return err
 	}
 	return nil
 }
 
-// verifyRequiredAuthColumns 校验 W0 Transport Auth 需要的前向 Migration 字段，避免旧 Schema 通过 Ready 后才在登录 JOIN 失败。
+// verifyRequiredAuthColumns 校验 Auth 与 Reviewer Decision 需要的前向 Migration 字段，避免旧 Schema 误通过 Ready。
 func (c *Client) verifyRequiredAuthColumns(ctx context.Context) error {
-	var displayNameColumnCount int64
+	var requiredColumnCount int64
 	if err := c.db.WithContext(ctx).Raw(`
 		SELECT COUNT(*)
 		FROM information_schema.columns
 		WHERE table_schema = ?
-		  AND table_name = 'user_account'
-		  AND column_name = 'display_name'`, schemaName).Scan(&displayNameColumnCount).Error; err != nil {
+		  AND (
+		    (table_name = 'user_account' AND column_name = 'display_name') OR
+		    (table_name = 'skill_command_receipt' AND column_name = 'request_id') OR
+		    (table_name = 'skill_governance_audit' AND column_name = 'request_id')
+		  )`, schemaName).Scan(&requiredColumnCount).Error; err != nil {
 		return fmt.Errorf("query business auth required columns: %w", err)
 	}
-	if displayNameColumnCount != 1 {
-		return fmt.Errorf("business schema is missing required W0 auth columns; run business migrations")
+	if requiredColumnCount != 3 {
+		return fmt.Errorf("business schema is missing required auth or RBAC columns; run business migrations")
 	}
 	return nil
 }
 
-// verifyRequiredTables 使用一次固定集合查询校验 W0 全部权威表；任意 Migration 缺失都会阻止 Runtime Ready。
+// verifyAuthorizationIntegrity 用一次固定 COUNT 检测无物理外键设计下的 target/actor orphan 与未知角色。
+func (c *Client) verifyAuthorizationIntegrity(ctx context.Context) error {
+	var invalidAssignmentCount int64
+	if err := c.db.WithContext(ctx).Raw(`
+		SELECT COUNT(*)
+		FROM business.user_role_assignment AS assignment
+		LEFT JOIN business.user_account AS target_account ON target_account.id = assignment.user_id
+		LEFT JOIN business.user_account AS actor_account ON actor_account.id = assignment.assigned_by_user_id
+		LEFT JOIN business.user_account AS revoke_actor_account ON revoke_actor_account.id = assignment.revoked_by_user_id
+		WHERE target_account.id IS NULL
+		   OR actor_account.id IS NULL
+		   OR (assignment.revoked_by_user_id IS NOT NULL AND revoke_actor_account.id IS NULL)
+		   OR assignment.role_key <> 'skill_reviewer'`).Scan(&invalidAssignmentCount).Error; err != nil {
+		return fmt.Errorf("query business authorization integrity: %w", err)
+	}
+	if invalidAssignmentCount != 0 {
+		return fmt.Errorf("business authorization contains %d orphan or unknown assignments", invalidAssignmentCount)
+	}
+	return nil
+}
+
+// verifyRequiredTables 使用一次固定集合查询校验全部权威表；任意 Migration 缺失都会阻止 Runtime Ready。
 func (c *Client) verifyRequiredTables(ctx context.Context) error {
 	var existingTableCount int64
 	if err := c.db.WithContext(ctx).Raw(`
@@ -113,7 +147,7 @@ func (c *Client) verifyRequiredTables(ctx context.Context) error {
 		return fmt.Errorf("query business required tables: %w", err)
 	}
 	if existingTableCount != int64(len(requiredBusinessTables)) {
-		return fmt.Errorf("business schema is missing required W0 tables: found %d of %d; run business migrations", existingTableCount, len(requiredBusinessTables))
+		return fmt.Errorf("business schema is missing required tables: found %d of %d; run business migrations", existingTableCount, len(requiredBusinessTables))
 	}
 	return nil
 }

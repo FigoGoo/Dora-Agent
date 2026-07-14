@@ -12,9 +12,9 @@ type Principal struct {
 	Email string
 	// AccountStatus 用户账户状态，W0 成功会话固定为 active。
 	AccountStatus string
-	// Roles W0 尚未引入完整 RBAC，因此返回非 nil 空数组。
+	// Roles 是本次权威 Session Resolve 动态投影的闭集角色，普通用户为空数组。
 	Roles []string
-	// Capabilities W0 尚未引入完整能力投影，因此返回非 nil 空数组。
+	// Capabilities 是本次权威 Session Resolve 动态投影的闭集能力，普通用户为空数组。
 	Capabilities []string
 }
 

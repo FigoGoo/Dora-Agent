@@ -3,15 +3,26 @@ set -euo pipefail
 umask 077
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/w1-smoke-mode.sh
+. "$repo_root/scripts/lib/w1-smoke-mode.sh"
 env_file="${ENV_FILE:-$repo_root/.env.example}"
 go_bin="${GO_BIN:-/Users/figo/sdk/go1.26.3/bin/go}"
 migrate_bin="${MIGRATE_BIN:-$repo_root/.local/tools/migrate}"
 compose=(docker compose --env-file "$env_file" -f "$repo_root/deploy/local/compose.yaml")
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-evidence_dir="$repo_root/.local/smoke/w0-transport/runs/$run_id"
-evidence_scan_root="$repo_root/.local/smoke/w0-transport/runs"
-evidence_file="$repo_root/.local/smoke/w05-workspace-transport-evidence.json"
-legacy_evidence_file="$repo_root/.local/smoke/w0-transport-evidence.json"
+w1_skill_smoke_enabled="${W1_RUN_SKILL_SMOKE:-0}"
+w1_browser_smoke_enabled="${W1_RUN_BROWSER_SMOKE:-0}"
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  evidence_dir="$repo_root/.local/smoke/w1-skill-foundation/runs/$run_id"
+  evidence_scan_root="$repo_root/.local/smoke/w1-skill-foundation/runs"
+  evidence_file="$repo_root/.local/smoke/w1-skill-foundation-evidence.json"
+  legacy_evidence_file=""
+else
+  evidence_dir="$repo_root/.local/smoke/w0-transport/runs/$run_id"
+  evidence_scan_root="$repo_root/.local/smoke/w0-transport/runs"
+  evidence_file="$repo_root/.local/smoke/w05-workspace-transport-evidence.json"
+  legacy_evidence_file="$repo_root/.local/smoke/w0-transport-evidence.json"
+fi
 pending_evidence_file="$evidence_dir/evidence-summary.pending.json"
 cookie_jar=""
 login_response_temp=""
@@ -22,12 +33,31 @@ owner_b_login_response_temp=""
 owner_b_denied_response_temp=""
 owner_b_denied_headers_temp=""
 source_manifest_temp=""
+w1_temp_dir=""
 owner_b_password=""
 owner_b_csrf_token=""
 owner_b_cookie_token=""
+provisioner_password=""
+reviewer_assignment_id=""
+reviewer_seed_creator_user_id=""
+provisioner_user_id=""
+user_cookie_token=""
 business_pid=""
 agent_pid=""
 browser_smoke_ran=false
+w1_skill_smoke_ran=false
+w1_browser_smoke_ran=false
+w1_skill_binding_smoke_ran=false
+w1_reviewer_rbac_smoke_ran=false
+w1_reviewer_revocation_smoke_ran=false
+w1_skill_id=""
+w1_review_id=""
+w1_skill_name=""
+w1_updated_skill_name=""
+w1_binding_prompt=""
+w1_binding_project_id=""
+w1_binding_session_id=""
+w1_binding_input_id=""
 
 stop_processes() {
   for pid in "$business_pid" "$agent_pid"; do
@@ -66,6 +96,9 @@ stop_processes() {
   fi
   if [[ -n "$source_manifest_temp" ]]; then
     rm -f "$source_manifest_temp"
+  fi
+  if [[ -n "$w1_temp_dir" ]]; then
+    rm -rf "$w1_temp_dir"
   fi
 }
 
@@ -231,11 +264,980 @@ sha256_file() {
   printf '%s' "$digest"
 }
 
+response_header_value() {
+  local headers_file="$1"
+  local header_name="$2"
+  tr -d '\r' <"$headers_file" | awk -F ': *' -v name="$header_name" '
+    tolower($1) == tolower(name) { print substr($0, index($0, ":") + 2); exit }
+  '
+}
+
+build_w1_skill_payload() {
+  local name="$1"
+  local suffix="$2"
+  local public_tool_refs="${3:-[]}"
+  jq -cn --arg name "$name" --arg suffix "$suffix" --argjson public_tool_refs "$public_tool_refs" '
+    {definition:{
+      schema_version:"skill_definition.v1",
+      name:$name,
+      summary:("真实 W1 Skill Foundation 冒烟摘要 " + $suffix),
+      category:"smoke",
+      tags:["beta","alpha","alpha"],
+      input_description:"输入真实业务目标与素材约束",
+      output_description:"输出可审核的结构化创作方案",
+      invocation_rules:"仅在用户明确需要完整创作规划时调用",
+      plan_creation_spec:{applicability:"enabled",guidance:"先确认目标，再形成可执行创作规格",not_applicable_reason:""},
+      analyze_materials:{applicability:"enabled",guidance:"只分析用户已授权的真实素材",not_applicable_reason:""},
+      plan_storyboard:{applicability:"enabled",guidance:"按镜头目标组织故事板和依赖",not_applicable_reason:""},
+      generate_media:{applicability:"enabled",guidance:"生成前确认规格、范围与资源引用",not_applicable_reason:""},
+      write_prompts:{applicability:"enabled",guidance:"生成可追踪且与目标一致的提示词",not_applicable_reason:""},
+      assemble_output:{applicability:"enabled",guidance:"按审核通过的时间线组织最终输出",not_applicable_reason:""},
+      examples:[
+        {input:"制作品牌介绍短片",output:"输出结构化短片创作方案"},
+        {input:"分析已有素材",output:"输出带来源约束的素材分析"}
+      ],
+      starter_prompts:["分析这批素材","帮我规划介绍视频","分析这批素材"],
+      market_listing:{cover_asset_id:null,detail:"用于 W1 真实链路验收",copyright_notice:"仅用于本地冒烟",user_notice:"不得用于生产内容"},
+      public_tool_refs:$public_tool_refs
+    }}'
+}
+
+run_w1_skill_smoke() {
+  local postgres_container="$1"
+  local response_file="$w1_temp_dir/response.json"
+  local headers_file="$w1_temp_dir/headers.txt"
+  local create_key="w1-skill-create-${run_id}"
+  local review_key="w1-skill-review-${run_id}"
+  local create_payload=""
+  local conflict_payload=""
+  local missing_array_payload=""
+  local null_array_payload=""
+  local cover_asset_payload=""
+  local updated_payload=""
+  local tool_payload=""
+  local status=""
+  local initial_etag=""
+  local updated_etag=""
+  local response_etag=""
+  local replay_skill_id=""
+  local replay_review_id=""
+  local database_assertion=""
+  local create_first_status=""
+  local create_replay_status=""
+  local create_conflict_status=""
+  local create_conflict_code=""
+  local create_response_etag=""
+  local missing_array_status=""
+  local missing_array_code=""
+  local null_array_status=""
+  local null_array_code=""
+  local cover_asset_status=""
+  local cover_asset_code=""
+  local owner_list_status=""
+  local owner_detail_status=""
+  local update_status=""
+  local update_response_etag=""
+  local stale_update_status=""
+  local stale_update_code=""
+  local public_tool_status=""
+  local public_tool_code=""
+  local review_first_status=""
+  local review_replay_status=""
+
+  w1_skill_name="W1 Skill API smoke ${run_id}"
+  w1_updated_skill_name="W1 Skill API smoke updated ${run_id}"
+  create_payload="$(build_w1_skill_payload "$w1_skill_name" "create")"
+
+  : >"$headers_file"
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $create_key" \
+    --data-binary "$create_payload" -D "$headers_file" -o "$response_file" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/skills')"
+  create_first_status="$status"
+  [[ "$status" == "201" ]] || fail "W1 Skill 首次创建状态为 $status"
+  w1_skill_id="$(jq -er '.skill.skill_id | strings | select(test("^[0-9a-f-]{36}$"))' "$response_file")"
+  initial_etag="$(jq -er '.skill.draft_etag | strings | select(test("^\\\"[^\\\"]+\\\"$"))' "$response_file")"
+  response_etag="$(response_header_value "$headers_file" 'ETag')"
+  create_response_etag="$response_etag"
+  [[ "$response_etag" == "$initial_etag" ]] || fail "W1 Skill 创建响应头与 draft_etag 不一致"
+  jq -e --arg id "$w1_skill_id" --arg name "$w1_skill_name" '
+    .skill.skill_id == $id
+    and .skill.definition.name == $name
+    and .skill.definition.tags == ["alpha","beta"]
+    and .skill.definition.starter_prompts == ["分析这批素材","帮我规划介绍视频"]
+    and .skill.definition.public_tool_refs == []
+    and .skill.content_status == "draft"
+    and .skill.has_unpublished_changes == true
+    and .skill.review_status == null
+    and .skill.allowed_actions == ["edit_draft","submit_review"]' \
+    "$response_file" >/dev/null || fail "W1 Skill 创建投影或 Canonical 规范化结果漂移"
+
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $create_key" \
+    --data-binary "$create_payload" -o "$response_file" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/skills')"
+  create_replay_status="$status"
+  [[ "$status" == "200" ]] || fail "W1 Skill 同键同义重放状态为 $status"
+  replay_skill_id="$(jq -er '.skill.skill_id' "$response_file")"
+  [[ "$replay_skill_id" == "$w1_skill_id" && "$(jq -er '.skill.draft_etag' "$response_file")" == "$initial_etag" ]] || \
+    fail "W1 Skill 同义重放未返回首次冻结结果"
+
+  conflict_payload="$(build_w1_skill_payload "W1 Skill conflicting ${run_id}" "conflict")"
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $create_key" \
+    --data-binary "$conflict_payload" -o "$response_file" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/skills')"
+  create_conflict_status="$status"
+  [[ "$status" == "409" ]] || fail "W1 Skill 同键异义状态为 $status"
+  create_conflict_code="$(jq -er '.error.code' "$response_file")"
+  jq -e '.error.code == "IDEMPOTENCY_CONFLICT"' "$response_file" >/dev/null || fail "W1 Skill 同键异义错误码漂移"
+
+  missing_array_payload="$(jq -c 'del(.definition.tags)' <<<"$create_payload")"
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: w1-shape-missing-${run_id}" \
+    --data-binary "$missing_array_payload" -o "$response_file" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/skills')"
+  missing_array_status="$status"
+  [[ "$status" == "400" ]] || fail "W1 Skill 缺失数组字段未失败关闭，状态为 $status"
+  missing_array_code="$(jq -er '.error.code' "$response_file")"
+  jq -e '
+    .error.code == "SKILL_INVALID_DEFINITION"
+    and any(.error.details.field_errors[]; .field == "definition.tags" and .code == "REQUIRED")' \
+    "$response_file" >/dev/null || fail "W1 Skill 缺失数组字段错误契约漂移"
+
+  null_array_payload="$(jq -c '.definition.examples = null' <<<"$create_payload")"
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: w1-shape-null-${run_id}" \
+    --data-binary "$null_array_payload" -o "$response_file" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/skills')"
+  null_array_status="$status"
+  [[ "$status" == "400" ]] || fail "W1 Skill null 数组字段未失败关闭，状态为 $status"
+  null_array_code="$(jq -er '.error.code' "$response_file")"
+  jq -e '
+    .error.code == "SKILL_INVALID_DEFINITION"
+    and any(.error.details.field_errors[]; .field == "definition.examples" and .code == "REQUIRED")' \
+    "$response_file" >/dev/null || fail "W1 Skill null 数组字段错误契约漂移"
+
+  cover_asset_payload="$(jq -c '.definition.market_listing.cover_asset_id = "019f0000-0000-7000-8000-000000000099"' <<<"$create_payload")"
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: w1-cover-unavailable-${run_id}" \
+    --data-binary "$cover_asset_payload" -o "$response_file" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/skills')"
+  cover_asset_status="$status"
+  [[ "$status" == "400" ]] || fail "W1 Skill 非 null cover_asset_id 未失败关闭，状态为 $status"
+  cover_asset_code="$(jq -er '.error.code' "$response_file")"
+  jq -e '
+    .error.code == "SKILL_INVALID_DEFINITION"
+    and any(.error.details.field_errors[]; .field == "definition.market_listing.cover_asset_id" and .code == "ASSET_REFERENCE_UNAVAILABLE")' \
+    "$response_file" >/dev/null || fail "W1 Skill cover_asset_id null-only 错误契约漂移"
+
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -o "$response_file" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/skills?scope=mine')"
+  owner_list_status="$status"
+  [[ "$status" == "200" ]] || fail "W1 Skill Owner 列表状态为 $status"
+  jq -e --arg id "$w1_skill_id" 'any(.items[]; .skill_id == $id)' "$response_file" >/dev/null || \
+    fail "W1 Skill Owner 列表未包含新建 Skill"
+
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}")"
+  owner_detail_status="$status"
+  [[ "$status" == "200" ]] || fail "W1 Skill Owner 详情状态为 $status"
+  jq -e --arg id "$w1_skill_id" --arg name "$w1_skill_name" \
+    '.skill.skill_id == $id and .skill.definition.name == $name' "$response_file" >/dev/null || \
+    fail "W1 Skill Owner 详情事实漂移"
+
+  updated_payload="$(build_w1_skill_payload "$w1_updated_skill_name" "updated")"
+  : >"$headers_file"
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -X PUT \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "If-Match: $initial_etag" \
+    --data-binary "$updated_payload" -D "$headers_file" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/draft")"
+  update_status="$status"
+  [[ "$status" == "200" ]] || fail "W1 Skill If-Match 更新状态为 $status"
+  updated_etag="$(jq -er '.skill.draft_etag | strings | select(test("^\\\"[^\\\"]+\\\"$"))' "$response_file")"
+  [[ "$updated_etag" != "$initial_etag" ]] || fail "W1 Skill 更新后 draft_etag 未变化"
+  response_etag="$(response_header_value "$headers_file" 'ETag')"
+  update_response_etag="$response_etag"
+  [[ "$response_etag" == "$updated_etag" ]] || fail "W1 Skill 更新响应头与 draft_etag 不一致"
+  jq -e --arg id "$w1_skill_id" --arg name "$w1_updated_skill_name" \
+    '.skill.skill_id == $id and .skill.definition.name == $name and .skill.allowed_actions == ["edit_draft","submit_review"]' \
+    "$response_file" >/dev/null || fail "W1 Skill 更新后 Owner 投影漂移"
+
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -X PUT \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "If-Match: $initial_etag" \
+    --data-binary "$updated_payload" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/draft")"
+  stale_update_status="$status"
+  [[ "$status" == "409" ]] || fail "W1 Skill 过期 ETag 更新状态为 $status"
+  stale_update_code="$(jq -er '.error.code' "$response_file")"
+  jq -e '.error.code == "SKILL_DRAFT_CONFLICT"' "$response_file" >/dev/null || fail "W1 Skill 过期 ETag 错误码漂移"
+
+  tool_payload="$(jq -c '.definition.public_tool_refs = [{"tool_key":"unavailable"}]' <<<"$updated_payload")"
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -X PUT \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "If-Match: $updated_etag" \
+    --data-binary "$tool_payload" -o "$response_file" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/draft")"
+  public_tool_status="$status"
+  [[ "$status" == "400" ]] || fail "W1 Skill 非空 public_tool_refs 未失败关闭，状态为 $status"
+  public_tool_code="$(jq -er '.error.code' "$response_file")"
+  jq -e '
+    .error.code == "SKILL_TOOL_REFERENCE_UNAVAILABLE"
+    and any(.error.details.field_errors[]; .field == "definition.public_tool_refs" and .code == "SKILL_TOOL_REFERENCE_UNAVAILABLE")' \
+    "$response_file" >/dev/null || fail "W1 Skill public_tool_refs 失败关闭错误契约漂移"
+
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -X POST \
+    -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $review_key" -H "If-Match: $updated_etag" \
+    -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/reviews")"
+  review_first_status="$status"
+  [[ "$status" == "201" ]] || fail "W1 Skill 首次提交审核状态为 $status"
+  w1_review_id="$(jq -er '.review_id | strings | select(test("^[0-9a-f-]{36}$"))' "$response_file")"
+  jq -e --arg id "$w1_skill_id" '
+    .skill.skill_id == $id
+    and .skill.review_status == "reviewing"
+    and .skill.allowed_actions == ["edit_draft"]' "$response_file" >/dev/null || \
+    fail "W1 Skill 提交审核后 Owner 投影漂移"
+
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -X POST \
+    -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $review_key" -H "If-Match: $updated_etag" \
+    -o "$response_file" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/reviews")"
+  review_replay_status="$status"
+  [[ "$status" == "200" ]] || fail "W1 Skill 提交审核同义重放状态为 $status"
+  replay_review_id="$(jq -er '.review_id' "$response_file")"
+  [[ "$replay_review_id" == "$w1_review_id" ]] || fail "W1 Skill 提交审核重放产生不同 Review"
+
+  database_assertion="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'owner_matches', EXISTS (
+        SELECT 1 FROM business.skill
+        WHERE id = '$w1_skill_id'::uuid AND owner_user_id = '$user_id'::uuid
+      ),
+      'revision_count', (SELECT COUNT(*) FROM business.skill_content_revision WHERE skill_id = '$w1_skill_id'::uuid),
+      'review_count', (SELECT COUNT(*) FROM business.skill_review_submission WHERE skill_id = '$w1_skill_id'::uuid),
+      'reviewing_count', (SELECT COUNT(*) FROM business.skill_review_submission WHERE skill_id = '$w1_skill_id'::uuid AND status = 'reviewing'),
+      'receipt_count', (SELECT COUNT(*) FROM business.skill_command_receipt WHERE result_skill_id = '$w1_skill_id'::uuid),
+      'published_count', (SELECT COUNT(*) FROM business.skill_published_snapshot WHERE skill_id = '$w1_skill_id'::uuid),
+      'audit_count', (SELECT COUNT(*) FROM business.skill_governance_audit WHERE skill_id = '$w1_skill_id'::uuid),
+      'same_name_skill_count', (
+        SELECT COUNT(DISTINCT revision.skill_id)
+        FROM business.skill_content_revision AS revision
+        WHERE revision.revision_no = 1 AND revision.definition_json->>'name' = '$w1_skill_name'
+      ),
+      'draft_pointer_matches', EXISTS (
+        SELECT 1
+        FROM business.skill AS skill_record
+        JOIN business.skill_content_revision AS revision
+          ON revision.id = skill_record.current_draft_revision_id AND revision.skill_id = skill_record.id
+        WHERE skill_record.id = '$w1_skill_id'::uuid AND revision.revision_no = 2
+      ),
+      'review_revision_matches', EXISTS (
+        SELECT 1
+        FROM business.skill_review_submission AS review
+        JOIN business.skill_content_revision AS revision
+          ON revision.id = review.content_revision_id AND revision.skill_id = review.skill_id
+        WHERE review.id = '$w1_review_id'::uuid AND review.skill_id = '$w1_skill_id'::uuid AND revision.revision_no = 2
+      ),
+      'physical_fk_count', (
+        SELECT COUNT(*)
+        FROM pg_constraint AS constraint_record
+        JOIN pg_namespace AS namespace ON namespace.oid = constraint_record.connamespace
+        WHERE namespace.nspname = 'business' AND constraint_record.contype = 'f'
+      )
+    );")"
+  jq -e '
+    .owner_matches
+    and .revision_count == 2
+    and .review_count == 1
+    and .reviewing_count == 1
+    and .receipt_count == 2
+    and .published_count == 0
+    and .audit_count == 0
+    and .same_name_skill_count == 1
+    and .draft_pointer_matches
+    and .review_revision_matches
+    and .physical_fk_count == 0' <<<"$database_assertion" >/dev/null || \
+    fail "W1 Skill 数据库 Revision/Review/Receipt 或无物理外键断言失败"
+
+  printf '%s\n' "$database_assertion" >"$evidence_dir/responses/w1-skill-database.json"
+  jq -n --arg skill_id "$w1_skill_id" --arg review_id "$w1_review_id" \
+    --arg replay_skill_id "$replay_skill_id" --arg replay_review_id "$replay_review_id" \
+    --arg initial_etag "$initial_etag" --arg updated_etag "$updated_etag" \
+    --arg create_response_etag "$create_response_etag" --arg update_response_etag "$update_response_etag" \
+    --arg create_conflict_code "$create_conflict_code" --arg missing_array_code "$missing_array_code" \
+    --arg null_array_code "$null_array_code" --arg cover_asset_code "$cover_asset_code" \
+    --arg stale_update_code "$stale_update_code" --arg public_tool_code "$public_tool_code" \
+    --argjson create_first_status "$create_first_status" --argjson create_replay_status "$create_replay_status" \
+    --argjson create_conflict_status "$create_conflict_status" --argjson missing_array_status "$missing_array_status" \
+    --argjson null_array_status "$null_array_status" --argjson cover_asset_status "$cover_asset_status" \
+    --argjson owner_list_status "$owner_list_status" --argjson owner_detail_status "$owner_detail_status" \
+    --argjson update_status "$update_status" --argjson stale_update_status "$stale_update_status" \
+    --argjson public_tool_status "$public_tool_status" --argjson review_first_status "$review_first_status" \
+    --argjson review_replay_status "$review_replay_status" --argjson database_fact "$database_assertion" '
+    {skill_id:$skill_id,review_id:$review_id,
+     create:{first_status:$create_first_status,replay_status:$create_replay_status,conflict_status:$create_conflict_status,
+       conflict_code:$create_conflict_code,response_etag_matches:($create_response_etag == $initial_etag),
+       replay_result_matches:($replay_skill_id == $skill_id)},
+     strict_shape:{missing_array_status:$missing_array_status,null_array_status:$null_array_status,
+       cover_asset_non_null_status:$cover_asset_status,
+       failed_closed_without_side_effects:($missing_array_code == "SKILL_INVALID_DEFINITION"
+         and $null_array_code == "SKILL_INVALID_DEFINITION" and $cover_asset_code == "SKILL_INVALID_DEFINITION"
+         and $database_fact.revision_count == 2 and $database_fact.same_name_skill_count == 1)},
+     owner_read:{list_status:$owner_list_status,detail_status:$owner_detail_status},
+     update:{status:$update_status,stale_status:$stale_update_status,stale_code:$stale_update_code,
+       response_etag_matches:($update_response_etag == $updated_etag),etag_changed:($initial_etag != $updated_etag)},
+     public_tool_refs:{status:$public_tool_status,code:$public_tool_code,
+       failed_closed:($public_tool_status == 400 and $database_fact.revision_count == 2)},
+     review:{first_status:$review_first_status,replay_status:$review_replay_status,
+       if_match:($database_fact.review_revision_matches == true),frozen_result:($replay_review_id == $review_id)}}' \
+    >"$evidence_dir/responses/w1-skill-api.json"
+
+  local review_queue="$w1_temp_dir/review-queue.json"
+  local review_detail="$w1_temp_dir/review-detail.json"
+  local review_detail_headers="$w1_temp_dir/review-detail-headers.txt"
+  local publish_first="$w1_temp_dir/publish-first.json"
+  local publish_replay="$w1_temp_dir/publish-replay.json"
+  local review_etag=""
+  local decision_key="w1-skill-approve-${run_id}"
+  local first_request_id=""
+  local first_snapshot_id=""
+  local first_decided_at=""
+  local queue_status=""
+  local detail_status=""
+  local decision_status=""
+  local decision_replay_status=""
+  local detail_header_etag=""
+
+  status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    -o "$review_queue" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/admin/skill-reviews?status=reviewing')"
+  queue_status="$status"
+  [[ "$status" == "200" ]] || fail "W1 Reviewer 待审队列状态为 $status"
+  jq -e --arg review "$w1_review_id" --arg skill "$w1_skill_id" '
+    any(.items[];
+      .review_id == $review and .skill_id == $skill and .status == "reviewing"
+      and .allowed_actions == ["approve_and_publish"])
+    and (.next_cursor == null or (.next_cursor | type) == "string")' \
+    "$review_queue" >/dev/null || fail "W1 Reviewer 待审队列未返回冻结审核项"
+
+  : >"$review_detail_headers"
+  status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    -D "$review_detail_headers" -o "$review_detail" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${w1_review_id}")"
+  detail_status="$status"
+  [[ "$status" == "200" ]] || fail "W1 Reviewer 冻结详情状态为 $status"
+  review_etag="$(jq -er '.review.review_etag | strings | select(test("^\\\"[^\\\"]+\\\"$"))' "$review_detail")"
+  detail_header_etag="$(response_header_value "$review_detail_headers" 'ETag')"
+  [[ "$detail_header_etag" == "$review_etag" ]] || \
+    fail "W1 Reviewer Detail Header/Body ETag 不一致"
+  jq -e --arg review "$w1_review_id" --arg skill "$w1_skill_id" --arg owner "$user_id" --arg name "$w1_updated_skill_name" '
+    .review.review_id == $review and .review.skill_id == $skill and .review.owner_user_id == $owner
+    and .review.status == "reviewing" and .review.definition.name == $name
+    and .review.current_published == null
+    and .review.comparison == {has_current_published:false,same_content:false}
+    and .review.allowed_actions == ["approve_and_publish"]' \
+    "$review_detail" >/dev/null || fail "W1 Reviewer 详情未使用提交时冻结 Definition"
+
+  status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -X POST \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $owner_b_csrf_token" \
+    -H "Idempotency-Key: $decision_key" -H "If-Match: $review_etag" \
+    --data-binary '{"decision":"approved"}' -o "$publish_first" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${w1_review_id}/decisions")"
+  decision_status="$status"
+  [[ "$status" == "200" ]] || fail "W1 Reviewer 首次批准状态为 $status"
+  first_request_id="$(jq -er '.request_id | strings | select(test("^[0-9a-f-]{36}$"))' "$publish_first")"
+  first_snapshot_id="$(jq -er '.review.published_snapshot_id | strings | select(test("^[0-9a-f-]{36}$"))' "$publish_first")"
+  first_decided_at="$(jq -er '.review.decided_at | strings | select(length > 0)' "$publish_first")"
+  jq -e --arg review "$w1_review_id" --arg skill "$w1_skill_id" '
+    .review.review_id == $review and .review.skill_id == $skill
+    and .review.status == "approved" and .review.allowed_actions == []' \
+    "$publish_first" >/dev/null || fail "W1 Reviewer 首次批准结果漂移"
+
+  status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -X POST \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $owner_b_csrf_token" \
+    -H "Idempotency-Key: $decision_key" -H "If-Match: $review_etag" \
+    --data-binary '{"decision":"approved"}' -o "$publish_replay" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${w1_review_id}/decisions")"
+  decision_replay_status="$status"
+  [[ "$status" == "200" ]] || fail "W1 Reviewer 批准同义重放状态为 $status"
+  jq -e --arg review "$w1_review_id" --arg skill "$w1_skill_id" --arg snapshot "$first_snapshot_id" --arg decided "$first_decided_at" --arg first_request "$first_request_id" '
+    .review.review_id == $review and .review.skill_id == $skill and .review.status == "approved"
+    and .review.published_snapshot_id == $snapshot and .review.decided_at == $decided
+    and .review.allowed_actions == [] and .request_id != $first_request' \
+    "$publish_replay" >/dev/null || fail "W1 Reviewer 批准重放未返回首次冻结业务结果"
+  jq -n --arg review_id "$w1_review_id" --arg skill_id "$w1_skill_id" --arg owner_id "$user_id" \
+    --arg snapshot_id "$first_snapshot_id" --arg expected_name "$w1_updated_skill_name" \
+    --arg review_etag "$review_etag" --arg detail_header_etag "$detail_header_etag" \
+    --arg first_request_id "$first_request_id" --arg first_decided_at "$first_decided_at" \
+    --argjson queue_status "$queue_status" --argjson detail_status "$detail_status" \
+    --argjson decision_status "$decision_status" --argjson replay_status "$decision_replay_status" \
+    --slurpfile queue "$review_queue" --slurpfile detail "$review_detail" \
+    --slurpfile first "$publish_first" --slurpfile replay "$publish_replay" '
+    {review_id:$review_id,skill_id:$skill_id,published_snapshot_id:$snapshot_id,
+      queue_status:$queue_status,detail_status:$detail_status,decision_status:$decision_status,replay_status:$replay_status,
+      reviewer_rbac:($queue_status == 200 and any($queue[0].items[];
+        .review_id == $review_id and .skill_id == $skill_id and .status == "reviewing"
+        and .allowed_actions == ["approve_and_publish"])),
+      strong_etag:($detail_status == 200 and $review_etag == $detail_header_etag),
+      frozen_definition:($detail[0].review.review_id == $review_id and $detail[0].review.skill_id == $skill_id
+        and $detail[0].review.owner_user_id == $owner_id and $detail[0].review.definition.name == $expected_name),
+      idempotent_business_result:($decision_status == 200 and $replay_status == 200
+        and $first[0].review.published_snapshot_id == $snapshot_id
+        and $replay[0].review.published_snapshot_id == $snapshot_id
+        and $first[0].review.decided_at == $first_decided_at
+        and $replay[0].review.decided_at == $first_decided_at
+        and $first[0].request_id == $first_request_id and $replay[0].request_id != $first_request_id)}' \
+    >"$evidence_dir/responses/w1-skill-publish.json"
+
+  database_assertion="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'approved_review_count', (
+        SELECT COUNT(*) FROM business.skill_review_submission
+        WHERE id = '$w1_review_id'::uuid AND status = 'approved'
+          AND submitted_by_user_id = '$user_id'::uuid
+          AND decided_by_user_id = '$owner_b_seed_user_id'::uuid
+          AND submitted_by_user_id <> decided_by_user_id
+      ),
+      'published_count', (
+        SELECT COUNT(*) FROM business.skill_published_snapshot
+        WHERE skill_id = '$w1_skill_id'::uuid AND published_by_user_id = '$owner_b_seed_user_id'::uuid
+      ),
+      'published_pointer_matches', EXISTS (
+        SELECT 1 FROM business.skill AS skill_record
+        JOIN business.skill_published_snapshot AS published ON published.id = skill_record.current_published_snapshot_id
+        WHERE skill_record.id = '$w1_skill_id'::uuid AND skill_record.publication_revision = 1
+          AND published.source_content_revision_id = skill_record.current_draft_revision_id
+      ),
+      'approval_receipt_count', (
+        SELECT COUNT(*) FROM business.skill_command_receipt
+        WHERE result_skill_id = '$w1_skill_id'::uuid AND command_type = 'approve_and_publish'
+          AND actor_user_id = '$owner_b_seed_user_id'::uuid
+          AND scope_id = '$w1_review_id'::uuid
+          AND request_id = '$first_request_id'::uuid
+      ),
+      'governance_audit_count', (
+        SELECT COUNT(*) FROM business.skill_governance_audit
+        WHERE skill_id = '$w1_skill_id'::uuid AND action = 'review_approved_and_published'
+          AND actor_user_id = '$owner_b_seed_user_id'::uuid
+          AND request_id = '$first_request_id'::uuid
+      ),
+      'receipt_audit_request_id_matches', EXISTS (
+        SELECT 1
+        FROM business.skill_command_receipt AS receipt
+        JOIN business.skill_governance_audit AS audit
+          ON audit.skill_id = receipt.result_skill_id
+         AND audit.review_submission_id = receipt.scope_id
+         AND audit.actor_user_id = receipt.actor_user_id
+         AND audit.request_id = receipt.request_id
+        WHERE receipt.command_type = 'approve_and_publish'
+          AND receipt.actor_user_id = '$owner_b_seed_user_id'::uuid
+          AND receipt.scope_id = '$w1_review_id'::uuid
+          AND receipt.request_id = '$first_request_id'::uuid
+      )
+    );")"
+  jq -e '
+    .approved_review_count == 1
+    and .published_count == 1
+    and .published_pointer_matches
+    and .approval_receipt_count == 1
+    and .governance_audit_count == 1
+    and .receipt_audit_request_id_matches' <<<"$database_assertion" >/dev/null || \
+    fail "W1 Skill 发布指针、审核、回执或治理审计断言失败"
+  printf '%s\n' "$database_assertion" >"$evidence_dir/responses/w1-skill-publish-database.json"
+  w1_reviewer_rbac_smoke_ran=true
+}
+
+run_w1_skill_binding_smoke() {
+  local postgres_container="$1"
+  local intent_key="w1-binding-${run_id}"
+  local batch_dir="$evidence_dir/responses/w1-binding-batch"
+  local payload=""
+  local replay_status=""
+  local conflict_status=""
+  local batch_request_count=""
+  local batch_success_count=""
+  local batch_created_count=""
+  local business_assertion=""
+  local agent_assertion=""
+  local verifier_file="$evidence_dir/responses/w1-binding-agent-verified.json"
+  local consistency_file="$evidence_dir/responses/w1-binding-consistency.json"
+
+  w1_binding_prompt="W1 Skill Snapshot transport ${run_id}"
+  payload="$(jq -cn --arg prompt "$w1_binding_prompt" --arg skill "$w1_skill_id" \
+    '{schema_version:"project_quick_create.v2",initial_prompt:$prompt,enabled_skill_ids:[$skill]}')"
+  w1_binding_project_id="$(run_concurrent_quick_create \
+    "$intent_key" "$payload" "$batch_dir" "$csrf_token")"
+  [[ "$w1_binding_project_id" =~ ^[0-9a-f-]{36}$ ]] || fail "W1 Binding Project ID 格式无效"
+  batch_request_count="$(find "$batch_dir" -type f -name '*.status' | wc -l | tr -d '[:space:]')"
+  batch_success_count="$(awk '$1 == "200" || $1 == "201" { count++ } END { print count + 0 }' "$batch_dir"/*.status)"
+  batch_created_count="$(awk '$1 == "201" { count++ } END { print count + 0 }' "$batch_dir"/*.status)"
+  poll_bootstrap_ready "$w1_binding_project_id" "$evidence_dir/responses/w1-binding-bootstrap.json" || \
+    fail "W1 非空 Skill Snapshot Project 未进入 ready"
+  w1_binding_session_id="$(jq -er '.session_id | strings | select(length > 0)' "$evidence_dir/responses/w1-binding-bootstrap.json")"
+  w1_binding_input_id="$(jq -er '.input_id | strings | select(length > 0)' "$evidence_dir/responses/w1-binding-bootstrap.json")"
+
+  replay_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $intent_key" \
+    --data-binary "$payload" -o "$evidence_dir/responses/w1-binding-replay.json" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/projects:quick-create')"
+  [[ "$replay_status" == "200" ]] || fail "W1 Binding 同义重放状态为 $replay_status"
+  jq -e --arg project "$w1_binding_project_id" --arg session "$w1_binding_session_id" --arg input "$w1_binding_input_id" \
+    '.project_id == $project and .session_id == $session and .input_id == $input and .creation_status == "ready"' \
+    "$evidence_dir/responses/w1-binding-replay.json" >/dev/null || fail "W1 Binding 同义重放未返回冻结结果"
+
+  conflict_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -H 'Content-Type: application/json' -H "X-CSRF-Token: $csrf_token" -H "Idempotency-Key: $intent_key" \
+    --data-binary "$(jq -cn --arg prompt "$w1_binding_prompt" \
+      '{schema_version:"project_quick_create.v2",initial_prompt:$prompt,enabled_skill_ids:[]}')" \
+    -o "$evidence_dir/responses/w1-binding-conflict.json" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/projects:quick-create')"
+  [[ "$conflict_status" == "409" ]] || fail "W1 Binding 同键异义状态为 $conflict_status"
+  jq -e '.error.code == "IDEMPOTENCY_CONFLICT"' "$evidence_dir/responses/w1-binding-conflict.json" >/dev/null || \
+    fail "W1 Binding 同键异义错误码漂移"
+  jq -n --arg project "$w1_binding_project_id" --arg session "$w1_binding_session_id" --arg input "$w1_binding_input_id" \
+    --argjson concurrent_requests "$batch_request_count" --argjson successful_requests "$batch_success_count" \
+    --argjson created_requests "$batch_created_count" --argjson replay_status "$replay_status" \
+    --argjson conflict_status "$conflict_status" --slurpfile replay "$evidence_dir/responses/w1-binding-replay.json" \
+    --slurpfile conflict "$evidence_dir/responses/w1-binding-conflict.json" '
+    {concurrent_requests:$concurrent_requests,successful_requests:$successful_requests,created_requests:$created_requests,
+      replay_status:$replay_status,conflict_status:$conflict_status,
+      replay_result_matches:($replay[0].project_id == $project and $replay[0].session_id == $session
+        and $replay[0].input_id == $input and $replay[0].creation_status == "ready"),
+      conflict_code:$conflict[0].error.code}' >"$evidence_dir/responses/w1-binding-api.json"
+  jq -e '.concurrent_requests == 100 and .successful_requests == 100 and .created_requests == 1
+    and .replay_status == 200 and .replay_result_matches
+    and .conflict_status == 409 and .conflict_code == "IDEMPOTENCY_CONFLICT"' \
+    "$evidence_dir/responses/w1-binding-api.json" >/dev/null || \
+    fail "W1 Binding 并发、重放或异义派生证据不成立"
+
+  business_assertion="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'request_schema_version', binding.request_schema_version,
+      'outbox_schema_version', outbox.schema_version,
+      'provisioning_status', binding.provisioning_status,
+      'outbox_status', outbox.status,
+      'creation_receipt_skill_count', receipt.skill_count,
+      'binding_skill_count', binding.skill_count,
+      'outbox_skill_count', outbox.skill_count,
+      'resolution_skill_count', resolution.skill_count,
+      'binding_count', (
+        SELECT COUNT(*) FROM business.project_skill_binding
+        WHERE project_id = project.id AND skill_id = '$w1_skill_id'::uuid AND status = 'enabled'
+      ),
+      'resolution_item_count', (
+        SELECT COUNT(*) FROM business.project_session_skill_resolution_item
+        WHERE resolution_id = outbox.resolution_id AND skill_id = '$w1_skill_id'::uuid
+      ),
+      'creation_receipt_snapshot_digest', encode(receipt.skill_snapshot_digest, 'hex'),
+      'binding_snapshot_digest', encode(binding.skill_snapshot_digest, 'hex'),
+      'outbox_snapshot_digest', encode(outbox.skill_snapshot_digest, 'hex'),
+      'resolution_snapshot_digest', encode(resolution.snapshot_set_digest, 'hex'),
+      'resolution_runtime_digest', (
+        SELECT encode(item.runtime_content_digest, 'hex')
+        FROM business.project_session_skill_resolution_item AS item
+        WHERE item.resolution_id = resolution.id AND item.skill_id = '$w1_skill_id'::uuid
+      ),
+      'resolution_content_digest', (
+        SELECT encode(item.content_digest, 'hex')
+        FROM business.project_session_skill_resolution_item AS item
+        WHERE item.resolution_id = resolution.id AND item.skill_id = '$w1_skill_id'::uuid
+      ),
+      'envelope_cleared', outbox.payload_encryption_algorithm IS NULL
+        AND outbox.payload_key_version IS NULL
+        AND outbox.payload_nonce IS NULL
+        AND outbox.payload_ciphertext IS NULL
+        AND outbox.payload_cleared_at IS NOT NULL
+    )
+    FROM business.project AS project
+    JOIN business.project_creation_receipt AS receipt ON receipt.project_id = project.id
+    JOIN business.project_session_binding AS binding ON binding.project_id = project.id
+    JOIN business.project_session_outbox AS outbox ON outbox.id = binding.command_id
+    JOIN business.project_session_skill_resolution AS resolution ON resolution.id = outbox.resolution_id
+    WHERE project.id = '$w1_binding_project_id'::uuid;")"
+  jq -e '
+    .request_schema_version == "ensure_project_session.v2"
+    and .outbox_schema_version == "session_bootstrap_outbox_payload.v2"
+    and .provisioning_status == "ready"
+    and .outbox_status == "delivered"
+    and .creation_receipt_skill_count == 1
+    and .binding_skill_count == 1
+    and .outbox_skill_count == 1
+    and .resolution_skill_count == 1
+    and .binding_count == 1
+    and .resolution_item_count == 1
+    and (.creation_receipt_snapshot_digest | test("^[0-9a-f]{64}$"))
+    and (.binding_snapshot_digest | test("^[0-9a-f]{64}$"))
+    and (.outbox_snapshot_digest | test("^[0-9a-f]{64}$"))
+    and (.resolution_snapshot_digest | test("^[0-9a-f]{64}$"))
+    and (.resolution_runtime_digest | test("^[0-9a-f]{64}$"))
+    and (.resolution_content_digest | test("^[0-9a-f]{64}$"))
+    and .creation_receipt_snapshot_digest == .binding_snapshot_digest
+    and .binding_snapshot_digest == .outbox_snapshot_digest
+    and .outbox_snapshot_digest == .resolution_snapshot_digest
+    and .envelope_cleared' <<<"$business_assertion" >/dev/null || \
+    fail "W1 Binding Business 权威事实或密文清理断言失败"
+  printf '%s\n' "$business_assertion" >"$evidence_dir/responses/w1-binding-business.json"
+
+  agent_assertion="$(docker exec "$postgres_container" psql -U dora_admin -d dora_agent -Atc "
+    SELECT json_build_object(
+      'session_count', (SELECT COUNT(*) FROM agent.session WHERE id = '$w1_binding_session_id'::uuid AND project_id = '$w1_binding_project_id'::uuid),
+      'new_snapshot_kind', (SELECT snapshot_kind FROM agent.session_skill_snapshot WHERE session_id = '$w1_binding_session_id'::uuid),
+      'new_skill_count', (SELECT skill_count FROM agent.session_skill_snapshot WHERE session_id = '$w1_binding_session_id'::uuid),
+      'new_snapshot_digest', (SELECT snapshot_digest FROM agent.session_skill_snapshot WHERE session_id = '$w1_binding_session_id'::uuid),
+      'new_item_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot_item WHERE session_id = '$w1_binding_session_id'::uuid),
+      'new_runtime_digest', (
+        SELECT runtime_content_digest FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$w1_binding_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid
+      ),
+      'new_content_digest', (
+        SELECT content_digest FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$w1_binding_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid
+      ),
+      'new_skill_matches', EXISTS (
+        SELECT 1 FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$w1_binding_session_id'::uuid AND skill_id = '$w1_skill_id'::uuid
+          AND runtime_content_schema_version = 'skill_runtime_content.v1'
+          AND public_tool_refs = '[]'::jsonb
+      ),
+      'runtime_plaintext_absent', NOT EXISTS (
+        SELECT 1 FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$w1_binding_session_id'::uuid
+          AND position(convert_to('$w1_updated_skill_name', 'UTF8') IN runtime_content_ciphertext) > 0
+      ),
+      'receipt_count', (
+        SELECT COUNT(*) FROM agent.session_command_receipt
+        WHERE session_id = '$w1_binding_session_id'::uuid AND command_type = 'ensure_project_session_v2' AND skill_count = 1
+      ),
+      'receipt_skill_count', (
+        SELECT skill_count FROM agent.session_command_receipt
+        WHERE session_id = '$w1_binding_session_id'::uuid AND command_type = 'ensure_project_session_v2'
+      ),
+      'receipt_snapshot_digest', (
+        SELECT skill_snapshot_digest FROM agent.session_command_receipt
+        WHERE session_id = '$w1_binding_session_id'::uuid AND command_type = 'ensure_project_session_v2'
+      ),
+      'input_count', (SELECT COUNT(*) FROM agent.session_input WHERE session_id = '$w1_binding_session_id'::uuid AND id = '$w1_binding_input_id'::uuid),
+      'old_snapshot_kind', (SELECT snapshot_kind FROM agent.session_skill_snapshot WHERE session_id = '$session_id'::uuid),
+      'old_skill_count', (SELECT skill_count FROM agent.session_skill_snapshot WHERE session_id = '$session_id'::uuid),
+      'old_item_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot_item WHERE session_id = '$session_id'::uuid)
+    );")"
+  jq -e '
+    .session_count == 1
+    and .new_snapshot_kind == "published_refs"
+    and .new_skill_count == 1
+    and .new_item_count == 1
+    and (.new_snapshot_digest | test("^[0-9a-f]{64}$"))
+    and (.new_runtime_digest | test("^[0-9a-f]{64}$"))
+    and (.new_content_digest | test("^[0-9a-f]{64}$"))
+    and .new_skill_matches
+    and .runtime_plaintext_absent
+    and .receipt_count == 1
+    and .receipt_skill_count == 1
+    and (.receipt_snapshot_digest | test("^[0-9a-f]{64}$"))
+    and .receipt_snapshot_digest == .new_snapshot_digest
+    and .input_count == 1
+    and .old_snapshot_kind == "empty"
+    and .old_skill_count == 0
+    and .old_item_count == 0' <<<"$agent_assertion" >/dev/null || \
+    fail "W1 Binding Agent Snapshot、密文或新旧 Session 隔离断言失败"
+  printf '%s\n' "$agent_assertion" >"$evidence_dir/responses/w1-binding-agent.json"
+
+  # 数据库形状不能代替完整性校验；调用仅 local 可编译的验证器，通过正式 Service Load 路径完成 AEAD 解密、Canonical 和摘要重算。
+  if ! (
+    cd "$repo_root/agent"
+    DORA_SMOKE_AGENT_SESSION_ID="$w1_binding_session_id" GOWORK=off "$go_bin" run -tags localsmoke ./cmd/local-smoke-snapshot-verifier
+  ) >"$verifier_file"; then
+    fail "W1 Binding Agent Snapshot 正式 Load 路径校验失败"
+  fi
+  jq -e --arg session "$w1_binding_session_id" --arg skill "$w1_skill_id" '
+    keys == ["session_id","skill_count","skills","snapshot_digest","status"]
+    and .status == "verified"
+    and .session_id == $session
+    and .skill_count == 1
+    and (.snapshot_digest | test("^[0-9a-f]{64}$"))
+    and (.skills | length) == 1
+    and (.skills[0] | keys) == ["content_digest","load_order","published_snapshot_id","runtime_content_digest","skill_id"]
+    and .skills[0].load_order == 1
+    and .skills[0].skill_id == $skill
+    and (.skills[0].published_snapshot_id | test("^[0-9a-f-]{36}$"))
+    and (.skills[0].runtime_content_digest | test("^[0-9a-f]{64}$"))
+    and (.skills[0].content_digest | test("^[0-9a-f]{64}$"))' \
+    "$verifier_file" >/dev/null || fail "W1 Binding Agent Snapshot 真实解密或 Canonical 校验失败"
+
+  # 一致性 evidence 的布尔值必须由三份独立事实计算，不得用长度或预设 true 冒充跨模块一致。
+  jq -n \
+    --slurpfile business "$evidence_dir/responses/w1-binding-business.json" \
+    --slurpfile agent "$evidence_dir/responses/w1-binding-agent.json" \
+    --slurpfile verifier "$verifier_file" '
+    $business[0] as $business_fact
+    | $agent[0] as $agent_fact
+    | $verifier[0] as $verified_fact
+    | {
+        skill_count:$verified_fact.skill_count,
+        snapshot_digest_business_agent_verifier_consistent:(
+          $business_fact.creation_receipt_snapshot_digest == $business_fact.binding_snapshot_digest
+          and $business_fact.binding_snapshot_digest == $business_fact.outbox_snapshot_digest
+          and $business_fact.outbox_snapshot_digest == $business_fact.resolution_snapshot_digest
+          and $business_fact.resolution_snapshot_digest == $agent_fact.new_snapshot_digest
+          and $agent_fact.new_snapshot_digest == $agent_fact.receipt_snapshot_digest
+          and $agent_fact.receipt_snapshot_digest == $verified_fact.snapshot_digest
+        ),
+        runtime_content_digest_business_agent_verifier_consistent:(
+          $business_fact.resolution_runtime_digest == $agent_fact.new_runtime_digest
+          and $agent_fact.new_runtime_digest == $verified_fact.skills[0].runtime_content_digest
+        ),
+        content_digest_business_agent_verifier_consistent:(
+          $business_fact.resolution_content_digest == $agent_fact.new_content_digest
+          and $agent_fact.new_content_digest == $verified_fact.skills[0].content_digest
+        ),
+        skill_count_business_agent_verifier_consistent:(
+          $business_fact.creation_receipt_skill_count == $business_fact.binding_skill_count
+          and $business_fact.binding_skill_count == $business_fact.outbox_skill_count
+          and $business_fact.outbox_skill_count == $business_fact.resolution_skill_count
+          and $business_fact.resolution_skill_count == $business_fact.binding_count
+          and $business_fact.binding_count == $business_fact.resolution_item_count
+          and $business_fact.resolution_item_count == $agent_fact.new_skill_count
+          and $agent_fact.new_skill_count == $agent_fact.new_item_count
+          and $agent_fact.new_item_count == $agent_fact.receipt_skill_count
+          and $agent_fact.receipt_skill_count == $verified_fact.skill_count
+        ),
+        business_v2_envelope_cleared:($business_fact.envelope_cleared == true),
+        agent_v2_snapshot_encrypted_and_decryptable:(
+          $agent_fact.runtime_plaintext_absent == true and $verified_fact.status == "verified"
+        ),
+        v1_v2_session_isolation:(
+          $agent_fact.old_snapshot_kind == "empty"
+          and $agent_fact.old_skill_count == 0
+          and $agent_fact.old_item_count == 0
+        )
+      }' >"$consistency_file"
+  jq -e '
+    .skill_count == 1
+    and .snapshot_digest_business_agent_verifier_consistent
+    and .runtime_content_digest_business_agent_verifier_consistent
+    and .content_digest_business_agent_verifier_consistent
+    and .skill_count_business_agent_verifier_consistent
+    and .business_v2_envelope_cleared
+    and .agent_v2_snapshot_encrypted_and_decryptable
+    and .v1_v2_session_isolation' "$consistency_file" >/dev/null || \
+    fail "W1 Binding Business/Agent/解密校验器摘要或数量不一致"
+  w1_skill_binding_smoke_ran=true
+}
+
+run_w1_browser_frozen_smoke() {
+  local postgres_container="$1"
+  local browser_result_file="$2"
+  local owner_api_raw="$w1_temp_dir/browser-owner-detail.json"
+  local review_api_raw="$w1_temp_dir/browser-review-detail.json"
+  local bootstrap_file="$evidence_dir/responses/w1-browser-bootstrap.json"
+  local verifier_file="$evidence_dir/responses/w1-browser-frozen-agent-verified.json"
+  local browser_creator_id=""
+  local browser_reviewer_id=""
+  local browser_skill_id=""
+  local browser_review_id=""
+  local browser_snapshot_id=""
+  local browser_project_id=""
+  local submitted_summary=""
+  local current_draft_summary=""
+  local submitted_summary_b64=""
+  local current_draft_summary_b64=""
+  local owner_api_status=""
+  local review_api_status=""
+  local browser_session_id=""
+  local browser_input_id=""
+  local business_fact=""
+  local agent_fact=""
+
+  [[ -s "$browser_result_file" ]] || fail "W1 浏览器未产出结构化真实结果"
+  jq -e --arg creator "$user_id" --arg reviewer "$owner_b_seed_user_id" '
+    keys == ["creator_id","current_draft_summary","project_id","published_snapshot_id","review_id","reviewer_id","schema_version","skill_id","submitted_summary"]
+    and .schema_version == "w1.real-review-result.v1"
+    and .creator_id == $creator and .reviewer_id == $reviewer and .creator_id != .reviewer_id
+    and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id]
+      | all(.[]; test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
+    and (.submitted_summary | type) == "string" and (.submitted_summary | length) > 0
+    and (.current_draft_summary | type) == "string" and (.current_draft_summary | length) > 0
+    and .submitted_summary != .current_draft_summary' "$browser_result_file" >/dev/null || \
+    fail "W1 浏览器结构化结果契约或 Creator/Reviewer 身份漂移"
+
+  browser_creator_id="$(jq -er '.creator_id' "$browser_result_file")"
+  browser_reviewer_id="$(jq -er '.reviewer_id' "$browser_result_file")"
+  browser_skill_id="$(jq -er '.skill_id' "$browser_result_file")"
+  browser_review_id="$(jq -er '.review_id' "$browser_result_file")"
+  browser_snapshot_id="$(jq -er '.published_snapshot_id' "$browser_result_file")"
+  browser_project_id="$(jq -er '.project_id' "$browser_result_file")"
+  submitted_summary="$(jq -er '.submitted_summary' "$browser_result_file")"
+  current_draft_summary="$(jq -er '.current_draft_summary' "$browser_result_file")"
+  submitted_summary_b64="$(printf '%s' "$submitted_summary" | base64 | tr -d '\n')"
+  current_draft_summary_b64="$(printf '%s' "$current_draft_summary" | base64 | tr -d '\n')"
+
+  owner_api_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
+    -o "$owner_api_raw" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skills/${browser_skill_id}")"
+  [[ "$owner_api_status" == "200" ]] || fail "W1 Browser Skill 正式 Owner API 状态为 $owner_api_status"
+  review_api_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    -o "$review_api_raw" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${browser_review_id}")"
+  [[ "$review_api_status" == "200" ]] || fail "W1 Browser Review 正式 Reviewer API 状态为 $review_api_status"
+
+  jq -n --argjson owner_status "$owner_api_status" --argjson review_status "$review_api_status" \
+    --arg creator "$browser_creator_id" --arg skill "$browser_skill_id" --arg review "$browser_review_id" \
+    --arg snapshot "$browser_snapshot_id" --arg submitted "$submitted_summary" --arg current "$current_draft_summary" \
+    --slurpfile owner "$owner_api_raw" --slurpfile detail "$review_api_raw" '
+    {owner_status:$owner_status,review_status:$review_status,skill_id:$skill,review_id:$review,published_snapshot_id:$snapshot,
+      owner_current_draft_is_b:($owner[0].skill.skill_id == $skill
+        and $owner[0].skill.definition.summary == $current
+        and $owner[0].skill.content_status == "published"
+        and $owner[0].skill.has_unpublished_changes == true
+        and $owner[0].skill.review_status == "approved"),
+      review_frozen_submission_is_a:($detail[0].review.review_id == $review
+        and $detail[0].review.skill_id == $skill
+        and $detail[0].review.owner_user_id == $creator
+        and $detail[0].review.status == "approved"
+        and $detail[0].review.definition.summary == $submitted
+        and $detail[0].review.definition.summary != $current),
+      review_current_published_is_a:($detail[0].review.current_published.published_snapshot_id == $snapshot
+        and $detail[0].review.current_published.definition.summary == $submitted
+        and $detail[0].review.current_published.definition.summary != $current
+        and $detail[0].review.comparison == {has_current_published:true,same_content:true}
+        and $detail[0].review.allowed_actions == [])}' \
+    >"$evidence_dir/responses/w1-browser-frozen-api.json"
+  jq -e '.owner_status == 200 and .review_status == 200 and .owner_current_draft_is_b
+    and .review_frozen_submission_is_a and .review_current_published_is_a' \
+    "$evidence_dir/responses/w1-browser-frozen-api.json" >/dev/null || \
+    fail "W1 Browser 正式 API 未证明提交 A、当前草稿 B、发布 A"
+
+  poll_bootstrap_ready "$browser_project_id" "$bootstrap_file" || fail "W1 Browser QuickCreate Project 未进入 ready"
+  browser_session_id="$(jq -er '.session_id | strings | select(test("^[0-9a-f-]{36}$"))' "$bootstrap_file")"
+  browser_input_id="$(jq -er '.input_id | strings | select(test("^[0-9a-f-]{36}$"))' "$bootstrap_file")"
+
+  business_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'review_fact_count', (SELECT COUNT(*) FROM business.skill_review_submission AS review
+        WHERE review.id = '$browser_review_id'::uuid AND review.skill_id = '$browser_skill_id'::uuid
+          AND review.status = 'approved' AND review.submitted_by_user_id = '$browser_creator_id'::uuid
+          AND review.decided_by_user_id = '$browser_reviewer_id'::uuid),
+      'published_fact_count', (SELECT COUNT(*) FROM business.skill_published_snapshot AS published
+        WHERE published.id = '$browser_snapshot_id'::uuid AND published.skill_id = '$browser_skill_id'::uuid
+          AND published.review_submission_id = '$browser_review_id'::uuid
+          AND published.published_by_user_id = '$browser_reviewer_id'::uuid),
+      'frozen_publication_matches', EXISTS (SELECT 1
+        FROM business.skill AS skill_record
+        JOIN business.skill_review_submission AS review ON review.id = '$browser_review_id'::uuid AND review.skill_id = skill_record.id
+        JOIN business.skill_published_snapshot AS published ON published.id = skill_record.current_published_snapshot_id
+        WHERE skill_record.id = '$browser_skill_id'::uuid AND published.id = '$browser_snapshot_id'::uuid
+          AND published.source_content_revision_id = review.content_revision_id
+          AND published.content_digest = review.content_digest
+          AND skill_record.current_draft_revision_id <> review.content_revision_id),
+      'submitted_summary_is_a', EXISTS (SELECT 1 FROM business.skill_review_submission AS review
+        JOIN business.skill_content_revision AS revision ON revision.id = review.content_revision_id
+        WHERE review.id = '$browser_review_id'::uuid
+          AND revision.definition_json->>'summary' = convert_from(decode('$submitted_summary_b64','base64'),'UTF8')),
+      'current_draft_summary_is_b', EXISTS (SELECT 1 FROM business.skill AS skill_record
+        JOIN business.skill_content_revision AS revision ON revision.id = skill_record.current_draft_revision_id
+        WHERE skill_record.id = '$browser_skill_id'::uuid
+          AND revision.definition_json->>'summary' = convert_from(decode('$current_draft_summary_b64','base64'),'UTF8')),
+      'published_summary_is_a', EXISTS (SELECT 1 FROM business.skill_published_snapshot AS published
+        WHERE published.id = '$browser_snapshot_id'::uuid
+          AND published.definition_json->>'summary' = convert_from(decode('$submitted_summary_b64','base64'),'UTF8')),
+      'project_owner_matches', EXISTS (SELECT 1 FROM business.project
+        WHERE id = '$browser_project_id'::uuid AND owner_user_id = '$browser_creator_id'::uuid),
+      'session_binding_matches', EXISTS (SELECT 1 FROM business.project_session_binding
+        WHERE project_id = '$browser_project_id'::uuid AND agent_session_id = '$browser_session_id'::uuid
+          AND agent_input_id = '$browser_input_id'::uuid AND provisioning_status = 'ready'),
+      'resolution_item_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$browser_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND published_snapshot_id = '$browser_snapshot_id'::uuid),
+      'published_content_digest', (SELECT encode(content_digest,'hex') FROM business.skill_published_snapshot
+        WHERE id = '$browser_snapshot_id'::uuid),
+      'resolution_content_digest', (SELECT encode(content_digest,'hex') FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$browser_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid),
+      'resolution_runtime_digest', (SELECT encode(runtime_content_digest,'hex') FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$browser_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid)
+    );")"
+  printf '%s\n' "$business_fact" >"$evidence_dir/responses/w1-browser-frozen-business.json"
+  jq -e '.review_fact_count == 1 and .published_fact_count == 1 and .frozen_publication_matches
+    and .submitted_summary_is_a and .current_draft_summary_is_b and .published_summary_is_a
+    and .project_owner_matches and .session_binding_matches and .resolution_item_count == 1
+    and (.published_content_digest | test("^[0-9a-f]{64}$"))
+    and (.resolution_content_digest | test("^[0-9a-f]{64}$"))
+    and (.resolution_runtime_digest | test("^[0-9a-f]{64}$"))' \
+    "$evidence_dir/responses/w1-browser-frozen-business.json" >/dev/null || \
+    fail "W1 Browser Business DB 未证明冻结 A/草稿 B 或 Project Snapshot"
+
+  agent_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_agent -Atc "
+    SELECT json_build_object(
+      'session_count', (SELECT COUNT(*) FROM agent.session WHERE id = '$browser_session_id'::uuid
+        AND project_id = '$browser_project_id'::uuid AND user_id = '$browser_creator_id'::uuid),
+      'snapshot_kind', (SELECT snapshot_kind FROM agent.session_skill_snapshot WHERE session_id = '$browser_session_id'::uuid),
+      'skill_count', (SELECT skill_count FROM agent.session_skill_snapshot WHERE session_id = '$browser_session_id'::uuid),
+      'snapshot_digest', (SELECT snapshot_digest FROM agent.session_skill_snapshot WHERE session_id = '$browser_session_id'::uuid),
+      'item_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot_item WHERE session_id = '$browser_session_id'::uuid),
+      'item_matches', EXISTS (SELECT 1 FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$browser_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND published_snapshot_id = '$browser_snapshot_id'::uuid),
+      'content_digest', (SELECT content_digest FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$browser_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid),
+      'runtime_content_digest', (SELECT runtime_content_digest FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$browser_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid)
+    );")"
+  printf '%s\n' "$agent_fact" >"$evidence_dir/responses/w1-browser-frozen-agent.json"
+  jq -e '.session_count == 1 and .snapshot_kind == "published_refs" and .skill_count == 1
+    and .item_count == 1 and .item_matches and (.snapshot_digest | test("^[0-9a-f]{64}$"))
+    and (.content_digest | test("^[0-9a-f]{64}$")) and (.runtime_content_digest | test("^[0-9a-f]{64}$"))' \
+    "$evidence_dir/responses/w1-browser-frozen-agent.json" >/dev/null || \
+    fail "W1 Browser Agent DB Snapshot 事实漂移"
+
+  if ! (
+    cd "$repo_root/agent"
+    DORA_SMOKE_AGENT_SESSION_ID="$browser_session_id" GOWORK=off "$go_bin" run -tags localsmoke ./cmd/local-smoke-snapshot-verifier
+  ) >"$verifier_file"; then
+    fail "W1 Browser Agent Snapshot 正式 Load 路径校验失败"
+  fi
+  jq -e --arg session "$browser_session_id" --arg skill "$browser_skill_id" --arg snapshot "$browser_snapshot_id" '
+    .status == "verified" and .session_id == $session and .skill_count == 1 and (.skills | length) == 1
+    and .skills[0].skill_id == $skill and .skills[0].published_snapshot_id == $snapshot' \
+    "$verifier_file" >/dev/null || fail "W1 Browser Agent Snapshot 解密验证结果漂移"
+
+  jq -n --slurpfile api "$evidence_dir/responses/w1-browser-frozen-api.json" \
+    --slurpfile business "$evidence_dir/responses/w1-browser-frozen-business.json" \
+    --slurpfile agent "$evidence_dir/responses/w1-browser-frozen-agent.json" \
+    --slurpfile verifier "$verifier_file" '
+    {skill_id:$api[0].skill_id,review_id:$api[0].review_id,published_snapshot_id:$api[0].published_snapshot_id,
+      browser_result_contract:($api[0].owner_status == 200 and $api[0].review_status == 200),
+      formal_api_frozen_revision:($api[0].owner_current_draft_is_b
+        and $api[0].review_frozen_submission_is_a and $api[0].review_current_published_is_a),
+      business_frozen_revision:($business[0].review_fact_count == 1 and $business[0].published_fact_count == 1
+        and $business[0].frozen_publication_matches and $business[0].submitted_summary_is_a
+        and $business[0].current_draft_summary_is_b and $business[0].published_summary_is_a),
+      agent_snapshot_matches_published:($business[0].project_owner_matches and $business[0].session_binding_matches
+        and $business[0].resolution_item_count == 1 and $agent[0].session_count == 1
+        and $agent[0].snapshot_kind == "published_refs" and $agent[0].skill_count == 1
+        and $agent[0].item_count == 1 and $agent[0].item_matches and $verifier[0].status == "verified"
+        and $verifier[0].skills[0].published_snapshot_id == $api[0].published_snapshot_id),
+      digest_business_agent_verifier_consistent:($business[0].published_content_digest == $business[0].resolution_content_digest
+        and $business[0].resolution_content_digest == $agent[0].content_digest
+        and $agent[0].content_digest == $verifier[0].skills[0].content_digest
+        and $business[0].resolution_runtime_digest == $agent[0].runtime_content_digest
+        and $agent[0].runtime_content_digest == $verifier[0].skills[0].runtime_content_digest)}
+    | .browser_review_publish_quickcreate_v2 = (.browser_result_contract and .formal_api_frozen_revision
+      and .business_frozen_revision and .agent_snapshot_matches_published
+      and .digest_business_agent_verifier_consistent)' \
+    >"$evidence_dir/responses/w1-browser-frozen-consistency.json"
+  jq -e '.browser_result_contract and .formal_api_frozen_revision and .business_frozen_revision
+    and .agent_snapshot_matches_published and .digest_business_agent_verifier_consistent
+    and .browser_review_publish_quickcreate_v2' \
+    "$evidence_dir/responses/w1-browser-frozen-consistency.json" >/dev/null || \
+    fail "W1 Browser API/Business/Agent/verifier 冻结事实不一致"
+}
+
 trap stop_processes EXIT
 mkdir -p "$evidence_dir"
 mkdir -p "$evidence_dir/responses"
+if ! w1_smoke_mode_error="$(validate_w1_smoke_mode "$w1_skill_smoke_enabled" "$w1_browser_smoke_enabled")"; then
+  fail "$w1_smoke_mode_error"
+fi
 # 新运行开始即撤销旧的 canonical summary；失败运行不得让消费者继续读取上一次 passed。
-rm -f "$evidence_file" "$legacy_evidence_file"
+rm -f "$evidence_file"
+if [[ -n "$legacy_evidence_file" ]]; then
+  rm -f "$legacy_evidence_file"
+fi
 cookie_jar="$(mktemp "${TMPDIR:-/tmp}/dora-w0-cookie.XXXXXX")"
 owner_b_cookie_jar="$(mktemp "${TMPDIR:-/tmp}/dora-w05-owner-b-cookie.XXXXXX")"
 login_response_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w0-login.XXXXXX")"
@@ -245,6 +1247,10 @@ owner_b_login_response_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-owner-b-login.XX
 owner_b_denied_response_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-owner-b-denied.XXXXXX")"
 owner_b_denied_headers_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-owner-b-denied-headers.XXXXXX")"
 source_manifest_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-source-manifest.XXXXXX")"
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  w1_temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/dora-w1-skill.XXXXXX")"
+  chmod 700 "$w1_temp_dir"
+fi
 chmod 600 "$cookie_jar" "$owner_b_cookie_jar" "$login_response_temp" "$workspace_response_temp" \
   "$owner_b_seed_response_temp" "$owner_b_login_response_temp" "$owner_b_denied_response_temp" \
   "$owner_b_denied_headers_temp" "$source_manifest_temp"
@@ -253,13 +1259,25 @@ set -a
 . "$env_file"
 set +a
 
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  # W1 冒烟显式确认同一批本地 Agent binary 已支持 v2；模板和普通启动仍保持默认关闭。
+  BUSINESS_PROJECT_SKILL_SNAPSHOT_V2_ENABLED=true
+  BUSINESS_AGENT_SESSION_V2_CAPABILITY_CONFIRMED=true
+  export BUSINESS_PROJECT_SKILL_SNAPSHOT_V2_ENABLED BUSINESS_AGENT_SESSION_V2_CAPABILITY_CONFIRMED
+fi
+
 [[ "${DORA_ENV:-}" == "local" ]] || fail "DORA_ENV 必须为 local"
 [[ -x "$go_bin" ]] || fail "未找到固定 Go SDK"
 [[ -x "$migrate_bin" ]] || fail "未找到 golang-migrate CLI"
-[[ -x "$repo_root/.local/bin/business-service" ]] || fail "未构建 business-service"
-[[ -x "$repo_root/.local/bin/agent-service" ]] || fail "未构建 agent-service"
 command -v shasum >/dev/null 2>&1 || fail "未找到 shasum"
 [[ -d "$repo_root/frontend/src" && -d "$repo_root/frontend/e2e" ]] || fail "前端源码或 E2E 目录缺失"
+
+# 脚本可被直接运行，不能依赖 Makefile 前置任务留下的旧二进制；在计算指纹和启动 Runtime 前从当前 worktree 重新构建。
+mkdir -p "$repo_root/.local/bin"
+GOWORK=off "$go_bin" -C "$repo_root/business" build -o "$repo_root/.local/bin/business-service" ./cmd/business-service || \
+  fail "从当前 worktree 构建 business-service 失败"
+GOWORK=off "$go_bin" -C "$repo_root/agent" build -o "$repo_root/.local/bin/agent-service" ./cmd/agent-service || \
+  fail "从当前 worktree 构建 agent-service 失败"
 business_binary_sha256="$(sha256_file "$repo_root/.local/bin/business-service")" || fail "Business Runtime SHA-256 计算失败"
 agent_binary_sha256="$(sha256_file "$repo_root/.local/bin/agent-service")" || fail "Agent Runtime SHA-256 计算失败"
 while IFS= read -r source_file; do
@@ -269,9 +1287,12 @@ done < <(
   cd "$repo_root"
   {
     find business agent -type f \( -name '*.go' -o -name '*.sql' -o -name '*.thrift' -o -name '*.proto' \) -print
-    find frontend/src frontend/e2e -type f -print
+    find frontend/src frontend/e2e frontend/scripts -type f -print
+    find scripts -type f -print
     find frontend -maxdepth 1 -type f \( -name 'package.json' -o -name 'package-lock.json' -o -name 'npm-shrinkwrap.json' \) -print
-    printf '%s\n' 'scripts/smoke-w0-transport.sh'
+    printf '%s\n' \
+      'frontend/playwright.config.js' \
+      'frontend/vite.config.js'
   } | LC_ALL=C sort -u
 )
 [[ -s "$source_manifest_temp" ]] || fail "Source SHA-256 manifest 为空"
@@ -281,6 +1302,9 @@ source_manifest_temp=""
 owner_b_email="owner-b.${DORA_SMOKE_USER_EMAIL}"
 owner_b_password="owner-b-${DORA_SMOKE_USER_PASSWORD}"
 owner_b_display_name="本地冒烟权限用户"
+provisioner_email="provisioner.${DORA_SMOKE_USER_EMAIL}"
+provisioner_password="provisioner-${DORA_SMOKE_USER_PASSWORD}"
+provisioner_display_name="本地冒烟角色赋权人"
 
 "${compose[@]}" up -d
 ENV_FILE="$env_file" "$repo_root/scripts/wait-for-local-infra.sh"
@@ -290,12 +1314,33 @@ MIGRATE_BIN="$migrate_bin" "$repo_root/scripts/migrate.sh" agent up
   cd "$repo_root/business"
   GOWORK=off "$go_bin" run ./cmd/local-smoke-seeder
 )
-(
-  cd "$repo_root/business"
-  DORA_SMOKE_USER_EMAIL="$owner_b_email" DORA_SMOKE_USER_PASSWORD="$owner_b_password" \
-    DORA_SMOKE_USER_DISPLAY_NAME="$owner_b_display_name" GOWORK=off "$go_bin" run ./cmd/local-smoke-seeder
-) >"$owner_b_seed_response_temp"
-owner_b_seed_user_id="$(jq -er 'select(.status == "ready") | .user_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  (
+    cd "$repo_root/business"
+    DORA_SMOKE_REVIEWER_EMAIL="$owner_b_email" DORA_SMOKE_REVIEWER_PASSWORD="$owner_b_password" \
+      DORA_SMOKE_REVIEWER_DISPLAY_NAME="$owner_b_display_name" \
+      DORA_SMOKE_PROVISIONER_EMAIL="$provisioner_email" DORA_SMOKE_PROVISIONER_PASSWORD="$provisioner_password" \
+      DORA_SMOKE_PROVISIONER_DISPLAY_NAME="$provisioner_display_name" \
+      GOWORK=off "$go_bin" run -tags localsmoke ./cmd/local-smoke-reviewer-seeder
+  ) >"$owner_b_seed_response_temp"
+  reviewer_assignment_id="$(jq -er '.assignment_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
+  owner_b_seed_user_id="$(jq -er '.reviewer_user_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
+  reviewer_seed_creator_user_id="$(jq -er '.creator_user_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
+  provisioner_user_id="$(jq -er '.provisioner_user_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
+  jq -e '
+    .role == "skill_reviewer" and .reason == "local_smoke_fixture"
+    and .creator_user_id != .reviewer_user_id
+    and .creator_user_id != .provisioner_user_id
+    and .reviewer_user_id != .provisioner_user_id' "$owner_b_seed_response_temp" >/dev/null || \
+    fail "Reviewer Seeder 未创建三身份隔离的正式角色分配"
+else
+  (
+    cd "$repo_root/business"
+    DORA_SMOKE_USER_EMAIL="$owner_b_email" DORA_SMOKE_USER_PASSWORD="$owner_b_password" \
+      DORA_SMOKE_USER_DISPLAY_NAME="$owner_b_display_name" GOWORK=off "$go_bin" run ./cmd/local-smoke-seeder
+  ) >"$owner_b_seed_response_temp"
+  owner_b_seed_user_id="$(jq -er 'select(.status == "ready") | .user_id | strings | select(test("^[0-9a-f-]{36}$"))' "$owner_b_seed_response_temp")"
+fi
 rm -f "$owner_b_seed_response_temp"
 owner_b_seed_response_temp=""
 
@@ -323,6 +1368,12 @@ login_status="$(curl --silent --show-error --max-time 10 -c "$cookie_jar" \
 [[ "$login_status" == "200" ]] || fail "登录状态为 $login_status"
 csrf_token="$(jq -er '.csrf_token | strings | select(length > 0)' "$login_response_temp")"
 user_id="$(jq -er '.principal.id | strings | select(length > 0)' "$login_response_temp")"
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  [[ "$user_id" == "$reviewer_seed_creator_user_id" && "$user_id" != "$owner_b_seed_user_id" && "$user_id" != "$provisioner_user_id" ]] || \
+    fail "Reviewer Seeder Creator/Reviewer/Provisioner 身份未与登录主体一致隔离"
+  user_cookie_token="$(awk 'NF >= 7 {value=$7} END {print value}' "$cookie_jar")"
+  [[ -n "$user_cookie_token" ]] || fail "用户 A Cookie 会话未建立"
+fi
 jq 'del(.csrf_token)' "$login_response_temp" >"$evidence_dir/responses/login.json"
 rm -f "$login_response_temp"
 login_response_temp=""
@@ -365,8 +1416,31 @@ poll_bootstrap_ready "$blank_project_id" "$evidence_dir/responses/blank-bootstra
 blank_session_id="$(jq -er '.session_id | strings | select(length > 0)' "$evidence_dir/responses/blank-bootstrap.json")"
 jq -e '.input_id == null and .initial_prompt_status == "absent"' "$evidence_dir/responses/blank-bootstrap.json" >/dev/null || fail "空 Prompt 创建了 Input 或错误状态"
 
+# 第二个真实用户在 W1-C2 中同时作为正式 Reviewer 和跨 Owner 负向主体；登录 Principal 必须来自动态角色解析。
+owner_b_login_status="$(curl --silent --show-error --max-time 10 -c "$owner_b_cookie_jar" \
+  -H 'Content-Type: application/json' \
+  --data-binary "$(jq -cn --arg email "$owner_b_email" --arg password "$owner_b_password" '{email:$email,password:$password}')" \
+  -o "$owner_b_login_response_temp" -w '%{http_code}' \
+  'http://127.0.0.1:18081/api/v1/auth/session')"
+[[ "$owner_b_login_status" == "200" ]] || fail "第二用户登录状态为 $owner_b_login_status"
+owner_b_user_id="$(jq -er '.principal.id | strings | select(length > 0)' "$owner_b_login_response_temp")"
+owner_b_csrf_token="$(jq -er '.csrf_token | strings | select(length > 0)' "$owner_b_login_response_temp")"
+[[ "$owner_b_user_id" == "$owner_b_seed_user_id" && "$owner_b_user_id" != "$user_id" ]] || fail "第二用户身份未与用户 A 隔离"
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  jq -e '.principal.roles == ["skill_reviewer"] and .principal.capabilities == ["skill.review"]' \
+    "$owner_b_login_response_temp" >/dev/null || fail "Reviewer 登录未返回权威角色与 capability"
+fi
+owner_b_cookie_token="$(awk 'NF >= 7 {value=$7} END {print value}' "$owner_b_cookie_jar")"
+[[ -n "$owner_b_cookie_token" ]] || fail "第二用户 Cookie 会话未建立"
+rm -f "$owner_b_login_response_temp"
+owner_b_login_response_temp=""
+
 postgres_container="$("${compose[@]}" ps -q postgres)"
 [[ -n "$postgres_container" ]] || fail "未找到 PostgreSQL 容器"
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  run_w1_skill_smoke "$postgres_container"
+  run_w1_skill_binding_smoke "$postgres_container"
+fi
 business_assertion="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
   SELECT json_build_object(
     'owner_matches', project.owner_user_id = '$user_id'::uuid,
@@ -456,19 +1530,29 @@ unknown_workspace_status="$(curl --silent --show-error --max-time 10 -b "$cookie
 jq -e '.error.code == "SESSION_NOT_FOUND"' "$evidence_dir/responses/unknown-workspace.json" >/dev/null || fail "未知 Session 错误码漂移"
 
 # 第二个真实用户使用独立 Web Session 访问用户 A 的 Project/Agent Session；两个授权边界都必须返回不泄漏资源事实的 404。
-owner_b_login_status="$(curl --silent --show-error --max-time 10 -c "$owner_b_cookie_jar" \
-  -H 'Content-Type: application/json' \
-  --data-binary "$(jq -cn --arg email "$owner_b_email" --arg password "$owner_b_password" '{email:$email,password:$password}')" \
-  -o "$owner_b_login_response_temp" -w '%{http_code}' \
-  'http://127.0.0.1:18081/api/v1/auth/session')"
-[[ "$owner_b_login_status" == "200" ]] || fail "第二用户登录状态为 $owner_b_login_status"
-owner_b_user_id="$(jq -er '.principal.id | strings | select(length > 0)' "$owner_b_login_response_temp")"
-owner_b_csrf_token="$(jq -er '.csrf_token | strings | select(length > 0)' "$owner_b_login_response_temp")"
-[[ "$owner_b_user_id" == "$owner_b_seed_user_id" && "$owner_b_user_id" != "$user_id" ]] || fail "第二用户身份未与用户 A 隔离"
-owner_b_cookie_token="$(awk 'NF >= 7 {value=$7} END {print value}' "$owner_b_cookie_jar")"
-[[ -n "$owner_b_cookie_token" ]] || fail "第二用户 Cookie 会话未建立"
-rm -f "$owner_b_login_response_temp"
-owner_b_login_response_temp=""
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  : >"$w1_temp_dir/response.json"
+  owner_b_skill_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    -o "$w1_temp_dir/response.json" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}")"
+  [[ "$owner_b_skill_status" == "404" ]] || fail "第二用户访问用户 A Skill 未按 Owner-safe 404 关闭，状态为 $owner_b_skill_status"
+  assert_owner_safe_error "$w1_temp_dir/response.json" "SKILL_NOT_FOUND" \
+    "$w1_skill_id" "$w1_review_id" "$w1_skill_name" "$w1_updated_skill_name" || \
+    fail "跨 Owner Skill 错误响应泄漏了权威资源事实"
+  jq -n --argjson status "$owner_b_skill_status" --arg creator "$user_id" --arg reviewer "$owner_b_user_id" \
+    --arg skill "$w1_skill_id" --arg review "$w1_review_id" --arg original_name "$w1_skill_name" \
+    --arg updated_name "$w1_updated_skill_name" --slurpfile response "$w1_temp_dir/response.json" '
+    ($response[0] | [.. | strings]
+      | any(.[]; contains($skill) or contains($review) or contains($original_name) or contains($updated_name))) as $disclosed
+    | {skill_detail:{status:$status,code:$response[0].error.code},
+       distinct_principals:($creator != $reviewer),resource_facts_disclosed:$disclosed,
+       cross_owner_not_found:($status == 404 and $response[0].error.code == "SKILL_NOT_FOUND"
+         and $creator != $reviewer and ($disclosed | not))}' \
+    >"$evidence_dir/responses/w1-skill-cross-owner.json"
+  jq -e '.cross_owner_not_found' "$evidence_dir/responses/w1-skill-cross-owner.json" >/dev/null || \
+    fail "W1 Skill 跨 Owner 派生证据不成立"
+  w1_skill_smoke_ran=true
+fi
 
 owner_b_project_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
   -o "$owner_b_denied_response_temp" -w '%{http_code}' \
@@ -504,10 +1588,6 @@ owner_b_denied_response_temp=""
 rm -f "$owner_b_denied_headers_temp"
 owner_b_denied_headers_temp=""
 
-owner_b_logout_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -c "$owner_b_cookie_jar" \
-  -X DELETE -H "X-CSRF-Token: $owner_b_csrf_token" -o /dev/null -w '%{http_code}' \
-  'http://127.0.0.1:18081/api/v1/auth/session')"
-[[ "$owner_b_logout_status" == "204" ]] || fail "第二用户退出状态为 $owner_b_logout_status"
 jq -n \
   '{project_bootstrap:{status:404,code:"PROJECT_NOT_FOUND"},session_workspace:{status:404,code:"SESSION_NOT_FOUND"},session_events:{status:404,code:"SESSION_NOT_FOUND",content_type:"application/json",sse_headers_committed:false},distinct_principals:true}' \
   >"$evidence_dir/responses/cross-owner-access.json"
@@ -575,6 +1655,83 @@ if [[ "${W0_RUN_BROWSER_SMOKE:-0}" == "1" ]]; then
   browser_smoke_ran=true
 fi
 
+if [[ "$w1_browser_smoke_enabled" == "1" ]]; then
+  [[ -x "$repo_root/frontend/node_modules/.bin/playwright" ]] || fail "未安装前端 Playwright 依赖，请先在 frontend 执行 npm install"
+  [[ -n "$DORA_SMOKE_USER_EMAIL" && -n "$DORA_SMOKE_USER_PASSWORD" && -n "$owner_b_email" && -n "$owner_b_password" ]] || \
+    fail "W1 Reviewer 浏览器门禁缺少 Creator/Reviewer 凭据"
+  w1_browser_result="$w1_temp_dir/browser-real-review-result.json"
+  rm -f "$w1_browser_result"
+  (
+    cd "$repo_root/frontend"
+    DORA_E2E_USER_EMAIL="$DORA_SMOKE_USER_EMAIL" \
+    DORA_E2E_USER_PASSWORD="$DORA_SMOKE_USER_PASSWORD" \
+    DORA_E2E_REVIEWER_EMAIL="$owner_b_email" \
+    DORA_E2E_REVIEWER_PASSWORD="$owner_b_password" \
+    DORA_E2E_BUSINESS_API_TARGET="http://127.0.0.1:18081" \
+    DORA_E2E_OUTPUT_DIR="../.local/playwright/w1-skill-foundation" \
+    DORA_E2E_W1_RESULT_PATH="$w1_browser_result" \
+    npm run test:e2e:w1-real-review
+  ) >"$evidence_dir/frontend-w1-playwright.log" 2>&1 || {
+    sed -n '1,240p' "$evidence_dir/frontend-w1-playwright.log" >&2
+    fail "W1 Creator→Reviewer→QuickCreate v2 浏览器真实链路失败"
+  }
+  run_w1_browser_frozen_smoke "$postgres_container" "$w1_browser_result"
+  w1_browser_smoke_ran=true
+fi
+
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  reviewer_revoke_output="$w1_temp_dir/reviewer-revoke.json"
+  reviewer_after_revoke="$w1_temp_dir/reviewer-after-revoke.json"
+  reviewer_denied_after_revoke="$w1_temp_dir/reviewer-denied-after-revoke.json"
+  (
+    cd "$repo_root/business"
+    DORA_ROLE_ADMIN_POSTGRES_DSN="$BUSINESS_DATABASE_URL" GOWORK=off "$go_bin" run ./cmd/business-role-admin \
+      -action revoke -assignment-id "$reviewer_assignment_id" -expected-version 1 \
+      -target-user-id "$owner_b_seed_user_id" -actor-user-id "$provisioner_user_id" \
+      -role skill_reviewer -reason local_smoke_cleanup \
+      -approval-reference "local-smoke-reviewer-revoke-${run_id}"
+  ) >"$reviewer_revoke_output"
+  jq -e --arg assignment "$reviewer_assignment_id" --arg reviewer "$owner_b_seed_user_id" '
+    .action == "revoke" and .assignment_id == $assignment and .target_user_id == $reviewer
+    and .role == "skill_reviewer" and .status == "revoked" and .version == 2' \
+    "$reviewer_revoke_output" >/dev/null || fail "Reviewer 正式撤权结果漂移"
+
+  reviewer_session_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    -o "$reviewer_after_revoke" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/auth/session')"
+  [[ "$reviewer_session_status" == "200" ]] || fail "Reviewer 撤权后同一 Session 未重新解析，状态为 $reviewer_session_status"
+  jq -e --arg reviewer "$owner_b_seed_user_id" '
+    .principal.id == $reviewer and .principal.roles == [] and .principal.capabilities == []' \
+    "$reviewer_after_revoke" >/dev/null || fail "Reviewer 撤权后同一 Cookie 仍保留 capability"
+  reviewer_denied_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    -o "$reviewer_denied_after_revoke" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/admin/skill-reviews?status=reviewing')"
+  [[ "$reviewer_denied_status" == "403" ]] || fail "Reviewer 撤权后管理 API 状态为 $reviewer_denied_status"
+  jq -e '.error.code == "SKILL_REVIEW_CAPABILITY_REQUIRED"' "$reviewer_denied_after_revoke" >/dev/null || \
+    fail "Reviewer 撤权后管理 API 错误码漂移"
+  jq -n --arg assignment_id "$reviewer_assignment_id" --arg reviewer "$owner_b_seed_user_id" \
+    --argjson session_status "$reviewer_session_status" --argjson denied_status "$reviewer_denied_status" \
+    --slurpfile revoke "$reviewer_revoke_output" --slurpfile session "$reviewer_after_revoke" \
+    --slurpfile denied "$reviewer_denied_after_revoke" '
+    {assignment_id:$assignment_id,revoke_status:$revoke[0].status,assignment_version:$revoke[0].version,
+      same_cookie_roles_empty:($session[0].principal.roles == []),
+      same_cookie_capabilities_empty:($session[0].principal.capabilities == []),
+      admin_api_status:$denied_status,admin_api_code:$denied[0].error.code,
+      reviewer_revocation:($revoke[0].assignment_id == $assignment_id and $revoke[0].target_user_id == $reviewer
+        and $revoke[0].status == "revoked" and $revoke[0].version == 2 and $session_status == 200
+        and $session[0].principal.id == $reviewer and $session[0].principal.roles == []
+        and $session[0].principal.capabilities == [] and $denied_status == 403
+        and $denied[0].error.code == "SKILL_REVIEW_CAPABILITY_REQUIRED")}' \
+    >"$evidence_dir/responses/w1-reviewer-revocation.json"
+  jq -e '.reviewer_revocation' "$evidence_dir/responses/w1-reviewer-revocation.json" >/dev/null || \
+    fail "Reviewer 撤权派生证据不成立"
+  w1_reviewer_revocation_smoke_ran=true
+fi
+
+owner_b_logout_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" -c "$owner_b_cookie_jar" \
+  -X DELETE -H "X-CSRF-Token: $owner_b_csrf_token" -o /dev/null -w '%{http_code}' \
+  'http://127.0.0.1:18081/api/v1/auth/session')"
+[[ "$owner_b_logout_status" == "204" ]] || fail "第二用户退出状态为 $owner_b_logout_status"
+
 logout_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -c "$cookie_jar" \
   -X DELETE -H "X-CSRF-Token: $csrf_token" -o /dev/null -w '%{http_code}' \
   'http://127.0.0.1:18081/api/v1/auth/session')"
@@ -589,16 +1746,129 @@ after_logout_workspace_status="$(curl --silent --show-error --max-time 10 -b "$c
 [[ "$after_logout_workspace_status" == "401" ]] || fail "退出后旧会话仍可读取 Workspace，状态为 $after_logout_workspace_status"
 
 produced_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-jq -n \
-  --arg schema_version "w05.workspace-transport.smoke.evidence.v1" \
-  --arg run_id "$run_id" --arg produced_at "$produced_at" \
-  --arg source_digest_sha256 "$source_digest_sha256" \
-  --arg business_binary_sha256 "$business_binary_sha256" --arg agent_binary_sha256 "$agent_binary_sha256" \
-  --arg project_id "$project_id" --arg session_id "$session_id" --arg input_id "$input_id" \
-  --arg blank_project_id "$blank_project_id" --arg blank_session_id "$blank_session_id" \
-  --argjson browser_ui "$browser_smoke_ran" \
-  '{schema_version:$schema_version,status:"pending",run_id:$run_id,produced_at:$produced_at,source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,agent_binary_sha256:$agent_binary_sha256,prompt_project:{project_id:$project_id,session_id:$session_id,input_id:$input_id},blank_project:{project_id:$blank_project_id,session_id:$blank_session_id,input_id:null},assertions:{concurrent_requests:100,idempotent_replay:true,idempotency_conflict:true,business_prompt_cleared:true,agent_unique_facts:true,blank_negative_side_effects:true,workspace_snapshot:true,workspace_empty_arrays:true,workspace_owner_safe_not_found:true,workspace_cross_owner_not_found:true,events_cross_owner_not_found:true,agent_direct_access_denied:true,sse_replay_and_ready:true,sse_cursor_reset:true,browser_ui:$browser_ui,logout_revoked:true,logout_workspace_denied:true}}' \
-  >"$pending_evidence_file"
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  [[ "$w1_skill_smoke_ran" == "true" ]] || fail "W1 Skill API/数据库/跨 Owner 门禁未完整执行"
+  [[ "$w1_skill_binding_smoke_ran" == "true" ]] || fail "W1 Project Skill Binding 跨模块门禁未完整执行"
+  [[ "$w1_reviewer_rbac_smoke_ran" == "true" ]] || fail "W1 Reviewer RBAC/HTTP 发布门禁未完整执行"
+  [[ "$w1_reviewer_revocation_smoke_ran" == "true" ]] || fail "W1 Reviewer 撤权即时失效门禁未完整执行"
+  [[ "$w1_browser_smoke_ran" == "true" ]] || fail "W1-C2 @w1-real-review 真实浏览器门禁未完整执行"
+  jq -n \
+    --arg schema_version "w1.skill-foundation.smoke.evidence.v3" \
+    --arg run_id "$run_id" --arg produced_at "$produced_at" \
+    --arg source_digest_sha256 "$source_digest_sha256" \
+    --arg business_binary_sha256 "$business_binary_sha256" --arg agent_binary_sha256 "$agent_binary_sha256" \
+    --arg project_id "$project_id" --arg session_id "$session_id" --arg input_id "$input_id" \
+    --arg blank_project_id "$blank_project_id" --arg blank_session_id "$blank_session_id" \
+    --arg skill_id "$w1_skill_id" --arg review_id "$w1_review_id" \
+    --arg binding_project_id "$w1_binding_project_id" --arg binding_session_id "$w1_binding_session_id" --arg binding_input_id "$w1_binding_input_id" \
+    --argjson logout_status "$after_logout_status" --argjson logout_workspace_status "$after_logout_workspace_status" \
+    --slurpfile skill_api "$evidence_dir/responses/w1-skill-api.json" \
+    --slurpfile skill_db "$evidence_dir/responses/w1-skill-database.json" \
+    --slurpfile publish "$evidence_dir/responses/w1-skill-publish.json" \
+    --slurpfile publish_db "$evidence_dir/responses/w1-skill-publish-database.json" \
+    --slurpfile cross_owner "$evidence_dir/responses/w1-skill-cross-owner.json" \
+    --slurpfile binding_api "$evidence_dir/responses/w1-binding-api.json" \
+    --slurpfile binding_consistency "$evidence_dir/responses/w1-binding-consistency.json" \
+    --slurpfile browser "$evidence_dir/responses/w1-browser-frozen-consistency.json" \
+    --slurpfile revocation "$evidence_dir/responses/w1-reviewer-revocation.json" \
+    --slurpfile transport_business "$evidence_dir/responses/business-prompt-assertion.json" \
+    --slurpfile transport_agent "$evidence_dir/responses/agent-prompt-assertion.json" \
+    --slurpfile transport_blank "$evidence_dir/responses/agent-blank-assertion.json" \
+    --slurpfile logout "$evidence_dir/responses/after-logout.json" \
+    --slurpfile logout_workspace "$evidence_dir/responses/after-logout-workspace.json" '
+    {schema_version:$schema_version,status:"pending",run_id:$run_id,produced_at:$produced_at,source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,agent_binary_sha256:$agent_binary_sha256,
+      transport_prerequisite:{prompt_project:{project_id:$project_id,session_id:$session_id,input_id:$input_id},blank_project:{project_id:$blank_project_id,session_id:$blank_session_id,input_id:null}},
+      skill_foundation:{skill_id:$skill_id,review_id:$review_id},
+      project_skill_binding:{project_id:$binding_project_id,session_id:$binding_session_id,input_id:$binding_input_id,skill_count:$binding_consistency[0].skill_count},
+      assertions:{
+        transport_prerequisite:($transport_business[0].owner_matches and $transport_business[0].binding_status == "ready"
+          and $transport_business[0].outbox_status == "delivered" and $transport_business[0].receipt_count == 1
+          and $transport_business[0].prompt_ciphertext_cleared and $transport_agent[0].session_count == 1
+          and $transport_agent[0].snapshot_count == 1 and $transport_agent[0].receipt_count == 1
+          and $transport_agent[0].message_count == 1 and $transport_agent[0].input_count == 1
+          and $transport_agent[0].event_count == 2 and $transport_blank[0].session_count == 1
+          and $transport_blank[0].message_count == 0 and $transport_blank[0].input_count == 0
+          and $transport_blank[0].receipt_count == 1 and $transport_blank[0].event_count == 1),
+        skill_create_201:($skill_api[0].create.first_status == 201),
+        skill_create_replay_200:($skill_api[0].create.replay_status == 200 and $skill_api[0].create.replay_result_matches),
+        skill_create_conflict_409:($skill_api[0].create.conflict_status == 409 and $skill_api[0].create.conflict_code == "IDEMPOTENCY_CONFLICT"),
+        missing_array_failed_closed:($skill_api[0].strict_shape.missing_array_status == 400 and $skill_api[0].strict_shape.failed_closed_without_side_effects),
+        null_array_failed_closed:($skill_api[0].strict_shape.null_array_status == 400 and $skill_api[0].strict_shape.failed_closed_without_side_effects),
+        cover_asset_null_only:($skill_api[0].strict_shape.cover_asset_non_null_status == 400 and $skill_api[0].strict_shape.failed_closed_without_side_effects),
+        owner_list_and_detail:($skill_api[0].owner_read.list_status == 200 and $skill_api[0].owner_read.detail_status == 200),
+        if_match_update:($skill_api[0].update.status == 200 and $skill_api[0].update.response_etag_matches and $skill_api[0].update.etag_changed),
+        stale_etag_conflict:($skill_api[0].update.stale_status == 409 and $skill_api[0].update.stale_code == "SKILL_DRAFT_CONFLICT"),
+        public_tool_refs_failed_closed:($skill_api[0].public_tool_refs.status == 400 and $skill_api[0].public_tool_refs.failed_closed),
+        review_submit_201:($skill_api[0].review.first_status == 201),
+        review_if_match:$skill_api[0].review.if_match,
+        review_replay_200:($skill_api[0].review.replay_status == 200 and $skill_api[0].review.frozen_result),
+        reviewer_rbac:$publish[0].reviewer_rbac,
+        reviewer_revocation:$revocation[0].reviewer_revocation,
+        review_approve_and_publish:($publish[0].decision_status == 200 and $publish_db[0].approved_review_count == 1
+          and $publish_db[0].published_pointer_matches and $publish_db[0].receipt_audit_request_id_matches),
+        review_approve_replay:($publish[0].replay_status == 200 and $publish[0].idempotent_business_result),
+        review_strong_etag:$publish[0].strong_etag,
+        review_frozen_definition:$publish[0].frozen_definition,
+        receipt_audit_request_id_consistent:$publish_db[0].receipt_audit_request_id_matches,
+        cross_owner_not_found:$cross_owner[0].cross_owner_not_found,
+        revision_count:$skill_db[0].revision_count,
+        review_count:$skill_db[0].review_count,
+        published_snapshot_count:$publish_db[0].published_count,
+        governance_audit_count:$publish_db[0].governance_audit_count,
+        no_physical_foreign_keys:($skill_db[0].physical_fk_count == 0),
+        quick_create_v2_concurrent_requests:$binding_api[0].concurrent_requests,
+        quick_create_v2_replay:($binding_api[0].replay_status == 200 and $binding_api[0].replay_result_matches),
+        quick_create_v2_conflict:($binding_api[0].conflict_status == 409 and $binding_api[0].conflict_code == "IDEMPOTENCY_CONFLICT"),
+        business_v2_envelope_cleared:$binding_consistency[0].business_v2_envelope_cleared,
+        agent_v2_snapshot_encrypted:$binding_consistency[0].agent_v2_snapshot_encrypted_and_decryptable,
+        v1_v2_session_isolation:$binding_consistency[0].v1_v2_session_isolation,
+        snapshot_digest_business_agent_verifier_consistent:$binding_consistency[0].snapshot_digest_business_agent_verifier_consistent,
+        runtime_content_digest_business_agent_verifier_consistent:$binding_consistency[0].runtime_content_digest_business_agent_verifier_consistent,
+        content_digest_business_agent_verifier_consistent:$binding_consistency[0].content_digest_business_agent_verifier_consistent,
+        skill_count_business_agent_verifier_consistent:$binding_consistency[0].skill_count_business_agent_verifier_consistent,
+        browser_ui:$browser[0].browser_result_contract,
+        browser_formal_api_frozen_revision:$browser[0].formal_api_frozen_revision,
+        browser_business_frozen_revision:$browser[0].business_frozen_revision,
+        browser_agent_snapshot_matches_published:$browser[0].agent_snapshot_matches_published,
+        browser_digest_business_agent_verifier_consistent:$browser[0].digest_business_agent_verifier_consistent,
+        browser_review_publish_quickcreate_v2:$browser[0].browser_review_publish_quickcreate_v2,
+        logout_revoked:($logout_status == 401 and $logout[0].error.code == "UNAUTHENTICATED"),
+        logout_workspace_denied:($logout_workspace_status == 401 and $logout_workspace[0].error.code == "UNAUTHENTICATED")
+      }}' \
+    >"$pending_evidence_file"
+else
+  jq -n \
+    --arg schema_version "w05.workspace-transport.smoke.evidence.v1" \
+    --arg run_id "$run_id" --arg produced_at "$produced_at" \
+    --arg source_digest_sha256 "$source_digest_sha256" \
+    --arg business_binary_sha256 "$business_binary_sha256" --arg agent_binary_sha256 "$agent_binary_sha256" \
+    --arg project_id "$project_id" --arg session_id "$session_id" --arg input_id "$input_id" \
+    --arg blank_project_id "$blank_project_id" --arg blank_session_id "$blank_session_id" \
+    --argjson browser_ui "$browser_smoke_ran" \
+    '{schema_version:$schema_version,status:"pending",run_id:$run_id,produced_at:$produced_at,source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,agent_binary_sha256:$agent_binary_sha256,prompt_project:{project_id:$project_id,session_id:$session_id,input_id:$input_id},blank_project:{project_id:$blank_project_id,session_id:$blank_session_id,input_id:null},assertions:{concurrent_requests:100,idempotent_replay:true,idempotency_conflict:true,business_prompt_cleared:true,agent_unique_facts:true,blank_negative_side_effects:true,workspace_snapshot:true,workspace_empty_arrays:true,workspace_owner_safe_not_found:true,workspace_cross_owner_not_found:true,events_cross_owner_not_found:true,agent_direct_access_denied:true,sse_replay_and_ready:true,sse_cursor_reset:true,browser_ui:$browser_ui,logout_revoked:true,logout_workspace_denied:true}}' \
+    >"$pending_evidence_file"
+fi
+
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  jq -e '
+    .schema_version == "w1.skill-foundation.smoke.evidence.v3"
+    and .status == "pending"
+    and .assertions.revision_count == 2
+    and .assertions.review_count == 1
+    and .assertions.published_snapshot_count == 1
+    and .assertions.governance_audit_count == 1
+    and .assertions.quick_create_v2_concurrent_requests == 100
+    and (.assertions | length) == 45
+    and ([.assertions | to_entries[]
+      | select(.key != "revision_count"
+        and .key != "review_count"
+        and .key != "published_snapshot_count"
+        and .key != "governance_audit_count"
+        and .key != "quick_create_v2_concurrent_requests")] as $boolean_assertions
+      | ($boolean_assertions | length) == 40
+      and all($boolean_assertions[]; ((.value | type) == "boolean" and .value == true)))' \
+    "$pending_evidence_file" >/dev/null || fail "W1 canonical Evidence 含未通过断言，禁止发布 passed summary"
+fi
 
 assert_evidence_excludes_literal "$csrf_token" "用户 A CSRF"
 assert_evidence_excludes_literal "$DORA_SMOKE_USER_PASSWORD" "用户 A 密码"
@@ -608,6 +1878,24 @@ assert_evidence_excludes_literal "$owner_b_cookie_token" "用户 B Cookie"
 assert_evidence_excludes_literal 'W0 Transport é Smoke' "完整 Prompt"
 assert_evidence_excludes_regex '"csrf_token"[[:space:]]*:[[:space:]]*"[^"[:space:]][^"]*"' "任意非空 CSRF JSON 字段"
 assert_evidence_excludes_regex 'X-Dora-Identity-(Assertion|Signature):' "内部身份断言材料"
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  assert_evidence_excludes_literal "$provisioner_password" "Reviewer Provisioner 密码"
+  assert_evidence_excludes_literal "$user_cookie_token" "用户 A Cookie"
+  assert_evidence_excludes_literal "$w1_skill_name" "W1 Skill 原始名称"
+  assert_evidence_excludes_literal "$w1_updated_skill_name" "W1 Skill 更新后原始名称"
+  assert_evidence_excludes_literal "$w1_binding_prompt" "W1 Binding 完整 Prompt"
+  assert_evidence_excludes_regex '"definition"[[:space:]]*:' "W1 Skill 完整定义正文"
+  assert_evidence_excludes_regex '(?i)(cookie|set-cookie)[[:space:]]*:' "W1 Cookie Header"
+  assert_evidence_excludes_regex '(?i)x-csrf-token[[:space:]]*:' "W1 CSRF Header"
+  assert_evidence_excludes_regex '(?i)"password"[[:space:]]*:' "W1 密码字段"
+  assert_evidence_excludes_regex '(?i)"(payload_nonce|payload_ciphertext|runtime_content_ciphertext)"[[:space:]]*:' "W1 密文或 Nonce 字段"
+  if [[ -n "${BUSINESS_PROJECT_PROMPT_KEY_BASE64:-}" ]]; then
+    assert_evidence_excludes_literal "$BUSINESS_PROJECT_PROMPT_KEY_BASE64" "Business Prompt 密钥材料"
+  fi
+  if [[ -n "${AGENT_CONTENT_KEY_BASE64:-}" ]]; then
+    assert_evidence_excludes_literal "$AGENT_CONTENT_KEY_BASE64" "Agent Content 密钥材料"
+  fi
+fi
 
 stop_processes
 business_pid=""
@@ -624,7 +1912,11 @@ rm -f "$pending_evidence_file"
 mv "${evidence_file}.tmp" "$evidence_file"
 trap - EXIT
 
-if [[ "$browser_smoke_ran" == "true" ]]; then
+if [[ "$w1_skill_smoke_enabled" == "1" && "$w1_browser_smoke_ran" == "true" ]]; then
+  echo "W1 Skill 发布、Project Binding、Session Snapshot v2、跨 Owner 与浏览器冒烟通过"
+elif [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  echo "W1 Skill 发布、Project Binding、Session Snapshot v2、数据库一致性与跨 Owner 冒烟通过"
+elif [[ "$browser_smoke_ran" == "true" ]]; then
   echo "W0.5 Transport API/Snapshot/SSE 与真实浏览器登录、Quick Create、正式工作台、退出冒烟通过"
 else
   echo "W0.5 Transport 真实登录、100 并发 Quick Create、Business generated Kitex→Agent、Workspace Snapshot/SSE、空 Prompt 与退出冒烟通过"

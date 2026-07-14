@@ -59,6 +59,10 @@ type EnsureResult struct {
 	Disposition EnsureDisposition
 	// ResultVersion 是冻结结果结构版本。
 	ResultVersion int
+	// SkillSnapshotDigest 是命令冻结的 Session Skill Snapshot set digest；V1 为规范空集合摘要。
+	SkillSnapshotDigest string
+	// SkillCount 是冻结的 Snapshot Item 数量；V1 固定为 0。
+	SkillCount int
 	// AcceptedAt 是 Agent 本地事务冻结 UTC 时间。
 	AcceptedAt time.Time
 }
@@ -73,6 +77,8 @@ type QueryCommand struct {
 	CommandID string
 	// ExpectedRequestDigest 是调用方原命令的预期语义摘要。
 	ExpectedRequestDigest string
+	// ExpectedCommandType 是调用方所查询的命令版本 token；跨 V1/V2 命中必须返回版本冲突。
+	ExpectedCommandType string
 }
 
 // QueryCommandStatus 表示原命令不存在、已完成或已被不同语义占用。

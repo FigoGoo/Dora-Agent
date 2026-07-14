@@ -78,6 +78,26 @@ func (revealer dispatchRevealer) Reveal(_ context.Context, _ EncryptedPayload) (
 	return revealer.prompt, revealer.err
 }
 
+type panicDispatchRevealer struct{}
+
+func (panicDispatchRevealer) Reveal(_ context.Context, _ EncryptedPayload) (string, error) {
+	panic("v2 outbox must not be revealed by the v1 prompt revealer")
+}
+
+type claimedV2DispatcherStub struct {
+	calls     int
+	outbox    SessionOutbox
+	claimedAt time.Time
+	err       error
+}
+
+func (dispatcher *claimedV2DispatcherStub) DispatchClaimedV2(_ context.Context, outbox SessionOutbox, claimedAt time.Time) error {
+	dispatcher.calls++
+	dispatcher.outbox = outbox
+	dispatcher.claimedAt = claimedAt
+	return dispatcher.err
+}
+
 func processingOutboxForDispatcher(t *testing.T, prompt string) SessionOutbox {
 	t.Helper()
 	projectID, _ := uuid.NewV7()
@@ -126,6 +146,38 @@ func newDispatcherForTest(t *testing.T, repository *dispatchRepository, client *
 	return dispatcher
 }
 
+func processingV2OutboxForDispatcher(t *testing.T) SessionOutbox {
+	t.Helper()
+	projectID, _ := uuid.NewV7()
+	ownerID, _ := uuid.NewV7()
+	commandID, _ := uuid.NewV7()
+	resolutionID, _ := uuid.NewV7()
+	now := time.Date(2026, 7, 14, 2, 0, 0, 0, time.UTC)
+	leaseOwner := "business-1"
+	leaseUntil := now.Add(time.Minute)
+	bindingSetVersion := int64(1)
+	outbox := SessionOutbox{
+		ID: commandID.String(), EventType: EnsureSessionEventType, SchemaVersion: EnsureSessionSchemaVersionV2,
+		AggregateID: projectID.String(), OwnerUserID: ownerID.String(), RequestDigest: SHA256Digest([]byte("request-v2")),
+		HasInitialPrompt: false,
+		EncryptedPayload: &EncryptedPayload{
+			Algorithm: PromptEncryptionAlgorithm, KeyVersion: "key-v2", Nonce: []byte("123456789012"),
+			Ciphertext: []byte("encrypted-bootstrap-with-auth-tag"), PayloadDigest: SHA256Digest([]byte("payload-v2")),
+		},
+		SkillSnapshotDigest: SHA256Digest([]byte("snapshot-v2")), SkillCount: 1,
+		BindingSetVersion: &bindingSetVersion, ResolutionID: stringPointer(resolutionID.String()),
+		Status: OutboxStatusProcessing, AvailableAt: now,
+		LeaseOwner: &leaseOwner, LeaseVersion: 1, LeaseExpiresAt: &leaseUntil, AttemptCount: 1, MaxAttempts: 3,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := outbox.Validate(); err != nil {
+		t.Fatalf("validate v2 outbox: %v", err)
+	}
+	return outbox
+}
+
+func stringPointer(value string) *string { return &value }
+
 func receiptForOutbox(t *testing.T, outbox SessionOutbox, withInput bool) EnsureSessionReceipt {
 	t.Helper()
 	sessionID, _ := uuid.NewV7()
@@ -150,6 +202,33 @@ func TestDispatcherDeliversFirstEnsureReceipt(t *testing.T) {
 	}
 	if repository.delivered != 1 || repository.retried != 0 || repository.dead != 0 || client.queryCalls != 0 {
 		t.Fatalf("unexpected dispatch effects: repository=%+v client=%+v", repository, client)
+	}
+}
+
+func TestDispatcherRoutesV2OutboxWithoutCallingV1Dependencies(t *testing.T) {
+	outbox := processingV2OutboxForDispatcher(t)
+	repository := &dispatchRepository{outbox: outbox}
+	client := &dispatchClient{}
+	v2 := &claimedV2DispatcherStub{}
+	requestID, _ := uuid.NewV7()
+	dispatcher, err := NewDispatcherWithV2(
+		repository, client, panicDispatchRevealer{},
+		serviceClock{now: outbox.CreatedAt}, &serviceIDGenerator{values: []string{requestID.String()}},
+		DispatcherConfig{LeaseOwner: "business-1", LeaseDuration: time.Minute, RetryDelay: 5 * time.Second},
+		v2,
+	)
+	if err != nil {
+		t.Fatalf("create v2 dispatcher: %v", err)
+	}
+
+	if err := dispatcher.DispatchNext(context.Background()); err != nil {
+		t.Fatalf("dispatch v2 outbox: %v", err)
+	}
+	if v2.calls != 1 || v2.outbox.ID != outbox.ID || !v2.claimedAt.Equal(outbox.CreatedAt) {
+		t.Fatalf("v2 outbox was not routed exactly once: stub=%+v", v2)
+	}
+	if client.ensureCalls != 0 || client.queryCalls != 0 || repository.delivered+repository.retried+repository.dead != 0 {
+		t.Fatalf("v2 outbox leaked into v1 path: client=%+v repository=%+v", client, repository)
 	}
 }
 

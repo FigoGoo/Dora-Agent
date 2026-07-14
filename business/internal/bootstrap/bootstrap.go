@@ -11,6 +11,7 @@ import (
 	"github.com/FigoGoo/Dora-Agent/business/internal/agentidentity"
 	"github.com/FigoGoo/Dora-Agent/business/internal/agentsessionrpc"
 	"github.com/FigoGoo/Dora-Agent/business/internal/auth"
+	"github.com/FigoGoo/Dora-Agent/business/internal/authorization"
 	"github.com/FigoGoo/Dora-Agent/business/internal/clock"
 	"github.com/FigoGoo/Dora-Agent/business/internal/config"
 	"github.com/FigoGoo/Dora-Agent/business/internal/etcdregistry"
@@ -20,10 +21,13 @@ import (
 	"github.com/FigoGoo/Dora-Agent/business/internal/idgen"
 	"github.com/FigoGoo/Dora-Agent/business/internal/postgres"
 	"github.com/FigoGoo/Dora-Agent/business/internal/project"
+	"github.com/FigoGoo/Dora-Agent/business/internal/projectcreation"
 	"github.com/FigoGoo/Dora-Agent/business/internal/projectdispatch"
+	"github.com/FigoGoo/Dora-Agent/business/internal/projectdispatchv2"
 	"github.com/FigoGoo/Dora-Agent/business/internal/promptcrypto"
 	redisadapter "github.com/FigoGoo/Dora-Agent/business/internal/redis"
 	"github.com/FigoGoo/Dora-Agent/business/internal/rpcserver"
+	"github.com/FigoGoo/Dora-Agent/business/internal/skill"
 	"github.com/FigoGoo/Dora-Agent/business/kitex_gen/foundationv1"
 )
 
@@ -92,6 +96,16 @@ func Run(ctx context.Context, build BuildInfo) error {
 		_ = registry.Close(ctx)
 		return fmt.Errorf("create business auth repository: %w", err)
 	}
+	authorizationRepository, err := postgres.NewAuthorizationRepository(postgresClient)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business authorization repository: %w", err)
+	}
+	authorizationService, err := authorization.NewService(authorizationRepository, clock.System{}, idgen.UUIDv7{})
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business authorization service: %w", err)
+	}
 	loginRateLimiter, err := redisadapter.NewLoginRateLimiter(
 		redisClient,
 		cfg.Auth.LoginRateLimitMaxAttempts,
@@ -105,6 +119,7 @@ func Run(ctx context.Context, build BuildInfo) error {
 	authService, err := auth.NewService(
 		userRepository,
 		authRepository,
+		authorizationService,
 		clock.System{},
 		idgen.UUIDv7{},
 		rand.Reader,
@@ -129,13 +144,25 @@ func Run(ctx context.Context, build BuildInfo) error {
 		_ = registry.Close(ctx)
 		return fmt.Errorf("create business project repository: %w", err)
 	}
-	promptProtector, err := promptcrypto.NewAESGCMProtectorWithSystemRandom(
+	promptProtector, err := promptcrypto.NewAESGCMProtectorWithPreviousSystemRandom(
 		cfg.Project.PromptProtectionKey,
 		cfg.Project.PromptProtectionKeyVersion,
+		cfg.Project.PromptProtectionPreviousKey,
+		cfg.Project.PromptProtectionPreviousKeyVersion,
 	)
 	if err != nil {
 		_ = registry.Close(ctx)
 		return fmt.Errorf("create business project prompt protector: %w", err)
+	}
+	bootstrapV2Protector, err := promptcrypto.NewBootstrapV2AESGCMProtectorWithPrevious(
+		cfg.Project.PromptProtectionKey,
+		cfg.Project.PromptProtectionKeyVersion,
+		cfg.Project.PromptProtectionPreviousKey,
+		cfg.Project.PromptProtectionPreviousKeyVersion,
+	)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business Bootstrap v2 protector: %w", err)
 	}
 	projectService, err := project.NewService(
 		projectRepository,
@@ -148,10 +175,45 @@ func Run(ctx context.Context, build BuildInfo) error {
 		_ = registry.Close(ctx)
 		return fmt.Errorf("create business project service: %w", err)
 	}
-	projectHandler, err := httpserver.NewProjectHandler(projectService, idgen.UUIDv7{}, cfg.Project.MaxRequestBodyBytes)
+	projectV2Service, err := projectcreation.NewService(
+		projectRepository,
+		clock.System{},
+		idgen.UUIDv7{},
+		bootstrapV2Protector,
+		cfg.Project.SkillSnapshotLimits,
+		cfg.Project.MaxOutboxAttempts,
+		cfg.Project.SkillSnapshotV2Enabled,
+	)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business QuickCreate v2 service: %w", err)
+	}
+	projectHandler, err := httpserver.NewProjectHandlerWithV2(
+		projectService, projectV2Service, idgen.UUIDv7{}, cfg.Project.MaxRequestBodyBytes,
+	)
 	if err != nil {
 		_ = registry.Close(ctx)
 		return fmt.Errorf("create business project HTTP handler: %w", err)
+	}
+	skillRepository, err := postgres.NewSkillRepository(postgresClient)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business skill repository: %w", err)
+	}
+	skillService, err := skill.NewService(skillRepository, clock.System{}, idgen.UUIDv7{})
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business skill service: %w", err)
+	}
+	skillHandler, err := httpserver.NewSkillHandler(skillService, idgen.UUIDv7{}, cfg.Skill.MaxRequestBodyBytes)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business skill HTTP handler: %w", err)
+	}
+	skillReviewHandler, err := httpserver.NewSkillReviewHandler(skillService, idgen.UUIDv7{})
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business skill review HTTP handler: %w", err)
 	}
 	agentSessionAccessService, err := project.NewAgentSessionAccessService(projectRepository)
 	if err != nil {
@@ -193,7 +255,18 @@ func Run(ctx context.Context, build BuildInfo) error {
 			logger.Error("关闭 Agent Session RPC Client 失败", "error_class", "resolver_close_failed")
 		}
 	}()
-	projectDispatcher, err := project.NewDispatcher(
+	projectV2Dispatcher, err := projectdispatchv2.New(
+		projectRepository,
+		agentSessionClient,
+		bootstrapV2Protector,
+		idgen.UUIDv7{},
+		projectdispatchv2.Config{RetryDelay: cfg.ProjectDispatch.RetryDelay, Limits: cfg.Project.SkillSnapshotLimits},
+	)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create project session v2 dispatcher: %w", err)
+	}
+	projectDispatcher, err := project.NewDispatcherWithV2(
 		projectRepository,
 		agentSessionClient,
 		promptProtector,
@@ -204,6 +277,7 @@ func Run(ctx context.Context, build BuildInfo) error {
 			LeaseDuration: cfg.ProjectDispatch.LeaseDuration,
 			RetryDelay:    cfg.ProjectDispatch.RetryDelay,
 		},
+		projectV2Dispatcher,
 	)
 	if err != nil {
 		_ = registry.Close(ctx)
@@ -218,6 +292,7 @@ func Run(ctx context.Context, build BuildInfo) error {
 	}
 	server, err := httpserver.New(cfg.HTTP, cfg.Service, state, httpserver.RouteHandlers{
 		Auth: authHandler, Project: projectHandler, Agent: agentProxyHandler,
+		Skill: skillHandler, SkillReview: skillReviewHandler,
 	})
 	if err != nil {
 		_ = registry.Close(ctx)

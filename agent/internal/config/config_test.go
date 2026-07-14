@@ -13,6 +13,33 @@ func TestLoadValidConfig(t *testing.T) {
 	if cfg.Service.Name != serviceName {
 		t.Fatalf("服务名不一致: got %q", cfg.Service.Name)
 	}
+	if cfg.SkillSnapshotLimits.ProfileVersion != "session_skill_snapshot_limits.v1" ||
+		cfg.SkillSnapshotLimits.MaxItems != 16 || cfg.SkillSnapshotLimits.MaxPublicToolRefsPerItem != 0 {
+		t.Fatalf("Skill Snapshot 默认 limits 漂移: %+v", cfg.SkillSnapshotLimits)
+	}
+}
+
+// TestLoadRejectsUnsafeSkillSnapshotLimits 验证配置不能突破协议 ceiling、开启 Public Tool 或使用未知 profile。
+func TestLoadRejectsUnsafeSkillSnapshotLimits(t *testing.T) {
+	testCases := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "unknown profile", key: "AGENT_SKILL_SNAPSHOT_LIMITS_PROFILE_VERSION", value: "session_skill_snapshot_limits.v2"},
+		{name: "items over ceiling", key: "AGENT_SKILL_SNAPSHOT_MAX_ITEMS", value: "33"},
+		{name: "public tools enabled", key: "AGENT_SKILL_SNAPSHOT_MAX_PUBLIC_TOOL_REFS_PER_ITEM", value: "1"},
+		{name: "RPC over ceiling", key: "AGENT_SKILL_SNAPSHOT_MAX_RPC_REQUEST_BYTES", value: "4194305"},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			setValidAgentConfig(t)
+			t.Setenv(testCase.key, testCase.value)
+			if _, err := Load("test"); err == nil {
+				t.Fatalf("非法 Skill Snapshot limit 被接受: %s=%s", testCase.key, testCase.value)
+			}
+		})
+	}
 }
 
 // TestLoadRejectsLoopbackAdvertisedAddress 验证服务注册不会发布回环地址。

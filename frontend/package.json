@@ -7,7 +7,9 @@
     "dev": "vite --host 0.0.0.0 --port 3200",
     "build": "vite build",
     "test": "vitest run",
-    "test:e2e:w0": "playwright test --config=playwright.config.js"
+    "test:e2e:w0": "playwright test --config=playwright.config.js --grep-invert '@w1-skill|@w1-real-review'",
+    "test:e2e:w1": "playwright test --config=playwright.config.js --grep @w1-skill",
+    "test:e2e:w1-real-review": "node ./scripts/require-w1-real-review-env.mjs && playwright test --config=playwright.config.js --grep @w1-real-review"
   },
   "dependencies": {
     "lucide-react": "^1.21.0",

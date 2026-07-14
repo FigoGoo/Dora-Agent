@@ -136,6 +136,38 @@ describe('AuthSessionProvider', () => {
     expect(client.logout).toHaveBeenCalledWith({ csrfToken: 'csrf-login' });
   });
 
+  it('keeps the authoritative Principal intact and latches a capability 403 separately', async () => {
+    const user = userEvent.setup();
+    const client = {
+      bootstrap: vi.fn().mockResolvedValue(authPayload('csrf-reviewer', ['project.read', 'skill.review'])),
+      login: vi.fn(),
+      logout: vi.fn()
+    };
+    render(
+      <AuthSessionProvider
+        autoBootstrap={false}
+        client={client}
+        initialSession={{
+          status: AUTH_SESSION_STATUS.AUTHENTICATED,
+          user: { id: 'u1', name: 'Dora', capabilities: ['project.read', 'skill.review'] },
+          csrfToken: 'csrf-1',
+          sessionExpiresAt: '2026-07-15T08:00:00Z'
+        }}
+      >
+        <SessionProbe />
+      </AuthSessionProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: '按 403 重解析' }));
+    await waitFor(() => expect(screen.getByTestId('denied-capabilities')).toHaveTextContent('skill.review'));
+    expect(screen.getByTestId('status')).toHaveTextContent('authenticated:Dora');
+    expect(screen.getByTestId('snapshot')).toHaveTextContent('project.read');
+    expect(screen.getByTestId('snapshot')).toHaveTextContent('skill.review');
+    expect(screen.getByTestId('can-review')).toHaveTextContent('false');
+    expect(screen.getByTestId('csrf')).toHaveTextContent('csrf-reviewer');
+    expect(client.bootstrap).toHaveBeenCalledTimes(1);
+  });
+
   it('returns to anonymous when the API layer reports session expiry', () => {
     render(
       <AuthSessionProvider
@@ -154,7 +186,7 @@ describe('AuthSessionProvider', () => {
   });
 });
 
-function authPayload(csrfToken) {
+function authPayload(csrfToken, capabilities = ['project.read']) {
   return {
     status: 'authenticated',
     principal: {
@@ -163,7 +195,7 @@ function authPayload(csrfToken) {
       email: 'd***@example.com',
       account_status: 'active',
       roles: ['user'],
-      capabilities: ['project.read']
+      capabilities
     },
     csrf_token: csrfToken,
     session_expires_at: '2026-07-15T08:00:00Z'
@@ -178,6 +210,8 @@ function SessionProbe() {
       <span data-testid="csrf">{session.csrfToken}</span>
       <span data-testid="error">{session.error?.code}</span>
       <span data-testid="snapshot">{JSON.stringify(session.user)}</span>
+      <span data-testid="denied-capabilities">{JSON.stringify(session.deniedCapabilities)}</span>
+      <span data-testid="can-review">{String(session.hasCapability('skill.review'))}</span>
       <button type="button" onClick={() => session.login({ email: 'dora@example.com', password: 'secret' })}>
         真实登录
       </button>
@@ -186,6 +220,9 @@ function SessionProbe() {
       </button>
       <button type="button" onClick={() => session.retryBootstrap()}>
         重试 Bootstrap
+      </button>
+      <button type="button" onClick={() => session.retryBootstrap({ deniedCapability: 'skill.review' })}>
+        按 403 重解析
       </button>
     </div>
   );

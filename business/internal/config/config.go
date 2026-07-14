@@ -2,6 +2,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -10,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/FigoGoo/Dora-Agent/business/internal/projectskillbinding"
 )
 
 const serviceName = "dora-business-service"
@@ -24,6 +27,8 @@ type Config struct {
 	Auth AuthConfig
 	// Project 保存 Quick Create、Prompt 保护和 Outbox 重试预算。
 	Project ProjectConfig
+	// Skill 保存 W1 Skill Builder 请求体资源边界。
+	Skill SkillConfig
 	// AgentSessionRPC 保存 Business 调用 Agent Session RPC 的有界 Client 配置。
 	AgentSessionRPC AgentSessionRPCConfig
 	// AgentHTTP 保存同源 BFF 调用 Agent Workspace HTTP 的 Endpoint、超时和断言签名配置。
@@ -110,6 +115,24 @@ type ProjectConfig struct {
 	PromptProtectionKey []byte
 	// PromptProtectionKeyVersion 是持久化的非秘密密钥版本引用。
 	PromptProtectionKeyVersion string
+	// PromptProtectionPreviousKey 是轮换窗口内只用于读取在途 Outbox 的可选旧根密钥。
+	PromptProtectionPreviousKey []byte
+	// PromptProtectionPreviousKeyVersion 是旧根密钥对应的持久化版本引用。
+	PromptProtectionPreviousKeyVersion string
+	// SkillSnapshotV2Enabled 控制显式 project_quick_create.v2 新流量，默认关闭且不影响 v1。
+	SkillSnapshotV2Enabled bool
+	// AgentSessionV2CapabilityConfirmed 是部署侧确认所有 Agent 实例均支持 V2 与相同/更大 limits 的门禁。
+	AgentSessionV2CapabilityConfirmed bool
+	// SkillSnapshotLimitsProfile 固定为 session_skill_snapshot_limits.v1。
+	SkillSnapshotLimitsProfile string
+	// SkillSnapshotLimits 是 Business Producer 加密和发送前执行的有效资源剖面。
+	SkillSnapshotLimits projectskillbinding.LimitsV1
+}
+
+// SkillConfig 描述 W1 Skill Builder 结构化定义请求体边界。
+type SkillConfig struct {
+	// MaxRequestBodyBytes 限制 Create 与 Draft Replace 的完整 JSON 请求体。
+	MaxRequestBodyBytes int64
 }
 
 // AgentSessionRPCConfig 描述 Business 调用 Agent Session RPC 的连接和请求超时。
@@ -202,6 +225,14 @@ func Load(version string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("BUSINESS_AUTH_COOKIE_SECURE must be true or false")
 	}
+	skillSnapshotV2Enabled, err := strconv.ParseBool(envOrDefault("BUSINESS_PROJECT_SKILL_SNAPSHOT_V2_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("BUSINESS_PROJECT_SKILL_SNAPSHOT_V2_ENABLED must be true or false")
+	}
+	agentSessionV2CapabilityConfirmed, err := strconv.ParseBool(envOrDefault("BUSINESS_AGENT_SESSION_V2_CAPABILITY_CONFIRMED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("BUSINESS_AGENT_SESSION_V2_CAPABILITY_CONFIRMED must be true or false")
+	}
 	csrfSecret, err := base64.StdEncoding.DecodeString(strings.TrimSpace(os.Getenv("BUSINESS_AUTH_CSRF_SECRET_BASE64")))
 	if err != nil {
 		return Config{}, fmt.Errorf("BUSINESS_AUTH_CSRF_SECRET_BASE64 must be valid standard Base64")
@@ -209,6 +240,14 @@ func Load(version string) (Config, error) {
 	promptProtectionKey, err := base64.StdEncoding.DecodeString(strings.TrimSpace(os.Getenv("BUSINESS_PROJECT_PROMPT_KEY_BASE64")))
 	if err != nil {
 		return Config{}, fmt.Errorf("BUSINESS_PROJECT_PROMPT_KEY_BASE64 must be valid standard Base64")
+	}
+	var promptProtectionPreviousKey []byte
+	promptProtectionPreviousKeyRaw := strings.TrimSpace(os.Getenv("BUSINESS_PROJECT_PROMPT_PREVIOUS_KEY_BASE64"))
+	if promptProtectionPreviousKeyRaw != "" {
+		promptProtectionPreviousKey, err = base64.StdEncoding.DecodeString(promptProtectionPreviousKeyRaw)
+		if err != nil {
+			return Config{}, fmt.Errorf("BUSINESS_PROJECT_PROMPT_PREVIOUS_KEY_BASE64 must be valid standard Base64")
+		}
 	}
 	agentSessionRPCAuthSecret, err := base64.StdEncoding.DecodeString(strings.TrimSpace(os.Getenv("BUSINESS_AGENT_SESSION_RPC_AUTH_SECRET_BASE64")))
 	if err != nil {
@@ -257,6 +296,25 @@ func Load(version string) (Config, error) {
 			PromptProtectionKeyVersion: strings.TrimSpace(
 				os.Getenv("BUSINESS_PROJECT_PROMPT_KEY_VERSION"),
 			),
+			PromptProtectionPreviousKey: promptProtectionPreviousKey,
+			PromptProtectionPreviousKeyVersion: strings.TrimSpace(
+				os.Getenv("BUSINESS_PROJECT_PROMPT_PREVIOUS_KEY_VERSION"),
+			),
+			SkillSnapshotV2Enabled:            skillSnapshotV2Enabled,
+			AgentSessionV2CapabilityConfirmed: agentSessionV2CapabilityConfirmed,
+			SkillSnapshotLimitsProfile:        envOrDefault("BUSINESS_SKILL_SNAPSHOT_LIMITS_PROFILE_VERSION", "session_skill_snapshot_limits.v1"),
+			SkillSnapshotLimits: projectskillbinding.LimitsV1{
+				MaxItems:                      mustPositiveInt("BUSINESS_SKILL_SNAPSHOT_MAX_ITEMS", 16),
+				MaxRuntimeContentBytesPerItem: mustPositiveInt("BUSINESS_SKILL_SNAPSHOT_MAX_RUNTIME_CONTENT_BYTES_PER_ITEM", 64*1024),
+				MaxTotalRuntimeContentBytes:   mustPositiveInt("BUSINESS_SKILL_SNAPSHOT_MAX_TOTAL_RUNTIME_CONTENT_BYTES", 256*1024),
+				MaxSnapshotMetadataBytes:      mustPositiveInt("BUSINESS_SKILL_SNAPSHOT_MAX_METADATA_BYTES", 128*1024),
+				MaxExamplesPerItem:            mustPositiveInt("BUSINESS_SKILL_SNAPSHOT_MAX_EXAMPLES_PER_ITEM", 16),
+				MaxStarterPromptsPerItem:      mustPositiveInt("BUSINESS_SKILL_SNAPSHOT_MAX_STARTER_PROMPTS_PER_ITEM", 16),
+				MaxOutboxPlaintextBytes:       mustPositiveInt("BUSINESS_SKILL_SNAPSHOT_MAX_OUTBOX_PLAINTEXT_BYTES", 2*1024*1024),
+			},
+		},
+		Skill: SkillConfig{
+			MaxRequestBodyBytes: int64(mustPositiveInt("BUSINESS_SKILL_MAX_REQUEST_BODY_BYTES", 524288)),
 		},
 		AgentSessionRPC: AgentSessionRPCConfig{
 			ConnectTimeout: mustDuration("BUSINESS_AGENT_RPC_CONNECT_TIMEOUT", "2s"),
@@ -383,11 +441,34 @@ func (c Config) Validate() error {
 	if c.Project.MaxOutboxAttempts < 1 || c.Project.MaxOutboxAttempts > 100 {
 		return fmt.Errorf("BUSINESS_PROJECT_MAX_OUTBOX_ATTEMPTS must be between 1 and 100")
 	}
+	if c.Skill.MaxRequestBodyBytes < 4096 || c.Skill.MaxRequestBodyBytes > 1048576 {
+		return fmt.Errorf("BUSINESS_SKILL_MAX_REQUEST_BODY_BYTES must be between 4096 and 1048576")
+	}
 	if len(c.Project.PromptProtectionKey) != 32 {
 		return fmt.Errorf("BUSINESS_PROJECT_PROMPT_KEY_BASE64 must decode to exactly 32 bytes")
 	}
 	if !validKeyVersion(c.Project.PromptProtectionKeyVersion) {
 		return fmt.Errorf("BUSINESS_PROJECT_PROMPT_KEY_VERSION is invalid")
+	}
+	if (len(c.Project.PromptProtectionPreviousKey) == 0) != (c.Project.PromptProtectionPreviousKeyVersion == "") {
+		return fmt.Errorf("BUSINESS_PROJECT_PROMPT_PREVIOUS_KEY_VERSION and BUSINESS_PROJECT_PROMPT_PREVIOUS_KEY_BASE64 must be provided together")
+	}
+	if len(c.Project.PromptProtectionPreviousKey) != 0 {
+		if len(c.Project.PromptProtectionPreviousKey) != 32 ||
+			!validKeyVersion(c.Project.PromptProtectionPreviousKeyVersion) ||
+			c.Project.PromptProtectionPreviousKeyVersion == c.Project.PromptProtectionKeyVersion ||
+			bytes.Equal(c.Project.PromptProtectionPreviousKey, c.Project.PromptProtectionKey) {
+			return fmt.Errorf("BUSINESS_PROJECT_PROMPT_PREVIOUS key pair is invalid")
+		}
+	}
+	if c.Project.SkillSnapshotLimitsProfile != "session_skill_snapshot_limits.v1" {
+		return fmt.Errorf("BUSINESS_SKILL_SNAPSHOT_LIMITS_PROFILE_VERSION is unsupported")
+	}
+	if err := c.Project.SkillSnapshotLimits.Validate(); err != nil {
+		return fmt.Errorf("business Skill Snapshot limits are invalid: %w", err)
+	}
+	if c.Project.SkillSnapshotV2Enabled && !c.Project.AgentSessionV2CapabilityConfirmed {
+		return fmt.Errorf("BUSINESS_AGENT_SESSION_V2_CAPABILITY_CONFIRMED must be true when Skill Snapshot v2 is enabled")
 	}
 	if c.AgentSessionRPC.ConnectTimeout <= 0 || c.AgentSessionRPC.RequestTimeout <= 0 {
 		return fmt.Errorf("business Agent Session RPC timeouts must be positive")
