@@ -9,7 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
+	"os"
+	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -44,13 +50,18 @@ type contractError struct {
 }
 
 type corpusManifestV1 struct {
-	SchemaVersion string                 `json:"schema_version"`
-	Files         []corpusManifestFileV1 `json:"files"`
+	SchemaVersion    string                 `json:"schema_version"`
+	Files            []corpusManifestFileV1 `json:"files"`
+	FixtureIDs       []string               `json:"fixture_ids"`
+	VectorIDs        []string               `json:"vector_ids"`
+	TotalVectorCount int                    `json:"total_vector_count"`
+	TargetTests      []string               `json:"target_tests"`
 }
 
 type corpusManifestFileV1 struct {
-	File   string `json:"file"`
-	SHA256 string `json:"sha256"`
+	File        string `json:"file"`
+	SHA256      string `json:"sha256"`
+	VectorCount int    `json:"vector_count"`
 }
 
 func (e *contractError) Error() string { return e.code + ": " + e.path }
@@ -210,12 +221,15 @@ func TestW2R01CorpusManifest(t *testing.T) {
 	if err := strictDecode(raw, &manifest); err != nil {
 		t.Fatalf("解析 manifest: %v", err)
 	}
-	if manifest.SchemaVersion != "w2_r01_contract_corpus_manifest.v1" || len(manifest.Files) != 2 {
+	if manifest.SchemaVersion != "w2_r01_contract_corpus_manifest.v1" || len(manifest.Files) != 2 || manifest.TotalVectorCount != 85 {
 		t.Fatalf("manifest 版本或文件数错误: %+v", manifest)
 	}
-	wantFiles := []string{"graph_tool_result_v1.json", "tool_receipt_v1.json"}
+	wantFiles := []corpusManifestFileV1{
+		{File: "graph_tool_result_v1.json", VectorCount: 48},
+		{File: "tool_receipt_v1.json", VectorCount: 37},
+	}
 	for index, item := range manifest.Files {
-		if item.File != wantFiles[index] || !digestPattern.MatchString(item.SHA256) {
+		if item.File != wantFiles[index].File || item.VectorCount != wantFiles[index].VectorCount || !digestPattern.MatchString(item.SHA256) {
 			t.Fatalf("manifest 文件顺序或摘要格式错误: %+v", item)
 		}
 		content, readErr := w2R01CorpusFS.ReadFile("testdata/w2_r01/" + item.File)
@@ -227,6 +241,67 @@ func TestW2R01CorpusManifest(t *testing.T) {
 			t.Fatalf("%s raw digest=%s want=%s", item.File, got, item.SHA256)
 		}
 	}
+	resultCorpus := loadResultCorpus(t)
+	receiptCorpus := loadReceiptCorpus(t)
+	if got := len(resultCorpus.Cases); got != manifest.Files[0].VectorCount {
+		t.Fatalf("%s vector_count=%d want=%d", manifest.Files[0].File, manifest.Files[0].VectorCount, got)
+	}
+	if got := len(receiptCorpus.TransitionCases) + len(receiptCorpus.EvidenceCases); got != manifest.Files[1].VectorCount {
+		t.Fatalf("%s vector_count=%d want=%d", manifest.Files[1].File, manifest.Files[1].VectorCount, got)
+	}
+	fixtureIDs := []string{receiptCorpus.InitialState.StateID}
+	vectorIDs := make([]string, 0, len(resultCorpus.Cases)+len(receiptCorpus.TransitionCases)+len(receiptCorpus.EvidenceCases))
+	for _, testCase := range resultCorpus.Cases {
+		vectorIDs = append(vectorIDs, testCase.ID)
+	}
+	for _, testCase := range receiptCorpus.TransitionCases {
+		vectorIDs = append(vectorIDs, testCase.ID)
+	}
+	for _, testCase := range receiptCorpus.EvidenceCases {
+		vectorIDs = append(vectorIDs, testCase.ID)
+	}
+	if len(vectorIDs) != manifest.TotalVectorCount || !reflect.DeepEqual(manifest.FixtureIDs, fixtureIDs) || !reflect.DeepEqual(manifest.VectorIDs, vectorIDs) {
+		t.Fatalf("manifest 未绑定 Corpus exact-set fixtures=%v vectors=%v", manifest.FixtureIDs, manifest.VectorIDs)
+	}
+	wantTests := []string{
+		"TestW2R01CorpusManifest", "TestGraphToolResultV1Corpus", "TestWarningIntegerPolicySafeBoundaryV1",
+		"TestToolReceiptV1Corpus",
+	}
+	if !reflect.DeepEqual(manifest.TargetTests, wantTests) {
+		t.Fatalf("manifest target tests=%v want=%v", manifest.TargetTests, wantTests)
+	}
+	actualTests := contractManifestTargetTestNamesV1(t, []string{
+		"graph_tool_result_v1_corpus_test.go", "tool_receipt_v1_corpus_test.go",
+	})
+	manifestTests := append([]string(nil), manifest.TargetTests...)
+	sort.Strings(manifestTests)
+	if !reflect.DeepEqual(actualTests, manifestTests) {
+		t.Fatalf("manifest target tests 未绑定实际 Test 函数 actual=%v manifest=%v", actualTests, manifestTests)
+	}
+}
+
+func contractManifestTargetTestNamesV1(t *testing.T, files []string) []string {
+	t.Helper()
+	directory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make([]string, 0)
+	for _, name := range files {
+		parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(directory, name), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Recv != nil || !strings.HasPrefix(function.Name.Name, "Test") {
+				continue
+			}
+			result = append(result, function.Name.Name)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func TestGraphToolResultV1Corpus(t *testing.T) {

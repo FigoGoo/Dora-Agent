@@ -1,0 +1,177 @@
+{
+  "schema_version": "approval_continuation_cross_object_evidence_v1_corpus.v1",
+  "exact_sets": {
+    "decisions": ["invalid", "valid"],
+    "reason_codes": ["APPROVAL_BINDING_MISMATCH", "APPROVAL_STATE_INVALID", "CONTINUATION_SOURCE_MISMATCH", "DECISION_BINDING_MISMATCH", "IDENTITY_MISMATCH", "LEGACY_AUTHORITY_FORBIDDEN", "PARENT_RECEIPT_INVALID", "PARENT_REQUEST_DIGEST_MISMATCH", "RESOLVED_REF_EXACT_SET_MISMATCH", "SCHEMA_INVALID", "TOOL_PIN_BINDING_MISMATCH", "TURN_CONTEXT_INVALID"],
+    "approval_states": ["approved", "cancelled", "expired", "pending", "rejected"],
+    "decision_actions": ["approve", "reject"],
+    "tool_keys": ["analyze_materials", "assemble_output", "generate_media", "plan_creation_spec", "plan_storyboard", "write_prompts"]
+  },
+  "fixtures": [
+    {
+      "fixture_id": "coe.approval_continuation.plan_creation_spec",
+      "base_turn_context_fixture_id": "turn.approval.continuation",
+      "parent_receipt": {
+        "id": "COE-PARENT-RECEIPT",
+        "base_snapshot": {
+          "schema_version": "tool_receipt_snapshot.v1",
+          "receipt_id": "019f4500-0000-7000-8000-000000000701",
+          "session_id": "019f2000-0000-7000-8000-000000000103",
+          "turn_id": "019f4500-0000-7000-8000-000000000702",
+          "run_id": "019f4500-0000-7000-8000-000000000703",
+          "tool_call_id": "019f4500-0000-7000-8000-000000000704",
+          "tool_key": "plan_creation_spec",
+          "definition_version": "plan_creation_spec.v1alpha1",
+          "intent_schema_version": "plan_creation_spec_intent.v1",
+          "result_schema_version": "graph_tool_result.v1",
+          "request_canonicalization_version": "dora.tool_request.v1",
+          "request_semantic_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "write_state": "open",
+          "receipt_version": 1,
+          "owner_fence": 11,
+          "execution_slots": [],
+          "result_refs": []
+        },
+        "setup_slots": [
+          {
+            "slot": {
+              "ref_slot": "approval.primary",
+              "slot_ordinal": 1,
+              "ref_type": "approval",
+              "ref_schema_version": "approval_ref.v1",
+              "authority_owner": "agent",
+              "idempotency_key": "tr:019f4500-0000-7000-8000-000000000701:approval.primary:v1",
+              "request_digest": "sha256:abababababababababababababababababababababababababababababababab",
+              "query_contract": "agent.approval.query.v1",
+              "resolution_state": "prepared"
+            },
+            "authority_ref": {
+              "authority_id": "019f4500-0000-7000-8000-000000000801",
+              "authority_version": 1,
+              "authority_semantic_digest": "sha256:79694799a9c9c38fc5c1b3eeeaddb414a608988d24ecdecc9611db85fc8e8dcd",
+              "projection_id": "019f4500-0000-7000-8000-000000000802"
+            }
+          }
+        ],
+        "result": {
+          "schema_version": "graph_tool_result.v1",
+          "status": "waiting_user",
+          "result_code": "APPROVAL_REQUIRED",
+          "summary": "需要确认后才能继续候选激活。",
+          "resource_refs": [],
+          "approval_ref": {
+            "approval_id": "019f4500-0000-7000-8000-000000000801",
+            "approval_version": 1,
+            "approval_digest": "sha256:79694799a9c9c38fc5c1b3eeeaddb414a608988d24ecdecc9611db85fc8e8dcd",
+            "card_id": "019f4500-0000-7000-8000-000000000802"
+          },
+          "receipt_ref": {"receipt_id": "019f4500-0000-7000-8000-000000000701"},
+          "warnings": [],
+          "retryable": false
+        },
+        "result_ref_slots": ["approval.primary"],
+        "expect": "accept",
+        "error_code": "",
+        "expected_snapshot_digest": "sha256:8771d9f5428b67f4e8b7271d9e2f8ac7a74836327fa181294c9ec5b855654281"
+      },
+      "parent_receipt_owner_record": {
+        "schema_version": "tool_receipt_owner_record.v1",
+        "owner": "agent.tool_receipt",
+        "ref": "tool-receipt:019f4500-0000-7000-8000-000000000701@v1",
+        "receipt_id": "019f4500-0000-7000-8000-000000000701",
+        "receipt_version": 4,
+        "write_state": "frozen",
+        "snapshot_digest": "sha256:8771d9f5428b67f4e8b7271d9e2f8ac7a74836327fa181294c9ec5b855654281"
+      },
+      "stored_receipt_owner_digest": "sha256:05b775bb2b012086bbc74d6345b8ce46c299decd0b5be97a33c1cec71a020b20",
+      "approval": {
+        "schema_version": "approval_binding.v1",
+        "approval_id": "019f4500-0000-7000-8000-000000000801",
+        "approval_version": 1,
+        "creation_state": "pending",
+        "approval_type": "candidate_activation",
+        "user_id": "019f4500-0000-7000-8000-000000000901",
+        "project_id": "019f4500-0000-7000-8000-000000000902",
+        "session_id": "019f2000-0000-7000-8000-000000000103",
+        "root_tool_receipt_id": "019f4500-0000-7000-8000-000000000701",
+        "original_turn_id": "019f4500-0000-7000-8000-000000000702",
+        "original_run_id": "019f4500-0000-7000-8000-000000000703",
+        "original_tool_call_id": "019f4500-0000-7000-8000-000000000704",
+        "parent_request_semantic_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "intent_digest": "sha256:bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc",
+        "execution_digest": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "tool_pin_owner": "agent.tool_registry",
+        "tool_pin_ref": "tool-pin:plan_creation_spec.v1alpha1@v1",
+        "tool_pin_digest": "sha256:546a40832c0e094b568b3108dd279602afdc17845d04f1029984b5a649e48f06",
+        "card_id": "019f4500-0000-7000-8000-000000000802",
+        "card_revision": 1,
+        "resource_id": "019f4500-0000-7000-8000-000000000803",
+        "resource_version": 3,
+        "resource_digest": "sha256:dededededededededededededededededededededededededededededededededede",
+        "target_exact_set_digest": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+        "expires_at": "2026-07-16T08:00:00Z"
+      },
+      "stored_approval_digest": "sha256:79694799a9c9c38fc5c1b3eeeaddb414a608988d24ecdecc9611db85fc8e8dcd",
+      "decision_receipt": {
+        "schema_version": "approval_decision_receipt.v1",
+        "decision_receipt_id": "019f4500-0000-7000-8000-000000000401",
+        "decision_id": "019f4500-0000-7000-8000-000000000402",
+        "request_id": "019f4500-0000-7000-8000-000000000403",
+        "approval_id": "019f4500-0000-7000-8000-000000000801",
+        "presented_approval_version": 1,
+        "resulting_approval_version": 2,
+        "action": "approve",
+        "resulting_state": "approved",
+        "actor_user_id": "019f4500-0000-7000-8000-000000000901",
+        "actor_project_id": "019f4500-0000-7000-8000-000000000902",
+        "card_id": "019f4500-0000-7000-8000-000000000802",
+        "card_revision": 1,
+        "approval_binding_digest": "sha256:79694799a9c9c38fc5c1b3eeeaddb414a608988d24ecdecc9611db85fc8e8dcd",
+        "continuation_source_id": "approval-decision:019f4500-0000-7000-8000-000000000801:019f4500-0000-7000-8000-000000000402",
+        "continuation_input_id": "019f4500-0000-7000-8000-000000000301"
+      },
+      "stored_decision_digest": "sha256:e7dd6229d918c30a5c50ae891b0c01cf7f06664534ee1497aa75720804b38890",
+      "tool_pin": {
+        "schema_version": "graph_tool_pin.v1",
+        "owner": "agent.tool_registry",
+        "ref": "tool-pin:plan_creation_spec.v1alpha1@v1",
+        "tool_key": "plan_creation_spec",
+        "definition_version": "plan_creation_spec.v1alpha1",
+        "intent_schema_version": "plan_creation_spec_intent.v1",
+        "result_schema_version": "graph_tool_result.v1",
+        "graph_key": "plan_creation_spec_graph_v1"
+      },
+      "stored_tool_pin_digest": "sha256:546a40832c0e094b568b3108dd279602afdc17845d04f1029984b5a649e48f06",
+      "turn_context": {"stored_context_digest": "7bd14833fdefcd8104633ec3faaec20b07a7d698cbf2a05a63ce966a6cc003c8"},
+      "stored_evidence_digest": "sha256:28f088e3f6feb898afa207ed4cb13b85e48ebfb914be0ecc08c48002e79606b0",
+      "operational_metadata": {
+        "trace_id": "trace-cross-object-1",
+        "attempt": 1,
+        "processor_instance": "agent-runtime-a",
+        "read_at": "2026-07-15T08:00:00Z"
+      }
+    }
+  ],
+  "cases": [
+    {"id":"COE-CAN-001-approval-continuation-golden","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":[],"expected":{"decision":"valid","reason_codes":[]}},
+    {"id":"COE-CAN-002-replay-stable","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":[],"expected":{"decision":"valid","reason_codes":[]}},
+    {"id":"COE-CAN-003-operational-metadata-excluded","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":[],"expected":{"decision":"valid","reason_codes":[]}},
+    {"id":"COE-N01-parent-receipt-ref-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["context.parent_receipt_ref.mismatch"],"expected":{"decision":"invalid","reason_codes":["PARENT_RECEIPT_INVALID"]}},
+    {"id":"COE-N02-parent-receipt-digest-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["context.parent_receipt_digest.mismatch"],"expected":{"decision":"invalid","reason_codes":["PARENT_RECEIPT_INVALID"]}},
+    {"id":"COE-N03-parent-request-digest-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["context.parent_request_digest.mismatch"],"expected":{"decision":"invalid","reason_codes":["PARENT_REQUEST_DIGEST_MISMATCH"]}},
+    {"id":"COE-N04-receipt-approval-id-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["receipt.approval_id.mismatch"],"expected":{"decision":"invalid","reason_codes":["APPROVAL_BINDING_MISMATCH"]}},
+    {"id":"COE-N05-receipt-approval-version-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["receipt.approval_version.mismatch"],"expected":{"decision":"invalid","reason_codes":["APPROVAL_BINDING_MISMATCH"]}},
+    {"id":"COE-N06-receipt-approval-digest-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["receipt.approval_digest.mismatch"],"expected":{"decision":"invalid","reason_codes":["APPROVAL_BINDING_MISMATCH"]}},
+    {"id":"COE-N07-approval-origin-identity-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["approval.origin_turn_id.mismatch"],"expected":{"decision":"invalid","reason_codes":["IDENTITY_MISMATCH"]}},
+    {"id":"COE-N08-approval-binding-state-not-pending","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["approval.creation_state.approved"],"expected":{"decision":"invalid","reason_codes":["APPROVAL_STATE_INVALID"]}},
+    {"id":"COE-N09-decision-authority-id-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["decision.approval_id.mismatch"],"expected":{"decision":"invalid","reason_codes":["DECISION_BINDING_MISMATCH"]}},
+    {"id":"COE-N10-decision-authority-digest-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["decision.digest.mismatch"],"expected":{"decision":"invalid","reason_codes":["DECISION_BINDING_MISMATCH"]}},
+    {"id":"COE-N11-continuation-source-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["decision.continuation_source.mismatch"],"expected":{"decision":"invalid","reason_codes":["CONTINUATION_SOURCE_MISMATCH"]}},
+    {"id":"COE-N12-context-approval-ref-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["context.approval_ref.mismatch"],"expected":{"decision":"invalid","reason_codes":["APPROVAL_BINDING_MISMATCH"]}},
+    {"id":"COE-N13-tool-pin-ref-digest-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["context.tool_pin_ref.mismatch"],"expected":{"decision":"invalid","reason_codes":["TOOL_PIN_BINDING_MISMATCH"]}},
+    {"id":"COE-N14-tool-pin-field-drift","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["tool_pin.definition_version.drift"],"expected":{"decision":"invalid","reason_codes":["TOOL_PIN_BINDING_MISMATCH"]}},
+    {"id":"COE-N15-resolved-ref-exact-set-mismatch","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["context.resolved_refs.extra"],"expected":{"decision":"invalid","reason_codes":["RESOLVED_REF_EXACT_SET_MISMATCH"]}},
+    {"id":"COE-N16-legacy-authority-substitution","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["context.authority.legacy_substitution"],"expected":{"decision":"invalid","reason_codes":["LEGACY_AUTHORITY_FORBIDDEN"]}},
+    {"id":"COE-N17-multi-error-priority","from_fixture":"coe.approval_continuation.plan_creation_spec","mutations":["context.schema.unknown","context.parent_receipt_ref.mismatch","tool_pin.definition_version.drift"],"expected":{"decision":"invalid","reason_codes":["SCHEMA_INVALID"]}}
+  ]
+}

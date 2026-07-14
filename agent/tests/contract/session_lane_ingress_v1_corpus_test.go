@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"sort"
 	"testing"
 )
 
@@ -29,13 +30,18 @@ var w2R02IngressCorpusFS embed.FS
 var ingressSHA256PatternV1 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type ingressManifestV1 struct {
-	SchemaVersion string                  `json:"schema_version"`
-	Files         []ingressManifestFileV1 `json:"files"`
+	SchemaVersion    string                  `json:"schema_version"`
+	Files            []ingressManifestFileV1 `json:"files"`
+	FixtureIDs       []string                `json:"fixture_ids"`
+	VectorIDs        []string                `json:"vector_ids"`
+	TotalVectorCount int                     `json:"total_vector_count"`
+	TargetTests      []string                `json:"target_tests"`
 }
 
 type ingressManifestFileV1 struct {
-	File   string `json:"file"`
-	SHA256 string `json:"sha256"`
+	File        string `json:"file"`
+	SHA256      string `json:"sha256"`
+	VectorCount int    `json:"vector_count"`
 }
 
 type ingressCorpusV1 struct {
@@ -262,11 +268,11 @@ func TestW2R02IngressCorpusManifest(t *testing.T) {
 	if err := strictDecode(raw, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest.SchemaVersion != "w2_r02_ingress_manifest.v1" || len(manifest.Files) != 1 {
+	if manifest.SchemaVersion != "w2_r02_ingress_manifest.v1" || len(manifest.Files) != 1 || manifest.TotalVectorCount != 42 {
 		t.Fatalf("Ingress manifest 版本或文件数错误: %+v", manifest)
 	}
 	item := manifest.Files[0]
-	if item.File != "session_lane_ingress_v1.json" || len(item.SHA256) != len("sha256:")+64 || item.SHA256[:len("sha256:")] != "sha256:" || !ingressSHA256PatternV1.MatchString(item.SHA256[len("sha256:"):]) {
+	if item.File != "session_lane_ingress_v1.json" || item.VectorCount != 42 || len(item.SHA256) != len("sha256:")+64 || item.SHA256[:len("sha256:")] != "sha256:" || !ingressSHA256PatternV1.MatchString(item.SHA256[len("sha256:"):]) {
 		t.Fatalf("Ingress manifest 文件或摘要格式错误: %+v", item)
 	}
 	content, err := w2R02IngressCorpusFS.ReadFile("testdata/w2_r02_ingress/" + item.File)
@@ -276,6 +282,28 @@ func TestW2R02IngressCorpusManifest(t *testing.T) {
 	actual := sha256.Sum256(content)
 	if got := "sha256:" + hex.EncodeToString(actual[:]); got != item.SHA256 {
 		t.Fatalf("%s raw digest=%s want=%s", item.File, got, item.SHA256)
+	}
+	corpus := loadIngressCorpusV1(t)
+	fixtureIDs := []string{corpus.InitialState.StateID}
+	vectorIDs := make([]string, 0, len(corpus.Cases))
+	for _, testCase := range corpus.Cases {
+		vectorIDs = append(vectorIDs, testCase.ID)
+	}
+	if len(vectorIDs) != manifest.TotalVectorCount || !reflect.DeepEqual(manifest.FixtureIDs, fixtureIDs) || !reflect.DeepEqual(manifest.VectorIDs, vectorIDs) {
+		t.Fatalf("Ingress manifest 未绑定 Corpus exact-set fixtures=%v vectors=%v", manifest.FixtureIDs, manifest.VectorIDs)
+	}
+	wantTests := []string{
+		"TestW2R02IngressCorpusManifest", "TestSessionLaneIngressV1Corpus",
+		"TestSessionLaneIngressV1RejectsCorruptReceiptSnapshot", "TestSessionLaneIngressV1ReplayUsesFrozenResultAfterRuntimeProgress",
+	}
+	if !reflect.DeepEqual(manifest.TargetTests, wantTests) {
+		t.Fatalf("Ingress manifest target tests=%v want=%v", manifest.TargetTests, wantTests)
+	}
+	actualTests := contractManifestTargetTestNamesV1(t, []string{"session_lane_ingress_v1_corpus_test.go"})
+	manifestTests := append([]string(nil), manifest.TargetTests...)
+	sort.Strings(manifestTests)
+	if !reflect.DeepEqual(actualTests, manifestTests) {
+		t.Fatalf("Ingress manifest target tests 未绑定实际 Test 函数 actual=%v manifest=%v", actualTests, manifestTests)
 	}
 }
 
