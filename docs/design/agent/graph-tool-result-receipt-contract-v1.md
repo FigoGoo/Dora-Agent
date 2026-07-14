@@ -85,9 +85,13 @@ Receipt 与 Execution Ref 的跨语言字段顺序同样固定，不能依赖 Go
 |---|---|
 | ToolReceipt Snapshot | `schema_version,receipt_id,session_id,turn_id,run_id,tool_call_id,tool_key,definition_version,intent_schema_version,result_schema_version,request_canonicalization_version,request_semantic_digest,write_state,receipt_version,owner_fence,execution_slots,result?,result_digest?,result_refs` |
 | Execution Slot | `ref_slot,slot_ordinal,ref_type,ref_schema_version,authority_owner,idempotency_key,request_digest,query_contract,resolution_state,authority_ref?,resolved_ref_digest?` |
-| Authority Ref | `authority_id,authority_version,authority_semantic_digest,resource_type?,projection_id?` |
+| Authority Ref | `authority_id,authority_version,authority_semantic_digest,authority_outcome?,resource_type?,projection_id?` |
 | Result Ref | `ref_slot,ref_digest` |
-| Execution Ref Digest Projection | `canonicalization_version,receipt_id,parent_request_digest,tool_key,definition_version,intent_schema_version,ref_slot,slot_ordinal,ref_type,ref_schema_version,authority_owner,idempotency_key,request_digest,query_contract,authority_ref` |
+| Execution Ref Digest Projection | `canonicalization_version,receipt_id,parent_request_digest,tool_key,definition_version,intent_schema_version,ref_slot,slot_ordinal,ref_type,ref_schema_version,authority_owner,idempotency_key,request_digest,query_contract,authority_ref`；`slot_effect_class` 由已绑定的 Tool Definition Registry 派生，不重复序列化 |
+
+`slot_effect_class` 与 ResultCode 的 `result_effect_policy` 是两套枚举：前者只允许 `side_effect/evidence_only`，由 immutable `(tool_key,definition_version,ref_slot)` 对应的 retained Registry entry 唯一派生；Execution Slot JSON/数据库列/调用方命令不得重复携带它。Execution Ref digest 已绑定 tool/definition/slot 与全部 Registry identity，重算时必须解析同一 retained entry；同 Definition Version 的 Registry 内容不得原地修改。Child 文档中的 prepared exact-set 也必须遵循此规则。
+
+`authority_outcome` 是 future Business Decision Authority ref 的条件必填 enum，只允许 `committed/not_committed`；对现有非 Business-decision ref 严格禁止。它必须由严格验证的 Business envelope/query result 投影，与 authority ID/version/semantic digest 一起进入 `authority_ref`，因此也进入 resolved-ref digest；不能从 HTTP status、错误文本或 opaque digest 猜测。该可选字段及 outcome-aware freeze 尚需 R01 Corpus 增量向量，旧 ref 无此字段时保持原 canonical。
 
 通用摘要形式为：
 
@@ -224,19 +228,25 @@ Result 只返回本次调用产生或确认的权威资源。`failed/cancelled` 
 - `before_side_effect`；
 - `after_side_effects_resolved`。
 
-ResultCode Registry 必须逐 code 固定 cancellation stage：`RUN_CANCELLED_BEFORE_SIDE_EFFECT` 只配 `before_side_effect/cancelled_before_side_effect`；`RUN_CANCELLED_AFTER_SIDE_EFFECTS_RESOLVED` 只配 `after_side_effects_resolved/cancelled_after_side_effects_resolved`，二者不可互换。
+ResultCode Registry 必须逐 code 固定 `result_effect_policy`；除已有类型外，candidate activation child 提出一个尚待 Corpus 扩展的 `permanent_failure_after_side_effects_resolved`：只允许 `status=failed + retryable=false + cancellation_stage absent`，表示主业务目标确定失败，但 ledger 已有不可逆且全部 resolved 的副作用（例如 single-use Approval Consumption）。它不能用于 unknown、prepared/unresolved slot 或自动重试，也不能由通用 `permanent_failure` 临时替代。
 
-`before_side_effect` 要求 Result refs 为空且 execution ledger 不含任何已提交副作用。`after_side_effects_resolved` 要求至少一个已提交副作用 slot、所有副作用 slot 均已 resolved，并以 slot ordinal exact-set 进入 Receipt `result_refs` 作为内部取消证据；Result 本身仍不伪造资源或 Operation 成功。存在任一外部副作用 unknown 时不能选择第二项，也不能冻结为任何 Result；Receipt 保持 open，Input/Run 进入隔离恢复。
+Cancellation ResultCode 仍必须逐 code 固定 stage：`RUN_CANCELLED_BEFORE_SIDE_EFFECT` 只配 `before_side_effect/cancelled_before_side_effect`；`RUN_CANCELLED_AFTER_SIDE_EFFECTS_RESOLVED` 只配 `after_side_effects_resolved/cancelled_after_side_effects_resolved`，二者不可互换。
+
+`before_side_effect` 要求 Result refs 为空且 execution ledger 不含任何已提交副作用。`cancelled_after_side_effects_resolved` 与 `permanent_failure_after_side_effects_resolved` 都要求至少一个已提交副作用 slot、所有副作用 slot 均已 resolved，并以 slot ordinal exact-set 进入 Receipt `result_refs` 作为内部证据；Result 本身仍不伪造资源或 Operation 成功。存在任一外部副作用 unknown 时不能选择这两类，也不能冻结为任何 Result；Receipt 保持 open，Input/Run 进入隔离恢复。
+
+Future Business Decision Authority 的 `outcome=not_committed` 可 resolve 一个 `slot_effect_class=side_effect` 的 prepared slot，但它以正式 negative authority 证明该业务副作用未提交；该 slot ref 仍必须进入 failed Receipt 的内部 `result_refs`，却不计入“已提交副作用至少一个”的判断。若同一 ledger 另有 Consumption/Charge 等 `outcome=committed` 或天然不可逆 ref，则必须使用 `permanent_failure_after_side_effects_resolved`；否则可使用 pinned `permanent_failure`。这一 outcome-aware 规则同样需要 R01 Corpus 扩展后才可生产使用。
 
 ### 3.8 ResultCode Registry
 
 每个 Tool Definition Pin 必须包含或不可变引用：
 
 ```text
-result_code -> exact status -> retryable constant -> effect_class -> cancellation_stage（仅 cancelled）
+result_code -> exact status -> retryable constant -> result_effect_policy -> cancellation_stage（仅 cancelled）
 ```
 
-`retryable=true` 仅允许 `failed` 且必须证明尚未发送或提交任何扣费、资源写入、Approval、Operation 或 Dispatch 副作用。它只表示新的用户意图可安全重试；同 ToolReceipt 重放仍返回原 frozen failure，不能立即自动重跑原副作用。
+当前 R01 Corpus 的 ResultCode Registry JSON 为兼容既有候选仍使用字段名 `effect_class`；其语义名称固定解释为 `result_effect_policy`，不得与 execution slot 的 Registry-derived `slot_effect_class` 混用。是否在后续 Schema Version 重命名字段必须单独评审，不能原地改写 v1 Corpus。
+
+`retryable=true` 仅允许 `failed` 且必须证明尚未发送或提交任何扣费、资源写入、Approval Consumption、Operation 或 Dispatch 副作用。它只表示新的用户意图可安全重试；同 ToolReceipt 重放仍返回原 frozen failure，不能立即自动重跑原副作用。`permanent_failure_after_side_effects_resolved` 必须固定 `retryable=false`。
 
 ## 4. ToolReceipt Snapshot 与执行 slot
 
@@ -270,17 +280,21 @@ result_code -> exact status -> retryable constant -> effect_class -> cancellatio
 | `query_contract` | 响应未知时使用的权威查询契约 |
 | `resolution_state` | `prepared` 或 `resolved` |
 
-每个 `(tool_key, definition_version)` 必须冻结 execution slot Registry；`ref_slot/slot_ordinal/ref_type/ref_schema_version/authority_owner/query_contract/effect_class` 必须逐值命中 Registry，不能由模型或 Runner 临时扩展。`effect_class` v1 只允许 `side_effect/evidence_only`，失败与取消 evidence 必须按 pinned policy 分类，禁止用硬编码 `ref_type` 白名单猜测副作用；因此未来增加 `ApprovalConsumptionReceipt` 等类型也不能逃逸账本检查。`idempotency_key` v1 精确派生为 `tr:<receipt_id>:<ref_slot>:v1`。Corpus 中出现的七条 slot policy 是用于评审的代表性 pinned Definition，不等于六个 Tool 已完成全部生产 Registry。
+每个 `(tool_key, definition_version)` 必须冻结 execution slot Registry；`ref_slot/slot_ordinal/ref_type/ref_schema_version/authority_owner/query_contract/slot_effect_class` 必须逐值命中 Registry，不能由模型或 Runner 临时扩展。`slot_effect_class` v1 只允许 `side_effect/evidence_only`，由 retained Registry entry 派生而不在 Execution Slot JSON、数据库列或命令中重复携带；失败与取消 evidence 必须按 pinned policy 分类，禁止用硬编码 `ref_type` 白名单猜测副作用。因此未来增加 `ApprovalConsumptionReceipt` 等类型也不能逃逸账本检查。`idempotency_key` v1 精确派生为 `tr:<receipt_id>:<ref_slot>:v1`。Corpus 中出现的七条 slot policy 是用于评审的代表性 pinned Definition，不等于六个 Tool 已完成全部生产 Registry。
 
 `prepared` 时禁止出现 authority ref 或 resolved digest。外部响应或查询确认后，原 slot 一次性写入：
 
 ```text
-authority_id + authority_version + authority_semantic_digest
+authority_id + authority_version + authority_semantic_digest + authority_outcome（仅条件适用时）
 ```
 
 并按 `dora.tool_execution_ref.v1` 计算 `resolved_ref_digest`。摘要投影必须同时绑定当前 Receipt ID、父 `request_semantic_digest`、Tool Key/Definition/Intent Pin、slot Registry 字段、阶段请求、查询契约和完整 authority ref；禁止把另一个 Receipt、请求或 Definition 的权威引用移植进来。同 slot、同完整 prepared/resolved ref 是只读幂等重放，即使提交方携带的 expected Receipt Version 已落后也不增加 Receipt Version；同 slot、不同请求或权威引用返回 `TOOL_EXECUTION_REF_CONFLICT`。
 
-仅有 `execution_refs` 而没有调用前 slot 预留无法区分“未发送”和“已提交但响应丢失”，因此不允许进入生产实现。
+仅有 `execution_refs` 而没有调用前 slot 预留无法区分“未发送”和“已提交但响应丢失”，因此不允许用于任何跨事务或外部调用。
+
+Agent 本地 authority 可使用唯一的 direct-resolved 例外：authority 必须由同一 Agent PostgreSQL Owner 管理，并在一个短事务的受信快照中严格验证为既有不可变记录，或与 resolved execution slot 在该事务内原子创建；中间不得出现 RPC、模型、Redis、对象存储或其他**外部** unknown-outcome 窗口。该事务仍必须锁定 open parent Receipt、校验当前 Fence/expected version、命中 retained slot Registry、使用相同 `tr:<receipt_id>:<ref_slot>:v1` 身份并一次写入完整 authority ref 与 resolved digest；同义重放只读、异义冲突。Approval Decision evidence 可引用同事务锁定并验证的既有不可变 Decision，Approval Consumption Core 则必须与 slot 原子创建/重放；Business Decide、Charge、Operation、Dispatch 等跨边界副作用严格禁止采用。
+
+direct-resolved 只消除“authority 已提交但 slot 未追加”的部分提交窗口，不能消除 PostgreSQL commit 成功但响应丢失。该事务返回 unknown 时 child 必须保持 open/quarantined，恢复方按原 child/slot/idempotency key 同时查询 local authority 与 resolved slot；同义完整记录只读收敛，冲突/单边记录视为损坏，`NOT_FOUND` 在真实 PG 事务模型证明 late commit 不可能前仍不得换 key、重发或冻结为未提交。
 
 ### 4.3 父 Receipt CAS
 
@@ -319,6 +333,7 @@ stateDiagram-v2
     [*] --> open: create first-write-wins / version=1
     open --> open: reserve prepared slot / version+1
     open --> open: resolve authority ref / version+1
+    open --> open: atomically create local authority and resolved slot / version+1
     open --> open: same slot + same semantic ref replay / no write
     open --> frozen: all required slots resolved + legal result / version+1
     frozen --> frozen: same request replay / read only
@@ -328,6 +343,7 @@ stateDiagram-v2
 禁止迁移：
 
 - 副作用开始后才创建 Receipt 或 reserve slot；
+- 把跨事务/外部 authority 伪装成 direct-resolved local slot；
 - prepared slot 未解决即调用 freeze；
 - append 和 freeze 使用不同父行互斥条件；
 - frozen 后 append、删除、重开或覆盖结果；
@@ -349,7 +365,7 @@ freeze 前必须满足：
 6. `result_digest` 覆盖完整 Result，包括 summary、retryable、所有嵌套 ref、Warning 和当前 Receipt ID；
 7. `result/result_digest/result_refs` 在同一次 `open -> frozen` CAS 写入。
 
-证据追溯适用于全部状态，不只适用于 `accepted`：`waiting_user` 必须逐值命中 Approval slot，且 `card_id` 等于该 slot 的稳定 `projection_id`；`completed/partial` 的每个 Resource 必须与 resolved resource slot 形成 exact-set；`failed` 与 `cancelled/before_side_effect` 不得在 ledger 中藏有 Approval、Operation、Batch、Dispatch、Resource、Business Write 或 Charge 等已提交副作用；`cancelled/after_side_effects_resolved` 必须携带全部已解决副作用 slot 的内部 `result_refs` exact-set。`retryable=true` 的失败只允许在 ledger 证明无副作用时冻结。
+证据追溯适用于全部状态，不只适用于 `accepted`：`waiting_user` 必须逐值命中 Approval slot，且 `card_id` 等于该 slot 的稳定 `projection_id`；`completed/partial` 的每个 Resource 必须与 resolved resource slot 形成 exact-set；`failed` 的 `safe_failure_before_side_effect/permanent_failure` 与 `cancelled/before_side_effect` 不得在 ledger 中藏有已提交副作用；只有 pinned ResultCode 明确使用 `permanent_failure_after_side_effects_resolved` 的非重试 failed，以及 `cancelled/after_side_effects_resolved`，才必须携带全部已解决副作用 slot 的内部 `result_refs` exact-set。`retryable=true` 的失败只允许在 ledger 证明无副作用时冻结。
 
 Receipt 自身 ID 不进入 `result_refs`。freeze 时不得临时调用下游补造 ref。
 
@@ -426,6 +442,7 @@ GOWORK=off /Users/figo/sdk/go1.26.3/bin/go -C agent test -race ./tests/contract 
 - [ ] `aigc-contract-catalog.md` 整体跨 Module Approved，并明确 Agent 内部 Result exact-version 例外；
 - [ ] W2-R08 接受 Approval 创建事务预分配 `card_id`，或在 R01 Approved 前升级 Result Schema；
 - [ ] 各 Tool 独立设计冻结完整 ResultCode/Warning/Resource/slot Registry 和 exact-set；
+- [ ] R01 Corpus 增加 `permanent_failure_after_side_effects_resolved` 的 ResultCode policy、合法 Consumption side-effect 投影，以及遗漏/unknown/错误 effect-class 的拒绝向量；在此之前 child post-Consumption failure 仍只是设计候选；
 - [ ] W2-R02 冻结 Session Lane/Lease/Fence 与 Repository 事务边界；
 - [ ] W2-R03 冻结 Approval/Continuation 权威状态与消费；
 - [ ] W2-R08 冻结 A2UI Projector、Action 和版本协商；
