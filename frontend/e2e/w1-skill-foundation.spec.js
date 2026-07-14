@@ -248,6 +248,78 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     expect(creatorLogin.principal?.capabilities || []).not.toContain('skill.review');
     await expect(page.getByRole('button', { name: 'Skill 审核' })).toHaveCount(0);
 
+    const reviewerRequestsBeforeCreatorAdminRoute = businessRequests.filter((request) => (
+      request.pathname.startsWith('/api/v1/admin/skill-reviews')
+    )).length;
+    await page.goto('/admin/skills/reviews');
+    const creatorAdminDeniedHeading = page.getByRole('heading', { name: '无 Skill 审核权限' });
+    const creatorAdminDeniedAlert = page.getByRole('alert');
+    await expect(creatorAdminDeniedHeading).toBeVisible();
+    await expect(creatorAdminDeniedAlert).toHaveText('当前会话不能使用 skill.review，未加载任何审核数据。');
+    await expect(page.getByRole('button', { name: 'Skill 审核' })).toHaveCount(0);
+    await page.waitForLoadState('networkidle');
+    const reviewerRequestsAfterCreatorAdminRoute = businessRequests.filter((request) => (
+      request.pathname.startsWith('/api/v1/admin/skill-reviews')
+    )).length;
+    const creatorAdminRouteBlocked = await creatorAdminDeniedHeading.isVisible()
+      && await creatorAdminDeniedAlert.textContent() === '当前会话不能使用 skill.review，未加载任何审核数据。';
+    const creatorAdminImplicitAPIBlocked = reviewerRequestsAfterCreatorAdminRoute
+      === reviewerRequestsBeforeCreatorAdminRoute;
+    expect(creatorAdminRouteBlocked).toBe(true);
+    expect(creatorAdminImplicitAPIBlocked).toBe(true);
+
+    const creatorAdminAPIResponse = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/admin/skill-reviews?status=reviewing', {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'application/json' }
+      });
+      const responseText = await response.text();
+      let payload = null;
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        // The outer strict assertion reports a useful mismatch for malformed JSON.
+      }
+      return {
+        status: response.status,
+        contentType: response.headers.get('content-type') || '',
+        cacheControl: response.headers.get('cache-control') || '',
+        responseURL: response.url,
+        responseText,
+        payload
+      };
+    });
+    expect(creatorAdminAPIResponse.status).toBe(403);
+    expect(creatorAdminAPIResponse.contentType).toBe('application/json; charset=utf-8');
+    const creatorAdminAPIURL = new URL(creatorAdminAPIResponse.responseURL);
+    expect(creatorAdminAPIURL.pathname).toBe('/api/v1/admin/skill-reviews');
+    expect(creatorAdminAPIURL.search).toBe('?status=reviewing');
+    const creatorAdminDeniedPageText = await page.locator('body').innerText();
+    const creatorSensitiveValues = [email, password].filter(Boolean);
+    const creatorAdminDenialHasNoSensitiveData = creatorSensitiveValues.every((value) => (
+      !creatorAdminAPIResponse.responseText.includes(value) && !creatorAdminDeniedPageText.includes(value)
+    ));
+    const creatorAdminAPIError = creatorAdminAPIResponse.payload?.error;
+    const creatorAdminAPIForbidden = creatorAdminAPIResponse.status === 403
+      && creatorAdminAPIResponse.contentType === 'application/json; charset=utf-8'
+      && creatorAdminAPIResponse.cacheControl === 'no-store'
+      && Object.keys(creatorAdminAPIResponse.payload || {}).join(',') === 'error'
+      && Object.keys(creatorAdminAPIError || {}).sort().join(',') === 'code,details,message,request_id,retryable'
+      && creatorAdminAPIError?.code === 'SKILL_REVIEW_CAPABILITY_REQUIRED'
+      && creatorAdminAPIError?.message === '当前账号没有 Skill 审核权限'
+      && creatorAdminAPIError?.retryable === false
+      && creatorAdminAPIError?.details !== null
+      && typeof creatorAdminAPIError?.details === 'object'
+      && !Array.isArray(creatorAdminAPIError?.details)
+      && Object.keys(creatorAdminAPIError.details).length === 0
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(creatorAdminAPIError?.request_id || '')
+      && creatorAdminDenialHasNoSensitiveData;
+    expect(
+      creatorAdminAPIForbidden,
+      'Creator Reviewer API denial must match the strict non-sensitive 403 contract'
+    ).toBe(true);
+
     await page.goto('/my/skills/new');
     await expect(page.getByRole('heading', { name: '创建 Skill' })).toBeVisible();
     await fillReviewerSmokeSkill(page, { skillName, summary: sentinelA });
@@ -444,8 +516,11 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
 
     if (w1ResultPath) {
       await writeFile(w1ResultPath, JSON.stringify({
-        schema_version: 'w1.real-review-result.v1',
+        schema_version: 'w1.real-review-result.v2',
         creator_id: creatorID,
+        creator_admin_route_blocked: creatorAdminRouteBlocked,
+        creator_admin_implicit_api_blocked: creatorAdminImplicitAPIBlocked,
+        creator_admin_api_forbidden: creatorAdminAPIForbidden,
         reviewer_id: reviewerID,
         skill_id: skillID,
         review_id: reviewID,

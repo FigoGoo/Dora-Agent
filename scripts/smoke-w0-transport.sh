@@ -1250,8 +1250,11 @@ run_w1_browser_frozen_smoke() {
 
   [[ -s "$browser_result_file" ]] || fail "W1 浏览器未产出结构化真实结果"
   jq -e --arg creator "$user_id" --arg reviewer "$owner_b_seed_user_id" '
-    keys == ["creator_id","current_draft_summary","project_id","published_snapshot_id","review_id","reviewer_id","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
-    and .schema_version == "w1.real-review-result.v1"
+    keys == ["creator_admin_api_forbidden","creator_admin_implicit_api_blocked","creator_admin_route_blocked","creator_id","current_draft_summary","project_id","published_snapshot_id","review_id","reviewer_id","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
+    and .schema_version == "w1.real-review-result.v2"
+    and .creator_admin_route_blocked == true
+    and .creator_admin_implicit_api_blocked == true
+    and .creator_admin_api_forbidden == true
     and .creator_id == $creator and .reviewer_id == $reviewer and .creator_id != .reviewer_id
     and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id,.tool_catalog_session_id,.tool_catalog_request_id]
       | all(.[]; test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
@@ -1407,11 +1410,16 @@ run_w1_browser_frozen_smoke() {
     "$verifier_file" >/dev/null || fail "W1 Browser Agent Snapshot 解密验证结果漂移"
 
   jq -n --slurpfile api "$evidence_dir/responses/w1-browser-frozen-api.json" \
+    --slurpfile browser "$browser_result_file" \
     --slurpfile business "$evidence_dir/responses/w1-browser-frozen-business.json" \
     --slurpfile agent "$evidence_dir/responses/w1-browser-frozen-agent.json" \
     --slurpfile verifier "$verifier_file" '
     {skill_id:$api[0].skill_id,review_id:$api[0].review_id,published_snapshot_id:$api[0].published_snapshot_id,
-      browser_result_contract:($api[0].owner_status == 200 and $api[0].review_status == 200),
+      browser_result_contract:($browser[0].schema_version == "w1.real-review-result.v2"
+        and $browser[0].creator_admin_route_blocked == true
+        and $browser[0].creator_admin_implicit_api_blocked == true
+        and $browser[0].creator_admin_api_forbidden == true
+        and $api[0].owner_status == 200 and $api[0].review_status == 200),
       formal_api_frozen_revision:($api[0].owner_current_draft_is_b
         and $api[0].review_frozen_submission_is_a and $api[0].review_current_published_is_a),
       business_frozen_revision:($business[0].review_fact_count == 1 and $business[0].published_fact_count == 1
@@ -1430,7 +1438,11 @@ run_w1_browser_frozen_smoke() {
       browser_tool_catalog_static_unavailable:($api[0].tool_catalog_exact_unavailable
         and ($api[0].tool_catalog_session_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
         and ($api[0].tool_catalog_request_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))}
-    | .browser_review_publish_quickcreate_v2 = (.browser_result_contract and .formal_api_frozen_revision
+    | .browser_review_publish_quickcreate_v2 = (.browser_result_contract
+      and $browser[0].creator_admin_route_blocked == true
+      and $browser[0].creator_admin_implicit_api_blocked == true
+      and $browser[0].creator_admin_api_forbidden == true
+      and .formal_api_frozen_revision
       and .business_frozen_revision and .agent_snapshot_matches_published
       and .digest_business_agent_verifier_consistent and .browser_tool_catalog_static_unavailable)' \
     >"$evidence_dir/responses/w1-browser-frozen-consistency.json"
