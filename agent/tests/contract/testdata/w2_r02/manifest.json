@@ -1,0 +1,6 @@
+{
+  "schema_version": "w2_r02_contract_corpus_manifest.v1",
+  "files": [
+    {"file": "session_lane_v1.json", "sha256": "sha256:f844aa4420719015cbc7a1a4491ffc221ee08c13958abb60c9081b5202da3664"}
+  ]
+}

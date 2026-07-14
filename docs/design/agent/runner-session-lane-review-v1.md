@@ -1,6 +1,6 @@
 # Agent Runner 与 PostgreSQL Session Lane v1 设计评审
 
-> 文档状态：Draft / W2-R01、W2-R02、W2-R03 待评审
+> 文档状态：Draft / W2-R01 已有 Agent-owned Review Ready Corpus；W2-R02 已有 Agent-owned Executable Draft；W2-R03 待评审
 >
 > 契约基线：`aigc.contract.v1alpha1`
 >
@@ -43,7 +43,7 @@
 | Session | 已有 W0 Session 基础 | 不代表已有可执行 Runner 或完整多轮语义 |
 | `session_runtime_lease` | 表已存在，但明确是空 W0 租约骨架 | 不代表已有 Claim、Heartbeat、Fence 校验或 Recovery Scanner |
 | `session_input` | Schema 有 `pending/claimed/running/retry_wait/resolved/dead` | 生产路径目前只写 `pending`，不存在状态处理器 |
-| Input Source | 当前约束只允许 `user_message` | 尚无 `ResumeRequested`、`ApprovalContinuationResult`、`BatchContinuationResult` |
+| Input Source | 当前约束只允许 `user_message` | 尚无 `ApprovalContinuationResult`、`BatchContinuationResult`；`ResumeRequested` 已在 W2-R02 候选中改为绑定当前 HOL 的持久化恢复控制命令，不作为后序普通 Input |
 | Turn/Run | 未实现 | 没有稳定 Turn/Run 重试或取消语义 |
 | Receipt | ModelReceipt、ToolReceipt 未实现 | 不能安全宣称模型/Tool 可回放或可解决 unknown outcome |
 | Approval | 未实现 | 前端确认、自然语言确认均不是正式授权 |
@@ -237,11 +237,12 @@ ToolReceipt
 | `source_type` | 来源 | 执行方式 |
 |---|---|---|
 | `UserMessage` | 已认证用户 HTTP | 创建 `turn_kind=chat`，由唯一 ChatModelAgent 执行 |
-| `ResumeRequested` | 已认证用户或受控运维恢复动作 | 绑定并恢复已验证的原 Turn/Run/Checkpoint，不制造新模型语义 |
 | `ApprovalContinuationResult` | Agent Approval Decision/Invalidation 事务 | approve，以及必须调用 Business `Decide*(action=reject)` 的 reject，创建 `turn_kind=approval_continuation` 的受信系统 Turn/Run，由 Runner 走原 pinned Graph 的确定性分支；仅需 Agent 本地失效/投影的 reject/expire/cancel 不创建 Turn/Run；所有分支均不调用模型 |
 | `BatchContinuationResult` | Agent Inbox/Batch Barrier | 默认确定性投影；仅确需语义解释时创建 `turn_kind=batch_explanation` 的新模型 Turn |
 
 所有系统输入必须有稳定 `source_id`，并保留真实来源类型，禁止伪装成用户消息。当前 `session_input.source_type=user_message` 约束只能通过新的向前 Migration 扩展。
+
+`ResumeRequested` v1 是绑定当前 HOL `input_id/run_id` 的持久化控制命令，不分配新的 `enqueue_seq`，也不创建第二个 Turn/Run。若把它排在原 `running/quarantined` Input 之后，会形成严格 HOL 自锁。该控制命令的 Command Receipt、权限和审计仍待生产契约评审。
 
 ### 5.4 Input → Turn → Run 候选状态机与终结映射
 
@@ -294,7 +295,7 @@ stateDiagram-v2
 
 | 触发 | Input 迁移 | Turn 迁移 | Run 迁移 | 必须同时提交的证据 |
 |---|---|---|---|---|
-| 需 Turn 的 Input 入队 | 新建 `pending` | 同事务新建带稳定 `turn_kind` 的 `created`；`ResumeRequested` 绑定原 Turn 而不新建 | 不创建 | SourceID、enqueue_seq、可信来源摘要、稳定 TurnID、turn_kind |
+| 需 Turn 的 Input 入队 | 新建 `pending` | 同事务新建带稳定 `turn_kind` 的 `created` | 不创建 | SourceID、enqueue_seq、可信来源摘要、稳定 TurnID、turn_kind |
 | 确定性系统 Input 入队 | 新建 `pending` | 不创建 | 不创建 | SourceID、enqueue_seq、可信来源摘要、投影类型 |
 | Claim 后准备执行 | `pending/retry_wait -> claimed` | 复用同一 `created/running` Turn | 新建 `created`，或复用原 `recovery_pending` Run | owner、当前 fence、冻结边界版本 |
 | Runner 真正启动 | `claimed -> running` | `created -> running`，恢复时保持 `running` | `created/recovery_pending -> running` | start receipt、budget digest、当前 fence |
@@ -303,9 +304,9 @@ stateDiagram-v2
 | `waiting_user` Result | `running -> resolved` | `running -> completed` | `running/recovery_pending -> completed` | frozen `waiting_user` ToolReceipt、pending Approval、`resolution_code=waiting_user` |
 | `accepted` Result | `running -> resolved` | `running -> completed` | `running/recovery_pending -> completed` | frozen `accepted` ToolReceipt、Operation/Dispatch Receipt、`resolution_code=accepted` |
 | 确定性 `failed` Result | `running -> resolved` | `running -> completed` | `running/recovery_pending -> completed` | frozen `failed` ToolReceipt、稳定错误码；执行已确定性收口 |
-| 可恢复技术失败/进程中断且已证明无未知副作用 | `running -> retry_wait` | 保持 `running` | `running -> recovery_pending` | 权威证据证明相关副作用未发送/未提交、retry_at、阶段标记、open/frozen Receipt 引用、失败预算 |
+| 可恢复技术失败/进程中断且已证明无未知副作用 | `claimed/running -> retry_wait` | 保持 `created/running` | `created/running -> recovery_pending` | 权威证据证明相关副作用未发送/未提交、retry_at、阶段标记、open/frozen Receipt 引用、失败预算 |
 | 任一副作用 Unknown Outcome | 发现时从 `claimed/running/retry_wait` 立即原子迁移为 `quarantined` | 保持 `running` | `created/running -> recovery_pending` 或保持 `recovery_pending` | 阶段证据、下游查询身份、隔离原因、下一恢复/人工动作；不得先进入 retry_wait，持续阻塞 HOL |
-| 取消已权威提交且没有未知副作用 | `pending/claimed/running/retry_wait -> resolved` | 已创建则 `created/running -> cancelled` | 已创建则 `created/running/recovery_pending -> cancelled` | cancel version、阶段、冻结取消结论和 `resolution_code=cancelled` |
+| 取消已权威提交且没有未知副作用 | 先记录 cancel；非 owned 的 `pending/retry_wait` 先 cancel-specific Claim；再由 `claimed/running -> resolved` | `created/running -> cancelled` | 已创建则 `created/running/recovery_pending -> cancelled`；Claim 前取消不补造 Run | cancel command receipt/version、当前 owner/fence、阶段、冻结取消结论和 `resolution_code=cancelled` |
 | 安全失败终结 | `claimed/running/retry_wait/quarantined -> dead` | `created/running -> failed` | `created/running/recovery_pending -> failed` | 已冻结 InputFailureReceipt/失败 ToolReceipt、EventLog/Projection Marker，并证明不存在未决副作用 |
 | 无需模型的 Batch/拒绝/过期/取消确定性投影 | `claimed -> running -> resolved` | 不创建 | 不创建 | Projection Receipt/EventLog；不得为了文案调用模型 |
 
@@ -335,7 +336,7 @@ Turn 开始前冻结：
 stateDiagram-v2
     [*] --> pending
     pending --> claimed: claim + session fence
-    claimed --> running: create/recover Turn and Run
+    claimed --> running: bind existing Turn + start/recover Run
     claimed --> retry_wait: transient setup failure + no side effect
     running --> retry_wait: retryable technical failure + proven no side effect
     retry_wait --> claimed: retry_at reached + same IDs
@@ -345,9 +346,7 @@ stateDiagram-v2
     quarantined --> resolved: authoritative result frozen
     quarantined --> dead: safe failure frozen, no pending effect
     running --> resolved: result/receipt/event committed
-    pending --> resolved: cancellation accepted before claim
     claimed --> resolved: cancellation accepted before side effect
-    retry_wait --> resolved: cancellation accepted
     running --> dead: safe failure frozen
     claimed --> dead: invalid input + failure receipt
     retry_wait --> dead: safe failure frozen
@@ -363,14 +362,14 @@ Claim 必须在短事务内完成：
 
 1. 锁定 Session Lane 及其最小非终态 Input；
 2. 若存在未到期且不属于当前进程的 Lease，立即放弃；
-3. 取得或续接 Session Lease，递增单调 `fence_token`；
-4. CAS Input `pending/retry_wait -> claimed`，记录 owner、fence、attempt 和 lease；`quarantined -> claimed` 还必须带权威核对证据或经审计的恢复授权，普通 Scanner 不得自动解除隔离；
+3. 取得新的 Session Lease ownership epoch 时令 `fence_token` 精确 `+1`；Heartbeat 只续租并递增 Lease Version，不改变 Fence；
+4. CAS Input `pending/retry_wait -> claimed`，记录 owner、fence、attempt 和 lease；cancel-requested 的非 owned Head 也先执行 cancel-specific Claim；`quarantined -> claimed` 必须有权威核对的 `effect_not_started/effect_committed` 结论，人工指令或普通 Scanner 不得自动解除隔离；
 5. 提交后才在数据库事务外启动 Runner。
 
 每一次对 Turn、Run、Receipt、Checkpoint、EventLog 和 Input 终态的写入都必须验证：
 
 ```text
-session_id + input_id + lease_owner + fence_token + expected_input_status
+session_id + input_id + lease_owner + fence_token + lease_until > database_now + expected_input_status
 ```
 
 Heartbeat 只延长当前 owner/fence 的 Lease。Lease 丢失或 Heartbeat CAS 失败时，进程必须立刻取消 Runner 上下文并停止提交；即使旧模型/Tool 晚到，也只能隔离为 stale evidence，不能覆盖新 owner 的权威记录。
@@ -416,7 +415,7 @@ Heartbeat 只延长当前 owner/fence 的 Lease。Lease 丢失或 Heartbeat CAS 
 
 ### 7.2 推荐执行顺序
 
-1. Lane Claim 并恢复/创建稳定 Input、Turn、Run；
+1. Lane Claim 绑定入队时已创建的稳定 Input/Turn，并创建或恢复同一 Run；
 2. 冻结 Turn Snapshot 与 Budget；
 3. 创建 Runner、绑定 cancel/deadline 和事件消费者；
 4. `chat/batch_explanation` 分支在模型请求前创建 ModelReceipt，并完全消费、冻结模型输出；
@@ -756,6 +755,8 @@ Agent PostgreSQL EventLog 至少包含：
 - [ ] `accepted` 只能由原子派发证据产生，`waiting_user` 只能由 pending Approval 产生。
 
 ### 15.2 Session Lane 测试
+
+W2-R02 已新增独立 [`PostgreSQL Session Lane 与 Runner Runtime 可执行契约 v1`](./session-lane-runtime-contract-v1.md) 与 60 条测试专用 Corpus 向量，先覆盖纯状态迁移、HOL、Fence 纪元、Takeover、Effect State 防降级、绑定目标 Input/Run 与 Cancel Version 的 first-write-wins/Claim 前取消、PG Scan trigger 和 Drain Handoff 候选。`evidence_kind/digest` 仍只是分支夹具，尚未绑定权威 Receipt/Marker/Checkpoint；下列清单仍按“生产 Repository/Runner/故障注入完成”口径保持未勾选，不能用纯模型冒充 PostgreSQL 集成、lost-wake 恢复或 `SMK-017` 证据。
 
 - [ ] 同 Session 100 个并发输入只按 `enqueue_seq` 执行；
 - [ ] 不同 Session 可并发且互不阻塞；
