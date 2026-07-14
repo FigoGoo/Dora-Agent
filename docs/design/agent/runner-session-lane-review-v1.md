@@ -889,8 +889,9 @@ Agent PostgreSQL EventLog 至少包含：
 - [ ] 不修改现有 W0 Migration；所有变化以向前 Migration 实现并有 Down 风险说明；
 - [ ] 从当前空 Lease、仅 pending Input 的真实数据状态升级通过；
 - [ ] `source_type` 扩展、`quarantined` 非终态、Receipt 双摘要、append-only execution ref slot/result projection、Checkpoint epoch/provenance、唯一键、HOL Claim 索引、Fence CAS、保留/清理索引通过 PostgreSQL 集成测试；
-- [ ] 独立 Eino 依赖 PR 完成版本兼容、许可证和构建验证；
-- [ ] Agent 单 Module 测试不依赖根 `go.work` 隐式解析；
+- [x] 独立 Eino 依赖批已按 [`eino-dependency-lock-review-v1.md`](./eino-dependency-lock-review-v1.md) 精确锁定 Eino `v0.9.10` / DeepSeek Adapter `v0.1.6`，完成经典 Message、DAG Compile/Invoke、直接/关键传递依赖许可证和现有三 Module 构建验证；该结论不授权 Runtime；
+- [x] Agent 单 Module 已在 `GOWORK=off` 下通过 test、race、vet 和 `agent-service` build，不依赖根 `go.work` 隐式解析；
+- [ ] Eino Runtime 实际装配后完成 Kitex/Gin/Telemetry Callback、Trace 上下文和中间件顺序集成验证；
 - [ ] 与 Business/Worker 的 Receipt、Approval、Operation/Event 契约测试通过；
 - [ ] 35 条 SMK-P0 场景能够从 HTTP 输入走到 SSE/A2UI/权威查询，并覆盖重连、重放和 unknown outcome。
 

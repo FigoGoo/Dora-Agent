@@ -11,6 +11,8 @@
 - [AIGC 跨 Module 契约目录](../../cross-module/aigc-contract-catalog.md)：数据 Owner、Business RPC、Agent→Worker Job Contract、Event、Approval、计费、幂等和 unknown-outcome 共同基线。
 - [Agent Runner 与 PostgreSQL Session Lane v1 设计评审](../runner-session-lane-review-v1.md)：GraphToolResult/Receipt、严格 HOL、Lease/Fence、Turn/Run、Approval Continuation、Checkpoint 与 A2UI/Event 的 W2 运行底座草案。
 - [Agent A2UI Event / Card / Action v1 契约评审](../a2ui-event-action-contract-v1.md)：W2 最小组件/Action 白名单、Card Revision、防重放、错误信封、SSE/REST 恢复和无 Mock/fallback 门禁草案。
+- [Agent Eino / DeepSeek 依赖锁定评审 v1](../eino-dependency-lock-review-v1.md)：只批准 Agent Module 的精确版本、经典 Message/DAG 兼容与独立构建，不批准 Runtime。
+- [`plan_creation_spec` W2-R04 开工差距评审](plan_creation_spec-w2-r04-gap-review.md)：记录首个同步 Tool 的十类 P0、待签核逐模型计费方案、Runtime 批次和 `SMK-009` 最小闭环；当前仍不通过实现门禁。
 - [Graph Tool 功能需求总览](../../../requirements/graph-tool-requirements-overview.md)：六个用户可见工具的产品能力、状态、计费和验收要求。
 - [全功能冒烟开发推进计划](../../../requirements/full-function-smoke-development-plan.md)：M0～M5、SMK-P0 和开发门禁。
 - [全功能冒烟工程设计](../../testing/full-function-smoke-engineering-design.md)：Fixture、可控 Adapter、故障注入和 Evidence Bundle。
