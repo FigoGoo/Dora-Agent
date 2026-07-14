@@ -6,7 +6,7 @@
 >
 > 更新日期：2026-07-14
 >
-> 关联文档：[用户端需求总览](user-requirements-overview.md)、[管理端需求总览](admin-requirements-overview.md)、[服务端需求总览](server-requirements-overview.md)、[Graph Tool 功能需求总览](graph-tool-requirements-overview.md)、[支付与积分充值需求总览](payment-requirements-overview.md)、[共通业务规则与验收基线](common-requirements-baseline.md)、[Graph Tool 详细设计索引](../design/agent/graphtool/README.md)、[AIGC 跨 Module 契约目录](../design/cross-module/aigc-contract-catalog.md)、[W0 身份与工作台契约 v1](../design/cross-module/w0-identity-workspace-contract-v1.md)、[W0.5 Workspace Transport 契约 v1](../design/cross-module/w05-workspace-transport-contract-v1.md)、[Business 鉴权/Project 评审包](../design/business/auth-project-foundation-review.md)、[Agent Session/Event 评审包](../design/agent/session-event-foundation-review.md)、[SMK-001～004 垂直切片评审包](../design/testing/smk-001-004-vertical-slice-review.md)
+> 关联文档：[用户端需求总览](user-requirements-overview.md)、[管理端需求总览](admin-requirements-overview.md)、[服务端需求总览](server-requirements-overview.md)、[Graph Tool 功能需求总览](graph-tool-requirements-overview.md)、[支付与积分充值需求总览](payment-requirements-overview.md)、[共通业务规则与验收基线](common-requirements-baseline.md)、[Graph Tool 详细设计索引](../design/agent/graphtool/README.md)、[AIGC 跨 Module 契约目录](../design/cross-module/aigc-contract-catalog.md)、[Agent Runner 与 PostgreSQL Session Lane v1 设计评审](../design/agent/runner-session-lane-review-v1.md)、[W0 身份与工作台契约 v1](../design/cross-module/w0-identity-workspace-contract-v1.md)、[W0.5 Workspace Transport 契约 v1](../design/cross-module/w05-workspace-transport-contract-v1.md)、[Business 鉴权/Project 评审包](../design/business/auth-project-foundation-review.md)、[Agent Session/Event 评审包](../design/agent/session-event-foundation-review.md)、[SMK-001～004 垂直切片评审包](../design/testing/smk-001-004-vertical-slice-review.md)
 
 ## 1. 目标与完成定义
 
@@ -384,6 +384,30 @@ W1-B2 只完成静态不可用目录，下一批不得直接创建 Graph、Regis
 | W2-R09 | `SMK-007/008` 实际执行验收 | Definition Pin、真实 Graph Run、Receipt、EventLog/SSE、刷新恢复、越权失败和同键只执行一次 | API + 数据库 + 单一真实 Chromium Evidence 通过，目录项才允许从 unavailable 切为 available |
 
 W3 前另行关闭 `generate_media` 与 `assemble_output` 的异步语义：Graph 返回的 `accepted` 只能表达原子 Dispatch 已提交，不能作为 Operation 的业务终态，也不能冒充媒体生成或导出成功；Provider/Worker 终态必须通过新的 Continuation 形成可验证结果。
+
+W2 开工前的当前仓库事实核对如下，后续设计和 PR 必须以此为迁移起点：
+
+| 当前能力 | 事实状态 | W2 处理要求 |
+| --- | --- | --- |
+| Session、单调序号、Runtime Lease/Fence 占位 | 已有 Agent Entity、Repository 与 `20260714000200` Migration；仅建会话时初始化空租约 | 以前向 Migration 和 Repository 扩展 Claim/Renew/Release；不得修改已发布 Migration，也不得宣称 Processor 已存在 |
+| Session Input | 已有 `user_message`、`pending/claimed/running/retry_wait/resolved/dead` Schema，W0/W1 生产路径只写 `pending` | 冻结 HOL Claim、Fence 提交和重试 Owner；再扩展 `approval_continuation_result`、`batch_continuation_result` 等可信来源 |
+| Workspace Snapshot/EventLog/SSE | W0.5 读取、补读、Reset 与 W1 浏览器水合已通过 | W2 只追加严格版本化 Run/Receipt/A2UI 投影；不得复用 SSE 缓存推断权威终态 |
+| Session Skill Snapshot v2 | 已冻结 Published Skill 引用与加密 Runtime Content | Runner 只读取会话快照；Skill 不得注册 Tool、扩权、提预算或改变既有会话 |
+| Tool Definition Catalog | W1-B2 仅有六项静态 `unavailable / DESIGN_REVIEW_PENDING` | Executable Registry 与目录保持分离；只有对应设计 Approved 且真实 Run Evidence 通过后才能切换 availability |
+| Turn、Run、Model/Tool Receipt、Approval、CheckpointStore | Agent 生产代码与 Migration 尚不存在 | 先完成 Owner、状态机、幂等键、恢复和数据分类评审，再以前向 Migration 实现 |
+| Runner Processor、主 ChatModelAgent、Graph Tool、Prompt Registry | Agent 生产代码尚不存在，`agent/go.mod` 也尚未引入 Eino/DeepSeek Adapter | 先用独立依赖变更精确锁定 Eino `v0.9.10` 与已审核 Adapter，再按单主 Agent、经典 `schema.Message` 和启动时 Compile/失败关闭实现 |
+| A2UI | 前端保留历史/目标形态协议与渲染资产；Agent 无对应权威后端包和投影链路 | 只选择性迁移前端资产；先冻结后端 DTO、Card/Action 白名单、版本与 EventLog 投影，不把旧 `/api/aigc/**` Mock 契约当当前事实 |
+
+本轮已经形成以下 W2 评审输入，但尚未获得跨角色 Approved 结论：
+
+| 评审项 | 当前产物 | 当前状态 | 下一关闭动作 |
+| --- | --- | --- | --- |
+| W2-R01/R02/R03 | [`runner-session-lane-review-v1.md`](../design/agent/runner-session-lane-review-v1.md) 与 [`aigc-contract-catalog.md`](../design/cross-module/aigc-contract-catalog.md) | Draft；固定向量、HOL/Lease/Fence、Receipt、Approval Continuation 与 Checkpoint 候选语义已齐 | Agent/Business/安全/运维/财务逐项关闭决策与复选项 |
+| W2-R08 | [`a2ui-event-action-contract-v1.md`](../design/agent/a2ui-event-action-contract-v1.md) | Draft；最小组件/Action 白名单、Revision、防重放、错误信封、SSE/REST 恢复和无 Mock/fallback 门禁已齐 | Agent/Business/前端/安全/运维联合冻结 Schema、迁移与发布协商 |
+| W2-R04 | [`plan_creation_spec-design.md`](../design/agent/graphtool/plan_creation_spec-design.md) | Draft；Intent、阶段 DAG、规划预算、待确认项、Node、候选/激活与恢复候选设计已齐 | 冻结 Candidate DTO、`BIZ-AIGC-007/008` 查询契约和同步计费规则 |
+| W2-R05 | [`analyze_materials-design.md`](../design/agent/graphtool/analyze_materials-design.md) | Draft；五媒体 Evidence、确定性 partial、Node、状态机与故障注入候选设计已齐 | 冻结素材 Evidence 契约、minimum gate、不可变版本和计费规则 |
+
+在以上文档状态改为 Approved、契约测试向量可执行且独立 Eino 依赖评审完成前，不创建 Runner、Graph、Executable Registry、相关 Migration 或前端 Approval Action；六个目录项继续保持 `unavailable / DESIGN_REVIEW_PENDING`。
 
 ### 10.4 多 Agent 协作边界
 
