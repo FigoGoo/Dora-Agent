@@ -13,6 +13,7 @@ go_bin="${GO_BIN:-/Users/figo/sdk/go1.26.3/bin/go}"
 migrate_bin="${MIGRATE_BIN:-$repo_root/.local/tools/migrate}"
 compose=(docker compose --env-file "$env_file" -f "$repo_root/deploy/local/compose.yaml")
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+w05_browser_prompt="W05 Browser Recovery ${run_id}"
 w1_skill_smoke_enabled="${W1_RUN_SKILL_SMOKE:-0}"
 w1_browser_smoke_enabled="${W1_RUN_BROWSER_SMOKE:-0}"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
@@ -38,6 +39,10 @@ owner_b_login_response_temp=""
 owner_b_denied_response_temp=""
 owner_b_denied_headers_temp=""
 source_manifest_temp=""
+w05_browser_result_temp=""
+agent_restart_workspace_temp=""
+agent_restart_sse_temp=""
+agent_restart_sse_status_temp=""
 w1_temp_dir=""
 owner_b_password=""
 owner_b_csrf_token=""
@@ -67,10 +72,24 @@ w1_binding_input_id=""
 stop_processes() {
   for pid in "$business_pid" "$agent_pid"; do
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      kill -TERM "$pid"
+      kill -TERM "$pid" 2>/dev/null || true
     fi
   done
   for pid in "$business_pid" "$agent_pid"; do
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      process_stopped=false
+      for _ in $(seq 1 120); do
+        process_state="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+        if ! kill -0 "$pid" 2>/dev/null || [[ "$process_state" == Z* ]]; then
+          process_stopped=true
+          break
+        fi
+        sleep 0.25
+      done
+      if [[ "$process_stopped" != "true" ]]; then
+        kill -KILL "$pid" 2>/dev/null || true
+      fi
+    fi
     if [[ -n "$pid" ]]; then
       wait "$pid" 2>/dev/null || true
     fi
@@ -108,9 +127,31 @@ stop_processes() {
   if [[ -n "$source_manifest_temp" ]]; then
     rm -f "$source_manifest_temp"
   fi
+  if [[ -n "$w05_browser_result_temp" ]]; then
+    rm -f "$w05_browser_result_temp"
+  fi
+  if [[ -n "$agent_restart_workspace_temp" ]]; then
+    rm -f "$agent_restart_workspace_temp"
+  fi
+  if [[ -n "$agent_restart_sse_temp" ]]; then
+    rm -f "$agent_restart_sse_temp"
+  fi
+  if [[ -n "$agent_restart_sse_status_temp" ]]; then
+    rm -f "$agent_restart_sse_status_temp"
+  fi
   if [[ -n "$w1_temp_dir" ]]; then
     rm -rf "$w1_temp_dir"
   fi
+}
+
+cleanup_on_exit() {
+  local exit_code="$?"
+  trap - EXIT
+  stop_processes
+  if [[ "$exit_code" -ne 0 && -n "$evidence_dir" && "$evidence_dir" == "$repo_root/.local/smoke/"* ]]; then
+    rm -rf "$evidence_dir"
+  fi
+  exit "$exit_code"
 }
 
 fail() {
@@ -1253,11 +1294,14 @@ run_w1_browser_frozen_smoke() {
     fail "W1 Browser API/Business/Agent/verifier 冻结事实不一致"
 }
 
-trap stop_processes EXIT
+trap cleanup_on_exit EXIT
 mkdir -p "$evidence_dir"
 mkdir -p "$evidence_dir/responses"
 if ! w1_smoke_mode_error="$(validate_w1_smoke_mode "$w1_skill_smoke_enabled" "$w1_browser_smoke_enabled")"; then
   fail "$w1_smoke_mode_error"
+fi
+if [[ "$w1_skill_smoke_enabled" == "1" && "${W0_RUN_BROWSER_SMOKE:-0}" == "1" ]]; then
+  fail "W1 canonical 门禁不得叠加 W0_RUN_BROWSER_SMOKE；请分别运行 w05-browser-smoke 与 w1-browser-smoke"
 fi
 # 新运行开始即撤销旧的 canonical summary；失败运行不得让消费者继续读取上一次 passed。
 rm -f "$evidence_file"
@@ -1278,11 +1322,20 @@ source_manifest_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-source-manifest.XXXXXX"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   w1_temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/dora-w1-skill.XXXXXX")"
   chmod 700 "$w1_temp_dir"
+else
+  w05_browser_result_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-browser-result.XXXXXX")"
+  agent_restart_workspace_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-agent-restart-workspace.XXXXXX")"
+  agent_restart_sse_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-agent-restart-sse.XXXXXX")"
+  agent_restart_sse_status_temp="$(mktemp "${TMPDIR:-/tmp}/dora-w05-agent-restart-sse-status.XXXXXX")"
 fi
 chmod 600 "$cookie_jar" "$user_curl_config" "$owner_b_cookie_jar" "$owner_b_curl_config" \
   "$login_response_temp" "$workspace_response_temp" \
   "$owner_b_seed_response_temp" "$owner_b_login_response_temp" "$owner_b_denied_response_temp" \
   "$owner_b_denied_headers_temp" "$source_manifest_temp"
+if [[ "$w1_skill_smoke_enabled" != "1" ]]; then
+  chmod 600 "$w05_browser_result_temp" "$agent_restart_workspace_temp" \
+    "$agent_restart_sse_temp" "$agent_restart_sse_status_temp"
+fi
 
 set -a
 . "$env_file"
@@ -1399,11 +1452,11 @@ unset login_payload
 csrf_token="$(jq -er '.csrf_token | strings | select(length > 0)' "$login_response_temp")"
 write_curl_header_config "$user_curl_config" 'X-CSRF-Token' "$csrf_token" || fail "用户 A curl 安全配置写入失败"
 user_id="$(jq -er '.principal.id | strings | select(length > 0)' "$login_response_temp")"
+user_cookie_token="$(awk 'NF >= 7 {value=$7} END {print value}' "$cookie_jar")"
+[[ -n "$user_cookie_token" ]] || fail "用户 A Cookie 会话未建立"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   [[ "$user_id" == "$reviewer_seed_creator_user_id" && "$user_id" != "$owner_b_seed_user_id" && "$user_id" != "$provisioner_user_id" ]] || \
     fail "Reviewer Seeder Creator/Reviewer/Provisioner 身份未与登录主体一致隔离"
-  user_cookie_token="$(awk 'NF >= 7 {value=$7} END {print value}' "$cookie_jar")"
-  [[ -n "$user_cookie_token" ]] || fail "用户 A Cookie 会话未建立"
 fi
 jq 'del(.csrf_token)' "$login_response_temp" >"$evidence_dir/responses/login.json"
 rm -f "$login_response_temp"
@@ -1713,18 +1766,128 @@ if grep -Eq '^id:' "$evidence_dir/responses/workspace-reset.sse"; then
   fail "stream.reset 错误携带了 SSE id"
 fi
 
+if [[ "$w1_skill_smoke_enabled" != "1" ]]; then
+  old_agent_pid="$agent_pid"
+  kill -TERM "$old_agent_pid" || fail "Agent 真实重启未能发送 TERM"
+  agent_stopped=false
+  for _ in $(seq 1 120); do
+    agent_process_state="$(ps -o stat= -p "$old_agent_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+    if ! kill -0 "$old_agent_pid" 2>/dev/null || [[ "$agent_process_state" == Z* ]]; then
+      agent_stopped=true
+      break
+    fi
+    sleep 0.25
+  done
+  [[ "$agent_stopped" == "true" ]] || fail "Agent 收到 TERM 后未在 30 秒内退出"
+  if ! wait "$old_agent_pid"; then
+    fail "Agent TERM 后未完成正常 wait"
+  fi
+  if kill -0 "$old_agent_pid" 2>/dev/null; then
+    fail "Agent wait 后进程仍存活"
+  fi
+  agent_pid=""
+
+  "$repo_root/.local/bin/agent-service" >"$evidence_dir/agent-restart.log" 2>&1 &
+  agent_pid="$!"
+  wait_ready 18082 "$agent_pid"
+
+  restart_workspace_status=""
+  for _ in $(seq 1 60); do
+    restart_workspace_status="$(curl --silent --show-error --max-time 2 -b "$cookie_jar" \
+      -o "$agent_restart_workspace_temp" -w '%{http_code}' \
+      "http://127.0.0.1:18081/api/v1/agent/sessions/${session_id}/workspace")"
+    if [[ "$restart_workspace_status" == "200" ]]; then
+      break
+    fi
+    [[ "$restart_workspace_status" == "502" || "$restart_workspace_status" == "503" ]] || \
+      fail "Agent 重启后 Business BFF Workspace 返回非恢复态状态 $restart_workspace_status"
+    sleep 0.25
+  done
+  [[ "$restart_workspace_status" == "200" ]] || fail "Agent 重启后 Business BFF Workspace 未恢复"
+  jq -e --arg project "$project_id" --arg session "$session_id" --arg input "$input_id" '
+    .schema_version == "session.workspace.v1"
+    and .session.id == $session
+    and .session.project_id == $project
+    and .session.status == "active"
+    and (.messages | type) == "array" and (.messages | length) == 1
+    and (.messages[0].content | length) > 0
+    and (.inputs | type) == "array" and (.inputs | length) == 1
+    and .inputs[0].id == $input
+    and .event_high_watermark == 2
+    and .min_available_seq == 1' "$agent_restart_workspace_temp" >/dev/null || \
+    fail "Agent 重启后 Workspace Snapshot 未恢复同一权威状态"
+
+  restart_sse_exit=0
+  curl --silent --show-error --no-buffer --max-time 3 -b "$cookie_jar" \
+    -H 'Accept: text/event-stream' \
+    -o "$agent_restart_sse_temp" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/agent/sessions/${session_id}/events?after_seq=1" \
+    >"$agent_restart_sse_status_temp" || restart_sse_exit="$?"
+  [[ "$restart_sse_exit" == "0" || "$restart_sse_exit" == "28" ]] || \
+    fail "Agent 重启后 Workspace SSE curl 退出码为 $restart_sse_exit"
+  [[ "$(tr -d '[:space:]' <"$agent_restart_sse_status_temp")" == "200" ]] || \
+    fail "Agent 重启后 Workspace SSE 未返回 200"
+  sed -n 's/^data: //p' "$agent_restart_sse_temp" \
+    | jq -s -e --arg project "$project_id" --arg session "$session_id" --arg input "$input_id" '
+      any(.[]; .schema_version == "workspace.event.v1"
+        and .event == "session.input.accepted"
+        and .session_id == $session and .project_id == $project
+        and .seq == 2 and .aggregate_id == $input)
+      and any(.[]; .schema_version == "workspace.stream-control.v1"
+        and .event == "stream.ready" and .session_id == $session and .cursor == 2)' >/dev/null || \
+    fail "Agent 重启后 Workspace SSE 未从 PostgreSQL 补读原 Event/Ready"
+  grep -Eq '^id: 2$' "$agent_restart_sse_temp" || fail "Agent 重启后 SSE id 未与原 Seq 对齐"
+
+  jq -n --arg project_id "$project_id" --arg session_id "$session_id" --arg input_id "$input_id" '
+    {schema_version:"w05.agent-restart-recovery.v1",project_id:$project_id,session_id:$session_id,input_id:$input_id,
+      event_seq:2,event_high_watermark:2,ready_cursor:2,
+      agent_restart_hit:true,snapshot_after_restart:true,sse_after_restart:true}' \
+    >"$evidence_dir/responses/agent-restart-recovery.json"
+fi
+
 if [[ "${W0_RUN_BROWSER_SMOKE:-0}" == "1" ]]; then
   [[ -x "$repo_root/frontend/node_modules/.bin/playwright" ]] || fail "未安装前端 Playwright 依赖，请先在 frontend 执行 npm install"
-  (
-    cd "$repo_root/frontend"
-    DORA_E2E_USER_EMAIL="$DORA_SMOKE_USER_EMAIL" \
-    DORA_E2E_USER_PASSWORD="$DORA_SMOKE_USER_PASSWORD" \
-    DORA_E2E_BUSINESS_API_TARGET="http://127.0.0.1:18081" \
-    npm run test:e2e:w0
-  ) >"$evidence_dir/frontend-playwright.log" 2>&1 || {
-    sed -n '1,240p' "$evidence_dir/frontend-playwright.log" >&2
-    fail "W0 浏览器页面链路失败"
-  }
+  if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+    (
+      cd "$repo_root/frontend"
+      DORA_E2E_USER_EMAIL="$DORA_SMOKE_USER_EMAIL" \
+      DORA_E2E_USER_PASSWORD="$DORA_SMOKE_USER_PASSWORD" \
+      DORA_E2E_BUSINESS_API_TARGET="http://127.0.0.1:18081" \
+      npm run test:e2e:w0
+    ) >"$evidence_dir/frontend-playwright.log" 2>&1 || {
+      sed -n '1,240p' "$evidence_dir/frontend-playwright.log" >&2
+      fail "W0 浏览器页面链路失败"
+    }
+  else
+    : >"$w05_browser_result_temp"
+    (
+      cd "$repo_root/frontend"
+      DORA_E2E_USER_EMAIL="$DORA_SMOKE_USER_EMAIL" \
+      DORA_E2E_USER_PASSWORD="$DORA_SMOKE_USER_PASSWORD" \
+      DORA_E2E_OWNER_B_EMAIL="$owner_b_email" \
+      DORA_E2E_OWNER_B_PASSWORD="$owner_b_password" \
+      DORA_E2E_PROMPT="$w05_browser_prompt" \
+      DORA_E2E_BUSINESS_API_TARGET="http://127.0.0.1:18081" \
+      DORA_E2E_W05_RESULT_PATH="$w05_browser_result_temp" \
+      npm run test:e2e:w0
+    ) >"$evidence_dir/frontend-playwright.log" 2>&1 || {
+      sed -n '1,240p' "$evidence_dir/frontend-playwright.log" >&2
+      fail "W0 浏览器页面链路失败"
+    }
+    jq -e --arg creator "$user_id" --arg owner_b "$owner_b_user_id" '
+      keys == ["controlled_disconnect","creator_user_id","cross_owner_agent_blocked","cross_owner_not_found","cross_owner_user_id","project_id","resource_facts_not_disclosed","same_session_recovery","schema_version","session_id"]
+      and .schema_version == "w05.workspace-browser.smoke.result.v1"
+      and .creator_user_id == $creator and .cross_owner_user_id == $owner_b
+      and .creator_user_id != .cross_owner_user_id
+      and (.project_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+      and (.session_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+      and .controlled_disconnect == true
+      and .same_session_recovery == true
+      and .cross_owner_not_found == true
+      and .cross_owner_agent_blocked == true
+      and .resource_facts_not_disclosed == true' "$w05_browser_result_temp" >/dev/null || \
+      fail "W0.5 Playwright 结构化恢复/跨 Owner 结果不满足严格契约"
+  fi
   browser_smoke_ran=true
 fi
 
@@ -1920,16 +2083,31 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
       }}' \
     >"$pending_evidence_file"
 else
-  jq -n \
-    --arg schema_version "w05.workspace-transport.smoke.evidence.v1" \
-    --arg run_id "$run_id" --arg produced_at "$produced_at" \
-    --arg source_digest_sha256 "$source_digest_sha256" \
-    --arg business_binary_sha256 "$business_binary_sha256" --arg agent_binary_sha256 "$agent_binary_sha256" \
-    --arg project_id "$project_id" --arg session_id "$session_id" --arg input_id "$input_id" \
-    --arg blank_project_id "$blank_project_id" --arg blank_session_id "$blank_session_id" \
-    --argjson browser_ui "$browser_smoke_ran" \
-    '{schema_version:$schema_version,status:"pending",run_id:$run_id,produced_at:$produced_at,source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,agent_binary_sha256:$agent_binary_sha256,prompt_project:{project_id:$project_id,session_id:$session_id,input_id:$input_id},blank_project:{project_id:$blank_project_id,session_id:$blank_session_id,input_id:null},assertions:{concurrent_requests:100,idempotent_replay:true,idempotency_conflict:true,business_prompt_cleared:true,agent_unique_facts:true,blank_negative_side_effects:true,workspace_snapshot:true,workspace_empty_arrays:true,workspace_owner_safe_not_found:true,workspace_cross_owner_not_found:true,events_cross_owner_not_found:true,agent_direct_access_denied:true,sse_replay_and_ready:true,sse_cursor_reset:true,browser_ui:$browser_ui,logout_revoked:true,logout_workspace_denied:true}}' \
-    >"$pending_evidence_file"
+  if [[ "$browser_smoke_ran" == "true" ]]; then
+    jq -n \
+      --arg schema_version "w05.workspace-transport.smoke.evidence.v2" \
+      --arg run_id "$run_id" --arg produced_at "$produced_at" \
+      --arg source_digest_sha256 "$source_digest_sha256" \
+      --arg business_binary_sha256 "$business_binary_sha256" --arg agent_binary_sha256 "$agent_binary_sha256" \
+      --arg project_id "$project_id" --arg session_id "$session_id" --arg input_id "$input_id" \
+      --arg blank_project_id "$blank_project_id" --arg blank_session_id "$blank_session_id" \
+      --argjson browser_ui "$browser_smoke_ran" \
+      --slurpfile restart "$evidence_dir/responses/agent-restart-recovery.json" \
+      --slurpfile browser "$w05_browser_result_temp" \
+      '{schema_version:$schema_version,status:"pending",run_id:$run_id,produced_at:$produced_at,source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,agent_binary_sha256:$agent_binary_sha256,prompt_project:{project_id:$project_id,session_id:$session_id,input_id:$input_id},blank_project:{project_id:$blank_project_id,session_id:$blank_session_id,input_id:null},browser_workspace:{project_id:$browser[0].project_id,session_id:$browser[0].session_id},assertions:{concurrent_requests:100,idempotent_replay:true,idempotency_conflict:true,business_prompt_cleared:true,agent_unique_facts:true,blank_negative_side_effects:true,workspace_snapshot:true,workspace_empty_arrays:true,workspace_owner_safe_not_found:true,workspace_cross_owner_not_found:true,events_cross_owner_not_found:true,agent_direct_access_denied:true,sse_replay_and_ready:true,sse_cursor_reset:true,browser_ui:$browser_ui,logout_revoked:true,logout_workspace_denied:true,agent_restart_hit:$restart[0].agent_restart_hit,snapshot_after_restart:$restart[0].snapshot_after_restart,sse_after_restart:$restart[0].sse_after_restart,browser_controlled_disconnect:$browser[0].controlled_disconnect,browser_same_session_recovery:$browser[0].same_session_recovery,browser_cross_owner_not_found:$browser[0].cross_owner_not_found,browser_cross_owner_agent_blocked:$browser[0].cross_owner_agent_blocked,browser_resource_facts_not_disclosed:$browser[0].resource_facts_not_disclosed}}' \
+      >"$pending_evidence_file"
+  else
+    jq -n \
+      --arg schema_version "w05.workspace-transport.smoke.evidence.v1" \
+      --arg run_id "$run_id" --arg produced_at "$produced_at" \
+      --arg source_digest_sha256 "$source_digest_sha256" \
+      --arg business_binary_sha256 "$business_binary_sha256" --arg agent_binary_sha256 "$agent_binary_sha256" \
+      --arg project_id "$project_id" --arg session_id "$session_id" --arg input_id "$input_id" \
+      --arg blank_project_id "$blank_project_id" --arg blank_session_id "$blank_session_id" \
+      --argjson browser_ui "$browser_smoke_ran" \
+      '{schema_version:$schema_version,status:"pending",run_id:$run_id,produced_at:$produced_at,source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,agent_binary_sha256:$agent_binary_sha256,prompt_project:{project_id:$project_id,session_id:$session_id,input_id:$input_id},blank_project:{project_id:$blank_project_id,session_id:$blank_session_id,input_id:null},assertions:{concurrent_requests:100,idempotent_replay:true,idempotency_conflict:true,business_prompt_cleared:true,agent_unique_facts:true,blank_negative_side_effects:true,workspace_snapshot:true,workspace_empty_arrays:true,workspace_owner_safe_not_found:true,workspace_cross_owner_not_found:true,events_cross_owner_not_found:true,agent_direct_access_denied:true,sse_replay_and_ready:true,sse_cursor_reset:true,browser_ui:$browser_ui,logout_revoked:true,logout_workspace_denied:true}}' \
+      >"$pending_evidence_file"
+  fi
 fi
 
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
@@ -1951,33 +2129,20 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
       | ($boolean_assertions | length) == 42
       and all($boolean_assertions[]; ((.value | type) == "boolean" and .value == true)))' \
     "$pending_evidence_file" >/dev/null || fail "W1 canonical Evidence 含未通过断言，禁止发布 passed summary"
-fi
-
-assert_evidence_excludes_literal "$csrf_token" "用户 A CSRF"
-assert_evidence_excludes_literal "$DORA_SMOKE_USER_PASSWORD" "用户 A 密码"
-assert_evidence_excludes_literal "$owner_b_password" "用户 B 密码"
-assert_evidence_excludes_literal "$owner_b_csrf_token" "用户 B CSRF"
-assert_evidence_excludes_literal "$owner_b_cookie_token" "用户 B Cookie"
-assert_evidence_excludes_literal 'W0 Transport é Smoke' "完整 Prompt"
-assert_evidence_excludes_regex '"csrf_token"[[:space:]]*:[[:space:]]*"[^"[:space:]][^"]*"' "任意非空 CSRF JSON 字段"
-assert_evidence_excludes_regex 'X-Dora-Identity-(Assertion|Signature):' "内部身份断言材料"
-if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
-  assert_evidence_excludes_literal "$provisioner_password" "Reviewer Provisioner 密码"
-  assert_evidence_excludes_literal "$user_cookie_token" "用户 A Cookie"
-  assert_evidence_excludes_literal "$w1_skill_name" "W1 Skill 原始名称"
-  assert_evidence_excludes_literal "$w1_updated_skill_name" "W1 Skill 更新后原始名称"
-  assert_evidence_excludes_literal "$w1_binding_prompt" "W1 Binding 完整 Prompt"
-  assert_evidence_excludes_regex '"definition"[[:space:]]*:' "W1 Skill 完整定义正文"
-  assert_evidence_excludes_regex '(?i)(cookie|set-cookie)[[:space:]]*:' "W1 Cookie Header"
-  assert_evidence_excludes_regex '(?i)x-csrf-token[[:space:]]*:' "W1 CSRF Header"
-  assert_evidence_excludes_regex '(?i)"password"[[:space:]]*:' "W1 密码字段"
-  assert_evidence_excludes_regex '(?i)"(payload_nonce|payload_ciphertext|runtime_content_ciphertext)"[[:space:]]*:' "W1 密文或 Nonce 字段"
-  if [[ -n "${BUSINESS_PROJECT_PROMPT_KEY_BASE64:-}" ]]; then
-    assert_evidence_excludes_literal "$BUSINESS_PROJECT_PROMPT_KEY_BASE64" "Business Prompt 密钥材料"
-  fi
-  if [[ -n "${AGENT_CONTENT_KEY_BASE64:-}" ]]; then
-    assert_evidence_excludes_literal "$AGENT_CONTENT_KEY_BASE64" "Agent Content 密钥材料"
-  fi
+elif [[ "$browser_smoke_ran" == "true" ]]; then
+  jq -e '
+    .schema_version == "w05.workspace-transport.smoke.evidence.v2"
+    and .status == "pending"
+    and (keys == ["agent_binary_sha256","assertions","blank_project","browser_workspace","business_binary_sha256","produced_at","prompt_project","run_id","schema_version","source_digest_sha256","status"])
+    and (.browser_workspace.project_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+    and (.browser_workspace.session_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+    and .assertions.concurrent_requests == 100
+    and (.assertions | length) == 25
+    and (.assertions | keys) == ["agent_direct_access_denied","agent_restart_hit","agent_unique_facts","blank_negative_side_effects","browser_controlled_disconnect","browser_cross_owner_agent_blocked","browser_cross_owner_not_found","browser_resource_facts_not_disclosed","browser_same_session_recovery","browser_ui","business_prompt_cleared","concurrent_requests","events_cross_owner_not_found","idempotency_conflict","idempotent_replay","logout_revoked","logout_workspace_denied","snapshot_after_restart","sse_after_restart","sse_cursor_reset","sse_replay_and_ready","workspace_cross_owner_not_found","workspace_empty_arrays","workspace_owner_safe_not_found","workspace_snapshot"]
+    and ([.assertions | to_entries[] | select(.key != "concurrent_requests")] | length) == 24
+    and all(.assertions | to_entries[] | select(.key != "concurrent_requests");
+      ((.value | type) == "boolean" and .value == true))' \
+    "$pending_evidence_file" >/dev/null || fail "W0.5 Recovery Evidence v2 含未通过或非布尔断言，禁止发布 passed summary"
 fi
 
 stop_processes
@@ -1987,6 +2152,35 @@ agent_pid=""
 etcd_container="$("${compose[@]}" ps -q etcd)"
 remaining_session_keys="$(docker exec "$etcd_container" /usr/local/bin/etcdctl --endpoints=http://127.0.0.1:2379 get /dora/services/dora.agent.session.v1/ --prefix --keys-only)"
 [[ -z "$remaining_session_keys" ]] || fail "Agent 退出后仍残留 Session RPC 注册键"
+
+# Runtime 已全部停止，下面扫描的是不会再追加内容的闭合 Evidence 集合。
+assert_evidence_excludes_literal "$csrf_token" "用户 A CSRF"
+assert_evidence_excludes_literal "$DORA_SMOKE_USER_PASSWORD" "用户 A 密码"
+assert_evidence_excludes_literal "$user_cookie_token" "用户 A Cookie"
+assert_evidence_excludes_literal "$owner_b_password" "用户 B 密码"
+assert_evidence_excludes_literal "$owner_b_csrf_token" "用户 B CSRF"
+assert_evidence_excludes_literal "$owner_b_cookie_token" "用户 B Cookie"
+assert_evidence_excludes_literal 'W0 Transport é Smoke' "完整 Prompt"
+assert_evidence_excludes_literal "$w05_browser_prompt" "W0.5 浏览器完整 Prompt"
+assert_evidence_excludes_regex '"csrf_token"[[:space:]]*:[[:space:]]*"[^"[:space:]][^"]*"' "任意非空 CSRF JSON 字段"
+assert_evidence_excludes_regex 'X-Dora-Identity-(Assertion|Signature):' "内部身份断言材料"
+assert_evidence_excludes_regex '(?i)(cookie|set-cookie)[[:space:]]*:' "Cookie Header"
+assert_evidence_excludes_regex '(?i)x-csrf-token[[:space:]]*:' "CSRF Header"
+assert_evidence_excludes_regex '(?i)"password"[[:space:]]*:' "密码字段"
+if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
+  assert_evidence_excludes_literal "$provisioner_password" "Reviewer Provisioner 密码"
+  assert_evidence_excludes_literal "$w1_skill_name" "W1 Skill 原始名称"
+  assert_evidence_excludes_literal "$w1_updated_skill_name" "W1 Skill 更新后原始名称"
+  assert_evidence_excludes_literal "$w1_binding_prompt" "W1 Binding 完整 Prompt"
+  assert_evidence_excludes_regex '"definition"[[:space:]]*:' "W1 Skill 完整定义正文"
+  assert_evidence_excludes_regex '(?i)"(payload_nonce|payload_ciphertext|runtime_content_ciphertext)"[[:space:]]*:' "W1 密文或 Nonce 字段"
+  if [[ -n "${BUSINESS_PROJECT_PROMPT_KEY_BASE64:-}" ]]; then
+    assert_evidence_excludes_literal "$BUSINESS_PROJECT_PROMPT_KEY_BASE64" "Business Prompt 密钥材料"
+  fi
+  if [[ -n "${AGENT_CONTENT_KEY_BASE64:-}" ]]; then
+    assert_evidence_excludes_literal "$AGENT_CONTENT_KEY_BASE64" "Agent Content 密钥材料"
+  fi
+fi
 
 # 只有脱敏扫描、Runtime 退出和 etcd 租约摘除全部成功后，才原子发布 passed summary。
 jq '.status = "passed"' "$pending_evidence_file" >"${evidence_file}.tmp"
