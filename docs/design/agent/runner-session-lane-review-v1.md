@@ -314,6 +314,8 @@ stateDiagram-v2
 
 ### 5.5 Turn 冻结边界
 
+Turn Context 的分表、候选字段、Message Set canonical/cutoff、不可变触发器、逻辑 FK、Repository 原子边界、Up/Down 和 P0 已收敛到独立 [`Agent Immutable Turn Context 最小物理契约 v1`](./immutable-turn-context-design-v1.md)。该文档仍是 Draft、未 Approved；它只作为跨角色评审输入，在冻结时点、模型可见历史、prefix-chain 和各 Snapshot 真源关闭前，不得创建生产 Turn/Context Migration 或 Repository。
+
 Turn 开始前冻结：
 
 - 可见消息边界与消息摘要；
@@ -756,12 +758,13 @@ Agent PostgreSQL EventLog 至少包含：
 
 ### 15.2 Session Lane 测试
 
-W2-R02 已新增独立 [`PostgreSQL Session Lane 与 Runner Runtime 可执行契约 v1`](./session-lane-runtime-contract-v1.md)、[`Session Lane Ingress 与 Command Receipt 可执行契约 v1`](./session-lane-ingress-command-contract-v1.md)、[`Session Lane PostgreSQL 物理设计与升级方案 v1`](./session-lane-postgresql-design-v1.md)、[`Session Lane legacy Authority 与升级分类可执行契约 v1`](./session-lane-legacy-upgrade-contract-v1.md) 与测试专用 Corpus：Lane 以 60 条向量覆盖纯状态迁移；Ingress 以 42 条向量固定 `enqueue_input_v1`；legacy upgrade 以 17 条 Authority + 90 条 blocker 向量固定 derived-only provenance、Session-rooted/global-orphan anti-join、升级 Ledger、Readiness 分层和 Down guard。它们均未 Approved，也没有生产 Migration/Repository/Helper/Runtime。`evidence_kind/digest` 和内容可读状态仍只是纯模型夹具；下列清单继续保持未勾选，不能用设计或纯模型冒充 PostgreSQL 集成、真实 Keyring、lost-wake 恢复或 `SMK-017` 证据。
+W2-R02 已新增独立 [`PostgreSQL Session Lane 与 Runner Runtime 可执行契约 v1`](./session-lane-runtime-contract-v1.md)、[`Session Lane Ingress 与 Command Receipt 可执行契约 v1`](./session-lane-ingress-command-contract-v1.md)、[`Session Lane PostgreSQL 物理设计与升级方案 v1`](./session-lane-postgresql-design-v1.md)、[`Session Lane legacy Authority 与升级分类可执行契约 v1`](./session-lane-legacy-upgrade-contract-v1.md)、[`Session Event Foundation 独立 Marker 设计 v1`](./session-event-foundation-marker-v1.md)、[`Agent Immutable Turn Context 最小物理契约 v1`](./immutable-turn-context-design-v1.md) 与测试专用 Corpus：Lane 以 60 条向量覆盖纯状态迁移；Ingress 以 42 条向量固定 `enqueue_input_v1`；legacy upgrade 以 17 条 Authority + 90 条 blocker 向量固定 derived-only provenance、Session-rooted/global-orphan anti-join、升级 Ledger、Readiness 分层和 Down guard。Marker/Turn Context 文档已形成跨角色评审输入，但均未 Approved，也没有生产 W2 Migration/Repository/Helper/Runtime。真实 Migration 005 的 V1/V2/empty 三类 Foundation cohort 已在 PostgreSQL 16 required-mode 逐值通过，只达到 `REAL PG PRECONDITION READY`；不能据此冒充 forward upgrade、真实 Keyring、lost-wake 或 `SMK-017` 证据。
 
 - [x] Legacy Authority canonical/digest、`derived_provenance_only + legacy_chat_only`、Receipt mutable 拒绝和敏感能力拒绝已有 17 条 test-only 向量；
 - [x] Preflight/Verify、72 blocker exact-set/order、empty prompt、Event 高低水位、Session-rooted/global-orphan anti-join 和 active/previous/unreadable 内容分类已有 90 条 test-only 向量；
 - [x] 升级 Ledger 的事务内 crash/commit response lost/replay/conflict、Foundation/Lane/Processor/Claim generation truth table 和 fail-safe Down guard 已有纯模型测试；
-- [ ] Receipt/Message/Event 数据库级不可变、created/accepted Event Retention/独立 Marker、immutable Turn Context 与 Activation Policy 完成设计审核；
+- [x] 真实 PostgreSQL 16、干净 Migration 005 的 V1/V2/Unicode empty 三类 cohort 已逐值核对 Foundation facts，并纳入 required-mode 拒绝 skip/空跑；
+- [ ] Receipt/Message/Event 数据库级不可变、created/accepted Event Retention/独立 Marker、[`immutable Turn Context`](./immutable-turn-context-design-v1.md) 与 Activation Policy 完成设计审核；
 - [ ] 从真实 Migration 005 V1/V2/empty fixture 执行 forward Up/Helper/Verify/Down guard，并通过 PostgreSQL 锁、并发、崩溃与摘要重算证据；
 - [ ] 生产 Keyring、Lane Capability Readiness、旧 Writer drain、Processor/Scanner 零早启和脱敏 Evidence 通过 Runtime 集成测试；
 
@@ -851,6 +854,7 @@ W2-R02 已新增独立 [`PostgreSQL Session Lane 与 Runner Runtime 可执行契
 
 - [ ] Agent 评审确认 GraphToolResult、ToolReceipt、Approval、Operation、Turn/Run 状态空间分离；
 - [ ] Agent 评审确认严格 HOL、无无条件抢占、Lease/Fence 和旧 owner 回写隔离；
+- [ ] Agent Runtime、PostgreSQL/Data、安全、Business/Authorization、产品/财务、运维/SRE、前端/A2UI 与跨 Module Contract Owner 按 [`immutable Turn Context`](./immutable-turn-context-design-v1.md) 第 13 节完成职责内审核；
 - [ ] Agent/安全评审确认冻结 Intent 的加密、访问控制、数据分类和保留期限；
 - [ ] Agent/Business 评审确认 Approval Consumption Receipt 与 billable execution 的逐字段校验；
 - [ ] 前端/Agent 评审确认 A2UI Schema、Action DTO、未知类型 fail-closed 和迁移策略；

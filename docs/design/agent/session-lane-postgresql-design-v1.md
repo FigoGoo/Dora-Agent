@@ -14,6 +14,7 @@
 
 - [`session-lane-runtime-contract-v1.md`](./session-lane-runtime-contract-v1.md) 的 60 条 Lane 状态向量；
 - [`session-lane-ingress-command-contract-v1.md`](./session-lane-ingress-command-contract-v1.md) 的 42 条 Ingress/Receipt 向量；
+- [`session-event-foundation-marker-v1.md`](./session-event-foundation-marker-v1.md) 的独立、不可裁剪 Event Marker Review Ready 候选；
 - [`runner-session-lane-review-v1.md`](./runner-session-lane-review-v1.md) 的 Runner、恢复、Drain 和冒烟门禁。
 
 当前生产 Schema/代码事实：
@@ -34,7 +35,7 @@
 |---|---|---|
 | PG-D01 | 保留 `session_command_receipt` 为唯一全局 Command Header；新增 Enqueue Result 子表 | 避免 Ensure/Enqueue 各自一张全局表导致同 CommandID 双成功，也避免继续向 Header 堆全部结果字段 |
 | PG-D02 | alias 只新增 Header，指向首次 primary；结果子表只存一份 | 一个 Input 可以有多个 CommandID，但首次结果、版本和提交时间只有一份 |
-| PG-D03 | `session.input.accepted` 继续是 Ingress 投影事件；升级 Authority 是否复用 EventLog 或引入独立不可裁剪 Marker 仍是 P0 | EventLog 有 Retention 水位；在 created/accepted Event 的保留策略冻结前，缺失一律阻断，不能把可裁剪投影冒充永久 Authority |
+| PG-D03 | 推荐新增独立、不可裁剪 `session_event_marker`；`session.created/session.input.accepted` EventLog 继续作为可裁剪在线投影 | Marker 字段、Digest、dual-write、legacy Helper、Retention/Down 和真实 PG 矩阵已进入 [`session-event-foundation-marker-v1.md`](./session-event-foundation-marker-v1.md) 的 Agent-owned Review Ready 候选，但仍未 Approved；缺 Marker/已裁剪 Event 继续阻断，不能把推荐方向冒充生产能力 |
 | PG-D04 | 外部 Enqueue DTO 不携带精确 `expected_session_version` | 100 个不同 Source 并发时，外部版本会让 99 个合法请求 stale；Session Version 只做事务内防御 CAS |
 | PG-D05 | `session_runtime_lease` 是唯一 TTL 真源 | Input owner/fence 只保留 Claim provenance；Input `lease_until` 退役且禁止读取 |
 | PG-D06 | 仅自动升级可严格证明的 legacy pending Input | claimed/running/retry/terminal 行缺权威 Run/Effect，重置会伪造恢复结论 |
@@ -198,7 +199,7 @@ claim_fence
 - Sequence Counter、Event Counter、`session.input.accepted` Event 无矛盾；Runtime Lease 行必须存在且严格为 `owner=NULL/until=NULL/fence=0/version=1`；
 - 同 Session 的序号、Source 和 Message 唯一约束无缺口。
 
-Preflight/Verify、72 个稳定 blocker、Session-rooted/global-orphan anti-join、active/previous Keyring 分类和空 Prompt 规则由 legacy upgrade Corpus 的 90 条向量冻结。`session.created/session.input.accepted` 若已被 Retention 裁剪或位于 `last_seq` 之后，不得猜测或补造，当前一律 fail-closed；不可裁剪 Marker/Retention 方案仍是第 10 节 P0。
+Preflight/Verify、72 个稳定 blocker、Session-rooted/global-orphan anti-join、active/previous Keyring 分类和空 Prompt 规则由 legacy upgrade Corpus 的 90 条向量冻结。`session.created/session.input.accepted` 若已被 Retention 裁剪或位于 `last_seq` 之后，不得猜测或补造，当前一律 fail-closed；独立、不可裁剪 Marker 已形成 [`session-event-foundation-marker-v1.md`](./session-event-foundation-marker-v1.md) 的 Review Ready 候选，但仍是第 10 节未 Approved/未实现 P0。
 
 claimed/running/retry_wait/resolved/dead、archived Session pending、缺 Receipt/Message/Event、非空旧 Lease 等行一律进入 upgrade-block 清单，`Runtime Ready=false`。不得重置为 pending、清零 Fence、伪造 Run 或猜测 Effect State。
 
@@ -209,7 +210,7 @@ PostgreSQL 16 不能直接可靠生成项目要求的 UUIDv7，Turn 回填由 ru
 - 锁定并再次校验 eligible Input；
 - 应用生成 Turn UUIDv7；
 - 创建 `turn_kind=chat/status=created/version=1`；
-- 从锁定的 `session_sequence_counter.last_message_seq` 冻结 `context_message_seq` 和已评审的执行上下文引用；若本次 Enqueue 创建 Message，则先分配 Message Seq，再把更新后的值冻结为 cutoff；
+- 从锁定的 `session_sequence_counter.last_message_seq` 取得 Message cutoff，并只写入同事务创建的不可变 Turn Context；若本次 Enqueue 创建 Message，则先分配 Message Seq，再把更新后的值冻结为 cutoff；
 - 幂等提交，支持中断重启；
 - 不创建 Run。
 
@@ -226,11 +227,12 @@ session_turn(
   input_id uuid UNIQUE,
   turn_kind varchar,
   status varchar,
-  context_message_seq bigint,
   version bigint,
   created_at/updated_at/terminal_at
 )
 ```
+
+Message cutoff 不再作为 `session_turn` 列候选；它只存在于 [`immutable-turn-context-design-v1.md`](./immutable-turn-context-design-v1.md) 的 `session_turn_context.message_cutoff_seq`，避免 Turn 状态行与不可变 Context 形成双真源。Turn/Context 最终字段仍需按该 Draft 的 P0 审核后冻结。
 
 Turn exact-set：`created/running/completed/failed/cancelled`。`deterministic_projection` Input 没有 Turn；chat、approval continuation、batch explanation 各有一个稳定 Turn。
 
@@ -318,6 +320,12 @@ Down 只在部署层取得全局 Migration Fence，确认兼容 Writer/Processor
 
 ## 8. 真实 PostgreSQL 测试矩阵
 
+### 8.0 Migration 005 前置基线
+
+`TestSessionLaneUpgradeBaselinePostgreSQLContract` 已使用正式 canonical/Service 生成 Ensure 计划，并通过测试内冻结、显式列名的 Migration 005 fixture writer，在真实 PostgreSQL 16、干净 `20260714000500` 上创建并逐值核对三类 cohort：Ensure V1 非空 Prompt、Ensure V2 empty Skill 非空 Prompt、Ensure V1 Unicode 空 Prompt。冻结 writer 只负责把计划写入 005 exact Schema，避免未来 006+ 生产 Repository 强制双写或依赖新列后反向破坏 legacy fixture。测试覆盖现有 Session/Receipt/Message/Input/Event/Snapshot/Counter/Lease exact facts，并确认当前只有十张 Foundation 表、没有测试私建 Authority/Turn/Ledger。
+
+该测试已纳入 `scripts/check-database-contracts.sh agent` 的 required-mode；runner 先在 latest Schema 完成现有契约，再重建独立测试 Schema、精确 `goto 20260714000500` 执行 baseline，避免未来 006+ 或前一测试事实污染。目标缺失、重命名、空跑或任何 Test/Subtest skip 均失败。它只把状态推进为 `REAL PG PRECONDITION READY`，不执行 forward Up、Helper、Verify、crash、Down guard，也不能替代下列 W2 PostgreSQL 矩阵。
+
 ### 8.1 Migration/Schema
 
 - `PG-M01`：从 W0/Ensure V1/V2 数据 Up，语义不漂移；无新数据 Down 可回退，有新事实 Down fail-safe；
@@ -359,7 +367,7 @@ Down 只在部署层取得全局 Migration Fence，确认兼容 Writer/Processor
 - `PG-U02`：Commit 边界断链后 Query completed 时，同命令 replay 返回原结果且所有计数零增量；Query not_found 时，同命令 retry 只创建一次且断链事务没有部分事实；
 - `PG-U03`：alias 响应丢失可 Query；错 scope/digest/type 不泄漏结果。
 
-Canonical 入口复用 `scripts/check-database-contracts.sh agent`。当前三 Module required-mode 已解析 `go test -json`，逐项要求目标 Test 出现 top-level `pass` 且任一 Test/Subtest 均无 `skip`；目标重命名、`no tests to run` 和普通环境门禁 Skip 都会失败关闭。第 8 节新增真实 PG Test 后仍须纳入 PostgreSQL 16.4 CI，并发门禁执行 `-race -count=3`；当前尚无这些用例或真实 DSN Evidence。无 DSN 的普通 `go test ./...` 可沿用显式环境门禁 skip，不能把本机缺数据库误报为通过证据。
+Canonical 入口复用 `scripts/check-database-contracts.sh agent`。当前三 Module required-mode 已解析 `go test -json`，逐项要求目标 Test 出现 top-level `pass` 且任一 Test/Subtest 均无 `skip`；目标重命名、`no tests to run` 和普通环境门禁 Skip 都会失败关闭。Migration 005 三 cohort 前置基线已在真实 PostgreSQL 16.4 required-mode 通过；PG-M/C/F/U 新增用例仍须逐项纳入同一 CI，并发门禁执行 `-race -count=3`。无 DSN 的普通 `go test ./...` 可沿用显式环境门禁 skip，不能把本机缺数据库误报为通过证据。
 
 ## 9. Evidence 与冒烟边界
 
@@ -384,7 +392,7 @@ Repository 测试只证明持久化顺序和事务原子性，不证明 Adapter 
 
 1. Turn 完整执行上下文：Prompt/Message cutoff、Message-set digest、Skill Snapshot、Tool Registry、Runtime Policy、Model Route、Budget/Approval/Access Scope 引用与摘要；同时补齐 cutoff/version 不可变绑定和系统 Turn cutoff 篡改拒绝测试；
 2. `legacy_ensure_receipt_attestation` 的数据库级 Receipt 不可变 DDL、安全审核、物理表与 canonical 重算路径；17 条纯模型 Authority 向量不能替代真实 PG 证据；
-3. created/accepted Event Retention：升级审计依赖的 `session.created/session.input.accepted` 不可裁剪，或新增独立不可裁剪 Marker；按 `[min_available_seq,last_seq]` 验证在线区间，选择前缺 Event 一律阻断；
+3. created/accepted Event Retention：已推荐 [`session-event-foundation-marker-v1.md`](./session-event-foundation-marker-v1.md) 的独立、不可裁剪 Marker，同时保留 EventLog 在线裁剪；该候选仍未 Approved/实现，按 `[min_available_seq,last_seq]` 验证在线区间，缺 Event/Marker 一律阻断；
 4. unsupported legacy/archived pending 的运维隔离、处置，以及 Foundation/Lane/Processor/Claim generation 分层 Readiness 协议；
 5. Header/Result DDL、字段组 CHECK、alias 时间和 Query 错误优先级的 Agent/安全/运维/数据联合评审；
 6. Claim/Heartbeat/Takeover/Terminal SQL 的锁顺序、DB time、Fence/CAS、cancel-specific no-Run 例外与 RowsAffected 规范；

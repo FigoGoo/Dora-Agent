@@ -132,6 +132,22 @@ run_required_go_tests() {
   rm -f -- "$output_file"
 }
 
+reset_module_contract_schema() {
+  local module="$1"
+  local database_url="$2"
+
+  run_command "$migrate_bin" -path "$repo_root/$module/migrations" -database "$database_url" drop -f
+  reset_migration_dir="$(mktemp -d "${TMPDIR:-/tmp}/dora-${module}-contract-reset.XXXXXX")"
+  chmod 700 "$reset_migration_dir"
+  printf 'DROP SCHEMA IF EXISTS %s CASCADE;\n' "$module" \
+    >"$reset_migration_dir/000001_reset_contract_schema.up.sql"
+  chmod 600 "$reset_migration_dir/000001_reset_contract_schema.up.sql"
+  run_command "$migrate_bin" -path "$reset_migration_dir" -database "$database_url" up
+  run_command "$migrate_bin" -path "$reset_migration_dir" -database "$database_url" drop -f
+  rm -rf -- "$reset_migration_dir"
+  reset_migration_dir=""
+}
+
 case "$target" in
   all) modules=(business agent worker) ;;
   business|agent|worker) modules=("$target") ;;
@@ -172,16 +188,7 @@ for module in "${modules[@]}"; do
   fi
   first_migration="${migration_files[0]##*/}"
   first_version="${first_migration%%_*}"
-  run_command "$migrate_bin" -path "$repo_root/$module/migrations" -database "$database_url" drop -f
-  reset_migration_dir="$(mktemp -d "${TMPDIR:-/tmp}/dora-${module}-contract-reset.XXXXXX")"
-  chmod 700 "$reset_migration_dir"
-  printf 'DROP SCHEMA IF EXISTS %s CASCADE;\n' "$module" \
-    >"$reset_migration_dir/000001_reset_contract_schema.up.sql"
-  chmod 600 "$reset_migration_dir/000001_reset_contract_schema.up.sql"
-  run_command "$migrate_bin" -path "$reset_migration_dir" -database "$database_url" up
-  run_command "$migrate_bin" -path "$reset_migration_dir" -database "$database_url" drop -f
-  rm -rf -- "$reset_migration_dir"
-  reset_migration_dir=""
+  reset_module_contract_schema "$module" "$database_url"
   run_command "$migrate_bin" -path "$repo_root/$module/migrations" -database "$database_url" force "$first_version"
   run_command "$migrate_bin" -path "$repo_root/$module/migrations" -database "$database_url" down 1
   run_command "$migrate_bin" -path "$repo_root/$module/migrations" -database "$database_url" up
@@ -209,6 +216,15 @@ for module in "${modules[@]}"; do
         env DORA_POSTGRES_CONTRACT_DSN="$database_url" GOWORK=off \
         "$go_bin" -C "$repo_root/agent" test -json \
           -run '^TestSessionRepositoryConcurrentEnsureContract$' \
+          -count=1 ./internal/postgres
+      # Baseline 使用独立 reset 后的精确 Migration 005，不能受 latest forward Schema 或上一个
+      # Repository Contract 留下的 V2 事实污染。它结束后保留 005 fixture 仅供人工诊断；下次运行先 reset。
+      reset_module_contract_schema agent "$database_url"
+      run_command "$migrate_bin" -path "$repo_root/agent/migrations" -database "$database_url" goto 20260714000500
+      run_required_go_tests agent 'TestSessionLaneUpgradeBaselinePostgreSQLContract' -- \
+        env DORA_POSTGRES_CONTRACT_DSN="$database_url" GOWORK=off \
+        "$go_bin" -C "$repo_root/agent" test -json \
+          -run '^TestSessionLaneUpgradeBaselinePostgreSQLContract$' \
           -count=1 ./internal/postgres
       ;;
     worker)

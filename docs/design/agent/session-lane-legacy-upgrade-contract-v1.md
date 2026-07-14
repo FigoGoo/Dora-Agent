@@ -22,7 +22,7 @@
 - `postgres.VerifySchema` 和全局 `/readyz` 仍只覆盖 Foundation；
 - 当前生产 `session_input` 仍是 W0 字段，不能直接承载本文候选回填结果。
 
-因此本批最多标记为 `MODEL CONTRACT READY` 候选，不得标记 `UPGRADE READY`、`RUNTIME READY`，也不得宣称 `SMK-017/020` 已通过。
+因此 legacy 升级能力本身最多标记为 `MODEL CONTRACT READY` 候选；真实 Migration 005 三类输入只达到独立的 `REAL PG PRECONDITION READY`。两者都不得标记 `UPGRADE READY`、`RUNTIME READY`，也不得宣称 `SMK-017/020` 已通过。
 
 ## 2. Corpus 与固定规模
 
@@ -235,26 +235,21 @@ Down 只允许 Expand-only pristine 状态。部署层必须先取得全局 Migr
 
 `session.created/session.input.accepted` 当前都位于带 `min_available_seq` 在线保留水位的 EventLog。若升级所需的 created/accepted Event 已被裁剪，Helper 不能猜测或补造历史事件；在线区间只要求 `[min_available_seq,last_seq]` 连续，水位前缀裁剪本身不是中间洞。
 
-生产实现前必须二选一并完成评审：
-
-1. 受升级审计约束的 created/accepted Event 在审计完成前不可裁剪；或
-2. 引入独立、不可裁剪的 created/accepted Marker/Authority 事实，并由 Migration 验证绑定。
-
-在选择完成前，created Event 被裁剪按 `SESSION_CREATED_EVENT_MISSING`、accepted Event 被裁剪按 `ACCEPTED_EVENT_MISSING` fail-closed；纯模型显式携带 `min_available_seq/last_seq`，但不替代真实 Retention SQL 证据。
+评审候选已推荐 [`session-event-foundation-marker-v1.md`](./session-event-foundation-marker-v1.md) 的独立、不可裁剪 Marker，EventLog 继续只承担在线投影与 Retention；该候选仍未 Approved/实现。在 Marker 覆盖完成前 Retention 必须关闭，created Event 被裁剪按 `SESSION_CREATED_EVENT_MISSING`、accepted Event 被裁剪按 `ACCEPTED_EVENT_MISSING` fail-closed；纯模型显式携带 `min_available_seq/last_seq`，但不替代真实 Marker/Retention SQL 证据。
 
 ## 11. 证据分层与下一步
 
 | 层级 | 本批能证明 | 仍不能证明 |
 |---|---|---|
 | 纯模型 | 107 向量、canonical/digest、reason exact-set/order、rooted anti-join、Ledger crash 语义、Readiness/Down truth table | SQL、锁、真实密文、进程、Migration metadata 和部署 |
-| 真实 PostgreSQL | 待实现：从真实 005 V1/V2/empty fixture 升级、anti-join、唯一约束、批锁、crash/resume、Down 原子拒绝 | 生产 Processor/Scanner/Redis/Runner |
+| 真实 PostgreSQL | `REAL PG PRECONDITION READY`：真实 005 已创建并逐值核对 V1/V2/empty 三类 cohort；待实现 forward Up、Helper/Verify、anti-join、唯一约束、批锁、crash/resume、Down 原子拒绝 | 生产 Processor/Scanner/Redis/Runner |
 | 生产 Runtime | 待实现：Keyring/AAD、Readiness/generation gate、旧 Writer drain、零早启 Claim/Wake、脱敏 Evidence | 全功能业务链 |
 | 全功能 Smoke | 待实现：真实 Session Lane/Provider unknown outcome/投影重试 | 完整回归和发布门禁 |
 
 下一批顺序：
 
-1. 冻结 immutable Turn Context、Activation Policy 与 Message-set digest；
-2. 决定 created/accepted Event Retention/Marker；
+1. 评审并冻结 [`immutable Turn Context`](./immutable-turn-context-design-v1.md)、Activation Policy 与 Message-set digest；
+2. 审核 [`session-event-foundation-marker-v1.md`](./session-event-foundation-marker-v1.md) 的独立 Marker/Retention 候选；
 3. 评审 Receipt/Message/Event 不可变 DDL 和升级 Ledger 物理设计；
 4. 才允许编写 forward-only Migration、Repository、Helper 与真实 PostgreSQL crash matrix；
 5. 真实 PG 证据 Approved 后再接 Lane Capability Readiness、Processor/Scanner、Redis Wake 和 Eino Runner。
