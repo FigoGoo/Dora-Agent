@@ -75,7 +75,7 @@ for module in "${modules[@]}"; do
       DORA_BUSINESS_TEST_POSTGRES_DSN="$database_url" \
       DORA_BUSINESS_TEST_ALLOW_DESTRUCTIVE=1 \
       GOWORK=off "$go_bin" -C "$repo_root/business" test \
-        -run '^(TestProjectRepositoryPostgreSQLW0Semantics|TestRepositoryAuthPostgreSQLW0Semantics|TestAuthorizationRepositoryPostgreSQLLifecycle|TestSkillRepositoryPostgreSQLW1Semantics|TestProjectRepositoryPostgreSQLQuickCreateV2BatchSQL|TestProjectRepositoryPostgreSQLQuickCreateV2|TestSkillApprovalCannotCommitAfterConcurrentReviewerRevocation)$' \
+        -run '^(TestProjectRepositoryPostgreSQLW0Semantics|TestRepositoryAuthPostgreSQLW0Semantics|TestAuthorizationRepositoryPostgreSQLLifecycle|TestSkillRepositoryPostgreSQLW1Semantics|TestProjectRepositoryPostgreSQLQuickCreateV2BatchSQL|TestProjectRepositoryPostgreSQLQuickCreateV2|TestSkillApprovalCannotCommitAfterConcurrentReviewerRevocation|TestSkillMarketMigrationPostgreSQLIndexContract|TestSkillMarketRepositoryPostgreSQLVisibilityAndPublisherPolicy|TestSkillMarketRepositoryPostgreSQLValidatesTwentyFirstCandidate)$' \
         -count=1 ./internal/postgres
       ;;
     agent)

@@ -712,6 +712,8 @@ func mapSkillRepositoryError(err error) error {
 		return skill.ErrGovernanceNotFound
 	case errors.Is(err, skill.ErrGovernanceConflict):
 		return skill.ErrGovernanceConflict
+	case errors.Is(err, skill.ErrMarketNotFound):
+		return skill.ErrMarketNotFound
 	case errors.Is(err, skill.ErrDraftConflict):
 		return skill.ErrDraftConflict
 	case errors.Is(err, skill.ErrReviewConflict):

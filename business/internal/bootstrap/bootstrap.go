@@ -225,6 +225,16 @@ func Run(ctx context.Context, build BuildInfo) error {
 		_ = registry.Close(ctx)
 		return fmt.Errorf("create business skill governance HTTP handler: %w", err)
 	}
+	skillMarketService, err := skill.NewMarketService(skillRepository)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business skill market service: %w", err)
+	}
+	skillMarketHandler, err := httpserver.NewSkillMarketHandler(skillMarketService, idgen.UUIDv7{})
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business skill market HTTP handler: %w", err)
+	}
 	agentSessionAccessService, err := project.NewAgentSessionAccessService(projectRepository)
 	if err != nil {
 		_ = registry.Close(ctx)
@@ -303,6 +313,7 @@ func Run(ctx context.Context, build BuildInfo) error {
 	server, err := httpserver.New(cfg.HTTP, cfg.Service, state, httpserver.RouteHandlers{
 		Auth: authHandler, Project: projectHandler, Agent: agentProxyHandler,
 		Skill: skillHandler, SkillReview: skillReviewHandler, SkillGovernance: skillGovernanceHandler,
+		SkillMarket: skillMarketHandler,
 	})
 	if err != nil {
 		_ = registry.Close(ctx)

@@ -43,6 +43,8 @@ type RouteHandlers struct {
 	SkillReview *SkillReviewHandler
 	// SkillGovernance 注册 W1-D Skill 治理列表、详情和状态决定路由。
 	SkillGovernance *SkillGovernanceHandler
+	// SkillMarket 注册 W1-E 匿名公开 Skill 列表与详情路由。
+	SkillMarket *SkillMarketHandler
 }
 
 // New 使用显式超时、请求头上限和可信代理配置创建 HTTP Server；可选 RouteHandlers 用于完整 Runtime 接线。
@@ -59,8 +61,8 @@ func New(httpCfg config.HTTPConfig, serviceCfg config.ServiceConfig, state *heal
 	if len(routeHandlers) == 1 {
 		handlers := routeHandlers[0]
 		if handlers.Auth == nil || handlers.Project == nil || handlers.Agent == nil || handlers.Skill == nil ||
-			handlers.SkillReview == nil || handlers.SkillGovernance == nil {
-			return nil, fmt.Errorf("register business HTTP handlers: Auth, Project, Agent, Skill, SkillReview, and SkillGovernance handlers are required together")
+			handlers.SkillReview == nil || handlers.SkillGovernance == nil || handlers.SkillMarket == nil {
+			return nil, fmt.Errorf("register business HTTP handlers: Auth, Project, Agent, Skill, SkillReview, SkillGovernance, and SkillMarket handlers are required together")
 		}
 		handlers.Auth.Register(router)
 		handlers.Project.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
@@ -68,6 +70,7 @@ func New(httpCfg config.HTTPConfig, serviceCfg config.ServiceConfig, state *heal
 		handlers.Skill.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
 		handlers.SkillReview.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
 		handlers.SkillGovernance.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
+		handlers.SkillMarket.Register(router)
 	}
 
 	router.GET("/livez", func(c *gin.Context) {

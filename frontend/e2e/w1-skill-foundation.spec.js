@@ -589,6 +589,63 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     await expect(page.getByText('审核已批准，冻结内容已原子发布。')).toBeVisible();
 
     await logoutFromCurrentContext(page);
+    await expect(page.getByRole('button', { name: '登录' })).toBeVisible();
+
+    const marketListResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET'
+        && url.pathname === '/api/v1/skill-market'
+        && url.search === '';
+    });
+    await page.goto('/skills');
+    const marketListResponse = await marketListResponsePromise;
+    const marketListPayload = await marketListResponse.json();
+    const marketListItem = (marketListPayload.items || []).find((item) => item.skill_id === skillID);
+    const marketListCard = page.getByTestId('skill-market-card').filter({ hasText: skillName });
+    await expect(page.getByRole('heading', { name: 'Skill 市场', level: 2 })).toBeVisible();
+    await expect(page.getByText('基础预览', { exact: true }).first()).toBeVisible();
+    await expect(marketListCard).toHaveCount(1);
+    await expect(marketListCard).toContainText(sentinelA);
+    await expect(marketListCard).not.toContainText(sentinelB);
+    await expect(page.getByRole('button', { name: /立即使用/ })).toHaveCount(0);
+    const marketListPageText = await page.locator('body').innerText();
+    const marketPublicList = marketListResponse.status() === 200
+      && marketListResponse.headers()['cache-control'] === 'no-store'
+      && marketListItem?.skill_id === skillID
+      && marketListItem?.summary === sentinelA
+      && !JSON.stringify(marketListItem || null).includes(sentinelB);
+    expect(marketPublicList, 'Anonymous Market list must return the no-store Published sentinel A projection').toBe(true);
+
+    const marketDetailResponsePromise = page.waitForResponse((response) => (
+      isSkillResponse(response, 'GET', `/api/v1/skill-market/${skillID}`)
+    ));
+    await marketListCard.getByRole('button', { name: `查看 ${skillName} 详情` }).click();
+    const marketDetailResponse = await marketDetailResponsePromise;
+    const marketDetailPayload = await marketDetailResponse.json();
+    await expect(page).toHaveURL((url) => url.pathname === `/skills/${skillID}`);
+    await expect(page.getByRole('heading', { name: skillName, level: 2 })).toBeVisible();
+    await expect(page.getByText('基础预览', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(sentinelA, { exact: true })).toBeVisible();
+    await expect(page.locator('body')).not.toContainText(sentinelB);
+    await expect(page.getByRole('button', { name: /立即使用/ })).toHaveCount(0);
+    const marketDetailPageText = await page.locator('body').innerText();
+    const marketPublicDetail = marketDetailResponse.status() === 200
+      && marketDetailResponse.headers()['cache-control'] === 'no-store'
+      && marketDetailPayload.skill?.skill_id === skillID
+      && marketDetailPayload.skill?.summary === sentinelA
+      && !JSON.stringify(marketDetailPayload.skill || null).includes(sentinelB);
+    const marketPublishedProjectionSafe = marketPublicList
+      && marketPublicDetail
+      && marketListPageText.includes(sentinelA)
+      && !marketListPageText.includes(sentinelB)
+      && marketDetailPageText.includes(sentinelA)
+      && !marketDetailPageText.includes(sentinelB);
+    expect(marketPublicDetail, 'Anonymous Market detail must return the no-store Published sentinel A projection').toBe(true);
+    expect(
+      marketPublishedProjectionSafe,
+      'Anonymous Market UI and DTOs must expose Published sentinel A without leaking Draft sentinel B'
+    ).toBe(true);
+
     await page.goto('/');
     const creatorRelogin = await loginAs(page, email, password);
     expect(exactPrincipalID(creatorRelogin)).toBe(creatorID);
@@ -713,13 +770,15 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
       expect.objectContaining({ method: 'PUT', pathname: `/api/v1/skills/${skillID}/draft` }),
       expect.objectContaining({ method: 'GET', pathname: '/api/v1/admin/skill-reviews' }),
       expect.objectContaining({ method: 'POST', pathname: `/api/v1/admin/skill-reviews/${reviewID}/decisions` }),
+      expect.objectContaining({ method: 'GET', pathname: '/api/v1/skill-market' }),
+      expect.objectContaining({ method: 'GET', pathname: `/api/v1/skill-market/${skillID}` }),
       expect.objectContaining({ method: 'POST', pathname: '/api/v1/projects:quick-create' }),
       expect.objectContaining({ method: 'GET', pathname: `/api/v1/agent/sessions/${workspaceSessionID}/tools` })
     ]));
 
     if (w1ResultPath) {
       await writeFile(w1ResultPath, JSON.stringify({
-        schema_version: 'w1.real-review-result.v3',
+        schema_version: 'w1.real-review-result.v4',
         creator_id: creatorID,
         creator_admin_route_blocked: creatorAdminRouteBlocked,
         creator_admin_implicit_api_blocked: creatorAdminImplicitAPIBlocked,
@@ -733,6 +792,9 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
         skill_id: skillID,
         review_id: reviewID,
         published_snapshot_id: publishedSnapshotID,
+        market_public_list: marketPublicList,
+        market_public_detail: marketPublicDetail,
+        market_published_projection_safe: marketPublishedProjectionSafe,
         project_id: projectID,
         tool_catalog_session_id: workspaceSessionID,
         tool_catalog_request_id: toolCatalogPayload.request_id,

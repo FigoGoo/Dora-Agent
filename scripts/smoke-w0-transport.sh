@@ -21,16 +21,19 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   evidence_scan_root="$repo_root/.local/smoke/w1-skill-foundation/runs"
   evidence_file="$repo_root/.local/smoke/w1-skill-foundation-evidence.json"
   governance_evidence_file="$repo_root/.local/smoke/w1-skill-governance-evidence.json"
+  skill_market_evidence_file="$repo_root/.local/smoke/w1-skill-market-evidence.json"
   legacy_evidence_file=""
 else
   evidence_dir="$repo_root/.local/smoke/w0-transport/runs/$run_id"
   evidence_scan_root="$repo_root/.local/smoke/w0-transport/runs"
   evidence_file="$repo_root/.local/smoke/w05-workspace-transport-evidence.json"
   governance_evidence_file=""
+  skill_market_evidence_file=""
   legacy_evidence_file="$repo_root/.local/smoke/w0-transport-evidence.json"
 fi
 pending_evidence_file="$evidence_dir/evidence-summary.pending.json"
 governance_pending_evidence_file=""
+skill_market_pending_evidence_file=""
 cookie_jar=""
 user_curl_config=""
 login_response_temp=""
@@ -67,6 +70,7 @@ governor_cookie_token=""
 user_cookie_token=""
 business_pid=""
 agent_pid=""
+postgres_container=""
 browser_smoke_ran=false
 w1_skill_smoke_ran=false
 w1_browser_smoke_ran=false
@@ -74,10 +78,20 @@ w1_skill_binding_smoke_ran=false
 w1_reviewer_rbac_smoke_ran=false
 w1_reviewer_revocation_smoke_ran=false
 w1_skill_governance_smoke_ran=false
+w1_skill_market_smoke_ran=false
+w1_skill_market_fixtures_present=false
+w1_skill_market_public_read=false
+w1_skill_market_safe_projection=false
+w1_skill_market_keyset_pagination=false
+w1_skill_market_governance_visibility=false
+w1_skill_market_cursor_fail_closed=false
+w1_skill_market_cross_owner_use_blocked=false
 w1_skill_id=""
 w1_review_id=""
 w1_skill_name=""
 w1_updated_skill_name=""
+w1_market_draft_name=""
+w1_offline_draft_name=""
 w1_binding_prompt=""
 w1_binding_project_id=""
 w1_binding_session_id=""
@@ -189,12 +203,18 @@ stop_processes() {
 cleanup_on_exit() {
   local exit_code="$?"
   trap - EXIT
+  if [[ "$w1_skill_market_fixtures_present" == "true" && -n "$postgres_container" ]]; then
+    cleanup_w1_skill_market_fixtures "$postgres_container" >/dev/null 2>&1 || true
+  fi
   stop_processes
   if [[ "$exit_code" -ne 0 ]]; then
-    # 本次运行已经在启动时撤销旧 summary；发布任一步失败时必须同时撤销两个新 summary，避免独立 Governance 假绿。
+    # 本次运行已经在启动时撤销旧 summary；发布任一步失败时必须同时撤销全部新 summary，避免独立 sidecar 假绿。
     rm -f "$evidence_file" "${evidence_file}.tmp"
     if [[ -n "$governance_evidence_file" ]]; then
       rm -f "$governance_evidence_file" "${governance_evidence_file}.tmp"
+    fi
+    if [[ -n "$skill_market_evidence_file" ]]; then
+      rm -f "$skill_market_evidence_file" "${skill_market_evidence_file}.tmp"
     fi
     if [[ -n "$evidence_dir" && "$evidence_dir" == "$repo_root/.local/smoke/"* ]]; then
       rm -rf "$evidence_dir"
@@ -442,8 +462,9 @@ assert_owner_safe_error() {
   local session_id="$4"
   local input_id="$5"
   local prompt="$6"
+  local extra_literals="${7:-[]}"
   jq -e --arg code "$expected_code" --arg project "$project_id" --arg session "$session_id" \
-    --arg input "$input_id" --arg prompt "$prompt" \
+    --arg input "$input_id" --arg prompt "$prompt" --argjson extra_literals "$extra_literals" \
     'keys == ["error"]
      and (.error | keys) == ["code", "details", "message", "request_id", "retryable"]
      and .error.code == $code
@@ -451,8 +472,9 @@ assert_owner_safe_error() {
      and (.error.request_id | type) == "string"
      and .error.retryable == false
      and .error.details == {}
-     and all(.. | strings;
-       ((contains($project) or contains($session) or contains($input) or contains($prompt)) | not))' \
+     and all(.. | strings; . as $value
+       | ((contains($project) or contains($session) or contains($input) or contains($prompt)
+         or any($extra_literals[]; . as $literal | $value | contains($literal))) | not))' \
     "$response_file" >/dev/null
 }
 
@@ -581,6 +603,261 @@ read_governance_quickcreate_counts() {
     );"
 }
 
+# assert_w1_skill_market_list_contract 验证公开列表 exact-set、发布快照投影与 no-store。
+assert_w1_skill_market_list_contract() {
+  local response_file="$1"
+  local headers_file="$2"
+  local expected_visible="$3"
+  jq -e --arg skill "$w1_skill_id" --arg name "$w1_updated_skill_name" \
+    --arg owner "$user_id" --arg display_name "$DORA_SMOKE_USER_DISPLAY_NAME" \
+    --argjson visible "$expected_visible" '
+    keys == ["items","next_cursor","request_id"]
+    and (.request_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+    and (.next_cursor == null or ((.next_cursor | type) == "string" and (.next_cursor | length) > 0))
+    and (.items | type) == "array"
+    and all(.items[];
+      (keys == ["category","cover_asset","declared_capability_keys","name","published_at","publisher","skill_id","summary","tags"])
+      and (.publisher | keys) == ["display_name","publisher_id"]
+      and (.skill_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+      and (.publisher.publisher_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+      and (.publisher.display_name | type) == "string" and (.publisher.display_name | length) > 0
+      and (.published_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"))
+      and .cover_asset == null and (.tags | type) == "array" and (.declared_capability_keys | type) == "array")
+    and (if $visible == null then true
+      else ([.items[] | select(.skill_id == $skill)] | length) == (if $visible then 1 else 0 end) end)
+    and (if $visible == true then
+      ([.items[] | select(.skill_id == $skill)][0]
+        | .name == $name
+        and .summary == "真实 W1 Skill Foundation 冒烟摘要 updated"
+        and .category == "smoke" and .tags == ["alpha","beta"] and .cover_asset == null
+        and .publisher == {publisher_id:$owner,display_name:$display_name}
+        and .declared_capability_keys == ["plan_creation_spec","analyze_materials","plan_storyboard","generate_media","write_prompts","assemble_output"])
+      else true end)' "$response_file" >/dev/null || return 1
+  [[ "$(response_header_value "$headers_file" 'Cache-Control')" == "no-store" ]]
+}
+
+# assert_w1_skill_market_detail_contract 验证详情只包含冻结白名单且来自 current published snapshot。
+assert_w1_skill_market_detail_contract() {
+  local response_file="$1"
+  local headers_file="$2"
+  jq -e --arg skill "$w1_skill_id" --arg name "$w1_updated_skill_name" \
+    --arg owner "$user_id" --arg display_name "$DORA_SMOKE_USER_DISPLAY_NAME" '
+    keys == ["request_id","skill"]
+    and (.request_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+    and (.skill | keys) == ["category","copyright_notice","cover_asset","declared_capability_keys","examples","input_description","market_detail","name","output_description","published_at","publisher","skill_id","starter_prompts","summary","tags","user_notice"]
+    and .skill.skill_id == $skill and .skill.name == $name
+    and .skill.summary == "真实 W1 Skill Foundation 冒烟摘要 updated"
+    and .skill.category == "smoke" and .skill.tags == ["alpha","beta"] and .skill.cover_asset == null
+    and .skill.publisher == {publisher_id:$owner,display_name:$display_name}
+    and (.skill.published_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"))
+    and .skill.declared_capability_keys == ["plan_creation_spec","analyze_materials","plan_storyboard","generate_media","write_prompts","assemble_output"]
+    and .skill.input_description == "输入真实业务目标与素材约束"
+    and .skill.output_description == "输出可审核的结构化创作方案"
+    and (.skill.examples | type) == "array" and (.skill.examples | length) == 2
+    and (.skill.starter_prompts | type) == "array" and (.skill.starter_prompts | length) == 2
+    and .skill.market_detail == "用于 W1 真实链路验收"
+    and .skill.copyright_notice == "仅用于本地冒烟"
+    and .skill.user_notice == "不得用于生产内容"' "$response_file" >/dev/null || return 1
+  [[ "$(response_header_value "$headers_file" 'Cache-Control')" == "no-store" ]]
+}
+
+# assert_w1_skill_market_error_response 验证公开 Market 的 fail-closed 安全错误 Envelope。
+assert_w1_skill_market_error_response() {
+  local response_file="$1"
+  local headers_file="$2"
+  local expected_code="$3"
+  jq -e --arg code "$expected_code" '
+    keys == ["error"]
+    and (.error | keys) == ["code","details","message","request_id","retryable"]
+    and .error.code == $code and (.error.message | type) == "string" and (.error.message | length) > 0
+    and (.error.request_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+    and .error.retryable == false and .error.details == {}' "$response_file" >/dev/null || return 1
+  [[ "$(response_header_value "$headers_file" 'Cache-Control')" == "no-store" ]]
+}
+
+# assert_w1_skill_market_visibility 在治理转换后从匿名真实 HTTP 路径确认列表与详情同步可见性。
+assert_w1_skill_market_visibility() {
+  local state="$1"
+  local expected_visible="$2"
+  local list_response="$w1_temp_dir/market-${state}-list.json"
+  local list_headers="$w1_temp_dir/market-${state}-list.headers"
+  local detail_response="$w1_temp_dir/market-${state}-detail.json"
+  local detail_headers="$w1_temp_dir/market-${state}-detail.headers"
+  local list_status=""
+  local detail_status=""
+  : >"$list_headers"
+  list_status="$(curl --silent --show-error --max-time 10 -D "$list_headers" -o "$list_response" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/skill-market')"
+  [[ "$list_status" == "200" ]] || return 1
+  assert_w1_skill_market_list_contract "$list_response" "$list_headers" "$expected_visible" || return 1
+  : >"$detail_headers"
+  detail_status="$(curl --silent --show-error --max-time 10 -D "$detail_headers" -o "$detail_response" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/skill-market/${w1_skill_id}")"
+  if [[ "$expected_visible" == "true" ]]; then
+    [[ "$detail_status" == "200" ]] || return 1
+    assert_w1_skill_market_detail_contract "$detail_response" "$detail_headers" || return 1
+  else
+    [[ "$detail_status" == "404" ]] || return 1
+    assert_w1_skill_market_error_response "$detail_response" "$detail_headers" "SKILL_MARKET_NOT_FOUND" || return 1
+  fi
+}
+
+# seed_w1_skill_market_fixtures 从真实发布快照克隆 21 个逻辑一致的 active current-published fixture。
+seed_w1_skill_market_fixtures() {
+  local postgres_container="$1"
+  docker exec -i "$postgres_container" psql -U dora_admin -d dora_business -qAt -v ON_ERROR_STOP=1 \
+    -v smoke_run_id="$run_id" -v source_skill_id="$w1_skill_id" -v owner_user_id="$user_id" \
+    -v reviewer_user_id="$owner_b_seed_user_id" <<'SQL'
+WITH source AS (
+  SELECT published.definition_schema_version, published.definition_json, published.content_digest
+  FROM business.skill AS skill_record
+  JOIN business.skill_published_snapshot AS published
+    ON published.id = skill_record.current_published_snapshot_id AND published.skill_id = skill_record.id
+  WHERE skill_record.id = :'source_skill_id'::uuid
+), raw_fixture AS (
+  SELECT fixture_no,
+    md5(:'smoke_run_id' || ':market-skill:' || fixture_no::text) AS skill_hash,
+    md5(:'smoke_run_id' || ':market-revision:' || fixture_no::text) AS revision_hash,
+    md5(:'smoke_run_id' || ':market-review:' || fixture_no::text) AS review_hash,
+    md5(:'smoke_run_id' || ':market-snapshot:' || fixture_no::text) AS snapshot_hash
+  FROM generate_series(1, 21) AS fixture_no
+), fixture AS (
+  SELECT fixture_no,
+    format('%s-%s-7%s-8%s-%s', substr(skill_hash,1,8), substr(skill_hash,9,4), substr(skill_hash,14,3), substr(skill_hash,18,3), substr(skill_hash,21,12))::uuid AS skill_id,
+    format('%s-%s-7%s-8%s-%s', substr(revision_hash,1,8), substr(revision_hash,9,4), substr(revision_hash,14,3), substr(revision_hash,18,3), substr(revision_hash,21,12))::uuid AS revision_id,
+    format('%s-%s-7%s-8%s-%s', substr(review_hash,1,8), substr(review_hash,9,4), substr(review_hash,14,3), substr(review_hash,18,3), substr(review_hash,21,12))::uuid AS review_id,
+    format('%s-%s-7%s-8%s-%s', substr(snapshot_hash,1,8), substr(snapshot_hash,9,4), substr(snapshot_hash,14,3), substr(snapshot_hash,18,3), substr(snapshot_hash,21,12))::uuid AS snapshot_id
+  FROM raw_fixture
+), inserted_revision AS (
+  INSERT INTO business.skill_content_revision
+    (id, skill_id, revision_no, definition_schema_version, definition_json, content_digest, created_by_user_id, created_at)
+  SELECT fixture.revision_id, fixture.skill_id, 1, source.definition_schema_version, source.definition_json,
+    source.content_digest, :'owner_user_id'::uuid, '2099-01-01T00:00:00Z'::timestamptz
+  FROM fixture CROSS JOIN source
+  RETURNING skill_id
+), inserted_review AS (
+  INSERT INTO business.skill_review_submission
+    (id, skill_id, content_revision_id, content_digest, status, safe_reason_code, version,
+      submitted_by_user_id, decided_by_user_id, submitted_at, decided_at, updated_at)
+  SELECT fixture.review_id, fixture.skill_id, fixture.revision_id, source.content_digest, 'approved', NULL, 2,
+    :'owner_user_id'::uuid, :'reviewer_user_id'::uuid, '2099-01-01T00:00:00Z'::timestamptz,
+    '2099-01-01T00:00:00Z'::timestamptz, '2099-01-01T00:00:00Z'::timestamptz
+  FROM fixture CROSS JOIN source
+  RETURNING skill_id
+), inserted_snapshot AS (
+  INSERT INTO business.skill_published_snapshot
+    (id, skill_id, source_content_revision_id, review_submission_id, publication_revision,
+      definition_schema_version, definition_json, content_digest, published_by_user_id, published_at)
+  SELECT fixture.snapshot_id, fixture.skill_id, fixture.revision_id, fixture.review_id, 1,
+    source.definition_schema_version, source.definition_json, source.content_digest,
+    :'reviewer_user_id'::uuid, '2099-01-01T00:00:00Z'::timestamptz
+  FROM fixture CROSS JOIN source
+  RETURNING skill_id
+), inserted_skill AS (
+  INSERT INTO business.skill
+    (id, owner_user_id, current_draft_revision_id, current_published_snapshot_id,
+      publication_revision, governance_status, version, created_at, updated_at)
+  SELECT fixture.skill_id, :'owner_user_id'::uuid, fixture.revision_id, fixture.snapshot_id,
+    1, 'active', 1, '2099-01-01T00:00:00Z'::timestamptz, '2099-01-01T00:00:00Z'::timestamptz
+  FROM fixture CROSS JOIN source
+  RETURNING id
+)
+SELECT COALESCE(json_agg(id::text ORDER BY id DESC), '[]'::json) FROM inserted_skill;
+SQL
+}
+
+# cleanup_w1_skill_market_fixtures 精确删除本次 21 个 fixture；仅本地 Smoke 管理会话绕过 immutable 删除触发器。
+cleanup_w1_skill_market_fixtures() {
+  local postgres_container="$1"
+  local cleanup_fact=""
+  cleanup_fact="$(docker exec -i "$postgres_container" psql -U dora_admin -d dora_business -qAt -v ON_ERROR_STOP=1 \
+    -v smoke_run_id="$run_id" <<'SQL'
+BEGIN;
+SET LOCAL session_replication_role = replica;
+WITH raw_fixture AS (
+  SELECT fixture_no,
+    md5(:'smoke_run_id' || ':market-skill:' || fixture_no::text) AS skill_hash,
+    md5(:'smoke_run_id' || ':market-revision:' || fixture_no::text) AS revision_hash,
+    md5(:'smoke_run_id' || ':market-review:' || fixture_no::text) AS review_hash,
+    md5(:'smoke_run_id' || ':market-snapshot:' || fixture_no::text) AS snapshot_hash
+  FROM generate_series(1, 21) AS fixture_no
+), fixture AS (
+  SELECT
+    format('%s-%s-7%s-8%s-%s', substr(skill_hash,1,8), substr(skill_hash,9,4), substr(skill_hash,14,3), substr(skill_hash,18,3), substr(skill_hash,21,12))::uuid AS skill_id,
+    format('%s-%s-7%s-8%s-%s', substr(revision_hash,1,8), substr(revision_hash,9,4), substr(revision_hash,14,3), substr(revision_hash,18,3), substr(revision_hash,21,12))::uuid AS revision_id,
+    format('%s-%s-7%s-8%s-%s', substr(review_hash,1,8), substr(review_hash,9,4), substr(review_hash,14,3), substr(review_hash,18,3), substr(review_hash,21,12))::uuid AS review_id,
+    format('%s-%s-7%s-8%s-%s', substr(snapshot_hash,1,8), substr(snapshot_hash,9,4), substr(snapshot_hash,14,3), substr(snapshot_hash,18,3), substr(snapshot_hash,21,12))::uuid AS snapshot_id
+  FROM raw_fixture
+), deleted_skill AS (
+  DELETE FROM business.skill WHERE id IN (SELECT skill_id FROM fixture) RETURNING id
+), deleted_snapshot AS (
+  DELETE FROM business.skill_published_snapshot WHERE id IN (SELECT snapshot_id FROM fixture) RETURNING id
+), deleted_review AS (
+  DELETE FROM business.skill_review_submission WHERE id IN (SELECT review_id FROM fixture) RETURNING id
+), deleted_revision AS (
+  DELETE FROM business.skill_content_revision WHERE id IN (SELECT revision_id FROM fixture) RETURNING id
+)
+SELECT json_build_object(
+  'skills', (SELECT count(*) FROM deleted_skill),
+  'snapshots', (SELECT count(*) FROM deleted_snapshot),
+  'reviews', (SELECT count(*) FROM deleted_review),
+  'revisions', (SELECT count(*) FROM deleted_revision));
+COMMIT;
+SQL
+)" || return 1
+  printf '%s' "$cleanup_fact"
+}
+
+# run_w1_skill_market_keyset_smoke 通过真实 HTTP 两页读取验证 20 条边界、同时间 ID 倒序和无重无漏。
+run_w1_skill_market_keyset_smoke() {
+  local postgres_container="$1"
+  local first_response="$w1_temp_dir/market-keyset-page-one.json"
+  local first_headers="$w1_temp_dir/market-keyset-page-one.headers"
+  local second_response="$w1_temp_dir/market-keyset-page-two.json"
+  local second_headers="$w1_temp_dir/market-keyset-page-two.headers"
+  local expected_fixture_ids=""
+  local next_cursor=""
+  local cleanup_fact=""
+  local status=""
+
+  w1_skill_market_fixtures_present=true
+  expected_fixture_ids="$(seed_w1_skill_market_fixtures "$postgres_container")" || fail "Market Keyset fixture 写入失败"
+  jq -e 'type == "array" and length == 21 and (unique | length) == 21
+    and all(.[]; test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$"))' \
+    <<<"$expected_fixture_ids" >/dev/null || fail "Market Keyset fixture ID 闭集漂移"
+
+  : >"$first_headers"
+  status="$(curl --silent --show-error --max-time 10 -D "$first_headers" -o "$first_response" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/skill-market')"
+  [[ "$status" == "200" ]] || fail "Market Keyset 第一页状态为 $status"
+  assert_w1_skill_market_list_contract "$first_response" "$first_headers" null || fail "Market Keyset 第一页安全契约漂移"
+  jq -e --argjson expected "$expected_fixture_ids" '
+    (.items | length) == 20 and (.next_cursor | type) == "string" and (.next_cursor | length) > 0
+    and (.items | map(.skill_id)) == $expected[0:20]
+    and ([.items[].published_at] | unique) == ["2099-01-01T00:00:00Z"]' "$first_response" >/dev/null || \
+    fail "Market Keyset 第一页未满足 limit=20、同时间 ID 倒序或 cursor 边界"
+  next_cursor="$(jq -er '.next_cursor' "$first_response")"
+
+  : >"$second_headers"
+  status="$(curl --silent --show-error --max-time 10 --get --data-urlencode "cursor=${next_cursor}" \
+    -D "$second_headers" -o "$second_response" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/skill-market')"
+  [[ "$status" == "200" ]] || fail "Market Keyset 第二页状态为 $status"
+  assert_w1_skill_market_list_contract "$second_response" "$second_headers" null || fail "Market Keyset 第二页安全契约漂移"
+  jq -ne --argjson expected "$expected_fixture_ids" --slurpfile first "$first_response" --slurpfile second "$second_response" '
+    (($first[0].items | map(.skill_id)) + ($second[0].items | map(.skill_id))) as $all_ids
+    | ($all_ids[0:21] == $expected)
+      and ($second[0].items[0].skill_id == $expected[20])
+      and (([$first[0].items[].published_at] + [$second[0].items[0].published_at] | unique) == ["2099-01-01T00:00:00Z"])
+      and (($all_ids | length) == ($all_ids | unique | length))' >/dev/null || \
+    fail "Market Keyset 跨页发生重复、遗漏或顺序漂移"
+
+  cleanup_fact="$(cleanup_w1_skill_market_fixtures "$postgres_container")" || fail "Market Keyset fixture 清理失败"
+  jq -e '.skills == 21 and .snapshots == 21 and .reviews == 21 and .revisions == 21' \
+    <<<"$cleanup_fact" >/dev/null || fail "Market Keyset fixture 未被精确清理"
+  w1_skill_market_fixtures_present=false
+  w1_skill_market_keyset_pagination=true
+}
+
 # read_governance_skill_state_fact 读取 offline 终态命令前后的最小聚合、回执与审计事实。
 read_governance_skill_state_fact() {
   local postgres_container="$1"
@@ -656,6 +933,110 @@ build_w1_skill_payload() {
       market_listing:{cover_asset_id:null,detail:"用于 W1 真实链路验收",copyright_notice:"仅用于本地冒烟",user_notice:"不得用于生产内容"},
       public_tool_refs:$public_tool_refs
     }}'
+}
+
+# run_w1_skill_market_active_smoke 验证匿名/带 Cookie 同投影、发布快照隔离、坏游标与跨 Owner 使用门禁。
+run_w1_skill_market_active_smoke() {
+  local postgres_container="$1"
+  local owner_response="$w1_temp_dir/market-owner-detail.json"
+  local owner_headers="$w1_temp_dir/market-owner-detail.headers"
+  local draft_response="$w1_temp_dir/market-draft-update.json"
+  local draft_headers="$w1_temp_dir/market-draft-update.headers"
+  local anon_list="$w1_temp_dir/market-active-anonymous-list.json"
+  local anon_list_headers="$w1_temp_dir/market-active-anonymous-list.headers"
+  local cookie_list="$w1_temp_dir/market-active-cookie-list.json"
+  local cookie_list_headers="$w1_temp_dir/market-active-cookie-list.headers"
+  local anon_detail="$w1_temp_dir/market-active-anonymous-detail.json"
+  local anon_detail_headers="$w1_temp_dir/market-active-anonymous-detail.headers"
+  local cookie_detail="$w1_temp_dir/market-active-cookie-detail.json"
+  local cookie_detail_headers="$w1_temp_dir/market-active-cookie-detail.headers"
+  local invalid_response="$w1_temp_dir/market-invalid-cursor.json"
+  local invalid_headers="$w1_temp_dir/market-invalid-cursor.headers"
+  local cross_owner_response="$w1_temp_dir/market-cross-owner-quick-create.json"
+  local cross_owner_headers="$w1_temp_dir/market-cross-owner-quick-create.headers"
+  local draft_config="$w1_temp_dir/market-draft-update.curl"
+  local cross_owner_config="$w1_temp_dir/market-cross-owner-quick-create.curl"
+  local status=""
+  local draft_etag=""
+  local draft_payload=""
+  local quick_payload=""
+  local before_counts=""
+  local after_counts=""
+
+  : >"$owner_headers"
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -D "$owner_headers" \
+    -o "$owner_response" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}")"
+  [[ "$status" == "200" ]] || fail "Market 隔离草稿前 Owner 详情状态为 $status"
+  [[ "$(response_header_value "$owner_headers" 'Cache-Control')" == "no-store" ]] || fail "Market 隔离草稿前 Owner 详情缺少 no-store"
+  draft_etag="$(jq -er '.skill.draft_etag | strings | select(test("^\\\"[^\\\"]+\\\"$"))' "$owner_response")"
+  w1_market_draft_name="W1 Skill market draft ${run_id}"
+  draft_payload="$(build_w1_skill_payload "$w1_market_draft_name" "market-draft")"
+  write_conditional_curl_config "$draft_config" "$user_curl_config" "$draft_etag" "" || fail "Market 隔离草稿 curl 配置写入失败"
+  : >"$draft_headers"
+  status="$(curl_with_body_stdin "$draft_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
+    --config "$draft_config" -X PUT -H 'Content-Type: application/json' -D "$draft_headers" \
+    -o "$draft_response" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}/draft")"
+  [[ "$status" == "200" ]] || fail "Market 隔离草稿更新状态为 $status"
+  [[ "$(response_header_value "$draft_headers" 'Cache-Control')" == "no-store" ]] || fail "Market 隔离草稿更新缺少 no-store"
+  jq -e --arg name "$w1_market_draft_name" '.skill.definition.name == $name' "$draft_response" >/dev/null || \
+    fail "Market 隔离草稿未成为 current draft"
+
+  : >"$anon_list_headers"
+  status="$(curl --silent --show-error --max-time 10 -D "$anon_list_headers" -o "$anon_list" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/skill-market')"
+  [[ "$status" == "200" ]] || fail "匿名 Market active 列表状态为 $status"
+  assert_w1_skill_market_list_contract "$anon_list" "$anon_list_headers" true || fail "匿名 Market active 列表契约漂移"
+  : >"$anon_detail_headers"
+  status="$(curl --silent --show-error --max-time 10 -D "$anon_detail_headers" -o "$anon_detail" -w '%{http_code}' \
+    "http://127.0.0.1:18081/api/v1/skill-market/${w1_skill_id}")"
+  [[ "$status" == "200" ]] || fail "匿名 Market active 详情状态为 $status"
+  assert_w1_skill_market_detail_contract "$anon_detail" "$anon_detail_headers" || fail "匿名 Market active 详情契约漂移"
+
+  : >"$cookie_list_headers"
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -D "$cookie_list_headers" \
+    -o "$cookie_list" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/skill-market')"
+  [[ "$status" == "200" ]] || fail "带 Cookie Market active 列表状态为 $status"
+  assert_w1_skill_market_list_contract "$cookie_list" "$cookie_list_headers" true || fail "带 Cookie Market active 列表契约漂移"
+  : >"$cookie_detail_headers"
+  status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" -D "$cookie_detail_headers" \
+    -o "$cookie_detail" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skill-market/${w1_skill_id}")"
+  [[ "$status" == "200" ]] || fail "带 Cookie Market active 详情状态为 $status"
+  assert_w1_skill_market_detail_contract "$cookie_detail" "$cookie_detail_headers" || fail "带 Cookie Market active 详情契约漂移"
+  jq -ne --slurpfile anonymous "$anon_list" --slurpfile cookie "$cookie_list" \
+    '($anonymous[0] | del(.request_id)) == ($cookie[0] | del(.request_id))' >/dev/null || \
+    fail "Market 列表发生 Session 个性化"
+  jq -ne --slurpfile anonymous "$anon_detail" --slurpfile cookie "$cookie_detail" \
+    '($anonymous[0] | del(.request_id)) == ($cookie[0] | del(.request_id))' >/dev/null || \
+    fail "Market 详情发生 Session 个性化"
+  w1_skill_market_public_read=true
+  w1_skill_market_safe_projection=true
+
+  run_w1_skill_market_keyset_smoke "$postgres_container"
+
+  : >"$invalid_headers"
+  status="$(curl --silent --show-error --max-time 10 -D "$invalid_headers" -o "$invalid_response" -w '%{http_code}' \
+    'http://127.0.0.1:18081/api/v1/skill-market?cursor=abc%3D')"
+  [[ "$status" == "400" ]] || fail "Market 非法 cursor 状态为 $status"
+  assert_w1_skill_market_error_response "$invalid_response" "$invalid_headers" "INVALID_REQUEST" || \
+    fail "Market 非法 cursor 未 fail-closed"
+  w1_skill_market_cursor_fail_closed=true
+
+  quick_payload="$(jq -cn --arg skill "$w1_skill_id" \
+    '{schema_version:"project_quick_create.v2",initial_prompt:"",enabled_skill_ids:[$skill]}')"
+  before_counts="$(read_governance_quickcreate_counts "$postgres_container")"
+  write_conditional_curl_config "$cross_owner_config" "$owner_b_curl_config" "" "market-cross-owner-${run_id}" || \
+    fail "Market 跨 Owner QuickCreate curl 配置写入失败"
+  : >"$cross_owner_headers"
+  status="$(curl_with_body_stdin "$quick_payload" --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    --config "$cross_owner_config" -H 'Content-Type: application/json' -D "$cross_owner_headers" \
+    -o "$cross_owner_response" -w '%{http_code}' 'http://127.0.0.1:18081/api/v1/projects:quick-create')"
+  [[ "$status" == "409" ]] || fail "Market 跨 Owner QuickCreate 状态为 $status"
+  assert_w1_skill_market_error_response "$cross_owner_response" "$cross_owner_headers" "PROJECT_SKILL_UNAVAILABLE" || \
+    fail "Market 跨 Owner QuickCreate 错误契约漂移"
+  after_counts="$(read_governance_quickcreate_counts "$postgres_container")"
+  jq -ne --argjson before "$before_counts" --argjson after "$after_counts" '$before == $after' >/dev/null || \
+    fail "Market 跨 Owner QuickCreate 留下部分事实"
+  w1_skill_market_cross_owner_use_blocked=true
 }
 
 run_w1_skill_smoke() {
@@ -1464,6 +1845,9 @@ run_w1_skill_governance_smoke() {
   rm -f "$governor_login_response_temp"
   governor_login_response_temp=""
 
+  # Market 隔离草稿会推进 Skill 聚合版本，必须先于治理 baseline 与 Strong ETag 读取完成。
+  run_w1_skill_market_active_smoke "$postgres_container"
+
   baseline_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
     SELECT json_build_object(
       'version', skill_record.version,
@@ -1544,6 +1928,7 @@ run_w1_skill_governance_smoke() {
   suspend_request_id="$(jq -er '.request_id' "$response_file")"
   assert_governance_decision_response "$response_file" "$headers_file" "suspended" 2 '["resume","offline"]' || \
     fail "治理 suspend 响应安全契约漂移"
+  assert_w1_skill_market_visibility "suspended" false || fail "Skill 暂停后 Market 未同步隐藏"
 
   : >"$headers_file"
   suspend_replay_status="$(curl_with_body_stdin "{\"action\":\"suspend\",\"reason_code\":\"incident_containment\",\"approval_reference\":\"SMOKE-SUSPEND-${run_id}\"}" \
@@ -1586,6 +1971,7 @@ run_w1_skill_governance_smoke() {
   resumed_etag="$(jq -er '.skill.governance_etag' "$response_file")"
   assert_governance_decision_response "$response_file" "$headers_file" "active" 3 '["suspend","offline"]' || \
     fail "治理 resume 响应安全契约漂移"
+  assert_w1_skill_market_visibility "resumed" true || fail "Skill 恢复后 Market 未同步重现"
 
   write_conditional_curl_config "$quick_config" "$user_curl_config" "" "governance-resumed-project-${run_id}" || fail "恢复 QuickCreate curl 配置写入失败"
   resumed_quick_status="$(curl_with_body_stdin "$quick_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
@@ -1605,6 +1991,8 @@ run_w1_skill_governance_smoke() {
   offline_etag="$(jq -er '.skill.governance_etag' "$response_file")"
   assert_governance_decision_response "$response_file" "$headers_file" "offline" 4 '[]' || \
     fail "治理 offline 响应安全契约漂移"
+  assert_w1_skill_market_visibility "offline" false || fail "Skill 下架后 Market 未同步隐藏"
+  w1_skill_market_governance_visibility=true
 
   before_counts="$(read_governance_quickcreate_counts "$postgres_container")"
   write_conditional_curl_config "$quick_config" "$user_curl_config" "" "governance-offline-project-${run_id}" || fail "下架 QuickCreate curl 配置写入失败"
@@ -1651,7 +2039,8 @@ run_w1_skill_governance_smoke() {
   [[ "$status" == "200" ]] || fail "offline 后 Creator 详情状态为 $status"
   offline_draft_etag="$(jq -er '.skill.draft_etag' "$response_file")"
   local offline_payload=""
-  offline_payload="$(build_w1_skill_payload "W1 Skill offline draft ${run_id}" "offline-review")"
+  w1_offline_draft_name="W1 Skill offline draft ${run_id}"
+  offline_payload="$(build_w1_skill_payload "$w1_offline_draft_name" "offline-review")"
   write_conditional_curl_config "$conditional_config" "$user_curl_config" "$offline_draft_etag" "" || fail "offline 草稿更新 curl 配置写入失败"
   offline_update_status="$(curl_with_body_stdin "$offline_payload" --silent --show-error --max-time 10 -b "$cookie_jar" \
     --config "$conditional_config" -X PUT -H 'Content-Type: application/json' -o "$response_file" -w '%{http_code}' \
@@ -1827,7 +2216,33 @@ run_w1_skill_governance_smoke() {
     and (.assertions | keys) == ["skill_governance_idempotency","skill_governance_offline_terminal","skill_governance_quickcreate_gate","skill_governor_rbac","skill_governor_revocation"]
     and all(.assertions[]; . == true)' "$governance_pending_evidence_file" >/dev/null || \
     fail "Skill Governance Evidence 含未通过或非闭集断言"
+
+  jq -n --arg run_id "$run_id" --arg produced_at "$governance_produced_at" \
+    --arg source_digest_sha256 "$source_digest_sha256" --arg business_binary_sha256 "$business_binary_sha256" \
+    --argjson public_read "$w1_skill_market_public_read" \
+    --argjson safe_projection "$w1_skill_market_safe_projection" \
+    --argjson keyset_pagination "$w1_skill_market_keyset_pagination" \
+    --argjson governance_visibility "$w1_skill_market_governance_visibility" \
+    --argjson cursor_fail_closed "$w1_skill_market_cursor_fail_closed" \
+    --argjson cross_owner_use_blocked "$w1_skill_market_cross_owner_use_blocked" '
+    {schema_version:"w1.skill-market.smoke.evidence.v1",status:"pending",run_id:$run_id,produced_at:$produced_at,
+      source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,
+      assertions:{
+        skill_market_public_read:$public_read,
+        skill_market_safe_projection:$safe_projection,
+        skill_market_keyset_pagination:$keyset_pagination,
+        skill_market_governance_visibility:$governance_visibility,
+        skill_market_cursor_fail_closed:$cursor_fail_closed,
+        skill_market_cross_owner_use_blocked:$cross_owner_use_blocked
+      }}' >"$skill_market_pending_evidence_file"
+  jq -e '
+    keys == ["assertions","business_binary_sha256","produced_at","run_id","schema_version","source_digest_sha256","status"]
+    and .schema_version == "w1.skill-market.smoke.evidence.v1" and .status == "pending"
+    and (.assertions | keys) == ["skill_market_cross_owner_use_blocked","skill_market_cursor_fail_closed","skill_market_governance_visibility","skill_market_keyset_pagination","skill_market_public_read","skill_market_safe_projection"]
+    and all(.assertions[]; ((. | type) == "boolean" and . == true))' "$skill_market_pending_evidence_file" >/dev/null || \
+    fail "Skill Market Evidence 含未通过或非闭集断言"
   w1_skill_governance_smoke_ran=true
+  w1_skill_market_smoke_ran=true
 }
 
 run_w1_browser_frozen_smoke() {
@@ -1863,8 +2278,8 @@ run_w1_browser_frozen_smoke() {
 
   [[ -s "$browser_result_file" ]] || fail "W1 浏览器未产出结构化真实结果"
   jq -e --arg creator "$user_id" --arg reviewer "$owner_b_seed_user_id" '
-    keys == ["creator_admin_api_forbidden","creator_admin_denial_request_id","creator_admin_implicit_api_blocked","creator_admin_route_blocked","creator_id","current_draft_summary","project_id","published_snapshot_id","review_id","reviewer_id","reviewer_owner_read_not_found","reviewer_owner_resource_facts_not_disclosed","reviewer_owner_route_not_found","reviewer_owner_write_not_found","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
-    and .schema_version == "w1.real-review-result.v3"
+    keys == ["creator_admin_api_forbidden","creator_admin_denial_request_id","creator_admin_implicit_api_blocked","creator_admin_route_blocked","creator_id","current_draft_summary","market_public_detail","market_public_list","market_published_projection_safe","project_id","published_snapshot_id","review_id","reviewer_id","reviewer_owner_read_not_found","reviewer_owner_resource_facts_not_disclosed","reviewer_owner_route_not_found","reviewer_owner_write_not_found","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
+    and .schema_version == "w1.real-review-result.v4"
     and .creator_admin_route_blocked == true
     and .creator_admin_implicit_api_blocked == true
     and .creator_admin_api_forbidden == true
@@ -1872,6 +2287,9 @@ run_w1_browser_frozen_smoke() {
     and .reviewer_owner_read_not_found == true
     and .reviewer_owner_write_not_found == true
     and .reviewer_owner_resource_facts_not_disclosed == true
+    and .market_public_list == true
+    and .market_public_detail == true
+    and .market_published_projection_safe == true
     and .creator_id == $creator and .reviewer_id == $reviewer and .creator_id != .reviewer_id
     and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id,.tool_catalog_session_id,.tool_catalog_request_id,.creator_admin_denial_request_id]
       | all(.[]; test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
@@ -2056,7 +2474,7 @@ run_w1_browser_frozen_smoke() {
       reviewer_owner_read_not_found:$browser[0].reviewer_owner_read_not_found,
       reviewer_owner_write_not_found:$browser[0].reviewer_owner_write_not_found,
       reviewer_owner_resource_facts_not_disclosed:$browser[0].reviewer_owner_resource_facts_not_disclosed,
-      browser_result_contract:($browser[0].schema_version == "w1.real-review-result.v3"
+      browser_result_contract:($browser[0].schema_version == "w1.real-review-result.v4"
         and $browser[0].creator_admin_route_blocked == true
         and $browser[0].creator_admin_implicit_api_blocked == true
         and $browser[0].creator_admin_api_forbidden == true
@@ -2066,6 +2484,9 @@ run_w1_browser_frozen_smoke() {
         and $browser[0].reviewer_owner_read_not_found == true
         and $browser[0].reviewer_owner_write_not_found == true
         and $browser[0].reviewer_owner_resource_facts_not_disclosed == true
+        and $browser[0].market_public_list == true
+        and $browser[0].market_public_detail == true
+        and $browser[0].market_published_projection_safe == true
         and $api[0].owner_status == 200 and $api[0].review_status == 200),
       formal_api_frozen_revision:($api[0].owner_current_draft_is_b
         and $api[0].review_frozen_submission_is_a and $api[0].review_current_published_is_a),
@@ -2122,6 +2543,9 @@ rm -f "$evidence_file"
 if [[ -n "$governance_evidence_file" ]]; then
   rm -f "$governance_evidence_file" "${governance_evidence_file}.tmp"
 fi
+if [[ -n "$skill_market_evidence_file" ]]; then
+  rm -f "$skill_market_evidence_file" "${skill_market_evidence_file}.tmp"
+fi
 if [[ -n "$legacy_evidence_file" ]]; then
   rm -f "$legacy_evidence_file"
 fi
@@ -2140,6 +2564,7 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   w1_temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/dora-w1-skill.XXXXXX")"
   chmod 700 "$w1_temp_dir"
   governance_pending_evidence_file="$evidence_dir/governance-evidence.pending.json"
+  skill_market_pending_evidence_file="$evidence_dir/skill-market-evidence.pending.json"
   governor_cookie_jar="$w1_temp_dir/governor-cookie.jar"
   governor_curl_config="$w1_temp_dir/governor-csrf.curl"
   governor_login_response_temp="$w1_temp_dir/governor-login.json"
@@ -2481,13 +2906,16 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
     "http://127.0.0.1:18081/api/v1/skills/${w1_skill_id}")"
   [[ "$owner_b_skill_status" == "404" ]] || fail "第二用户访问用户 A Skill 未按 Owner-safe 404 关闭，状态为 $owner_b_skill_status"
   assert_owner_safe_error "$w1_temp_dir/response.json" "SKILL_NOT_FOUND" \
-    "$w1_skill_id" "$w1_review_id" "$w1_skill_name" "$w1_updated_skill_name" || \
+    "$w1_skill_id" "$w1_review_id" "$w1_skill_name" "$w1_updated_skill_name" \
+    "$(jq -cn --arg market "$w1_market_draft_name" --arg offline "$w1_offline_draft_name" '[$market,$offline]')" || \
     fail "跨 Owner Skill 错误响应泄漏了权威资源事实"
   jq -n --argjson status "$owner_b_skill_status" --arg creator "$user_id" --arg reviewer "$owner_b_user_id" \
     --arg skill "$w1_skill_id" --arg review "$w1_review_id" --arg original_name "$w1_skill_name" \
-    --arg updated_name "$w1_updated_skill_name" --slurpfile response "$w1_temp_dir/response.json" '
+    --arg updated_name "$w1_updated_skill_name" --arg market_name "$w1_market_draft_name" \
+    --arg offline_name "$w1_offline_draft_name" --slurpfile response "$w1_temp_dir/response.json" '
     ($response[0] | [.. | strings]
-      | any(.[]; contains($skill) or contains($review) or contains($original_name) or contains($updated_name))) as $disclosed
+      | any(.[]; contains($skill) or contains($review) or contains($original_name) or contains($updated_name)
+        or contains($market_name) or contains($offline_name))) as $disclosed
     | {skill_detail:{status:$status,code:$response[0].error.code},
        distinct_principals:($creator != $reviewer),resource_facts_disclosed:$disclosed,
        cross_owner_not_found:($status == 404 and $response[0].error.code == "SKILL_NOT_FOUND"
@@ -3042,6 +3470,15 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
     and (.assertions | keys) == ["skill_governance_idempotency","skill_governance_offline_terminal","skill_governance_quickcreate_gate","skill_governor_rbac","skill_governor_revocation"]
     and all(.assertions[]; . == true)' "$governance_pending_evidence_file" >/dev/null || \
     fail "W1 Governance Evidence 含未通过断言，禁止发布 passed summary"
+  [[ "$w1_skill_market_smoke_ran" == "true" && -s "$skill_market_pending_evidence_file" ]] || \
+    fail "W1 Skill Market Smoke 未产生独立 pending Evidence"
+  jq -e '
+    keys == ["assertions","business_binary_sha256","produced_at","run_id","schema_version","source_digest_sha256","status"]
+    and .schema_version == "w1.skill-market.smoke.evidence.v1"
+    and .status == "pending"
+    and (.assertions | keys) == ["skill_market_cross_owner_use_blocked","skill_market_cursor_fail_closed","skill_market_governance_visibility","skill_market_keyset_pagination","skill_market_public_read","skill_market_safe_projection"]
+    and all(.assertions[]; ((. | type) == "boolean" and . == true))' "$skill_market_pending_evidence_file" >/dev/null || \
+    fail "W1 Skill Market Evidence 含未通过断言，禁止发布 passed summary"
 elif [[ "$browser_smoke_ran" == "true" ]]; then
   jq -e '
     .schema_version == "w05.workspace-transport.smoke.evidence.v3"
@@ -3087,6 +3524,8 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   assert_evidence_excludes_literal "$governor_cookie_token" "Skill Governor Cookie"
   assert_evidence_excludes_literal "$w1_skill_name" "W1 Skill 原始名称"
   assert_evidence_excludes_literal "$w1_updated_skill_name" "W1 Skill 更新后原始名称"
+  assert_evidence_excludes_literal "$w1_market_draft_name" "W1 Skill Market 隔离草稿名称"
+  assert_evidence_excludes_literal "$w1_offline_draft_name" "W1 Skill Offline 草稿名称"
   assert_evidence_excludes_literal "$w1_binding_prompt" "W1 Binding 完整 Prompt"
   assert_evidence_excludes_regex '"definition"[[:space:]]*:' "W1 Skill 完整定义正文"
   assert_evidence_excludes_regex '(?i)"(payload_nonce|payload_ciphertext|runtime_content_ciphertext)"[[:space:]]*:' "W1 密文或 Nonce 字段"
@@ -3105,10 +3544,13 @@ fi
 jq '.status = "passed"' "$pending_evidence_file" >"${evidence_file}.tmp"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   jq '.status = "passed"' "$governance_pending_evidence_file" >"${governance_evidence_file}.tmp"
+  jq '.status = "passed"' "$skill_market_pending_evidence_file" >"${skill_market_evidence_file}.tmp"
 fi
 rm -f "$pending_evidence_file"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   rm -f "$governance_pending_evidence_file"
+  rm -f "$skill_market_pending_evidence_file"
+  mv "${skill_market_evidence_file}.tmp" "$skill_market_evidence_file"
   mv "${governance_evidence_file}.tmp" "$governance_evidence_file"
 fi
 # canonical W0.5 summary 是最后一次可失败写操作；旧 W0 summary 已在运行开始撤销，避免双真源假绿。

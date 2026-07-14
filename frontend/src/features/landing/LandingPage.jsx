@@ -26,6 +26,7 @@ import {
   getPathForPage,
   getProjectWorkspacePath,
   matchOwnerSkillBuilderPath,
+  matchPublicSkillDetailPath,
   matchSkillReviewDetailPath,
   normalizePath
 } from '../../app/routes.js';
@@ -41,6 +42,7 @@ import {
   submitQuickCreateIntent
 } from '../projects/quickCreateIntent.js';
 import { SkillsPage } from '../skills/SkillsPage.jsx';
+import { SkillMarketDetailPage } from '../skills/SkillMarketDetailPage.jsx';
 import { MySkillsPage } from '../skills/MySkillsPage.jsx';
 import { SkillBuilderPage } from '../skills/SkillBuilderPage.jsx';
 import { SkillReviewDetailPage } from '../skillReviews/SkillReviewDetailPage.jsx';
@@ -1028,6 +1030,9 @@ export function LandingPage() {
   const skillReviewRoute = activePage === 'skillReviewDetail'
     ? matchSkillReviewDetailPath(window.location.pathname)
     : null;
+  const publicSkillRoute = activePage === 'skillDetail'
+    ? matchPublicSkillDetailPath(window.location.pathname)
+    : null;
   const visibleNavItems = navItems.filter((item) => (
     !item.requiredCapability || hasCapability(item.requiredCapability)
   ));
@@ -1097,8 +1102,20 @@ export function LandingPage() {
         {activePage === 'workspace' ? <WorkspacePage onIntent={requestLogin} /> : null}
         {activePage === 'projects' ? <ProjectsPage onIntent={requestLogin} /> : null}
         {activePage === 'assets' ? <AssetsPage onIntent={requestLogin} /> : null}
-        {activePage === 'skills' || activePage === 'skillDetail' ? (
+        {activePage === 'skills' ? (
           <SkillsPage isLoggedIn={isLoggedIn} onLogin={requestLogin} />
+        ) : null}
+        {activePage === 'skillDetail' && publicSkillRoute ? (
+          <SkillMarketDetailPage skillID={publicSkillRoute.skillID} />
+        ) : null}
+        {activePage === 'skillDetail' && !publicSkillRoute ? (
+          <section className="route-state" aria-labelledby="invalid-public-skill-route-title">
+            <h2 id="invalid-public-skill-route-title">Skill 详情路径无效</h2>
+            <p role="alert">链接中的 skill_id 不是有效的规范小写 UUIDv7，未发起公开详情请求。</p>
+            <button type="button" className="secondary-button" onClick={() => navigateToPage('skills')}>
+              返回 Skill 市场
+            </button>
+          </section>
         ) : null}
         {activePage === 'mySkills' ? <MySkillsPage /> : null}
         {activePage === 'skillBuilder' && skillBuilderRoute ? (

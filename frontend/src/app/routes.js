@@ -48,8 +48,16 @@ export function getPageFromPath(pathname) {
     || (path.startsWith('/my/skills/') && path.endsWith('/edit'))
   ) return 'skillBuilder';
   if (path.startsWith(`${SKILL_REVIEW_QUEUE_ROUTE}/`)) return 'skillReviewDetail';
-  if (PUBLIC_SKILL_DETAIL_ROUTE_PATTERN.test(path)) return 'skillDetail';
+  if (PUBLIC_SKILL_DETAIL_ROUTE_PATTERN.test(path) || path.startsWith('/skills/')) return 'skillDetail';
   return ROUTE_TO_PAGE[path] || 'home';
+}
+
+// 公开详情只接受原始、无编码替代和无尾斜杠的规范小写 UUIDv7 路径。
+export function matchPublicSkillDetailPath(pathname) {
+  const match = String(pathname || '').match(PUBLIC_SKILL_DETAIL_ROUTE_PATTERN);
+  if (!match) return null;
+  const skillID = match[1];
+  return UUID_V7_ROUTE_PATTERN.test(skillID) ? { skillID } : null;
 }
 
 export function matchSkillReviewDetailPath(pathname) {

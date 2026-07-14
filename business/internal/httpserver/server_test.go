@@ -96,6 +96,7 @@ func TestServerRegistersProjectRouteBehindSessionAndCSRF(t *testing.T) {
 		Auth: authHandler, Project: projectHandler,
 		Agent: mustAgentProxyHandlerForServerTest(t), Skill: mustSkillHandlerForServerTest(t),
 		SkillReview: mustSkillReviewHandlerForServerTest(t), SkillGovernance: mustSkillGovernanceHandlerForServerTest(t),
+		SkillMarket: mustSkillMarketHandlerForServerTest(t),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -112,6 +113,50 @@ func TestServerRegistersProjectRouteBehindSessionAndCSRF(t *testing.T) {
 	}
 	if authService.resolveCalls != 1 || projectService.command.OwnerUserID != resolved.Principal.ID {
 		t.Fatalf("route did not use one trusted session resolution: resolve_calls=%d command=%+v", authService.resolveCalls, projectService.command)
+	}
+}
+
+func TestServerRegistersSkillMarketWithoutSessionResolution(t *testing.T) {
+	authService := &authHandlerTestService{}
+	authHandler, err := NewAuthHandler(authService, config.AuthConfig{
+		CookieName: "dora_session", CookieSameSite: "lax", MaxRequestBodyBytes: 4096,
+	}, authHandlerTestIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectHandler, err := NewProjectHandler(&projectHTTPService{}, authHandlerTestIDs{}, project.MaxInitialPromptBytes+1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marketService := &skillMarketHTTPService{listResult: skill.MarketListResult{Items: []skill.MarketListItemDTO{}}}
+	marketHandler, err := NewSkillMarketHandler(marketService, authHandlerTestIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(config.HTTPConfig{
+		Address: ":0", HeaderTimeout: time.Second, ReadTimeout: time.Second,
+		WriteTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 1024,
+	}, config.ServiceConfig{Name: "business-test", Version: "test"}, health.NewState(), RouteHandlers{
+		Auth: authHandler, Project: projectHandler, Agent: mustAgentProxyHandlerForServerTest(t),
+		Skill: mustSkillHandlerForServerTest(t), SkillReview: mustSkillReviewHandlerForServerTest(t),
+		SkillGovernance: mustSkillGovernanceHandlerForServerTest(t), SkillMarket: marketHandler,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withCookie := range []bool{false, true} {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/skill-market", nil)
+		if withCookie {
+			request.AddCookie(&http.Cookie{Name: "dora_session", Value: "ignored-cookie"})
+		}
+		recorder := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("anonymous Market status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+	}
+	if authService.resolveCalls != 0 || marketService.listCalls != 2 {
+		t.Fatalf("Market registration used Auth: resolve_calls=%d list_calls=%d", authService.resolveCalls, marketService.listCalls)
 	}
 }
 
@@ -157,6 +202,7 @@ func TestServerRegistersAgentProxyBehindBusinessSession(t *testing.T) {
 		Auth: authHandler, Project: projectHandler, Agent: mustAgentProxyHandlerForServerTest(t),
 		Skill: mustSkillHandlerForServerTest(t), SkillReview: mustSkillReviewHandlerForServerTest(t),
 		SkillGovernance: mustSkillGovernanceHandlerForServerTest(t),
+		SkillMarket:     mustSkillMarketHandlerForServerTest(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -203,6 +249,7 @@ func TestServerRegistersSkillWriteBehindSessionAndCSRF(t *testing.T) {
 		Auth: authHandler, Project: projectHandler, Agent: mustAgentProxyHandlerForServerTest(t),
 		Skill: skillHandler, SkillReview: mustSkillReviewHandlerForServerTest(t),
 		SkillGovernance: mustSkillGovernanceHandlerForServerTest(t),
+		SkillMarket:     mustSkillMarketHandlerForServerTest(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -264,6 +311,7 @@ func TestServerRegistersSkillGovernanceDecisionBehindSessionCapabilityAndCSRF(t 
 		Auth: authHandler, Project: projectHandler, Agent: mustAgentProxyHandlerForServerTest(t),
 		Skill: mustSkillHandlerForServerTest(t), SkillReview: mustSkillReviewHandlerForServerTest(t),
 		SkillGovernance: governanceHandler,
+		SkillMarket:     mustSkillMarketHandlerForServerTest(t),
 	})
 	if err != nil {
 		t.Fatal(err)

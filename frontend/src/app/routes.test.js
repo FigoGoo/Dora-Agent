@@ -5,6 +5,7 @@ import {
   getPathForPage,
   getSkillReviewDetailPath,
   matchOwnerSkillBuilderPath,
+  matchPublicSkillDetailPath,
   matchSkillReviewDetailPath,
   PUBLIC_PAGES
 } from './routes.js';
@@ -18,6 +19,18 @@ describe('Skill routes', () => {
     expect(getPageFromPath('/skills/public-skill-id')).toBe('skillDetail');
     expect(PUBLIC_PAGES.has('skills')).toBe(true);
     expect(PUBLIC_PAGES.has('skillDetail')).toBe(true);
+  });
+
+  it('matches only an exact canonical lowercase UUIDv7 public detail path', () => {
+    const detailPath = `/skills/${SKILL_IDS.skill}`;
+    expect(getPageFromPath(detailPath)).toBe('skillDetail');
+    expect(matchPublicSkillDetailPath(detailPath)).toEqual({ skillID: SKILL_IDS.skill });
+    expect(matchPublicSkillDetailPath('/skills/not-a-uuid')).toBeNull();
+    expect(matchPublicSkillDetailPath(`/skills/${SKILL_IDS.skill.toUpperCase()}`)).toBeNull();
+    expect(matchPublicSkillDetailPath(`${detailPath}/`)).toBeNull();
+    expect(getPageFromPath(`${detailPath}/extra`)).toBe('skillDetail');
+    expect(matchPublicSkillDetailPath(`${detailPath}/extra`)).toBeNull();
+    expect(matchPublicSkillDetailPath(`/skills/${SKILL_IDS.skill.replace(/^0/, '%30')}`)).toBeNull();
   });
 
   it('matches protected Owner Skill list, create and edit routes', () => {

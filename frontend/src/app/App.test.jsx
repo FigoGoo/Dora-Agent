@@ -3,6 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectBootstrapFixture, WORKSPACE_IDS, workspaceSnapshotFixture } from '../test/workspaceFixtures.js';
 import { ownerSkillFixture, SKILL_IDS } from '../test/skillFixtures.js';
+import {
+  SKILL_MARKET_IDS,
+  skillMarketDetailFixture,
+  skillMarketListItemFixture
+} from '../test/skillMarketFixtures.js';
 import { skillReviewQueueResponseFixture } from '../test/skillReviewFixtures.js';
 import { App } from './App.jsx';
 
@@ -395,19 +400,52 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('不是有效的 UUIDv7');
   });
 
-  it('redirects the legacy Skill route to the public market without mock content', async () => {
+  it('redirects the legacy Skill route to the real public market API', async () => {
     window.history.pushState({}, '', '/skill');
     vi.stubGlobal('fetch', mockAppFetch({ authenticatedBootstrap: true }));
 
     render(<App />);
 
     const navigation = await screen.findByRole('complementary', { name: 'DORAIGC 导航' });
-    expect(await screen.findByRole('heading', { name: 'Skill 市场暂未开放' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Skill 市场', level: 2 })).toBeInTheDocument();
     expect(window.location.pathname).toBe('/skills');
     expect(screen.getByRole('button', { name: '创建 Skill' })).toBeInTheDocument();
-    expect(screen.queryByTestId('skill-card')).not.toBeInTheDocument();
+    expect(await screen.findAllByTestId('skill-market-card')).toHaveLength(1);
     expect(screen.queryByText('塔可夫斯基风格诗意短片')).not.toBeInTheDocument();
     expect(within(navigation).getByRole('button', { name: 'Skill 市场' })).toHaveClass('is-active');
+  });
+
+  it('loads a canonical public Skill detail exactly once', async () => {
+    window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+    const fetchMock = mockAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '短片提示词助手' })).toBeInTheDocument();
+    expect(screen.getByText('公开市场详情。')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      requestPath(input) === `/api/v1/skill-market/${SKILL_MARKET_IDS.skill}`
+    ))).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /立即使用/ })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    '/skills/not-a-uuid',
+    `/skills/${SKILL_MARKET_IDS.skill.toUpperCase()}`,
+    `/skills/${SKILL_MARKET_IDS.skill.replace(/^0/, '%30')}`,
+    `/skills/${SKILL_MARKET_IDS.skill}/`,
+    `/skills/${SKILL_MARKET_IDS.skill}/extra`
+  ])('renders invalid public Skill path %s without any Market API request', async (path) => {
+    window.history.pushState({}, '', path);
+    const fetchMock = mockAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Skill 详情路径无效' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input).startsWith('/api/v1/skill-market')))
+      .toHaveLength(0);
   });
 
   it('redirects the legacy explore route to the home featured works section', async () => {
@@ -3262,8 +3300,8 @@ describe('DORAIGC static client pages', () => {
 
     await user.click(screen.getByRole('button', { name: 'Skill 市场' }));
     expect(window.location.pathname).toBe('/skills');
-    expect(screen.getByRole('heading', { name: 'Skill 市场暂未开放' })).toBeInTheDocument();
-    expect(screen.queryByTestId('skill-card')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Skill 市场', level: 2 })).toBeInTheDocument();
+    expect(await screen.findAllByTestId('skill-market-card')).toHaveLength(1);
 
     await user.click(screen.getByRole('button', { name: '精选作品' }));
     expect(window.location.pathname).toBe('/');
@@ -3332,9 +3370,9 @@ describe('DORAIGC static client pages', () => {
     expect(screen.queryByRole('button', { name: '上传素材' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Skill 市场' }));
-    expect(screen.getByRole('heading', { name: 'Skill 市场暂未开放' })).toBeInTheDocument();
-    expect(screen.queryByTestId('skill-card')).not.toBeInTheDocument();
-    expect(screen.getByText(/当前不会展示静态或伪造 Skill/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Skill 市场', level: 2 })).toBeInTheDocument();
+    expect(await screen.findAllByTestId('skill-market-card')).toHaveLength(1);
+    expect(screen.getByText(/搜索、收藏、费用、指标和跨发布者使用尚未开放/)).toBeInTheDocument();
   });
 });
 
@@ -3354,7 +3392,8 @@ async function submitLoginModal(user, dialog = screen.getByRole('dialog', { name
 function mockAppFetch({
   authenticatedBootstrap = false,
   ownerSkillsUnauthorized = false,
-  ownerSkills = [ownerSkillFixture()]
+  ownerSkills = [ownerSkillFixture()],
+  marketItems = [skillMarketListItemFixture()]
 } = {}) {
   let authenticated = authenticatedBootstrap;
   return vi.fn(async (input, options = {}) => {
@@ -3372,6 +3411,19 @@ function mockAppFetch({
     if (path === '/api/v1/auth/session' && method === 'DELETE') {
       authenticated = false;
       return new Response(null, { status: 204 });
+    }
+    if (path === '/api/v1/skill-market' && method === 'GET') {
+      return jsonResponse({
+        items: marketItems,
+        next_cursor: null,
+        request_id: SKILL_MARKET_IDS.request
+      });
+    }
+    if (path === `/api/v1/skill-market/${SKILL_MARKET_IDS.skill}` && method === 'GET') {
+      return jsonResponse({
+        skill: skillMarketDetailFixture(),
+        request_id: SKILL_MARKET_IDS.request
+      });
     }
     if (path === '/api/v1/skills' && method === 'GET') {
       if (ownerSkillsUnauthorized) {
