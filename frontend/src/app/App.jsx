@@ -1,5 +1,10 @@
+import { AuthSessionProvider } from '../platform/auth/authSession.js';
 import { AppRouter } from './router.jsx';
 
 export function App() {
-  return <AppRouter />;
+  return (
+    <AuthSessionProvider>
+      <AppRouter />
+    </AuthSessionProvider>
+  );
 }

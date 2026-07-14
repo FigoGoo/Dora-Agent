@@ -13,6 +13,8 @@ import {
   UserCircle
 } from 'lucide-react';
 import { BrandLogo } from '../../components/brand/BrandLogo.jsx';
+import { requestJSON, requestOptionalJSON } from '../../platform/api/apiClient.js';
+import { connectReconnectingSSE } from '../../platform/events/reconnectingSSE.js';
 import { StoryboardPanel } from './StoryboardPanel.jsx';
 import {
   A2UI_ACTIONS,
@@ -402,34 +404,27 @@ export function AigcWorkspacePage() {
       return undefined;
     }
     const isActiveStream = () => isCurrentSessionRequest(sessionID, request.generation);
-    const afterSeq = lastEventSeqRef.current;
-    const query = afterSeq > 0 ? `?after_seq=${afterSeq}` : '';
-    const source = new window.EventSource(`/api/aigc/sessions/${sessionID}/events/stream${query}`);
-    const listeners = A2UI_EVENT_NAMES.map((eventName) => {
-      const listener = (event) => {
+    const stream = connectReconnectingSSE({
+      url: `/api/aigc/sessions/${sessionID}/events/stream`,
+      eventNames: A2UI_EVENT_NAMES,
+      initialCursor: lastEventSeqRef.current,
+      onEvent: (event) => {
         if (isActiveStream()) {
-          handleA2UIEvent(parseSSEEvent(event), request.generation);
+          handleA2UIEvent(event, request.generation);
         }
-      };
-      source.addEventListener(eventName, listener);
-      return [eventName, listener];
+      },
+      onOpen: () => {
+        if (isActiveStream()) {
+          setError('');
+        }
+      },
+      onTransportError: () => {
+        if (isActiveStream()) {
+          setError('事件流已断开，正在自动重连。');
+        }
+      }
     });
-    source.onopen = () => {
-      if (isActiveStream()) {
-        setError('');
-      }
-    };
-    source.onerror = () => {
-      if (isActiveStream()) {
-        setError('事件流已断开，刷新页面可重新连接。');
-      }
-    };
-    return () => {
-      listeners.forEach(([eventName, listener]) => source.removeEventListener(eventName, listener));
-      source.onopen = null;
-      source.onerror = null;
-      source.close();
-    };
+    return () => stream.close();
   }, [currentSessionRequest, handleA2UIEvent, isCurrentSessionRequest, sessionID]);
 
   // sendMessage 发送普通用户消息；A2UI 输出只从 /events/stream 接收。
@@ -2097,7 +2092,6 @@ async function createSession() {
   const session = await requestJSON('/api/aigc/sessions', {
     method: 'POST',
     body: JSON.stringify({
-      user_id: 'demo-user',
       title: 'AIGC Demo'
     })
   });
@@ -2151,44 +2145,6 @@ function clearLocalSessionID() {
     }
   } catch {
     // Session recovery still continues when browser storage is unavailable.
-  }
-}
-
-// requestOptionalJSON 调用 JSON API，404 时返回 null 方便可选资源读取。
-async function requestOptionalJSON(path, options) {
-  try {
-    return await requestJSON(path, options);
-  } catch (err) {
-    if (err.status === 404) {
-      return null;
-    }
-    throw err;
-  }
-}
-
-// requestJSON 封装 fetch JSON 请求，并把非 2xx 响应转成带 status 的 Error。
-async function requestJSON(path, options = {}) {
-  const body = options.body;
-  const headers = body instanceof FormData ? options.headers || {} : { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  const response = await fetch(path, { ...options, headers });
-  if (!response.ok) {
-    const text = await response.text();
-    const err = new Error(text || response.statusText);
-    err.status = response.status;
-    throw err;
-  }
-  if (response.status === 204) {
-    return null;
-  }
-  return response.json();
-}
-
-// parseSSEEvent 解析 EventSource 事件，JSON 失败时转成 error-like payload。
-function parseSSEEvent(event) {
-  try {
-    return JSON.parse(event.data);
-  } catch {
-    return { event: event.type, payload: { message: event.data } };
   }
 }
 

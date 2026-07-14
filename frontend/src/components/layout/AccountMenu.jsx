@@ -1,14 +1,14 @@
-import { ChevronDown, Crown, Globe2, MessageCircle, Settings } from 'lucide-react';
+import { ChevronDown, Crown, Globe2, LogOut, MessageCircle, Settings } from 'lucide-react';
 import { accountPointGroups } from '../../features/account/accountMock.js';
 
-export function AccountMenu({ user, onOpenCredits }) {
+export function AccountMenu({ user, onOpenCredits, onLogout }) {
   return (
     <section className="account-menu account-menu--compact account-menu--slim" role="dialog" aria-modal="false" aria-labelledby="account-menu-title">
       <h2 id="account-menu-title" className="sr-only">账户与积分</h2>
       <div className="account-menu__profile">
         <div>
-          <strong>{user.name}</strong>
-          <span>{user.plan}</span>
+          <strong>{user.name || 'Dora 用户'}</strong>
+          <span>{user.plan || '基础版'}</span>
           <p>{user.email}</p>
         </div>
       </div>
@@ -50,6 +50,10 @@ export function AccountMenu({ user, onOpenCredits }) {
         <button type="button">
           <Settings aria-hidden="true" size={19} />
           <span>管理账户</span>
+        </button>
+        <button type="button" onClick={onLogout}>
+          <LogOut aria-hidden="true" size={19} />
+          <span>退出登录</span>
         </button>
       </div>
     </section>

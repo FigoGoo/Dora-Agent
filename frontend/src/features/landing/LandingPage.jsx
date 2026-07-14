@@ -21,9 +21,17 @@ import { PageHeader } from '../../components/common/PageHeader.jsx';
 import { WorkPreviewModal } from '../../components/common/WorkPreviewModal.jsx';
 import { ContextHeader } from '../../components/layout/ContextHeader.jsx';
 import { SideNav } from '../../components/layout/SideNav.jsx';
-import { getPageFromPath, getPathForPage, normalizePath, WORKSPACE_ROUTE } from '../../app/routes.js';
-import { currentUser } from '../account/accountMock.js';
+import { getPageFromPath, getPathForPage, getProjectWorkspacePath, normalizePath } from '../../app/routes.js';
+import { AUTH_SESSION_STATUS, useAuthSession } from '../../platform/auth/authSession.js';
 import { ProjectsPage } from '../projects/ProjectsPage.jsx';
+import { quickCreateProject } from '../projects/projectQuickCreate.js';
+import {
+  createQuickCreateIntent,
+  QUICK_CREATE_STATUS,
+  rejectQuickCreateIntent,
+  resolveQuickCreateIntent,
+  submitQuickCreateIntent
+} from '../projects/quickCreateIntent.js';
 import { SkillsPage } from '../skills/SkillsPage.jsx';
 import {
   agentWorkspaceMock,
@@ -59,10 +67,9 @@ function openLoginIntent(setLoginIntent, title, prompt, targetPage) {
   setLoginIntent({ title, prompt: prompt || '登录后会继续刚才的创作动作。', targetPage });
 }
 
-function openWorkspaceInNewTab() {
-  if (typeof window !== 'undefined') {
-    window.open(WORKSPACE_ROUTE, '_blank', 'noopener,noreferrer');
-  }
+function navigateToProjectWorkspace(projectID) {
+  window.history.pushState({}, '', getProjectWorkspacePath(projectID));
+  window.dispatchEvent(new Event('dora:navigate'));
 }
 
 function scrollToHomeSection(targetId) {
@@ -107,7 +114,8 @@ function createMasonryColumns(items, columnCount, cardWidth) {
   return columns.map((column) => column.works);
 }
 
-function PromptComposer({ prompt, onPromptChange, onLogin }) {
+function PromptComposer({ prompt, onPromptChange, onLogin, onCreate, quickCreateIntent }) {
+  const isSubmitting = quickCreateIntent?.status === QUICK_CREATE_STATUS.SUBMITTING;
   return (
     <section className="prompt-composer" aria-label="快速创作">
       <textarea
@@ -128,14 +136,42 @@ function PromptComposer({ prompt, onPromptChange, onLogin }) {
           </button>
         ))}
       </div>
-      <button className="prompt-composer__submit" type="button" aria-label="开始创作" onClick={() => onLogin('开始创作', prompt)}>
+      <button className="prompt-composer__submit" type="button" aria-label="开始创作" onClick={() => onCreate(prompt)} disabled={isSubmitting}>
         <ArrowUp aria-hidden="true" size={19} />
       </button>
       <div className="prompt-composer__count" aria-hidden="true">
         {prompt.length}/2000
       </div>
+      <QuickCreateFeedback intent={quickCreateIntent} onRetry={() => onCreate(prompt, { retry: true })} />
     </section>
   );
+}
+
+function QuickCreateFeedback({ intent, onRetry }) {
+  if (!intent || intent.status === QUICK_CREATE_STATUS.EDITING) {
+    return null;
+  }
+  if (intent.status === QUICK_CREATE_STATUS.SUBMITTING) {
+    return <p className="quick-create-feedback" role="status">正在创建项目…</p>;
+  }
+  if (intent.status === QUICK_CREATE_STATUS.AWAITING_AUTH) {
+    return <p className="quick-create-feedback" role="status">登录后将继续这次创建。</p>;
+  }
+  if (intent.status === QUICK_CREATE_STATUS.RETRYABLE_ERROR) {
+    return (
+      <p className="quick-create-feedback" role="alert">
+        {intent.error?.message || '创建请求暂时失败'}
+        <button type="button" onClick={onRetry}>使用原请求重试</button>
+      </p>
+    );
+  }
+  if (intent.status === QUICK_CREATE_STATUS.CONFLICT) {
+    return <p className="quick-create-feedback" role="alert">创建意图发生冲突，请修改内容后重新提交。</p>;
+  }
+  if (intent.status === QUICK_CREATE_STATUS.FAILED) {
+    return <p className="quick-create-feedback" role="alert">{intent.error?.message || '创建失败，请重新发起一次创作。'}</p>;
+  }
+  return null;
 }
 
 function HotSkills({ onUse }) {
@@ -682,15 +718,29 @@ function CreditsPage({ onIntent }) {
 }
 
 export function LandingPage() {
+  const auth = useAuthSession();
+  const {
+    csrfToken,
+    isAuthenticated: isLoggedIn,
+    login,
+    logout,
+    retryBootstrap,
+    status: authStatus,
+    user: authenticatedUser
+  } = auth;
   const [prompt, setPrompt] = useState('');
   const [activePage, setActivePage] = useState(() => (typeof window === 'undefined' ? 'home' : getPageFromPath(window.location.pathname)));
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [loginIntent, setLoginIntent] = useState(null);
   const [previewWork, setPreviewWork] = useState(null);
   const [likedWorks, setLikedWorks] = useState([]);
   const [mutedWorks, setMutedWorks] = useState([]);
   const [activeCategory, setActiveCategory] = useState('全部');
+  const [quickCreateIntent, setQuickCreateIntent] = useState(null);
+  const quickCreateIntentRef = useRef(null);
+  const quickCreateRequestRef = useRef(null);
+  const quickCreateOperationRef = useRef(0);
+  const previousAuthStatusRef = useRef(authStatus);
   const [pendingScrollTarget, setPendingScrollTarget] = useState(() => (
     typeof window !== 'undefined' && normalizePath(window.location.pathname) === '/explore'
       ? HOME_FEATURED_SECTION_ID
@@ -707,6 +757,79 @@ export function LandingPage() {
     setIsAccountMenuOpen(false);
   }
 
+  function commitQuickCreateIntent(intent) {
+    quickCreateIntentRef.current = intent;
+    setQuickCreateIntent(intent);
+  }
+
+  function cancelQuickCreateRequest() {
+    quickCreateOperationRef.current += 1;
+    quickCreateRequestRef.current?.controller.abort();
+    quickCreateRequestRef.current = null;
+  }
+
+  function submitStableQuickCreate(intent, activeCSRFToken = csrfToken) {
+    if (quickCreateRequestRef.current) {
+      return quickCreateRequestRef.current.promise;
+    }
+    const submitted = submitQuickCreateIntent(intent);
+    commitQuickCreateIntent(submitted);
+    const controller = new AbortController();
+    const operation = ++quickCreateOperationRef.current;
+    const promise = (async () => {
+      try {
+        const payload = await quickCreateProject({
+          prompt: submitted.prompt,
+          idempotencyKey: submitted.idempotencyKey,
+          csrfToken: activeCSRFToken,
+          signal: controller.signal
+        });
+        if (operation !== quickCreateOperationRef.current || controller.signal.aborted) {
+          return null;
+        }
+        const resolved = resolveQuickCreateIntent(submitted, payload);
+        commitQuickCreateIntent(resolved);
+        navigateToProjectWorkspace(resolved.projectID);
+        return resolved;
+      } catch (error) {
+        if (operation !== quickCreateOperationRef.current || controller.signal.aborted) {
+          return null;
+        }
+        const rejected = rejectQuickCreateIntent(submitted, error);
+        commitQuickCreateIntent(rejected);
+        throw error;
+      } finally {
+        if (operation === quickCreateOperationRef.current) {
+          quickCreateRequestRef.current = null;
+        }
+      }
+    })();
+    quickCreateRequestRef.current = { controller, operation, promise };
+    return promise;
+  }
+
+  function requestQuickCreate(promptValue, { retry = false } = {}) {
+    let intent = quickCreateIntentRef.current;
+    if (!retry || !intent) {
+      if (intent && (
+        intent.status === QUICK_CREATE_STATUS.AWAITING_AUTH
+        || intent.status === QUICK_CREATE_STATUS.SUBMITTING
+        || intent.status === QUICK_CREATE_STATUS.PROVISIONING
+      )) {
+        return;
+      }
+      intent = createQuickCreateIntent(promptValue);
+      commitQuickCreateIntent(intent);
+    }
+    if (!isLoggedIn) {
+      intent = { ...intent, status: QUICK_CREATE_STATUS.AWAITING_AUTH };
+      commitQuickCreateIntent(intent);
+      openLoginIntent(setLoginIntent, '开始创作', intent.prompt || '创建空工作台', 'quick_create');
+      return;
+    }
+    submitStableQuickCreate(intent).catch(() => {});
+  }
+
   function navigateToPage(page, options = {}) {
     setActivePage(page);
     setIsAccountMenuOpen(false);
@@ -718,26 +841,34 @@ export function LandingPage() {
 
       if (window.location.pathname !== path) {
         window.history.pushState({}, '', path);
+        window.dispatchEvent(new Event('dora:navigate'));
       }
     }
   }
 
-  function handleLoginComplete() {
-    setIsLoggedIn(true);
-
-    if (loginIntent?.targetPage === 'workspace') {
-      openWorkspaceInNewTab();
-    } else if (loginIntent?.targetPage) {
-      navigateToPage(loginIntent.targetPage);
-    }
-
+  async function handleLoginComplete(credentials) {
+    const nextSession = await login(credentials);
+    const targetPage = loginIntent?.targetPage;
     setLoginIntent(null);
     setIsAccountMenuOpen(false);
+
+    if (targetPage === 'quick_create') {
+      const intent = quickCreateIntentRef.current;
+      if (intent) {
+        submitStableQuickCreate(intent, nextSession?.csrfToken).catch(() => {});
+      }
+    } else if (targetPage === 'workspace') {
+      const intent = createQuickCreateIntent(prompt);
+      commitQuickCreateIntent(intent);
+      submitStableQuickCreate(intent, nextSession?.csrfToken).catch(() => {});
+    } else if (targetPage) {
+      navigateToPage(targetPage);
+    }
   }
 
   function handleNavigate(page, targetId) {
     if (page === 'workspace') {
-      openWorkspaceInNewTab();
+      requestQuickCreate(prompt);
       setIsAccountMenuOpen(false);
       return;
     }
@@ -747,6 +878,18 @@ export function LandingPage() {
 
   function openCreditsPage() {
     navigateToPage('credits');
+  }
+
+  async function handleLogout() {
+    setIsAccountMenuOpen(false);
+    try {
+      await logout();
+    } catch {
+      // Provider 已将基础设施错误映射为 unavailable；页面只负责避免事件回调产生未处理拒绝。
+    } finally {
+      cancelQuickCreateRequest();
+      commitQuickCreateIntent(null);
+    }
   }
 
   function handleWorkLike(work) {
@@ -785,6 +928,18 @@ export function LandingPage() {
       window.removeEventListener('popstate', syncPageFromPath);
     };
   }, []);
+
+  useEffect(() => {
+    const previous = previousAuthStatusRef.current;
+    previousAuthStatusRef.current = authStatus;
+    if (previous === AUTH_SESSION_STATUS.AUTHENTICATED && authStatus !== AUTH_SESSION_STATUS.AUTHENTICATED) {
+      cancelQuickCreateRequest();
+      commitQuickCreateIntent(null);
+      setIsAccountMenuOpen(false);
+    }
+  }, [authStatus]);
+
+  useEffect(() => () => cancelQuickCreateRequest(), []);
 
   useEffect(() => {
     if (typeof window === 'undefined' || normalizePath(window.location.pathname) !== '/explore') {
@@ -839,14 +994,22 @@ export function LandingPage() {
         onToggleAccountMenu={() => setIsAccountMenuOpen((value) => !value)}
       />
       <main className={mainClassName}>
+        {authStatus === AUTH_SESSION_STATUS.UNAVAILABLE ? (
+          <section className="auth-service-banner" role="alert">
+            <span>认证服务暂不可用，当前不能登录或访问受保护内容。</span>
+            <button type="button" onClick={retryBootstrap}>重试</button>
+          </section>
+        ) : null}
         <ContextHeader
           activePage={activePage}
           isLoggedIn={isLoggedIn}
-          user={currentUser}
+          user={authenticatedUser || {}}
           isAccountMenuOpen={isAccountMenuOpen}
           onLogin={requestLogin}
           onToggleAccountMenu={() => setIsAccountMenuOpen((value) => !value)}
           onOpenCredits={openCreditsPage}
+          onLogout={handleLogout}
+          authStatus={authStatus}
         />
         {activePage === 'home' ? (
           <>
@@ -859,6 +1022,8 @@ export function LandingPage() {
                     prompt={prompt}
                     onPromptChange={setPrompt}
                     onLogin={requestLogin}
+                    onCreate={requestQuickCreate}
+                    quickCreateIntent={quickCreateIntent}
                   />
                 </div>
                 <HotSkills onUse={(skill) => requestLogin(skill.title, skill.title)} />
@@ -883,7 +1048,7 @@ export function LandingPage() {
         {activePage === 'works' ? <WorksPage onIntent={requestLogin} /> : null}
         {activePage === 'credits' ? <CreditsPage onIntent={requestLogin} /> : null}
       </main>
-      <LoginModal intent={loginIntent} onClose={() => setLoginIntent(null)} onComplete={handleLoginComplete} />
+      <LoginModal intent={loginIntent} onClose={() => setLoginIntent(null)} onSubmit={handleLoginComplete} />
       <WorkPreviewModal work={previewWork} onClose={() => setPreviewWork(null)} onCreate={handleWorkCreate} />
     </div>
   );

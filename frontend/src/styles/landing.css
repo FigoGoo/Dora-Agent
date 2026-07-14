@@ -2875,6 +2875,34 @@
   padding: 40px 34px;
 }
 
+.login-modal__form label {
+  display: grid;
+  gap: 7px;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.login-modal__form input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 11px;
+  outline: none;
+  background: rgba(255, 255, 255, 0.055);
+  color: #fff;
+}
+
+.login-modal__form input:focus {
+  border-color: var(--dora-mint);
+  box-shadow: 0 0 0 3px rgba(53, 224, 186, 0.12);
+}
+
+.login-modal__form .login-modal__error {
+  color: #ff9b91;
+}
+
 .login-modal h2 {
   margin: 0;
   font-size: 24px;
@@ -2929,6 +2957,69 @@
 
 .subtle-button:hover {
   color: #fff;
+}
+
+.auth-service-banner,
+.quick-create-feedback,
+.route-state,
+.project-workspace-gate {
+  color: #fff;
+}
+
+.auth-service-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 16px 24px 0;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 111, 97, 0.35);
+  border-radius: 12px;
+  background: rgba(255, 111, 97, 0.1);
+}
+
+.quick-create-feedback {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+}
+
+.route-state,
+.project-workspace-gate {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  min-height: 100vh;
+  gap: 14px;
+  padding: 32px;
+  background: var(--dora-bg, #05070a);
+  text-align: center;
+}
+
+.route-state h1,
+.route-state p,
+.project-workspace-gate h1,
+.project-workspace-gate p {
+  margin: 0;
+}
+
+.project-workspace-gate dl {
+  display: grid;
+  gap: 8px;
+  min-width: min(480px, 100%);
+  padding: 18px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.055);
+  text-align: left;
+}
+
+.project-workspace-gate dl div {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 12px;
 }
 
 .preview-modal {

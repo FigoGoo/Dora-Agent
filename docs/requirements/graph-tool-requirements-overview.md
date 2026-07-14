@@ -274,18 +274,18 @@ Worker 完成后只发布持久化 `generation.batch.*` 终态事件；Agent Inb
 
 ## 11. 当前设计与目标需求差距
 
-现有 AIGC 设计中的五个 Capability Graph Tool 不能直接视为本文需求已经实现，至少存在以下差距：
+当前 `master` 尚无可运行的服务端实现。下表“历史设计状态”专指 `main` 分支及现有 AIGC 详细设计记录的迁移起点，不能视为当前分支能力，更不能直接视为本文需求已经实现。
 
-| 目标需求 | 当前设计状态 | 必须补齐 |
+| 目标需求 | 历史设计状态 | 必须补齐 |
 | --- | --- | --- |
-| 六个用户可见工具 | 当前 Registry 固定五个 Tool | 新增独立 `write_prompts`，Registry、权限、状态和计费纳入同一治理。 |
-| 用户工具箱和显式调用 | 当前重点是 Agent 内部隐式选择 | 增加目录、详情、结构化输入、`requested_tool_key`、运行与结果入口。 |
-| 素材真实内容分析 | 当前主要分析文件名、MIME、URL 和可信 metadata | 接入图片、PDF、音频、视频内容抽取，并提供证据引用与部分失败。 |
-| 提示词写法独立可用 | 当前 Prompt 生成隐藏在 `plan_storyboard`/`generate_media` 内部 | 拆出独立 Graph Tool，同时保留确定性 Prompt 编辑命令边界。 |
-| 媒体生成独立模式 | 当前主要推进 Active Storyboard | 支持无 Storyboard 的直接生成，结果只进入 Project/资产中心。 |
-| 生产级视频剪辑 | 当前 Assembly 可以仅产生 manifest 或占位结果 | 实现版本化时间线、预览和真实渲染/转码交付。 |
+| 六个用户可见工具 | 历史 Runner Registry 固定五个 Tool | 新增独立 `write_prompts`，Registry、权限、状态和计费纳入同一治理。 |
+| 用户工具箱和显式调用 | 历史实现重点是 Agent 内部隐式选择 | 增加目录、详情、结构化输入、`requested_tool_key`、运行与结果入口。 |
+| 素材真实内容分析 | 历史实现主要分析文件名、MIME、URL 和可信 metadata | 接入图片、PDF、音频、视频内容抽取，并提供证据引用与部分失败。 |
+| 提示词写法独立可用 | 历史 Prompt 生成隐藏在 `plan_storyboard`/`generate_media` 内部 | 拆出独立 Graph Tool，同时保留确定性 Prompt 编辑命令边界。 |
+| 媒体生成独立模式 | 历史实现主要推进 Active Storyboard | 支持无 Storyboard 的直接生成，结果只进入 Project/资产中心。 |
+| 生产级视频剪辑 | 历史 Assembly 可以仅产生 manifest 或占位结果 | 实现版本化时间线、预览和真实渲染/转码交付。 |
 
-详细设计和实现验收不得以“已有五个 Tool 名称相近”替代上述差距关闭证明。
+详细设计和实现验收不得以“历史分支已有五个 Tool 名称相近”替代上述差距关闭证明。
 
 ## 12. 详细设计阶段门禁
 
@@ -301,7 +301,7 @@ Worker 完成后只发布持久化 `generation.batch.*` 终态事件；Agent Inb
 - 单元、契约、故障注入、恢复、计费和用户验收用例。
 - 明确审核结论和与本文需求 ID 的追踪关系。
 
-这些设计内容按用户决定延后到详细设计阶段，但缺少任一独立设计文档时，对应 Graph Tool 不得开始实现或宣称生产可用。
+六份独立设计草案及共同契约目录已收录在 [Graph Tool 详细设计索引](../design/agent/graphtool/README.md)。当前均为 Draft / 待评审；缺少设计或评审未通过时，对应 Graph Tool 都不得开始实现或宣称生产可用。
 
 ## 13. 待确认参数
 

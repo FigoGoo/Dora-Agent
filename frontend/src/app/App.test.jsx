@@ -1,7 +1,12 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { projectBootstrapFixture, WORKSPACE_IDS, workspaceSnapshotFixture } from '../test/workspaceFixtures.js';
 import { App } from './App.jsx';
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', mockAppFetch());
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -190,25 +195,28 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByRole('button', { name: '148积分' })).toBeInTheDocument();
   });
 
-  it('renders the projects page from a direct route', () => {
+  it('does not render the projects page before a direct-route auth bootstrap succeeds', async () => {
     window.history.pushState({}, '', '/projects');
+    vi.stubGlobal('fetch', mockAppFetch({ authenticatedBootstrap: true }));
 
     render(<App />);
 
-    const navigation = screen.getByRole('complementary', { name: 'DORAIGC 导航' });
-    expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '正在确认登录状态' })).toBeInTheDocument();
+    const navigation = await screen.findByRole('complementary', { name: 'DORAIGC 导航' });
+    expect(await screen.findByRole('heading', { name: '项目' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建项目' })).toBeInTheDocument();
     expect(within(navigation).getByRole('button', { name: '项目' })).toHaveClass('is-active');
     expect(screen.queryByRole('heading', { name: 'Dora Agent - 人人都是艺术大师' })).not.toBeInTheDocument();
   });
 
-  it('renders the Skill page from the direct route', () => {
+  it('renders the Skill page from the direct route after auth bootstrap', async () => {
     window.history.pushState({}, '', '/skill');
+    vi.stubGlobal('fetch', mockAppFetch({ authenticatedBootstrap: true }));
 
     render(<App />);
 
-    const navigation = screen.getByRole('complementary', { name: 'DORAIGC 导航' });
-    expect(screen.getByRole('heading', { name: 'Skill' })).toBeInTheDocument();
+    const navigation = await screen.findByRole('complementary', { name: 'DORAIGC 导航' });
+    expect(await screen.findByRole('heading', { name: 'Skill' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '我的', selected: true })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建Skill' })).toBeInTheDocument();
     expect(screen.getAllByTestId('skill-card')).toHaveLength(10);
@@ -236,8 +244,7 @@ describe('DORAIGC static client pages', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+    await loginFromHeader(user);
 
     await user.click(screen.getByRole('button', { name: '项目' }));
     expect(window.location.pathname).toBe('/projects');
@@ -257,31 +264,25 @@ describe('DORAIGC static client pages', () => {
 
   it('continues to a private page after login from navigation', async () => {
     const user = userEvent.setup();
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '快速创作' }));
+    await user.click(await screen.findByRole('button', { name: '快速创作' }));
 
     const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
     expect(within(dialog).getByText('进入快速创作')).toBeInTheDocument();
 
-    await user.click(within(dialog).getByRole('button', { name: '登录并继续' }));
+    await submitLoginModal(user, dialog);
 
-    expect(openSpy).toHaveBeenCalledWith('/workspace', '_blank', 'noopener,noreferrer');
-    expect(screen.queryByRole('heading', { name: 'Seedance 2.0 创作工作台' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '用户菜单' })).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe(`/projects/${WORKSPACE_IDS.project}/workspace`));
+    expect(await screen.findByText('工作台已就绪')).toBeInTheDocument();
+    expect(screen.getByText(WORKSPACE_IDS.session)).toBeInTheDocument();
   });
 
-  it('navigates through workspace, projects, and assets mock pages after login', async () => {
+  it('navigates through projects and assets pages after login', async () => {
     const user = userEvent.setup();
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
-
-    await user.click(screen.getByRole('button', { name: '快速创作' }));
-    expect(openSpy).toHaveBeenCalledWith('/workspace', '_blank', 'noopener,noreferrer');
+    await loginFromHeader(user);
 
     await user.click(screen.getByRole('button', { name: '项目' }));
     expect(window.location.pathname).toBe('/projects');
@@ -498,15 +499,15 @@ describe('DORAIGC static client pages', () => {
     act(() => {
       DefaultMockEventSource.instances[1].onerror();
     });
-    expect(await screen.findByRole('alert')).toHaveTextContent('事件流已断开，刷新页面可重新连接。');
+    expect(await screen.findByRole('alert')).toHaveTextContent('事件流已断开，正在自动重连。');
 
     act(() => {
       staleOpen();
     });
-    expect(screen.getByRole('alert')).toHaveTextContent('事件流已断开，刷新页面可重新连接。');
+    expect(screen.getByRole('alert')).toHaveTextContent('事件流已断开，正在自动重连。');
   });
 
-  it('subscribes to the ready event and clears stale stream errors when reopened', async () => {
+  it('subscribes to the ready event and clears transport errors after automatic reconnection', async () => {
     window.history.pushState({}, '', '/workspace');
     const fetchMock = mockAigcFetch({ sessionIDs: ['s1'] });
     class MockEventSource {
@@ -534,16 +535,22 @@ describe('DORAIGC static client pages', () => {
     render(<App />);
 
     expect(await screen.findByText('Session s1')).toBeInTheDocument();
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
     const source = MockEventSource.instances[0];
     expect(source.listeners).toHaveProperty('a2ui.ready');
 
     await act(async () => {
       source.onerror();
     });
-    expect(await screen.findByRole('alert')).toHaveTextContent('事件流已断开，刷新页面可重新连接。');
+    expect(await screen.findByRole('alert')).toHaveTextContent('事件流已断开，正在自动重连。');
+    expect(source.close).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+    const reconnectedSource = MockEventSource.instances[1];
+    expect(reconnectedSource.listeners).toHaveProperty('a2ui.ready');
 
     await act(async () => {
-      source.onopen();
+      reconnectedSource.onopen();
     });
     await waitFor(() => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -571,7 +578,7 @@ describe('DORAIGC static client pages', () => {
     });
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Agent 输出协议错误');
-    expect(screen.queryByText('事件流已断开，刷新页面可重新连接。')).not.toBeInTheDocument();
+    expect(screen.queryByText('事件流已断开，正在自动重连。')).not.toBeInTheDocument();
   });
 
   it('resumes an agent interrupt through the unified message endpoint', async () => {
@@ -3065,8 +3072,7 @@ describe('DORAIGC static client pages', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+    await loginFromHeader(user);
 
     await user.click(screen.getByRole('button', { name: 'Skill' }));
     expect(window.location.pathname).toBe('/skill');
@@ -3083,7 +3089,7 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByText('MV 分镜生成')).toBeInTheDocument();
     expect(within(screen.getByRole('complementary', { name: 'DORAIGC 导航' })).getByRole('button', { name: '精选作品' })).toHaveClass('is-active');
 
-    await user.click(screen.getByRole('button', { name: '310积分' }));
+    await user.click(screen.getByRole('button', { name: '—积分' }));
     expect(screen.getByRole('heading', { name: '积分中心' })).toBeInTheDocument();
     expect(screen.getByText('148 积分')).toBeInTheDocument();
     expect(screen.getByText('DORA-2026-CREATOR')).toBeInTheDocument();
@@ -3093,8 +3099,7 @@ describe('DORAIGC static client pages', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+    await loginFromHeader(user);
 
     await user.click(screen.getByRole('button', { name: '项目' }));
     await user.click(screen.getByRole('button', { name: '继续创作 Seedance 2.0 视频制作' }));
@@ -3108,8 +3113,7 @@ describe('DORAIGC static client pages', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+    await loginFromHeader(user);
     await user.click(screen.getByRole('button', { name: '用户菜单' }));
 
     const menu = screen.getByRole('dialog', { name: '账户与积分' });
@@ -3117,7 +3121,7 @@ describe('DORAIGC static client pages', () => {
     expect(menu).toHaveClass('account-menu--slim');
     expect(within(menu).getByText('User')).toBeInTheDocument();
     expect(within(menu).getByText('zhuifei2099@gmail.com')).toBeInTheDocument();
-    expect(within(menu).getByText('Free')).toBeInTheDocument();
+    expect(within(menu).getByText('基础版')).toBeInTheDocument();
     expect(within(menu).getByRole('button', { name: '开通会员' })).toHaveClass('membership-button--theme');
     expect(within(menu).getByText('会员积分')).toBeInTheDocument();
     expect(within(menu).getByText('每周积分')).toBeInTheDocument();
@@ -3126,14 +3130,14 @@ describe('DORAIGC static client pages', () => {
     expect(within(menu).getByText('语言')).toBeInTheDocument();
     expect(within(menu).getByText('反馈')).toBeInTheDocument();
     expect(within(menu).getByText('管理账户')).toBeInTheDocument();
+    expect(within(menu).getByRole('button', { name: '退出登录' })).toBeInTheDocument();
   });
 
   it('uses user-facing copy and the same card system on private pages', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+    await loginFromHeader(user);
 
     await user.click(screen.getByRole('button', { name: '项目' }));
     expect(screen.getAllByTestId('project-card')).toHaveLength(11);
@@ -3149,6 +3153,73 @@ describe('DORAIGC static client pages', () => {
     expect(screen.queryByText(/静态|mock|系统|API|PRD/)).not.toBeInTheDocument();
   });
 });
+
+async function loginFromHeader(user) {
+  await user.click(await screen.findByRole('button', { name: '登录' }));
+  const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
+  await submitLoginModal(user, dialog);
+  await screen.findByRole('button', { name: '用户菜单' });
+}
+
+async function submitLoginModal(user, dialog = screen.getByRole('dialog', { name: '登录后继续创作' })) {
+  await user.type(within(dialog).getByRole('textbox', { name: '邮箱' }), 'user@example.com');
+  await user.type(within(dialog).getByLabelText('密码'), 'test-password');
+  await user.click(within(dialog).getByRole('button', { name: '登录并继续' }));
+}
+
+function mockAppFetch({ authenticatedBootstrap = false } = {}) {
+  let authenticated = authenticatedBootstrap;
+  return vi.fn(async (input, options = {}) => {
+    const path = new URL(typeof input === 'string' ? input : input.url, 'http://localhost').pathname;
+    const method = options.method || 'GET';
+    if (path === '/api/v1/auth/session' && method === 'GET') {
+      return authenticated
+        ? jsonResponse(mockAuthPayload())
+        : jsonResponse({ error: { code: 'UNAUTHENTICATED', message: '未登录', retryable: false } }, 401);
+    }
+    if (path === '/api/v1/auth/session' && method === 'POST') {
+      authenticated = true;
+      return jsonResponse(mockAuthPayload());
+    }
+    if (path === '/api/v1/auth/session' && method === 'DELETE') {
+      authenticated = false;
+      return new Response(null, { status: 204 });
+    }
+    if (path === '/api/v1/projects:quick-create' && method === 'POST') {
+      return jsonResponse({
+        project_id: WORKSPACE_IDS.project,
+        session_id: null,
+        input_id: null,
+        creation_status: 'provisioning',
+        workspace_ref: `/projects/${WORKSPACE_IDS.project}/workspace`,
+        request_id: WORKSPACE_IDS.request
+      }, 201);
+    }
+    if (path === `/api/v1/projects/${WORKSPACE_IDS.project}/bootstrap` && method === 'GET') {
+      return jsonResponse(projectBootstrapFixture());
+    }
+    if (path === `/api/v1/agent/sessions/${WORKSPACE_IDS.session}/workspace` && method === 'GET') {
+      return jsonResponse(workspaceSnapshotFixture());
+    }
+    return jsonResponse({ error: { code: 'NOT_FOUND', message: 'not found', retryable: false } }, 404);
+  });
+}
+
+function mockAuthPayload() {
+  return {
+    status: 'authenticated',
+    principal: {
+      id: 'user-1',
+      display_name: 'User',
+      email: 'zhuifei2099@gmail.com',
+      account_status: 'active',
+      roles: ['user'],
+      capabilities: ['project.read']
+    },
+    csrf_token: 'csrf-1',
+    session_expires_at: '2026-07-15T08:00:00Z'
+  };
+}
 
 function mockLocalStorage() {
   const items = new Map();
