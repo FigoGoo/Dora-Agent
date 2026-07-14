@@ -357,7 +357,7 @@ Down Migration 只在不存在 Enqueue Header/alias/Result/Turn/Run/新状态时
 - `PG-U02`：Commit 边界断链后 Query completed 时，同命令 replay 返回原结果且所有计数零增量；Query not_found 时，同命令 retry 只创建一次且断链事务没有部分事实；
 - `PG-U03`：alias 响应丢失可 Query；错 scope/digest/type 不泄漏结果。
 
-Canonical 入口复用 `scripts/check-database-contracts.sh agent`，新增真实 PG Test 后纳入 PostgreSQL 16.4 CI；canonical required-mode 必须验证目标 Test 确实执行且无 skip，并发门禁执行 `-race -count=3`。无 DSN 的普通 `go test ./...` 可沿用显式环境门禁 skip，不能把本机缺数据库误报为通过证据。
+Canonical 入口复用 `scripts/check-database-contracts.sh agent`。当前三 Module required-mode 已解析 `go test -json`，逐项要求目标 Test 出现 top-level `pass` 且任一 Test/Subtest 均无 `skip`；目标重命名、`no tests to run` 和普通环境门禁 Skip 都会失败关闭。第 8 节新增真实 PG Test 后仍须纳入 PostgreSQL 16.4 CI，并发门禁执行 `-race -count=3`；当前尚无这些用例或真实 DSN Evidence。无 DSN 的普通 `go test ./...` 可沿用显式环境门禁 skip，不能把本机缺数据库误报为通过证据。
 
 ## 9. Evidence 与冒烟边界
 
