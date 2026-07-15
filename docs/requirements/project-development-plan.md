@@ -4,7 +4,7 @@
 >
 > 更新日期：2026-07-16
 >
-> 当前实现事实基线（不含本计划文档提交）：`codex/w2-r04-consumption-audit@59b8b2b5`
+> 当前实现事实基线（不含本计划文档提交）：`codex/w2-r04-consumption-audit@8ea78c2b`
 
 ## 1. 文档职责与冲突处理
 
