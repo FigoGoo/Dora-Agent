@@ -4,7 +4,7 @@
 >
 > 审计日期：2026-07-16
 >
-> 事实基线：`codex/w2-r04-consumption-audit@63999145`
+> 事实基线：`codex/w2-r04-consumption-audit@8d9cb205`
 >
 > 结论边界：本文只把分散的 ADR、Review Freeze、Billing、Approval/Consumption 与 Structured Smoke 未决项整理成可逐项签核的决策包。本文不是 Owner 批准、不是机器 Review Freeze、不是 trust root，也不授权生产 Go、SQL Migration、IDL、生成代码、Graph、Runner、Billing、Approval、A2UI 或 Harness 实现。
 
@@ -53,6 +53,10 @@ a98059cfa4971f0123565d63ad56ab4d202ad354a0971bbecf99a0711bee616e
 R02 的分散待决项已由 [`w2-r02-owner-decision-matrix-v1.md`](../agent/w2-r02-owner-decision-matrix-v1.md) 去重为 `R02-D01`～`R02-D19`，并映射既有 `PG-D01`～`PG-D08`、`TC-P01`～`TC-P10`、Owner 候选和最低关闭证据。该矩阵只关闭稳定引用缺口；全部决定仍为 `awaiting_owner_decision`，不构成 aggregate candidate、Owner approval 或生产解锁。
 
 [`DR-W2-R02-v1.json`](../agent/approvals/w2-r02-owner-decision-requests/DR-W2-R02-v1.json) 将 19 项推荐候选固定为严格待决请求，原始字节 SHA-256 为 `4b6356f9d6b4da7adf348c2207135e2cebd8c972349f84c67ade274f6d274fe9`。它只允许 `accept_recommendation/reject_keep_blocked` 两种请求选项，Owner role 集显式标记为 provisional，并固定 `implementation_unlocked=false`；Schema 不包含 selected option、approval、Review、actor 或 commit 自报字段。该请求不是 approval summary、Owner authority request、aggregate manifest 或 Formal Freeze 输入。
+
+R03 的分散 Approval、Decision、Continuation、Consumption、child Receipt 与双向 Query 待决项已由 [`w2-r03-owner-decision-matrix-v1.md`](../agent/w2-r03-owner-decision-matrix-v1.md) 去重为 `R03-D01`～`R03-D14`。该矩阵显式区分 Decision key、Continuation SourceID、child ToolReceipt key、Agent-local Consumption key、Business `tr:` command key 与领域 backstop，也区分 Business→Agent Consumption Authority Query 和 Agent→Business CreationSpec Decision Query；全部决定仍为 `awaiting_owner_decision`。
+
+R04 的 headless scope、Intent、Candidate、Billing、Graph、Activation、Business RPC、child Receipt 与发布待决项已由 [`w2-r04-owner-decision-matrix-v1.md`](../agent/w2-r04-owner-decision-matrix-v1.md) 去重为 `R04-D01`～`R04-D20`。该矩阵把 111 条 Activation Consumption 向量继续限定为 partial candidate，并将 headless R04 与 R08/A2UI/C1/R09 分开；全部决定仍为 `awaiting_owner_decision`。
 
 ### 2.2 ADR-009 / Structured Smoke
 
@@ -226,24 +230,24 @@ ADR-011 批准前还必须关闭 `R01-D05`：`approval_consumption` 的 Receipt/
 
 ### 5.1 P4 ballot 机械依赖映射
 
-本表只建立追踪关系，不代表对应 ADR、Gate 或 stable decision 已被接受。`R03/R04 待建` 表示该 Gate 尚无可替代 Owner 结论的稳定 decision record。
+本表只建立追踪关系，不代表对应 ADR、Gate 或 stable decision 已被接受。R02/R03/R04 的 stable decision record 只关闭引用漂移，不替代 Owner 结论、aggregate manifest 或正式批准。
 
 | P4 缺口 | ADR 依赖 | Gate | Stable decision / open item | 进入 Owner review 前置 |
 | --- | --- | --- | --- | --- |
-| `P4-C01` | ADR-001 | R00/R01/R04 | `R01-D02`、`BILL-OPEN-012` | 冻结普通 Query 与 terminal no-effect authority 的唯一 resolve 规则 |
+| `P4-C01` | ADR-001 | R00/R01/R04 | `R01-D02`、`BILL-OPEN-012`、`R04-D10/D13/D14/D19` | 冻结普通 Query 与 terminal no-effect authority 的唯一 resolve 规则 |
 | `P4-C02` | ADR-001 | R01/R02 | `R01-D05`、`R02-D09` | 冻结 root/segment/slot/observation identity、Receipt scope 与原子 terminal 拓扑 |
 | `P4-C03` | ADR-002 | R01/R02 | `R01-D01`、`R02-D19` | 提供 old→new 摘要字段表、domain/version 与 golden vectors |
 | `P4-C04` | ADR-002 | R01 | `R01-D01` | 在 exact-version 与同主版本兼容中选择唯一 v1 口径 |
-| `P4-C05` | R08 contract ballot | R01/R08 | `R01-D03` | 冻结 Approval 因果引用与 Card 展示生命周期字段责任表 |
+| `P4-C05` | R08 contract ballot | R01/R03/R04/R08 | `R01-D03`、`R03-D13`、`R04-D01/D20` | 冻结 Approval 因果引用、headless exclusion 与 Card 展示生命周期字段责任表 |
 | `P4-C06` | Tool Registry ballot | R01 | `R01-D04` | 选择“机制+六 key”或版本化缩小 Gate |
 | `P4-C07` | ADR-001/002/008/010 | R02 | `R02-D01`～`D19`、`PG-D01`～`D08`、`TC-P01`～`P10` | 全部语义 disposition、upgrade fixture 口径、build/trust closure 后才生成 aggregate |
 | `P4-C08` | ADR-008/010 | R02 | `R02-D19` | 冻结 A1 carve-out/追加 Gate 与 Feature lifecycle 要求 |
 | `P4-C09` | R02 A1 scope | R02 | `R02-D03`、`R02-D19` | 冻结 Approval/Batch corpus 保留但 production unavailable |
 | `P4-C10` | R02 stable reference | R02 | `R02-D01`～`D19` | 稳定 ID 已建立；逐项 Owner ballot、最终 role exact-set 仍待完成 |
-| `P4-C11` | ADR-005 | R00 | `BILL-OPEN-001`～`012` | 先补 `BILL-OPEN-005` Owner，再裁决计费/Provider/时钟/Registry/Test 责任 |
+| `P4-C11` | ADR-005 | R00/R04 | `BILL-OPEN-001`～`012`、`R04-D08`～`D15` | 先补 `BILL-OPEN-005` Owner，再裁决计费/Provider/时钟/Registry/Test 责任 |
 | `P4-C12` | ADR-009 | W2-S0 | 无；七方独立轮次 | Test Owner 冻结 refresh exact-set，版本化 baseline 后七方重审 |
-| `P4-C13` | ADR-003 | R01/R03/R04 | `R01-D05`；R03/R04 待建 | 冻结唯一 `tr:` identity、version 语义、Business backstop 与 child Receipt |
-| `P4-C14` | ADR-004 | R03/R04 | `R01-D02`、`R02-D18`；R03/R04 待建 | 冻结认证 Query 或新版本签名方案，以及 RPC/权限/审计 exact-set |
+| `P4-C13` | ADR-003 | R01/R03/R04 | `R01-D05`、`R03-D04`～`R03-D06`、`R03-D08`、`R03-D11`、`R04-D16`、`R04-D18`、`R04-D19` | 冻结唯一 `tr:` identity、version 语义、Business backstop 与 child Receipt |
+| `P4-C14` | ADR-004 | R03/R04 | `R01-D02`、`R02-D18`、`R03-D03`、`R03-D10`、`R03-D11`、`R04-D17`～`R04-D19` | 冻结 v1 认证 Query 或新版本签名方案，以及双向 RPC/权限/审计 exact-set |
 
 ## 6. 最短批准与实施顺序
 
@@ -323,16 +327,18 @@ candidate_unactivated
 - [ ] Product / Finance / Security / Business / Agent：接受 `preauthorized`，或明确转入完整 `full_approval` 设计；
 - [ ] Agent / Operations：裁决 ADR-008/010 对 A1 的 carve-out；
 - [ ] Agent / Business / Product / Finance / Security / Test：接受或修订 ADR-011 Activation mapping；
-- [ ] R01/R02/R03/R04 语义 Owner：关闭 `P4-C01`～`P4-C14` 并推导最终 role exact-set；R02 按 `R02-D01`～`R02-D19` 逐项 ballot，不得笼统批准。
+- [ ] R01/R02/R03/R04 语义 Owner：关闭 `P4-C01`～`P4-C14` 并推导最终 role exact-set；分别按 `R02-D01`～`D19`、`R03-D01`～`D14`、`R04-D01`～`D20` 逐项 ballot，不得笼统批准。
 
 ### 9.2 第二轮：可验证候选
 
 - [ ] 为 ADR-001/002 增加生产模型 mapping、摘要迁移表与 golden vectors；
 - [x] 为 R02 待决项分配 `R02-D01`～`R02-D19`，映射 Owner 候选、最低关闭证据和源位置；
 - [x] 为 R02 建立严格的 `awaiting_owner_decision` 请求及 validator，禁止选择/批准/Review 身份字段和实现解锁；
+- [x] 为 R03 待决项分配 `R03-D01`～`R03-D14`，区分六类 identity、双向 Query、child/failed-after 与 Owner exact-set；
+- [x] 为 R04 待决项分配 `R04-D01`～`R04-D20`，映射 PLAN/Billing/P4、headless/R08 边界与完整 Gate 缺口；
 - [ ] 取得 R02 全部稳定决定及既有 `PG-Dxx/TC-Pxx` 的结构化结论，补齐 upgrade exact-set 并生成 aggregate manifest；
 - [ ] 关闭 `BILL-OPEN-001`～`012`，生成 R00 canonical manifest 和 exact vectors；
-- [ ] 冻结 R01/R03/R04 slot/ordinal/owner/query mapping 与 child exact-set；
+- [ ] 取得 R03/R04 全部 stable decision 的结构化结论，冻结 R01/R03/R04 slot/ordinal/owner/query mapping 与 child exact-set；
 - [ ] 激活 GOV-D01～D06 对应的 base-owned trust root、build closure 和真实 PR authority。
 
 ### 9.3 ADR-009 独立轮次
@@ -354,4 +360,5 @@ candidate_unactivated
 - Activation mapping 与 production projection Owner 已形成可评审候选，但尚未冻结；
 - R02 已有稳定 Owner 决策矩阵，但 19 项决定、既有 PG/TC 决定、aggregate manifest 与 Owner approval 均未关闭；
 - R02 待决请求已机械绑定矩阵、当前 Gate manifest 和 validator；它没有批准能力，不能推进 `expansion_frozen`；
+- R03/R04 已分别建立 14 项和 20 项稳定 Owner 决策矩阵，但语义、child/full-gate manifest、最终 Owner exact-set 与批准均未关闭；
 - 当前唯一允许继续的工作是 Owner 决策、版本化契约/manifest 准备与 authority 路线收口；生产实现和 Harness 继续失败关闭。
