@@ -10,16 +10,28 @@ import (
 	"testing"
 )
 
-// TestW2R03R04OwnerDecisionMatricesV1 固定 R03/R04 稳定决策编号及其失败关闭边界，防止计划引用再次退化为位置式待决项。
-func TestW2R03R04OwnerDecisionMatricesV1(t *testing.T) {
+// TestW2R00R03R04OwnerDecisionMatricesV1 固定 R00/R03/R04 稳定决策编号及其失败关闭边界，防止计划引用再次退化为位置式待决项。
+func TestW2R00R03R04OwnerDecisionMatricesV1(t *testing.T) {
 	t.Parallel()
 
 	repoRoot := findOwnerDecisionMatrixRepoRootV1(t)
+	r00 := readOwnerDecisionMatrixFileV1(t, repoRoot, "docs/design/agent/w2-r00-owner-decision-matrix-v1.md")
 	r03 := readOwnerDecisionMatrixFileV1(t, repoRoot, "docs/design/agent/w2-r03-owner-decision-matrix-v1.md")
 	r04 := readOwnerDecisionMatrixFileV1(t, repoRoot, "docs/design/agent/w2-r04-owner-decision-matrix-v1.md")
 
+	assertOwnerDecisionIDExactSetV1(t, r00, "R00", 14)
 	assertOwnerDecisionIDExactSetV1(t, r03, "R03", 14)
 	assertOwnerDecisionIDExactSetV1(t, r04, "R04", 20)
+	assertOwnerDecisionMatrixFragmentsV1(t, "R00", r00, []string{
+		"awaiting_owner_decision",
+		"candidate_incomplete_not_ballot_ready",
+		"scope_derivation_pending",
+		"implementation_status=prohibited",
+		"status=expansion_frozen",
+		"candidate_evidence=[]",
+		"当前不得生成 `DR-W2-R00-v1`",
+		"W2-B0a/W2-B1` 均未解锁",
+	})
 	assertOwnerDecisionMatrixFragmentsV1(t, "R03", r03, []string{
 		"decision_status=awaiting_owner_decision",
 		"implementation_status=prohibited",
