@@ -416,6 +416,21 @@
           "kind": "corpus_manifest"
         },
         {
+          "path": "docs/design/agent/approval-consumption-receipt-contract-v1.md",
+          "sha256": "sha256:7bdaf6339bd86b604d120c462a177935f4be97661487da72479a30b1adfd2735",
+          "kind": "design_doc"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r04_approval_consumption/manifest.json",
+          "sha256": "sha256:979fbc988d15add9038f3b07e6e6bd3a4c454c23aedb1832798a80e510f9a925",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "docs/design/agent/continuation-child-tool-receipt-contract-v1.md",
+          "sha256": "sha256:12c9bb9756ac8f63287aa4c1ea40f58049297f76912cf667c3d22b2a2dfb7c92",
+          "kind": "design_doc"
+        },
+        {
           "path": "scripts/check-database-contracts.sh",
           "sha256": "sha256:6ed8a8b329adc7e1d8823d8891587ecc7881e8091ed30c25b808f3d31d9ec125",
           "kind": "required_mode_script"
@@ -450,6 +465,30 @@
           "module": "agent",
           "source_path": "agent/tests/contract/approval_continuation_cross_object_evidence_v1_corpus_test.go",
           "test_name": "TestApprovalContinuationCrossObjectEvidenceV1TurnContextBinding",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
+          "test_name": "TestW2R04ApprovalConsumptionManifest",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
+          "test_name": "TestApprovalConsumptionReceiptCoreV1Corpus",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
+          "test_name": "TestApprovalConsumptionReceiptCoreV1ReplayAndQuery",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
+          "test_name": "TestApprovalConsumptionReceiptCoreV1SingleUseConflicts",
           "mode": "normal"
         },
         {

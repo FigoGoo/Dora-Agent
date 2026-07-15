@@ -1,6 +1,6 @@
 # Agent Runner 与 PostgreSQL Session Lane v1 设计评审
 
-> 文档状态：Draft / W2-R01 已有 Agent-owned Review Ready Corpus；W2-R02 已有 Agent-owned Executable Draft；W2-R03 待评审
+> 文档状态：Draft / W2-R01 基线已有 Agent-owned Review Ready Corpus（failed-after/outcome-aware 扩展待补）；W2-R02 已有 Agent-owned Executable Draft；W2-R03 已有跨对象与 unsigned Consumption Core 候选证据，child 仍为 Corpus Pending
 >
 > 契约基线：`aigc.contract.v1alpha1`
 >
@@ -167,7 +167,7 @@ reserve、resolve 和 freeze 必须在同一 Agent PostgreSQL 事务里共同锁
 
 `execution_refs` 是 Receipt 处于 `open` 时的追加式阶段权威引用账本。PromptArtifact、ModelReceipt、Quote、Approval、ApprovalConsumptionReceipt、Charge、Business Write Receipt、Resource Version、Operation/Batch、Dispatch 等在执行中产生或核对出的权威引用，必须先以稳定 `ref_slot` 写入 `execution_refs`；唯一键候选为 `(tool_receipt_id, ref_slot)`。只有数据库当前有效最高 Fence owner 可以 CAS append-once：同 slot 且同 `ref_digest` 返回原引用，同 slot 但不同 digest 返回 `TOOL_EXECUTION_REF_CONFLICT`，不得覆盖、删除或换 slot 规避冲突。`execution_refs` 不进入也不重算 `request_semantic_digest`，但为恢复阶段和冻结结果提供权威证据。
 
-`result_status/result_digest/result_refs` 只能在 `open -> frozen` 的同一次 CAS 中写入一次。`result_digest` 覆盖完整 Canonical Result：Schema、status、code、summary、retryable、Warnings、所有嵌套 Ref 和当前 ToolReceipt ID，不只覆盖状态/ref 子集；每个 `result_ref` 必须是冻结时从既有 `execution_refs` 按结果 Schema 白名单确定性投影出的逐值相等引用，允许只公开其中安全且与结果有关的子集，禁止凭内存结果、模型文本或新下游调用临时补造。`waiting_user/completed/partial` 与 `accepted` 一样必须逐值验证 evidence；`failed` 与副作用前取消必须证明 ledger 不含已提交副作用，副作用后取消则必须把全部已解决副作用 slot 作为内部 result refs exact-set；冻结后 `execution_refs` 和结果字段都不可再追加。Continuation 子 Receipt 的 `request_semantic_digest` 必须覆盖签名 Decision/Source、新 Turn/Run 因果身份及 `parent_request_semantic_digest`，因此不要求与父 Receipt 字节相等；但父 Intent、Tool Pin、Definition/Schema、业务 `execution_digest` 和资源 exact-set 必须逐值继承，不得借机改变原动作。
+`result_status/result_digest/result_refs` 只能在 `open -> frozen` 的同一次 CAS 中写入一次。`result_digest` 覆盖完整 Canonical Result：Schema、status、code、summary、retryable、Warnings、所有嵌套 Ref 和当前 ToolReceipt ID，不只覆盖状态/ref 子集；每个 `result_ref` 必须是冻结时从既有 `execution_refs` 按结果 Schema 白名单确定性投影出的逐值相等引用，允许只公开其中安全且与结果有关的子集，禁止凭内存结果、模型文本或新下游调用临时补造。`waiting_user/completed/partial` 与 `accepted` 一样必须逐值验证 evidence；`failed` 与副作用前取消必须证明 ledger 不含已提交副作用，副作用后取消则必须把全部已解决副作用 slot 作为内部 result refs exact-set；冻结后 `execution_refs` 和结果字段都不可再追加。Continuation child 的 `request_semantic_digest` 必须覆盖不可变 Decision authority ref/digest、Source、新 Turn/Run、root/direct parent 因果及 `parent_request_semantic_digest`，因此不要求与 parent 字节相等；但父 Intent、Tool Pin、Definition/Schema、执行审计 digest、Turn Context 和资源/目标 binding 必须逐值继承，不得借机改变原动作。R03 当前没有密码学签名，禁止把摘要称为签名。
 
 回执写入规则：
 
@@ -193,7 +193,7 @@ reserve、resolve 和 freeze 必须在同一 Agent PostgreSQL 事务里共同锁
 | ToolReceipt / Agent | Agent PostgreSQL | `open` | 形成合法 `completed/partial` GraphToolResult | Runner Receipt Service | 校验全部结果引用已存在于 `execution_refs` 且逐值一致；一次写 `result_status/result_refs/result_digest` | `frozen` | 终态；只读同义重放 | `open -> frozen` CAS；原 Receipt key | 当前 fence + expected receipt version；同事务 EventLog/Projection Marker | 引用缺失/冲突不得冻结；无 unknown 且可证明安全则冻结失败结果，否则隔离 |
 | ToolReceipt / Agent | Agent PostgreSQL | `open` | pending Approval 已持久化，形成合法 `waiting_user` Result | Runner Receipt Service | Approval ref 必须已 append 到 `execution_refs`；禁止同时存在待执行 Operation ref | `frozen` | 终态；只读同义重放 | `open -> frozen` CAS；原 Receipt key | 当前 fence/version；Approval/Event Projection 同事务或 Marker | Approval 非 pending、版本/摘要不符则不冻结 waiting_user；按是否存在 unknown 决定安全失败或隔离 |
 | ToolReceipt / Agent | Agent PostgreSQL | `open` | Operation/Dispatch 已原子提交，形成合法 `accepted` Result | Runner Receipt Service | Operation/Batch/Dispatch refs 必须已 append 到 `execution_refs`；不得把 Redis 唤醒当证据 | `frozen` | 终态；只读同义重放 | `open -> frozen` CAS；原 Receipt key | 当前 fence/version；Dispatch Outbox 与 Operation 权威事务已可查询 | 派发未知立即隔离；只有权威查询确认提交后才冻结 accepted |
-| ToolReceipt / Agent | Agent PostgreSQL | `open` | 形成确定性 `failed/cancelled` Result | Runner Receipt Service | 必须证明不存在未决/未知副作用；failed/副作用前取消要求空副作用账本，副作用后取消要求全部 resolved slot 的内部 result refs exact-set | `frozen` | 终态；只读同义重放 | `open -> frozen` CAS；原 Receipt key | 当前 fence/version；EventLog/Projection Marker | 无法证明安全终结则不得冻结 failed/cancelled，保持 open 并隔离 Input/Run |
+| ToolReceipt / Agent | Agent PostgreSQL | `open` | 形成确定性 `failed/cancelled` Result | Runner Receipt Service | 必须证明不存在未决/unknown；普通 failed/副作用前取消要求无已提交副作用；Business `outcome=not_committed` ref 必须投影但不算提交；只有 pinned `permanent_failure_after_side_effects_resolved` 的非重试 failed 与副作用后取消，要求全部 resolved refs exact-set且至少一个已提交副作用 | `frozen` | 终态；只读同义重放 | `open -> frozen` CAS；原 Receipt key | 当前 fence/version；EventLog/Projection Marker | 无法证明安全终结则不得冻结；保持 open 并隔离 Input/Run。outcome-aware/failed-after 扩展的 R01 Corpus 未完成前不得生产使用 |
 | ToolReceipt / Agent | Agent PostgreSQL | `open` | 瞬时技术失败且权威证据证明没有副作用发送或提交 | Runner/Recovery Owner | 保存技术失败证据和 `retry_at`；不改请求、execution/result 字段 | `open` | 非终态；有界技术重试 | 原 Receipt/Run/Input 身份 | 当前 fence/version；无业务 Outbox | Input 可进 `retry_wait`、Run `recovery_pending`；若后来发现 unknown，立即转 quarantined，不等待预算耗尽 |
 | ToolReceipt / Agent | Agent PostgreSQL | `frozen` | 同 key 同 `request_semantic_digest` 重放 | Query/Runner | 校验冻结结果重新计算后匹配 `result_digest`，只读返回 | `frozen` | 终态；可无限同义读取 | 原 Receipt key；不写新回执 | 不需要新 fence 写入；不得重发 Event/Outbox，投影缺失由 Marker 补投 | 摘要损坏/不一致 fail closed 并告警，不重跑 Model/Tool |
 | ToolReceipt / Agent | Agent PostgreSQL | `open/frozen` | 同 key 异 `request_semantic_digest`、旧 fence 或非法状态写入 | 任意调用方 | 不执行、不覆盖、不追加 execution/result refs | 原状态 | 否 | 原唯一键和 CAS 条件 | fence/version 校验失败；不发 Outbox | 返回稳定 conflict/stale-fence，记录最小审计；若原执行仍 unknown 维持隔离 |
@@ -508,13 +508,15 @@ Approval 默认有效期为 24 小时；高风险、价格波动或短期 Quote 
 
 #### Approval Consumption Receipt
 
-消费时间、`consumption_key` 和已消费次数不属于 Approval 决策聚合。每次进入实际副作用边界前先写入不可变 Consumption Receipt，其稳定键为 `(approval_id, consumption_key)`，并冻结覆盖动作、目标、金额、Tool Pin 和 Intent 的 `consumption_digest`：
+消费时间、`consumption_key` 和已消费次数不属于 Approval 决策聚合。当前只有 [`plan_creation_spec` candidate activation 的 Approval Consumption Receipt Core v1 候选契约](./approval-consumption-receipt-contract-v1.md) 与 test-only Corpus；它冻结的是 unsigned semantic core，不是可直接传给 Business 的已认证 wire Receipt：
 
-- 同键且同 digest：first-write-wins，返回原 Consumption Receipt；
-- 同键但不同 digest：返回 `APPROVAL_CONSUMPTION_CONFLICT`，不覆盖、不执行；
-- 一次性策略：除复合键外，数据库还必须限制同一 `approval_id` 最多存在一条 Consumption Receipt，调用方更换 key 不能绕过；
-- 可复用策略：按 Approval 冻结的最大次数和作用域逐条 CAS 写 Receipt；次数由 Receipt 聚合查询得出，不回写 Approval 决策状态；
-- 任何消费后 Approval 的决策状态仍为 `approved`，不能变为 `consumed`。
+- 稳定键为 `(approval_id, consumption_key)`；同键且同 request digest first-write-wins 返回首次 core，同键异 request digest 冲突且不得回传完整 stored core；
+- `single_use` 还要求同一 `approval_id` 最多一条，调用方更换 key 不能绕过；查询 exact key 必须先于 approval-only backstop，结果不能依赖读取顺序；
+- 首写前把 intent 的 user/project/session、Decision、root/direct parent、child causal、Tool Pin/Intent、Candidate/目标和 expected eligibility 逐值绑定冻结权威，再重验 current scope/resource/target/policy；
+- 存量重放/查询先完整验证 stored core，只授权给与 stored scope 相同的受信 Agent 调用方；调用方再以独立 expected-binding evaluator 对 request/scope/approval/effect/child 逐值核对；
+- 存量重放返回首次 Receipt ID、observation 与 core，不因当前 expiry/drift 或新 attempt 的 Clock/observation 改写历史；任何消费后 Approval 仍为 `approved`，不能变为 `consumed`。
+
+`billable_execution` 的金额、Quote、Charge、逐模型/纠错计费和可复用次数尚无独立 Approved 设计与 Corpus，不得从上述 activation core 外推。安全 Owner 也尚未决定 DB Owner + authenticated query 还是 signer/key-version envelope；在此之前该 core 不能冒充 `ApprovalConsumptionReceiptV1` 生产认证已完成。
 
 ### 9.2 Approval 规范状态迁移表（六 Tool 共同引用）
 
@@ -532,42 +534,40 @@ Approval 默认有效期为 24 小时；高风险、价格波动或短期 Quote 
 
 Expiry Scanner 只能处理 `now >= expires_at` 的 pending Approval；Invalidation Processor 必须验证来源 Event/Command 的签名、类型和资源版本。已经 `approved` 的 Approval 不通过后台任务改写为 `cancelled`；尚未消费时由 Continuation 执行前的权限、资源、价格和政策复核 fail closed，并记录执行失败证据。
 
-过期、取消以及只需 Agent 本地失效的 reject Input 只走确定性 Event/A2UI 投影，不执行原副作用。候选资源等 Business Owner 要求落拒绝事实时，reject Input 必须创建受信系统 Turn/Run，由 Runner 进入原 pinned Graph 的确定性 reject 分支并调用对应 `Decide*(action=reject)`；只携带不可变 Decision Receipt，明确禁止创建或发送 ApprovalConsumptionReceipt。Approve Input 同样创建受信系统 Turn/Run并排在 Session Lane 尾部，由 Runner 直接进入已 pin Graph。两者都不是模型 ReAct Turn；任何 Business RPC 响应 unknown 均立即隔离 Input/Run。自然语言“确认”不能进入本状态机。
+过期、取消以及只需 Agent 本地失效的 reject Input 只走确定性 Event/A2UI 投影，不执行原副作用。当前 `plan_creation_spec` candidate activation 候选固定由 Business 落正常拒绝事实：reject Input 必须创建受信系统 Turn/Run，由 Runner 进入原 pinned Graph 的确定性 reject 分支；只有 immutable/current guards 通过，才调用未来 `DecideCreationSpecCandidate(action=reject)`，只携带不可变 Decision 且严格无 Consumption。guards 在 Business slot prepared/发送前确定失败时，冻结的是“Owner reject 未落地”的 stable failed Result，不是本地成功 reject。Approve Input 同样创建受信系统 Turn/Run 并排在 Session Lane 尾部，由 Runner 直接进入已 pin Graph。两者都不是模型 ReAct Turn；任何 Business RPC 响应 unknown 均立即隔离 Input/Run。自然语言“确认”不能进入本状态机。其他 Approval 类型是否只作本地 reject 或必须调用 Owner，要由各自设计独立冻结。
 
-原 ToolReceipt 已以 `waiting_user` 冻结，必须保持不可变。需要执行 Owner 写入的 approve/reject 新系统 Turn 创建一个子 ToolReceipt：键为 `(session_id, continuation_turn_id, original_tool_call_id)`，并保存 `root_tool_receipt_id/original_run_id/approval_id/parent_request_semantic_digest` 因果引用；它不是新的逻辑 ToolCall。子 Receipt 自己的 `request_semantic_digest` 覆盖签名 Decision/Source、新 Turn/Run 因果身份和父摘要；父 Intent、Tool Pin、Definition/Schema、业务 `execution_digest` 及资源 exact-set 必须逐值继承。本次 Continuation 执行产生或核对出的 Decision、Consumption、Charge、Business Write、Operation、Resource 等引用先按稳定 slot append-once 写入子 Receipt 的 `execution_refs`，再在 `open -> frozen` 时确定性投影为 `result_refs/result_digest`。实际计费/派发继续使用由原逻辑 ToolCall 和原 `execution_digest` 派生的业务幂等键。这样既保留新 Turn 的独立审计和结果回执，又不会覆盖原等待审批回执或制造第二个副作用意图。
+原 ToolReceipt 已以 `waiting_user` 冻结，必须保持不可变。当前 [`Candidate Activation Continuation Child ToolReceipt v1 候选契约`](./continuation-child-tool-receipt-contract-v1.md) 只覆盖 `plan_creation_spec`：approve/reject 新系统 Turn 创建或恢复键为 `(session_id, continuation_turn_id, original_tool_call_id)` 的 child；root 首 Receipt、direct parent 与 current child 三者分离，root/direct parent 的 Receipt/Turn/Run/request digest 都显式冻结，child 不是新的逻辑 ToolCall。child request digest 覆盖 Decision/Source、新 Turn/Run、root/direct parent、父 Intent/Tool Pin/执行审计摘要、Turn Context 与 Candidate/目标绑定；Consumption、Business response、slot/ref、Fence、Clock 与 attempt 不进入 request digest。Decision/Consumption/Business authority 只按稳定 slot append-once，`open -> frozen` 再确定性投影 Result。该 child 草案不覆盖 `billable_execution`，也不声称 parent `execution_digest` 已决定 Business Decide 幂等键。
 
-#### `billable_execution` 冻结输入不变量
+#### `candidate_activation` 冻结输入不变量
 
-批准后的新 Turn 是 `turn_kind=approval_continuation` 的受信系统因果回合，不是模型 Turn，也不运行 ReAct 重新设计原动作。Processor 仍先通过同一 PostgreSQL Lane Claim，Runner 创建稳定 Run/子 ToolReceipt、绑定 Fence/预算/取消并消费事件，然后直接调用原 ToolReceipt pin 的 Graph 入口。它不得伪造 User Message、Assistant ToolCall 或 Tool Result 历史；完成事实只通过类型化 Input、Receipt 和 EventLog 进入后续上下文。Continuation 必须包含服务端生成、调用方不可覆盖的保护输入或权威引用：
+批准后的新 Turn 是 `turn_kind=approval_continuation` 的受信系统因果回合，不是模型 Turn，也不运行 ReAct 重新设计原动作。Processor 仍先通过同一 PostgreSQL Lane Claim，Runner 创建稳定 Run/child ToolReceipt、绑定 Fence/取消并消费事件，然后直接进入原 ToolReceipt pin 的确定性 activation/reject 分支。它不得伪造 User Message、Assistant ToolCall 或 Tool Result 历史；完成事实只通过类型化 Input、Receipt 和 EventLog 进入后续上下文。当前 test-only child canonical 必须由服务端权威逐值构造：
 
 | 字段 | 约束 |
 |---|---|
-| `original_tool_receipt_id` | 定位原 ToolReceipt，必须属于同用户/项目/Session |
-| `original_turn_id/original_run_id` | 保留因果链和审计，不从前端接受 |
+| `root_tool_receipt_id/version/turn_id/run_id/request_semantic_digest` | 冻结逻辑 ToolCall 的首 Receipt；普通 origin 必须 self-ref，后续 continuation 不得把 direct parent 静默当 root |
+| `parent_tool_receipt_id/version/turn_id/run_id/request_semantic_digest/result_status/result_digest` | direct parent 必须 frozen `waiting_user` 且逐值绑定本 Approval |
 | `original_tool_call_id` | 复用原稳定 ToolCall，不创建新的副作用键 |
-| `parent_request_semantic_digest` | 必须等于原 Receipt 的请求摘要；子 Receipt 以它绑定原动作，但子请求摘要还包含新的 Decision/Source/Turn/Run 因果 |
-| `execution_digest` | 必须继承原 ToolCall 冻结的业务执行摘要；不能由 Continuation 的新因果 ID 重算 |
-| `tool_pin` | 精确 `tool_key/definition_version/schema_version`，必须等于原 Receipt |
-| `intent_digest` | 等于原规范化 Intent digest |
-| `protected_intent_ref` | 指向 Agent 受控、加密或最小权限存储的冻结 Intent，或指向足以无歧义重建的权威资源引用 |
-| `trusted_context_digest` | 用户、项目、资源范围、Policy/Budget 快照摘要 |
-| `resource_refs` | 精确 ID/version/content digest/目标集合 |
-| `approval_id/version/decision_id` | 必须是已批准且当前有效的权威决策 |
-| `quote_or_charge_ref` | 金额与有效期必须仍在 Approval 覆盖范围 |
+| `continuation_source_id/input_id/turn_id/run_id` | 同一 Decision SourceID first-write-wins 解析为同一 causal identity |
+| `approval_id/presented_approval_version/resulting_approval_version/binding_digest` | 呈交与结果版本分离，approved authority 使用 resulting version |
+| `decision_receipt_id/digest + decision_id/action/card_id/card_revision/actor scope` | 必须是同一不可变 Decision authority；当前 R03 不虚构 Receipt version 或签名 |
+| `intent_digest + tool_pin owner/ref/digest/tool_key/definition/intent schema/result schema/graph key` | 逐值继承 R03 冻结事实，不能自动升级 Registry |
+| `execution_digest + parent_turn_context_digest` | 只作继承的因果/执行审计，不声称派生 Business key |
+| `resource_id/version/digest + target_exact_set_digest` | 精确 Candidate baseline 与目标集合绑定 |
 
 Continuation 执行前必须：
 
-1. 读取原 ToolReceipt、原 Turn Snapshot 和 Approval，不信任 Continuation Payload 的重复字段；
-2. 校验所有者、项目、Session、原 Run/ToolCall、Tool Pin、Intent Digest、`parent_request_semantic_digest`、原 `execution_digest` 和资源版本；
-3. 校验 Definition/Schema 仍可用；若已撤销或安全下线，fail closed 并要求新意图；
-4. 校验 Approval 未过期/撤销、消费策略允许、Quote/金额仍受覆盖；
-5. 使用原冻结 Intent/权威引用执行，不调用模型重生参数，不允许前端补写参数；
-6. 创建或恢复链接原 Receipt 的 `open` 子 ToolReceipt，复用 `original_tool_call_id` 及原 Receipt 派生的业务幂等身份；新 Continuation Turn 只新增因果引用，不制造第二个逻辑 ToolCall 或计费/派发意图；
-7. approve 在实际副作用边界用 `approval_id + consumption_key` CAS 写 Consumption Receipt，并在同一 Agent 事务把 Decision/Consumption 引用按稳定 slot append-once 写入子 Receipt `execution_refs`；reject 明确禁止写 Consumption Receipt；
-8. `candidate_activation` 的 approve 调 Business `Decide*` 时必须携带并逐字段绑定不可变 Decision Receipt 与已认证 Agent 生成的 `ApprovalConsumptionReceiptV1`；reject 只携带不可变 Decision Receipt，Business 收到 Consumption Receipt 必须拒绝；
-9. 同消费键且同 `consumption_digest` 重放原结果；同键异义冲突并停止。Business 响应按原幂等键查询，权威引用 append execution slot；仍 unknown 时立即隔离 Input/Run。
+1. 读取 root、direct parent、Approval、Decision、SourceID Input、R03 Tool Pin/Turn Context 权威记录，不信任 Continuation Payload 的重复字段；
+2. 校验所有者、项目、Session、root/direct parent/current causal、原 ToolCall、Tool Pin、Intent digest、父 request/execution/Context digest 和 Candidate/目标冻结 binding；
+3. 创建或恢复链接 root/direct parent 的 `open` child ToolReceipt，复用 `original_tool_call_id`，并 append-once 写 Decision ref；新 Continuation Turn 只新增因果引用，不制造第二个逻辑 ToolCall；
+4. 首轮 fresh guard 校验 Definition/Schema、Approval effective guard、current scope/resource/target/activation policy；失败且 Business slot 从未 prepared/发送时，以 Decision-only stable failed Result 冻结；
+5. approve 用 `(approval_id, consumption_key)` first-write-wins 写/replay unsigned Consumption Core，并在同一 Agent 事务 append Consumption ref；reject 严格禁止 Consumption；
+6. approve 在紧邻 Business prepare 前执行第二次 fresh guard；若已 drift 且 Business slot 从未 prepared/发送，以 Decision+Consumption stable failed Result 冻结，single-use 保持已消费；
+7. guard 通过后按 R01 通用 slot canonical 预留 `business_decide`，唯一 `idempotency_key=tr:<child_receipt_id>:<ref_slot>:v1`；future public command/query 只传输并校验该身份，不得另造第二 key；
+8. approve 未来只有在安全 Owner 冻结可验证 Consumption envelope/query 后才能发送 `DecideCreationSpecCandidate(approve)`；reject 只携带不可变 Decision，Business 收到 Consumption 必须拒绝；
+9. Business response/Query 只能以同一 ref schema 的正式 `outcome=committed|not_committed` authority resolve 原 slot；transport error、`not_found` 或歧义均保持 prepared/recovery_pending/quarantined，不盲重发；
+10. 任一确定分支只使用原冻结 Intent/权威引用，不调用模型重生参数，不允许前端补写参数。
 
-Continuation 继承原 ToolCall 的 Budget/Billing Policy digest 和 Approval 覆盖的费用/影响上限，并在同一因果预算账本下分配子预算；新 Turn/Run 不能重置、提高或绕过原迭代、Tool、时间、费用和异步任务上限。其 Run、Receipt、EventLog、取消和 unknown-outcome 恢复规则与普通 Runner 分支相同，只是明确没有 ModelReceipt。
+本 activation child 不产生 ModelReceipt，不把 Budget/Billing/Quote/Charge 字段塞入 request canonical。Runtime 的全局时间/Tool/取消边界仍独立生效，但不能被解释为本 Approval 的继承费用授权。`billable_execution` 的预算账本、逐模型计费、纠错与 child 状态机必须另立设计和 Corpus。
 
 日志、Event 和 A2UI 只记录必要 ID、版本和 digest，不复制保护 Intent、完整 Prompt、Token、密钥或敏感业务数据。
 
@@ -582,9 +582,9 @@ Approval 决策状态与消费事实严格分离。六个 Graph Tool 的 Approva
 | Approval / Agent | Agent PostgreSQL | `pending` | 已认证 `ApprovalDecisionRequestV1{action=reject}` | Approval Decision Handler | 同 approve 的身份/版本/Card 校验；写不可变 reject Decision Receipt 和稳定 Continuation Input；不得创建 Consumption Receipt | `rejected` | 决策终态；同义 Decision 可重放 | `(approval_id, decision_id)` first-write-wins；单 Agent 事务 | CAS approval_version；EventLog/Outbox 或 Marker | 收到/发现 Consumption Receipt 即契约冲突并停止；同键异义拒绝 |
 | Approval / Agent | Agent PostgreSQL | `pending` | `now >= expires_at` | Approval Expiry Scanner | CAS 版本/期限，写不可变 Expiry Receipt 和稳定本地投影 Input | `expired` | 终态；Scanner 可同义重放 | `(approval_id, approval_version, expires_at)` | CAS approval_version；无需 Session fence 执行原动作；EventLog/Marker | 未到期、非 pending 或版本变化跳过；不消费、不执行原动作 |
 | Approval / Agent | Agent PostgreSQL | `pending` | 受信资源/Session/Policy 失效事件 | Approval Invalidation Processor | 校验签名来源、类型、资源版本；CAS 并写 Invalidation Receipt/稳定 Input | `cancelled` | 终态；同来源可重放 | `(approval_id, source_event_id)` | CAS approval_version；Inbox/Outbox/Event Marker | 来源不可信、版本不符或已终态时拒绝/幂等读取；不消费原动作 |
-| Approval / Agent + ConsumptionReceipt / Agent | Agent PostgreSQL | `approved` | approve Continuation 即将越过实际副作用边界 | 当前有效 Fence 的 Runner/Consumption Service | 重新查询权限、资源/目标/Quote/政策；按冻结策略写不可变 Consumption Receipt；一次性 Approval 另以 approval_id 唯一；引用 append 子 ToolReceipt execution slot | `approved` | Approval 决策保持终态；Consumption 同义可重放 | `(approval_id, consumption_key)` + `consumption_digest`；一次性另 `approval_id` 唯一 | 当前 Continuation Session fence、Approval version 和 child receipt version；不改 Approval 状态，不单独伪造 Business Outbox | 同键同 digest 返回原 Consumption；异 digest/超次数/版本变化冲突；未取得 Receipt 不得调用 approve 副作用 |
-| Approval / Agent + Business Resource / Business | `approved` Approval、Decision Receipt、Consumption Receipt、Business PostgreSQL | `approved` | `Decide*Candidate(action=approve)` 或其他受批准副作用 | 当前有效 Fence 的 Runner 调已认证 Business RPC | 请求必须同时携带不可变 Decision Receipt 和已认证 Agent 生成的 `ApprovalConsumptionReceiptV1`；Business 逐字段验证 user/project/action/resource/target/version/digest/金额范围后 first-write-wins 写业务结果 | `approved` | Approval 不变；Business 结果按原键可查询 | 对应 BIZ-AIGC 幂等键 + Decision/Consumption 身份 | Agent 当前 fence 只授权 Agent 本地推进；Business 使用自身 resource version/事务/Outbox；返回 ref append child execution slot | Business 缺任一 Receipt、字段不符或已失效则失败关闭；响应 unknown 立即 Input quarantined + Run recovery_pending，按原业务键查询 |
-| Approval / Agent + Business Resource / Business | `rejected` Approval、Decision Receipt、Business PostgreSQL | `rejected` | `Decide*Candidate(action=reject)` 需要持久化 Owner 拒绝事实 | 当前有效 Fence 的确定性 Continuation Runner 调已认证 Business RPC | 只携带不可变 reject Decision Receipt；Business 逐字段验证 user/project/action/resource/target/version/digest；明确拒绝任何 Consumption Receipt | `rejected` | Approval 不变；Business 拒绝结果按原键可查询 | 对应 BIZ-AIGC reject 幂等键 + Decision identity | Continuation 当前 fence；Business resource version/事务/Outbox；返回 ref append child execution slot | 出现 Consumption Receipt、字段/版本不符即失败关闭；响应 unknown 立即隔离 Input/Run，不重复拒绝写 |
+| Approval / Agent + Consumption Core / Agent | Agent PostgreSQL candidate | `approved` | `plan_creation_spec` approve Continuation 即将越过 Candidate activation 边界 | 当前有效 Fence 的 Runner/Consumption Service candidate | 逐值绑定 Frozen Decision/Approval、root/direct parent、child causal、Tool Pin/Intent、Candidate/目标与 expected eligibility；重验 current scope/resource/target/policy；first-write-wins 写 unsigned core；一次性另以 approval_id 唯一；同 Agent 事务 append child ref | `approved` | Approval 决策保持终态；同义 core 可重放 | `(approval_id, consumption_key)` + request digest；一次性另 `approval_id` 唯一 | 当前 Continuation fence + child receipt CAS；不改 Approval 状态；真实 PG 约束尚未 Approved | exact key 同 digest 返回首次 core；异 digest/other key 冲突；存量先完整校验并按 stored scope 授权；未取得 core 不得 prepare Business approve |
+| Approval / Agent + Creation Spec Candidate / Business | `approved` Approval、Decision Receipt、可认证 Consumption envelope/query（尚未冻结）、Business PostgreSQL | `approved` | future `DecideCreationSpecCandidate(action=approve)` | 当前有效 Fence 的 Runner 调未来已认证 Business RPC | 先按 R01 预留 `business_decide` slot；请求必须绑定不可变 Decision 与可验证 Consumption、user/project/Candidate/target/version/digest；Business first-write-wins 并提供同键 Query | `approved` | Approval 不变；Business authority 按原键可查询 | 唯一语义幂等身份 `tr:<child_receipt_id>:<ref_slot>:v1`；future BIZ-AIGC-008 只冻结其字段号/位置/校验 | Agent fence 只授权 Agent 本地推进；Business 使用自身 resource version/事务/Outbox；authority ref resolve 原 child slot | 当前无正式 IDL/认证 envelope，禁止调用；字段不符失败关闭；响应/Query unknown 或 not_found 继续隔离，不盲重发 |
+| Approval / Agent + Creation Spec Candidate / Business | `rejected` Approval、Decision Receipt、Business PostgreSQL | `rejected` | future `DecideCreationSpecCandidate(action=reject)` 持久化 Owner 拒绝事实 | 当前有效 Fence 的确定性 Continuation Runner 调未来已认证 Business RPC | 先预留同一逻辑 `business_decide` slot；只携不可变 reject Decision；Business 逐值验证 user/project/action/Candidate/target/version/digest，明确拒绝 Consumption | `rejected` | Approval 不变；Business authority 按原键可查询 | 与 approve 相同只使用 `tr:<child_receipt_id>:<ref_slot>:v1`；不另造 reject command key | Continuation fence；Business resource version/事务/Outbox；authority ref resolve 原 child slot | 当前无正式 IDL，禁止调用；出现 Consumption 或字段不符失败关闭；响应 unknown 立即隔离，不重复拒绝写 |
 | Approval / Agent | Agent PostgreSQL | `approved/rejected/expired/cancelled` | 重复 Decision、失效事件、资源/价格/策略后续变化或非法迁移 | Handler/Scanner/Runner | 同一稳定键同 digest 只读原 Receipt；禁止覆盖终态、禁止 `approved -> consumed/cancelled` | 原状态 | 终态；仅同义查询可重试 | 原 Decision/Invalidation/Consumption key | expected approval version；投影缺失只补 Event/Marker | 异义返回稳定 conflict；已批准但未消费且环境变化由 Continuation fail closed 并创建新 Approval，不改旧 digest |
 
 ### 9.3 状态变化和失效
@@ -795,19 +795,19 @@ W2-R02 已新增独立 [`PostgreSQL Session Lane 与 Runner Runtime 可执行契
 
 ### 15.4 Approval/Continuation 测试
 
-W2-R03 已新增独立 [`Approval Continuation 跨对象证据契约 v1`](./approval-continuation-cross-object-evidence-v1.md) 与 test-only Corpus：1 个 `plan_creation_spec` 正向 fixture、20 条向量和 13 个目标测试逐值绑定 frozen `waiting_user` ToolReceipt、Approval immutable binding、approve Decision/SourceID、五字段 Graph Tool Pin 与完整 58 字段 Turn Context，并覆盖严格 `sha256:` 桥接、resolved refs exact-set、legacy Authority 替换、五字段 Pin sensitivity、运维元数据排除和稳定失败优先级。该证据只把 Receipt→Approval→Decision→Pin→Context 从结构候选推进为可执行跨对象候选；不证明 child Receipt、Consumption、CAS/Outbox、Business `Decide*`、真实 Lane/Runner/Graph/A2UI，因此下列生产/集成项仍保持未完成。
+W2-R03 已新增独立 [`Approval Continuation 跨对象证据契约 v1`](./approval-continuation-cross-object-evidence-v1.md) 与 test-only Corpus：1 个 `plan_creation_spec` 正向 fixture、20 条向量和 13 个目标测试逐值绑定 frozen `waiting_user` ToolReceipt、Approval immutable binding、approve Decision/SourceID、五字段 Graph Tool Pin 与完整 58 字段 Turn Context。其后 [`Approval Consumption Receipt Core v1 候选契约`](./approval-consumption-receipt-contract-v1.md) 以 4 个 fixture、102 条向量和 11 个目标测试新增 `creation_spec_activation` approve-only unsigned core 证据，覆盖显式 intent、服务端 first-write material、exact/backstop 优先级、完整 stored core/index 校验、stored scope authorization、Query/expected-binding 分离、current drift/replay 与 single-use。该证据仍不证明生产/认证 Consumption envelope、真实 PG CAS/Outbox、[`child Receipt`](./continuation-child-tool-receipt-contract-v1.md) Corpus、R01 failed-after 扩展、Business `DecideCreationSpecCandidate`/Query、真实 Lane/Runner/Graph/A2UI，因此下列生产/集成项全部保持未完成。
 
 - [ ] 初始状态只能是 `pending`，`approval.requested` 只作为事件；
 - [ ] approve/reject/expire/cancel 状态迁移和 CAS 正确；
 - [ ] `approved` 消费后仍为 `approved`，Consumption Receipt 不可变；
 - [ ] 重复 Decision ID 返回原结果；同 Consumption key + 同 digest 回放，同 key + 异义 digest 冲突；
 - [ ] 一次性 Approval 即使更换 `consumption_key` 也只能产生一条 Consumption Receipt；
-- [ ] 四个 `Decide*` 的 approve 请求同时携带不可变 Decision Receipt 与已认证 Agent 生成的 `ApprovalConsumptionReceiptV1`，Business 逐字段校验；任一缺失/不符失败关闭；
-- [ ] 四个 `Decide*` 的 reject 请求只携带不可变 reject Decision Receipt；出现 Consumption Receipt 必须拒绝且不得消耗 Approval；
+- [ ] `DecideCreationSpecCandidate(approve)` 的正式请求同时携带不可变 Decision 与安全 Owner 已批准、Business 可验证的 Consumption envelope/query binding；任一缺失/不符失败关闭；Storyboard/Prompt/Assembly Plan 分别评审；
+- [ ] `DecideCreationSpecCandidate(reject)` 的正式请求只携带不可变 reject Decision；出现 Consumption 必须拒绝且不得消耗 Approval；其他 Graph Tool 分别评审；
 - [ ] Decision DTO 缺失/复用异义 `decision_id` 被拒绝；Decision/Expiry/Cancel 各 owner、幂等键、事务与 Continuation SourceID 逐项验证；
 - [ ] 过期、跨用户、跨项目、版本冲突、Card Revision 过期全部拒绝；
 - [ ] 新 Continuation Turn 能定位原 ToolReceipt/Run/Turn；
-- [ ] Continuation 子 Receipt 正确绑定 `parent_request_semantic_digest`，并精确复用原 Intent Digest、Definition/Schema、Tool Pin、业务 `execution_digest` 和幂等键；新因果 ID 只改变子请求摘要，不改变原动作；
+- [ ] Continuation child 正确分离 root/direct parent/current，绑定父 request digest，并精确继承 Intent、五字段 Tool Pin、执行审计 digest、Turn Context 与 Candidate/目标；Business key 只来自正式公共契约，不从 `execution_digest` 猜测；
 - [ ] 模型、前端和 Continuation Payload 均不能替换保护参数；
 - [ ] approved Continuation 由 Runner 直接调用原 pinned Graph，不产生 ModelReceipt，不伪造 User/Assistant ToolCall/Result 历史，仍受 Lane/Fence/Budget/Cancel/Event 管控；
 - [ ] 资源/价格/权限变化使原 Approval fail closed；
@@ -869,7 +869,7 @@ W2-R03 已新增独立 [`Approval Continuation 跨对象证据契约 v1`](./appr
 2. W2-R01 可执行契约已达到 Agent-owned Review Ready，但仍需 Agent/Business/安全/运维/财务和跨 Module 目录审核；测试专用 DTO 不得直接转为生产 GORM/HTTP/IDL；
 3. `BatchContinuationResult` 进入确定性无 Turn 投影或 `batch_explanation` 模型 Turn 的版本化服务端分类规则；
 4. 各模型 Provider 的 request/idempotency 查询能力，以及不支持查询时的人工 unknown-outcome 流程；
-5. `protected_intent_ref` 的存储介质、加密密钥轮换、访问审计和保留期限；
+5. future `billable_execution` 是否需要 `protected_intent_ref`，以及其存储介质、加密密钥轮换、访问审计和保留期限；当前 candidate activation 不虚构该字段；
 6. W2-R08 独立 [`a2ui-event-action-contract-v1.md`](./a2ui-event-action-contract-v1.md) 已产出 Draft，但 Component 白名单、Event/Action DTO、Error Envelope、RequestID-Receipt 关联、无 Mock/fallback 门禁和旧 `/api/aigc/**` 迁移窗口尚未联合 Approved；
 7. Approval 类型、默认 24 小时有效期的例外、金额范围与一次性/可复用策略；
 8. Lease TTL、Heartbeat 间隔、Drain deadline、Checkpoint 7 天保留的最终配置；
