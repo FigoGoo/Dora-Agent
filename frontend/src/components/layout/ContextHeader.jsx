@@ -36,6 +36,16 @@ const PAGE_TITLE_CONFIG = {
     icon: Blocks,
     id: 'skill-review-detail-title',
     label: 'Skill 审核'
+  },
+  skillGovernance: {
+    icon: Blocks,
+    id: 'skill-governance-title',
+    label: 'Skill 治理'
+  },
+  skillGovernanceDetail: {
+    icon: Blocks,
+    id: 'skill-governance-detail-title',
+    label: 'Skill 治理'
   }
 };
 

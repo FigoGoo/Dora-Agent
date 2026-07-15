@@ -9,6 +9,7 @@ import {
   skillMarketListItemFixture
 } from '../test/skillMarketFixtures.js';
 import { skillReviewQueueResponseFixture } from '../test/skillReviewFixtures.js';
+import { skillGovernanceListResponseFixture } from '../test/skillGovernanceFixtures.js';
 import { AUTH_SESSION_EXPIRED_EVENT } from '../platform/auth/authSession.js';
 import { App } from './App.jsx';
 
@@ -380,6 +381,112 @@ describe('DORAIGC static client pages', () => {
 
     expect(await screen.findByRole('heading', { name: 'Skill 审核路径无效' })).toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(([input]) => requestPath(input).startsWith('/api/v1/admin/skill-reviews')))
+      .toHaveLength(0);
+  });
+
+  it.each([
+    ['Creator', ['user'], ['project.read'], false, false],
+    ['Reviewer', ['skill_reviewer'], ['skill.review'], true, false],
+    ['Governor', ['skill_governor'], ['skill.govern'], false, true],
+    ['Reviewer + Governor', ['skill_reviewer', 'skill_governor'], ['skill.review', 'skill.govern'], true, true]
+  ])('shows exact, independent Reviewer and Governance navigation for %s', async (
+    _name,
+    roles,
+    capabilities,
+    canReview,
+    canGovern
+  ) => {
+    const fetchMock = mockGovernanceAppFetch({ roles, capabilities });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    const navigation = await screen.findByRole('complementary', { name: 'DORAIGC 导航' });
+    await screen.findByRole('button', { name: '用户菜单' });
+    expect(within(navigation).queryByRole('button', { name: 'Skill 审核' }) !== null).toBe(canReview);
+    expect(within(navigation).queryByRole('button', { name: 'Skill 治理' }) !== null).toBe(canGovern);
+  });
+
+  it.each([
+    [['user'], ['project.read']],
+    [['skill_reviewer'], ['skill.review']]
+  ])('denies direct Governance routes without skill.govern and sends zero Governance API calls', async (
+    roles,
+    capabilities
+  ) => {
+    window.history.pushState({}, '', '/admin/skills/governance');
+    const fetchMock = mockGovernanceAppFetch({ roles, capabilities });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '无 Skill 治理权限' })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('不能使用 skill.govern');
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input).startsWith('/api/v1/admin/skill-governance')))
+      .toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Skill 治理' })).not.toBeInTheDocument();
+  });
+
+  it('lets a pure Governor enter Governance without granting Reviewer navigation or API access', async () => {
+    window.history.pushState({}, '', '/admin/skills/governance');
+    const fetchMock = mockGovernanceAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    const navigation = await screen.findByRole('complementary', { name: 'DORAIGC 导航' });
+    expect(within(navigation).getByRole('button', { name: 'Skill 治理' })).toHaveClass('is-active');
+    expect(within(navigation).queryByRole('button', { name: 'Skill 审核' })).not.toBeInTheDocument();
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => (
+      requestPath(input) === '/api/v1/admin/skill-governance'
+    ))).toHaveLength(1));
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input).startsWith('/api/v1/admin/skill-reviews')))
+      .toHaveLength(0);
+    expect(screen.queryByRole('heading', { name: '无 Skill 治理权限' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [200, '无 Skill 治理权限'],
+    [503, '认证服务暂不可用']
+  ])('latches a Governance 403 after one authority re-parse (bootstrap %s)', async (
+    retryBootstrapStatus,
+    heading
+  ) => {
+    window.history.pushState({}, '', '/admin/skills/governance');
+    const fetchMock = mockGovernanceAppFetch({ queueStatus: 403, retryBootstrapStatus });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/auth/session')).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      requestPath(input) === '/api/v1/admin/skill-governance'
+    ))).toHaveLength(1);
+  });
+
+  it('fails a pure Governor closed on the Reviewer route without calling Reviewer APIs', async () => {
+    window.history.pushState({}, '', '/admin/skills/reviews');
+    const fetchMock = mockGovernanceAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '无 Skill 审核权限' })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('不能使用 skill.review');
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input).startsWith('/api/v1/admin/skill-reviews')))
+      .toHaveLength(0);
+  });
+
+  it.each([
+    ['/admin/skills/governance/'],
+    ['/admin/skills/governance/not-a-uuid'],
+    [`/admin/skills/governance/${SKILL_IDS.skill.toUpperCase()}`],
+    [`/admin/skills/governance/${SKILL_IDS.skill}/`]
+  ])('keeps invalid Governance admin path %s protected and performs no Governance API call', async (path) => {
+    window.history.pushState({}, '', path);
+    const fetchMock = mockGovernanceAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Skill 治理路径无效' })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('规范小写 UUIDv7');
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input).startsWith('/api/v1/admin/skill-governance')))
       .toHaveLength(0);
   });
 
@@ -3641,6 +3748,44 @@ function mockReviewerAppFetch({
         }, queueStatus);
       }
       return jsonResponse(skillReviewQueueResponseFixture());
+    }
+    return jsonResponse({ error: { code: 'NOT_FOUND', message: 'not found', retryable: false } }, 404);
+  });
+}
+
+function mockGovernanceAppFetch({
+  roles = ['skill_governor'],
+  capabilities = ['skill.govern'],
+  queueStatus = 200,
+  retryBootstrapStatus = 200
+} = {}) {
+  let authReads = 0;
+  return vi.fn(async (input, options = {}) => {
+    const path = requestPath(input);
+    const method = options.method || 'GET';
+    if (path === '/api/v1/auth/session' && method === 'GET') {
+      authReads += 1;
+      if (authReads > 1 && retryBootstrapStatus !== 200) {
+        return jsonResponse({
+          error: { code: 'AUTH_UNAVAILABLE', message: '认证服务暂不可用', retryable: true }
+        }, retryBootstrapStatus);
+      }
+      return jsonResponse({
+        ...mockAuthPayload(),
+        principal: { ...mockAuthPayload().principal, roles, capabilities }
+      });
+    }
+    if (path === '/api/v1/admin/skill-governance' && method === 'GET') {
+      if (queueStatus !== 200) {
+        return jsonResponse({
+          error: {
+            code: 'SKILL_GOVERNANCE_CAPABILITY_REQUIRED',
+            message: 'Governor capability required',
+            retryable: false
+          }
+        }, queueStatus);
+      }
+      return jsonResponse(skillGovernanceListResponseFixture());
     }
     return jsonResponse({ error: { code: 'NOT_FOUND', message: 'not found', retryable: false } }, 404);
   });

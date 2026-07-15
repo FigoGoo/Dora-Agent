@@ -27,6 +27,7 @@ import {
   getProjectWorkspacePath,
   matchOwnerSkillBuilderPath,
   matchPublicSkillDetailPath,
+  matchSkillGovernanceDetailPath,
   matchSkillReviewDetailPath,
   normalizePath
 } from '../../app/routes.js';
@@ -47,6 +48,8 @@ import { MySkillsPage } from '../skills/MySkillsPage.jsx';
 import { SkillBuilderPage } from '../skills/SkillBuilderPage.jsx';
 import { SkillReviewDetailPage } from '../skillReviews/SkillReviewDetailPage.jsx';
 import { SkillReviewQueuePage } from '../skillReviews/SkillReviewQueuePage.jsx';
+import { GovernanceDetailPage } from '../skillGovernance/GovernanceDetailPage.jsx';
+import { GovernanceQueuePage } from '../skillGovernance/GovernanceQueuePage.jsx';
 import {
   agentWorkspaceMock,
   assetMocks,
@@ -1109,7 +1112,16 @@ export function LandingPage() {
   const mainClassName =
     activePage === 'projects'
       ? 'landing-main landing-main--projects'
-      : ['skills', 'skillDetail', 'mySkills', 'skillBuilder', 'skillReviews', 'skillReviewDetail'].includes(activePage)
+      : [
+          'skills',
+          'skillDetail',
+          'mySkills',
+          'skillBuilder',
+          'skillReviews',
+          'skillReviewDetail',
+          'skillGovernance',
+          'skillGovernanceDetail'
+        ].includes(activePage)
         ? 'landing-main landing-main--skills'
         : 'landing-main';
   const skillBuilderRoute = activePage === 'skillBuilder'
@@ -1117,6 +1129,9 @@ export function LandingPage() {
     : null;
   const skillReviewRoute = activePage === 'skillReviewDetail'
     ? matchSkillReviewDetailPath(window.location.pathname)
+    : null;
+  const skillGovernanceRoute = activePage === 'skillGovernanceDetail'
+    ? matchSkillGovernanceDetailPath(window.location.pathname)
     : null;
   const publicSkillRoute = activePage === 'skillDetail'
     ? matchPublicSkillDetailPath(window.location.pathname)
@@ -1236,6 +1251,19 @@ export function LandingPage() {
             <p role="alert">链接中的 review_id 不是有效的规范 UUIDv7，未发起审核请求。</p>
             <button type="button" className="secondary-button" onClick={() => navigateToPage('skillReviews')}>
               返回审核队列
+            </button>
+          </section>
+        ) : null}
+        {activePage === 'skillGovernance' ? <GovernanceQueuePage /> : null}
+        {activePage === 'skillGovernanceDetail' && skillGovernanceRoute ? (
+          <GovernanceDetailPage skillID={skillGovernanceRoute.skillID} csrfToken={csrfToken} />
+        ) : null}
+        {activePage === 'skillGovernanceDetail' && !skillGovernanceRoute ? (
+          <section className="route-state" aria-labelledby="invalid-skill-governance-route-title">
+            <h2 id="invalid-skill-governance-route-title">Skill 治理路径无效</h2>
+            <p role="alert">链接中的 skill_id 不是有效的规范小写 UUIDv7，未发起治理请求。</p>
+            <button type="button" className="secondary-button" onClick={() => navigateToPage('skillGovernance')}>
+              返回治理队列
             </button>
           </section>
         ) : null}

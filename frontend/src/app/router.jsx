@@ -6,6 +6,7 @@ import { AUTH_SESSION_STATUS, useAuthSession } from '../platform/auth/authSessio
 import {
   canAccessPage,
   getPageFromPath,
+  getRequiredCapabilityForPage,
   LEGACY_SKILLS_ROUTE,
   matchProjectWorkspacePath,
   normalizePath,
@@ -43,12 +44,13 @@ export function AppRouter() {
   }
 
   const page = getPageFromPath(currentPath);
+  const requiredCapability = getRequiredCapabilityForPage(page);
   const isProtected = Boolean(projectWorkspace) || !PUBLIC_PAGES.has(page);
   if (isProtected && auth.status !== AUTH_SESSION_STATUS.AUTHENTICATED) {
     return <ProtectedRouteState auth={auth} />;
   }
   if (!canAccessPage(page, auth.user?.capabilities, auth.deniedCapabilities)) {
-    return <ForbiddenRouteState />;
+    return <ForbiddenRouteState requiredCapability={requiredCapability} />;
   }
   if (projectWorkspace) {
     return <ProjectWorkspacePage key={projectWorkspace.projectID} projectID={projectWorkspace.projectID} />;
@@ -57,11 +59,14 @@ export function AppRouter() {
   return <ClientAppPage />;
 }
 
-function ForbiddenRouteState() {
+function ForbiddenRouteState({ requiredCapability }) {
+  const isGovernanceRoute = requiredCapability === 'skill.govern';
   return (
     <main className="route-state">
-      <h1>无 Skill 审核权限</h1>
-      <p role="alert">当前会话不能使用 skill.review，未加载任何审核数据。</p>
+      <h1>{isGovernanceRoute ? '无 Skill 治理权限' : '无 Skill 审核权限'}</h1>
+      <p role="alert">
+        当前会话不能使用 {requiredCapability || '所需 capability'}，未加载任何{isGovernanceRoute ? '治理' : '审核'}数据。
+      </p>
       <button type="button" className="start-button" onClick={() => navigate('/')}>返回首页</button>
     </main>
   );

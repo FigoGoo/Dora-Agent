@@ -4,6 +4,7 @@ import {
   Home,
   Images,
   Play,
+  Shield,
   ShieldCheck,
   Sparkles,
   UserCircle
@@ -19,6 +20,7 @@ export const navItems = [
   { label: 'Skill 市场', page: 'skills', icon: Blocks },
   { label: '我的 Skill', page: 'mySkills', icon: UserCircle },
   { label: 'Skill 审核', page: 'skillReviews', icon: ShieldCheck, requiredCapability: 'skill.review' },
+  { label: 'Skill 治理', page: 'skillGovernance', icon: Shield, requiredCapability: 'skill.govern' },
   { label: '精选作品', page: 'home', icon: Play, targetId: HOME_FEATURED_SECTION_ID }
 ];
 
