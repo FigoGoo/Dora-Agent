@@ -1,0 +1,76 @@
+{
+  "schema_version": "w2_s0_g0_smk_004a_shadow_baseline.v1",
+  "slice_id": "SMK-004A",
+  "canonical_smoke_id": "SMK-004",
+  "scenario_kind": "derived_slice",
+  "mode": "shadow_parity",
+  "contributes_to_status": false,
+  "source_refs": [
+    {
+      "profile": "api",
+      "path": "scripts/smoke-w0-transport.sh",
+      "git_mode": "100755",
+      "line_count": 4457,
+      "sha256": "sha256:17d4797c240bc4e1e9036d941773304c5e399340d7cfe57d689a4c7e34581cf1"
+    },
+    {
+      "profile": "ui",
+      "path": "frontend/e2e/w0-transport.spec.js",
+      "git_mode": "100644",
+      "line_count": 567,
+      "sha256": "sha256:4a6185a10ed73bdddf252545f5b70782fe75dea1b9433fb1e656c433edf882de"
+    }
+  ],
+  "profiles": [
+    {
+      "profile": "api",
+      "mode": "shadow_parity",
+      "contributes_to_status": false,
+      "assertion_ids": [
+        "agent_direct_access_denied",
+        "agent_restart_hit",
+        "events_cross_owner_not_found",
+        "retention_old_events_pruned",
+        "retention_server_cursor_expired_reset",
+        "retention_window_advanced",
+        "snapshot_after_restart",
+        "sse_after_restart",
+        "sse_cursor_reset",
+        "sse_replay_and_ready",
+        "workspace_cross_owner_not_found",
+        "workspace_empty_arrays",
+        "workspace_owner_safe_not_found",
+        "workspace_snapshot"
+      ]
+    },
+    {
+      "profile": "ui",
+      "mode": "shadow_parity",
+      "contributes_to_status": false,
+      "assertion_ids": [
+        "browser_controlled_disconnect",
+        "browser_cross_owner_agent_blocked",
+        "browser_cross_owner_not_found",
+        "browser_resource_facts_not_disclosed",
+        "browser_retention_no_stale_event_replayed",
+        "browser_retention_reset_received",
+        "browser_retention_reset_without_id",
+        "browser_retention_same_session_recovery",
+        "browser_retention_snapshot_reloaded",
+        "browser_retention_snapshot_retained",
+        "browser_same_session_recovery",
+        "browser_ui"
+      ]
+    }
+  ],
+  "canonical_only_assertion_ids": [
+    "agent_unique_facts",
+    "blank_negative_side_effects",
+    "business_prompt_cleared",
+    "concurrent_requests",
+    "idempotency_conflict",
+    "idempotent_replay",
+    "logout_revoked",
+    "logout_workspace_denied"
+  ]
+}

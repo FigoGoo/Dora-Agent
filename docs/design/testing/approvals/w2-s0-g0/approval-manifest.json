@@ -1,0 +1,52 @@
+{
+  "schema_version": "w2_s0_g0_approval_manifest.v1",
+  "gate_id": "W2-S0-G0",
+  "status": "awaiting_owner_approval",
+  "implementation_unlocked": false,
+  "trust_root_status": "candidate_unactivated",
+  "activation_blockers": [
+    "BASE_OWNED_WORKFLOW_NOT_ACTIVE",
+    "FORK_CANARY_NOT_PASSED",
+    "OWNER_AUTHORITY_NOT_ACTIVE",
+    "RULESET_SOURCE_AND_NO_BYPASS_NOT_PROVEN",
+    "SAME_REPO_CANARY_NOT_PASSED",
+    "SEMANTIC_PATH_POLICY_NOT_ACTIVE",
+    "TRUST_ROOT_REKEY_HANDOFF_NOT_FROZEN",
+    "TRUST_ROOT_RELEASE_NOT_INSTALLED",
+    "VALIDATOR_BUILD_CLOSURE_NOT_FROZEN",
+    "WORKFLOW_DIGEST_AND_ACTION_SHA_NOT_FROZEN"
+  ],
+  "required_owner_roles": [
+    "agent_owner",
+    "business_owner",
+    "frontend_owner",
+    "operations_owner",
+    "security_owner",
+    "test_owner",
+    "worker_owner"
+  ],
+  "artifact_refs": [
+    {
+      "path": "docs/design/cross-module/w2-adr-009-structured-smoke-harness-v1.md",
+      "sha256": "sha256:be6f5233cfe5d29011f31b7dfa079bfa9e3bad9e3aff12d70e4882bbdae62ca8",
+      "kind": "architecture_decision"
+    },
+    {
+      "path": "docs/design/testing/approvals/w2-s0-g0/smk-004a-shadow-baseline-v1.json",
+      "sha256": "sha256:f0d889e8e976ce0ee1c7c1ec6431dc573dc3170f55119cd800fe36acf7fdfa45",
+      "kind": "shadow_baseline"
+    },
+    {
+      "path": "docs/design/testing/w2-smoke-context-registry-contract-v1.md",
+      "sha256": "sha256:2a8d831a5376b769b7c9a7fc5a3a7e22b55a464bf0536e1ef461a36bc5637d81",
+      "kind": "context_registry_contract"
+    }
+  ],
+  "forbidden_paths": [
+    "deploy/local-smoke/**",
+    "smoke/**",
+    "test-adapters/**"
+  ],
+  "block_code": "W2_S0_G0_AWAITING_OWNER_APPROVAL",
+  "block_statement": "W2-S0-G0 尚未取得七方 Owner 联合批准；禁止创建 smoke/**、test-adapters/** 或 deploy/local-smoke/**。"
+}
