@@ -4,7 +4,7 @@
 >
 > 审计日期：2026-07-16
 >
-> 事实基线：`codex/w2-r04-consumption-audit@8d9cb205`
+> 事实基线：`codex/w2-r04-consumption-audit@1e6bf728`
 >
 > 结论边界：本文只把分散的 ADR、Review Freeze、Billing、Approval/Consumption 与 Structured Smoke 未决项整理成可逐项签核的决策包。本文不是 Owner 批准、不是机器 Review Freeze、不是 trust root，也不授权生产 Go、SQL Migration、IDL、生成代码、Graph、Runner、Billing、Approval、A2UI 或 Harness 实现。
 
@@ -56,7 +56,11 @@ R02 的分散待决项已由 [`w2-r02-owner-decision-matrix-v1.md`](../agent/w2-
 
 R03 的分散 Approval、Decision、Continuation、Consumption、child Receipt 与双向 Query 待决项已由 [`w2-r03-owner-decision-matrix-v1.md`](../agent/w2-r03-owner-decision-matrix-v1.md) 去重为 `R03-D01`～`R03-D14`。该矩阵显式区分 Decision key、Continuation SourceID、child ToolReceipt key、Agent-local Consumption key、Business `tr:` command key 与领域 backstop，也区分 Business→Agent Consumption Authority Query 和 Agent→Business CreationSpec Decision Query；全部决定仍为 `awaiting_owner_decision`。
 
+[`DR-W2-R03-v1.json`](../agent/approvals/w2-r03-owner-decision-requests/DR-W2-R03-v1.json) 将 14 项推荐候选固定为严格待决请求，原始字节 SHA-256 为 `d0e229c8b2fbaaee21b67a87155d6f9607f08e581d36419ae3833ae65b2d7c6d`。互相交叉守卫的两个独立 stdlib-only validator package 机械绑定 validator source exact-set、矩阵 §3、当前 Gate、provisional role 和 blocker exact-set，并要求 R03 保持 `candidate_evidence=[]`；请求仍不记录选择、批准、平台 Review 或实现解锁，也不补齐 child Corpus、生产 Authority Query、数据库 Evidence、aggregate 或 build/trust closure。
+
 R04 的 headless scope、Intent、Candidate、Billing、Graph、Activation、Business RPC、child Receipt 与发布待决项已由 [`w2-r04-owner-decision-matrix-v1.md`](../agent/w2-r04-owner-decision-matrix-v1.md) 去重为 `R04-D01`～`R04-D20`。该矩阵把 111 条 Activation Consumption 向量继续限定为 partial candidate，并将 headless R04 与 R08/A2UI/C1/R09 分开；全部决定仍为 `awaiting_owner_decision`。
+
+[`DR-W2-R04-v1.json`](../agent/approvals/w2-r04-owner-decision-requests/DR-W2-R04-v1.json) 将 20 项推荐候选固定为严格待决请求，原始字节 SHA-256 为 `d8806af1289aff1b8a790bdbf861c97a7c348f70aa83213760bdc28b318cd0e7`。同一 validator/guard 对从 SHA-bound candidate manifest 派生并交叉核验 4 个 fixture、111 条唯一向量、11 个唯一目标测试和 `candidate_unactivated` 状态；这只证明请求绑定当前 partial candidate，不是 compile attestation、完整 Gate baseline、Owner approval、aggregate 或 Formal Freeze。
 
 ### 2.2 ADR-009 / Structured Smoke
 
@@ -336,6 +340,7 @@ candidate_unactivated
 - [x] 为 R02 建立严格的 `awaiting_owner_decision` 请求及 validator，禁止选择/批准/Review 身份字段和实现解锁；
 - [x] 为 R03 待决项分配 `R03-D01`～`R03-D14`，区分六类 identity、双向 Query、child/failed-after 与 Owner exact-set；
 - [x] 为 R04 待决项分配 `R04-D01`～`R04-D20`，映射 PLAN/Billing/P4、headless/R08 边界与完整 Gate 缺口；
+- [x] 为 R03/R04 建立严格的 `awaiting_owner_decision` 请求及互相交叉守卫的 stdlib-only validator/guard；R03 保持零 candidate，R04 只绑定当前 partial candidate，均禁止选择、批准、Review 身份与实现解锁；
 - [ ] 取得 R02 全部稳定决定及既有 `PG-Dxx/TC-Pxx` 的结构化结论，补齐 upgrade exact-set 并生成 aggregate manifest；
 - [ ] 关闭 `BILL-OPEN-001`～`012`，生成 R00 canonical manifest 和 exact vectors；
 - [ ] 取得 R03/R04 全部 stable decision 的结构化结论，冻结 R01/R03/R04 slot/ordinal/owner/query mapping 与 child exact-set；
