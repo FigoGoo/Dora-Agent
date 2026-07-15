@@ -53,8 +53,12 @@ func TestW2R00R03R04OwnerDecisionMatricesV1(t *testing.T) {
 	closure := readOwnerDecisionMatrixFileV1(t, repoRoot, "docs/design/cross-module/w2-owner-decision-closure-v1.md")
 	projectPlan := readOwnerDecisionMatrixFileV1(t, repoRoot, "docs/requirements/project-development-plan.md")
 	for _, fragment := range []string{
+		"w2-r00-owner-decision-matrix-v1.md",
+		"DR-W2-R01-v1.json",
 		"w2-r03-owner-decision-matrix-v1.md",
 		"w2-r04-owner-decision-matrix-v1.md",
+		"R00-D01`～`R00-D14",
+		"R01-D01`～`D06",
 		"R03-D01`～`D14",
 		"R04-D01`～`D20",
 	} {
@@ -63,8 +67,12 @@ func TestW2R00R03R04OwnerDecisionMatricesV1(t *testing.T) {
 		}
 	}
 	for _, fragment := range []string{
+		"w2-r00-owner-decision-matrix-v1.md",
+		"DR-W2-R01-v1.json",
 		"w2-r03-owner-decision-matrix-v1.md",
 		"w2-r04-owner-decision-matrix-v1.md",
+		"R00-D01`～`D14",
+		"R01-D01`～`D06",
 		"R03-D01`～`D14",
 		"R04-D01`～`D20",
 		"生产实现与 Harness 继续失败关闭",
