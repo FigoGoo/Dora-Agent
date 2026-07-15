@@ -306,7 +306,7 @@ skill_market_stale_selection_fail_closed
 | Evidence | Schema | assertions exact-set |
 | --- | --- | --- |
 | Foundation | `w1.skill-foundation.smoke.evidence.v3` | 47 项，其中 5 项固定数值、42 项布尔 true |
-| Governance | `w1.skill-governance.smoke.evidence.v1` | 5 项布尔 true |
+| Governance | `w1.skill-governance.smoke.evidence.v2` | 9 项布尔 true |
 | Market | `w1.skill-market.smoke.evidence.v2` | 6 项布尔 true |
 | Public Market Binding | `w1.skill-market-binding.smoke.evidence.v1` | 7 项布尔 true |
 

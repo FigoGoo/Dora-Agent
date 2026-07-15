@@ -376,7 +376,7 @@ skill_market_cursor_fail_closed=true
 skill_market_stale_selection_fail_closed=true
 ```
 
-它不能修改现有 Foundation v3 的 47 assertions/42 booleans，也不能把 Governance v1 的五项结果复制为市场通过。
+它不能修改现有 Foundation v3 的 47 assertions/42 booleans，也不能把 Governance v2 的九项结果复制为市场通过。
 
 ## 12. 已关闭门禁：Public Market Binding v1
 
