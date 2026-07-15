@@ -1,14 +1,14 @@
 # 全功能冒烟工程设计
 
-> 状态：Draft / 待 Business、Agent、Worker、前端、测试、运维与安全评审
+> 状态：Review Ready / 待 Business、Agent、Worker、前端、测试、运维与安全联合批准
 >
-> 版本：`smoke.engineering.v1alpha1`
+> 版本：`smoke.engineering.v1alpha2`
 >
-> 更新日期：2026-07-14
+> 更新日期：2026-07-15
 >
 > 适用范围：`SMK-001`～`SMK-035`
 >
-> 实现门禁：本文评审通过前可以继续细化场景，不创建会被误认为生产 Runtime 的测试服务或不受控测试后门。
+> 实现门禁：`W2-ADR-009` 与本文均 Approved 前，只允许继续细化场景和评审输入；不得创建 `smoke/**` Harness、会被误认为生产 Runtime 的测试服务或不受控测试后门。
 
 ## 1. 目标与通过定义
 
@@ -407,14 +407,50 @@ SMK-P0 全量通过前：
 - [ ] 真实 preview/export 可解码、播放和下载；
 - [ ] Evidence 脱敏抽检通过。
 
-## 14. 当前结论
+## 14. W2-S0 首切评审候选
 
-本文已给出推荐的测试工程形态、Fixture 分类、Adapter 协议、Evidence 和故障注入边界，但以下项目仍需评审：
+### 14.1 工程与依赖边界
 
-- 测试工程是否统一使用独立 Node/Playwright package；
-- local object storage 采用协议 Fake 还是 MinIO 等 S3-compatible Runtime；
-- 策略 Clock 控制协议和可注入时间范围；
-- CI 的核心 Smoke 子集、全量执行频率和 Evidence 保留期限；
-- Provider Sandbox 的凭据 Owner 和运行环境。
+W2-S0 推荐使用一个独立的 `smoke/` Node/TypeScript + Playwright package，Node 版本与 CI 的 Node 24 基线一致，不新增根 Go Module 或生产 Runtime。首切依赖只允许锁定 YAML、严格 Schema、TypeScript、Node 类型和 Playwright；HTTP、摘要和单元测试优先使用 Node 内置 `fetch`、`crypto` 与 `node:test`，不得引入动态脚本执行、任意模块路径或第二套 CLI 框架。
 
-当前结论：**Draft / 待评审，不得以本文存在为由宣称 SMK-P0 已可执行。**
+Scenario 不是单个自由脚本。一个 Scenario 可以按 `profile` 声明有序的白名单 typed steps；Registry 必须验证 canonical/derived slice 映射无环、ID 和 assertion exact-set 唯一、closure run 版本一致、未知字段/Driver/Assertion 失败关闭。YAML 禁止内嵌 SQL、Shell、Secret、任意 Header、生产域名或动态模块路径。
+
+### 14.2 首个 parity 场景
+
+首切只迁移既有 `SMK-004A` 的两个 profile，不新增 W2 业务语义：
+
+| Profile | 新 Harness 职责 | 既有权威路径 | 首切状态 |
+| --- | --- | --- | --- |
+| `api` | 读取正式 Business BFF Workspace Snapshot，验证 Project/Session/Input 绑定、非 null 集合、Event Window 与空 Prompt 的空 Message/Input | `scripts/smoke-w0-transport.sh` 的 Workspace、空 Workspace、PostgreSQL 权威断言、SSE 与 Agent 重启段 | `shadow_parity` |
+| `ui` | 使用真实 Chromium 打开正式 Workspace，验证 `ready/live`、同 Project/Session 与硬刷新后恢复；不得请求拦截或注入测试 Header | `frontend/e2e/w0-transport.spec.js` 的初次加载、硬刷新和离线恢复段 | `shadow_parity` |
+
+两个 profile 均固定 `contributes_to_status=false`。它们通过只证明新 Registry、Driver、Assertion 和 Evidence 编排与既有路径等价，不替代 `w05.workspace-transport.smoke.evidence.v3` 的 34 项 canonical 闭集，也不能把 `SMK-004` 或 SMK-P0 标为通过。W2-S0 退出前必须由测试 Owner 冻结“完整迁移现有 W0.5 门禁”或“新的完整 parity exact-set”二者之一。
+
+### 14.3 Shell 交接与安全上下文
+
+Shell 在迁移期继续拥有真实依赖/Runtime 生命周期、一次性 Secret、已有 Seeder 和失败清理；Harness 只通过权限为 `0600` 的版本化 Context 文件读取本次 Run 的 loopback endpoint、公开资源 ID、fixture namespace、binary digest、Migration head 与临时凭据引用。Context 原文不得进入 Evidence，进程退出后必须删除。
+
+当前 W0 脚本仍使用 `dora_admin` 执行权威查询。在专用只读 Evidence Role 与最小查询面建立前，Harness 只能消费 Shell 产出的脱敏权威投影，不能宣称 Shell 已只负责 Runtime 编排，也不得自行获得跨数据库写权限。
+
+### 14.4 Evidence 与失败闭环
+
+Evidence 状态固定为 `pending -> passed|failed`，通过临时目录、逐文件 checksum、Secret/内容扫描和原子 rename 发布。失败时删除 Cookie、密码、Context、完整 Prompt/Message 和未扫描原始日志，但保留已经完成脱敏闭环的 `failed` bundle；第一次失败不能被后续重试覆盖。真实 parity 必须绑定同一 Evidence schema、assertion exact-set、source digest、Runtime binary digest、Migration heads、Definition/Graph/Adapter/Freeze versions，任一漂移都使 closure stale。
+
+### 14.5 后续 Adapter、Clock 与 CI 候选
+
+- W2-S0 不引入对象存储；W3 推荐使用 MinIO 验证 S3 语义，并以受控故障代理覆盖 Unknown Outcome。
+- W2-S0 使用真实单调时钟；后续策略 Clock 只允许 local-smoke 内网、一次性 Run Token 和白名单策略推进，不修改系统时钟。
+- PR 候选门禁运行 Registry/Schema/单元测试和 API shadow parity；nightly 运行 Chromium parity。失败脱敏 Evidence 候选保留 30 天，通过摘要候选保留 14 天，最终期限由安全与运维批准。
+- Provider Sandbox 使用独立受保护手动作业，由运维管理环境与 Secret，不进入普通 PR，也不影响 Local Deterministic Smoke 的确定性。
+
+### 14.6 联合批准清单
+
+以下结论必须形成不可变 Owner 审批引用后，才能把本文和 `W2-ADR-009` 标为 Approved 并创建 `smoke/**`：
+
+- 测试 Owner：首个 parity exact-set、canonical closure 与第一次失败保留规则；
+- 前端 Owner：Playwright 复用边界、真实请求和硬刷新/重连断言；
+- Business、Agent、Worker Owner：Context/只读 Evidence Query 不越过 Module Owner；
+- 安全 Owner：Secret 生命周期、loopback/生产失败关闭、脱敏扫描和 Evidence 保留；
+- 运维 Owner：Node/Playwright 版本、CI 频率、Artifact 权限/期限与 Provider Sandbox 环境。
+
+当前结论：**Review Ready / 待联合批准。本文已经收敛 W2-S0 推荐方案，但尚未 Approved；不得创建 `smoke/**`，也不得以本候选宣称 SMK-P0 已可执行。**
