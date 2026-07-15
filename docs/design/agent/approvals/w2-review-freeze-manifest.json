@@ -34,7 +34,7 @@
     },
     {
       "gate": "W2-R01",
-      "status": "awaiting_review",
+      "status": "expansion_frozen",
       "required_owner_roles": [
         "agent_owner",
         "business_owner",
@@ -45,7 +45,7 @@
       "candidate_evidence": [
         {
           "scope": "graph_tool_result_and_tool_receipt_current_candidate",
-          "coverage": "gate_candidate",
+          "coverage": "partial_candidate",
           "contract_manifest_path": "agent/tests/contract/testdata/w2_r01/manifest.json",
           "contract_manifest_sha256": "sha256:d08c20bafb9f4119b13e07a419cbfa72224d3e85a9af8447c5f88313d38217cd",
           "vector_ids": [
@@ -151,8 +151,24 @@
           "statement": "W2-ADR-001/002 与 failed-after/outcome-aware 最小缺口是否保留仍待 Owner 结论。"
         },
         {
+          "code": "W2_R01_CARD_AND_REGISTRY_SCOPE_PENDING",
+          "statement": "waiting_user card_id 的 R01/R08 Owner 边界，以及 R01 只冻结 Registry 机制还是等待六 Tool exact-set，尚未联合裁决。"
+        },
+        {
+          "code": "W2_R01_CORPUS_SCOPE_INCOMPLETE",
+          "statement": "现有 85 向量是可靠候选子集，但尚未覆盖文档声明的 failed-after/outcome-aware 与 Billing authority projection，因此不得称完整 Gate candidate。"
+        },
+        {
           "code": "W2_R01_OWNER_APPROVAL_MISSING",
           "statement": "跨 Module Owner 尚未对当前候选 manifest 摘要、向量 exact-set 与目标测试签字。"
+        },
+        {
+          "code": "W2_R01_OWNER_SCOPE_PENDING",
+          "statement": "若 R01 保留 card_id 与产品状态语义，是否追加 Frontend/Product Owner 仍待决定；当前 required_owner_roles 不代表该问题已关闭。"
+        },
+        {
+          "code": "W2_R01_VERSION_POLICY_PENDING",
+          "statement": "GraphToolResult exact-version 与跨 Module Catalog 同主版本忽略未知可选字段的兼容策略仍然冲突。"
         }
       ]
     },

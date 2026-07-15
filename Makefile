@@ -8,7 +8,7 @@ THRIFTGO_VERSION := v0.4.5
 MIGRATE_VERSION := v4.19.0
 W0_ENV_FILE ?= .env.example
 
-.PHONY: verify test test-smoke-contracts test-local-smoke-seeders vet race build test-frontend build-frontend check-frontend check-w2-review-freeze rpc-tools foundation-rpc-tools migration-tools generate-foundation-rpc generate-session-rpc generate-rpc check-generated check-migrations check-database-contracts local-up local-down local-reset migrate-up migrate-down seed-local-smoke-user foundation-smoke w0-smoke w0-browser-smoke w05-smoke w05-browser-smoke w1-smoke w1-browser-smoke run-business run-agent run-worker
+.PHONY: verify test test-smoke-contracts test-local-smoke-seeders vet race build test-frontend build-frontend check-frontend check-w2-review-freeze check-w2-review-freeze-transition rpc-tools foundation-rpc-tools migration-tools generate-foundation-rpc generate-session-rpc generate-rpc check-generated check-migrations check-database-contracts local-up local-down local-reset migrate-up migrate-down seed-local-smoke-user foundation-smoke w0-smoke w0-browser-smoke w05-smoke w05-browser-smoke w1-smoke w1-browser-smoke run-business run-agent run-worker
 
 verify:
 	@for module in $(MODULES); do (cd $$module && GOWORK=off $(GO) mod verify) || exit 1; done
@@ -44,7 +44,12 @@ build-frontend:
 check-frontend: test-frontend build-frontend
 
 check-w2-review-freeze:
-	@cd agent && GOWORK=off $(GO) test ./tests/contract -run '^TestW2ReviewFreezeManifestV1' -count=1
+	@cd agent && GOWORK=off GOTOOLCHAIN=local $(GO) test ./tests/reviewfreeze -count=1
+
+check-w2-review-freeze-transition:
+	@test -n "$$W2_REVIEW_FREEZE_BASE_SHA" || (echo "缺少 W2_REVIEW_FREEZE_BASE_SHA" >&2; exit 1)
+	@test -n "$$W2_REVIEW_FREEZE_HEAD_SHA" || (echo "缺少 W2_REVIEW_FREEZE_HEAD_SHA" >&2; exit 1)
+	@cd agent && GOWORK=off GOTOOLCHAIN=local $(GO) test ./tests/reviewfreeze -run '^TestW2ReviewFreezeTransitionGitV1FromObjects$$' -count=1
 
 rpc-tools foundation-rpc-tools:
 	@mkdir -p $(TOOLS_DIR)

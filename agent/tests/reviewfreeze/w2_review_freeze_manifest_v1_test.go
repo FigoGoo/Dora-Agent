@@ -1,4 +1,4 @@
-package contract_test
+package reviewfreeze_test
 
 import (
 	"crypto/sha256"
@@ -21,7 +21,7 @@ const (
 	reviewFreezeSchemaV1                = "w2_review_freeze_manifest.v1"
 	reviewFreezeOwnerApprovalSchemaV1   = "w2_review_freeze_owner_approval.v1"
 	reviewFreezeExceptionSchemaV1       = "w2_corpus_freeze_exception.v1"
-	reviewFreezeApprovalSummarySchemaV1 = "w2_review_freeze_approval_summary.v1"
+	reviewFreezeApprovalSummarySchemaV2 = "w2_review_freeze_approval_summary.v2"
 )
 
 // reviewFreezeManifestV1 描述由 Integration Owner 串行维护的 W2 契约评审冻结总表。
@@ -198,12 +198,36 @@ type reviewFreezeExceptionBaselineV1 struct {
 type reviewFreezeCorpusManifestV1 struct {
 	// SchemaVersion 标识被引用 Corpus manifest 的版本。
 	SchemaVersion string `json:"schema_version"`
+	// Files 固定 Corpus 文件、原始字节摘要和各文件向量数。
+	Files []reviewFreezeCorpusFileV1 `json:"files"`
+	// FixtureIDs 固定 Corpus 使用的初始状态夹具 exact-set。
+	FixtureIDs []string `json:"fixture_ids"`
+	// DesignSources 可选绑定产生该 Corpus 的设计源文件及原始字节摘要。
+	DesignSources []reviewFreezeDesignSourceV1 `json:"design_sources,omitempty"`
 	// VectorIDs 是现有 manifest 声明的向量集合。
 	VectorIDs []string `json:"vector_ids"`
 	// TotalVectorCount 是现有 manifest 声明的向量总数。
 	TotalVectorCount int `json:"total_vector_count"`
 	// TargetTests 是现有 manifest 声明的目标测试集合。
 	TargetTests []string `json:"target_tests"`
+}
+
+// reviewFreezeCorpusFileV1 描述 contract manifest 直接拥有的单个 Corpus 文件。
+type reviewFreezeCorpusFileV1 struct {
+	// File 是相对 contract manifest 所在目录的安全文件路径。
+	File string `json:"file"`
+	// SHA256 固定文件原始字节摘要。
+	SHA256 string `json:"sha256"`
+	// VectorCount 是该文件实际承载的向量数。
+	VectorCount int `json:"vector_count"`
+}
+
+// reviewFreezeDesignSourceV1 描述可选的仓库设计源绑定。
+type reviewFreezeDesignSourceV1 struct {
+	// Path 是仓库相对设计文件路径。
+	Path string `json:"path"`
+	// SHA256 固定设计文件原始字节摘要。
+	SHA256 string `json:"sha256"`
 }
 
 // reviewFreezeArtifactLoaderV1 以仓库相对路径读取不可变治理输入。
@@ -264,6 +288,41 @@ func TestW2ReviewFreezeManifestV1FormalStates(t *testing.T) {
 				t.Fatalf("valid formal transition rejected: %v", err)
 			}
 		})
+	}
+}
+
+// TestW2ReviewFreezeManifestV1ReopenReapprovedFreeze 验证已经由 CFE 重批的高版本 Freeze 仍可保留完整谱系后再次受控重开。
+func TestW2ReviewFreezeManifestV1ReopenReapprovedFreeze(t *testing.T) {
+	manifest, overlay := reviewFreezeSyntheticFormalV1(t, "approved", true)
+	gate := &manifest.Gates[0]
+	gate.Status = "reopened"
+	gate.Blockers = []reviewFreezeBlockerV1{{Code: "W2_R00_CFE_OPEN", Statement: "第二个 CFE 尚未重新冻结和批准，生产实现继续阻断。"}}
+
+	oldException := reviewFreezeDecodeExceptionV1(t, overlay[gate.ReopenException.Path])
+	newException := oldException
+	newException.ExceptionID = "CFE-W2-R00-SECURITY-002"
+	newException.ParentFreezeID = gate.Freeze.FreezeID
+	newException.Blocker = "重批后的 v2 Freeze 发现新的 Unknown Outcome 回归。"
+	newException.VectorIDs = []string{"V-003"}
+	newException.Manifest.ContractManifestSHA256 = reviewFreezeSHA256V1([]byte("synthetic-v3-contract"))
+	newException.Manifest.VectorIDs = []string{"V-001", "V-002", "V-003"}
+	newExceptionRaw := reviewFreezeMarshalV1(t, newException)
+	newExceptionPath := "docs/design/agent/approvals/w2-review-freeze-exceptions/cfe-w2-r00-security-002.json"
+	overlay[newExceptionPath] = newExceptionRaw
+	gate.ReopenException = &reviewFreezeExceptionRefV1{
+		Path: newExceptionPath, ExceptionManifestSHA256: reviewFreezeSHA256V1(newExceptionRaw),
+		ExceptionID: newException.ExceptionID, ParentFreezeID: gate.Freeze.FreezeID,
+	}
+
+	approval := reviewFreezeDecodeOwnerApprovalV1(t, overlay[gate.Freeze.OwnerApprovalRef.Path])
+	approval.ApprovalID = "APR-W2-R00-REOPEN-002"
+	approval.ApprovalSummarySHA256 = reviewFreezeApprovalSummaryV1(*gate)
+	reviewFreezeReplaceOwnerApprovalV1(t, gate, approval, overlay)
+	gate.Freeze.OwnerApprovalRef.ApprovalSummarySHA256 = approval.ApprovalSummarySHA256
+
+	loader := reviewFreezeOverlayLoaderV1(overlay, reviewFreezeRepositoryLoaderV1(reviewFreezeRepoRootV1(t)))
+	if err := reviewFreezeValidateManifestV1(manifest, loader); err != nil {
+		t.Fatalf("reopen reapproved freeze rejected: %v", err)
 	}
 }
 
@@ -426,6 +485,18 @@ func TestW2ReviewFreezeManifestV1FailClosedGuards(t *testing.T) {
 			want: "额外 Gate",
 		},
 		{
+			name: "reopened approval summary binds exact CFE",
+			make: func(t *testing.T) (reviewFreezeManifestV1, map[string][]byte) {
+				manifest, overlay := reviewFreezeSyntheticFormalV1(t, "reopened", false)
+				gate := &manifest.Gates[0]
+				exception := reviewFreezeDecodeExceptionV1(t, overlay[gate.ReopenException.Path])
+				exception.Blocker = "同一 CFE 引用的阻断事实被替换。"
+				reviewFreezeReplaceExceptionV1(t, gate, exception, overlay)
+				return manifest, overlay
+			},
+			want: "approval summary 不一致",
+		},
+		{
 			name: "candidate path escapes repository",
 			make: func(t *testing.T) (reviewFreezeManifestV1, map[string][]byte) {
 				manifest, _ := reviewFreezeLoadCurrentV1(t)
@@ -433,6 +504,16 @@ func TestW2ReviewFreezeManifestV1FailClosedGuards(t *testing.T) {
 				return manifest, nil
 			},
 			want: "不安全路径",
+		},
+		{
+			name: "candidate corpus file digest drift",
+			make: func(t *testing.T) (reviewFreezeManifestV1, map[string][]byte) {
+				manifest, _ := reviewFreezeLoadCurrentV1(t)
+				return manifest, map[string][]byte{
+					"agent/tests/contract/testdata/w2_r01/graph_tool_result_v1.json": []byte(`{"tampered":true}`),
+				}
+			},
+			want: "sha256=",
 		},
 	}
 
@@ -630,11 +711,17 @@ func reviewFreezeValidateContractRefV1(path, expectedSHA string, vectorIDs, targ
 		return fmt.Errorf("contract manifest %s: %w", path, err)
 	}
 	var source reviewFreezeCorpusManifestV1
-	if err := json.Unmarshal(raw, &source); err != nil {
-		return fmt.Errorf("解析 contract manifest %s: %w", path, err)
+	if err := messageSetStrictDecodeV1(raw, &source); err != nil {
+		return fmt.Errorf("严格解析 contract manifest %s: %w", path, err)
 	}
-	if source.SchemaVersion == "" || source.TotalVectorCount != len(source.VectorIDs) {
+	if source.SchemaVersion == "" || source.TotalVectorCount != len(source.VectorIDs) || len(source.Files) == 0 {
 		return fmt.Errorf("contract manifest %s 版本或向量总数非法", path)
+	}
+	if err := reviewFreezeValidateCorpusFilesV1(path, source, loader); err != nil {
+		return err
+	}
+	if err := reviewFreezeValidateOptionalDesignSourcesV1(source.DesignSources, loader); err != nil {
+		return err
 	}
 	sourceVectors := append([]string(nil), source.VectorIDs...)
 	sourceTests := append([]string(nil), source.TargetTests...)
@@ -642,6 +729,60 @@ func reviewFreezeValidateContractRefV1(path, expectedSHA string, vectorIDs, targ
 	sort.Strings(sourceTests)
 	if !reflect.DeepEqual(vectorIDs, sourceVectors) || !reflect.DeepEqual(targetTests, sourceTests) {
 		return fmt.Errorf("contract manifest %s 的 vector/target-test exact-set 漂移", path)
+	}
+	return nil
+}
+
+// reviewFreezeValidateCorpusFilesV1 校验 Corpus 文件 exact-set、逐文件摘要及总向量数，防止只固定顶层 manifest 而替换底层向量。
+func reviewFreezeValidateCorpusFilesV1(manifestPath string, source reviewFreezeCorpusManifestV1, loader reviewFreezeArtifactLoaderV1) error {
+	lastFile := ""
+	totalVectors := 0
+	manifestDir := filepath.ToSlash(filepath.Dir(filepath.FromSlash(manifestPath)))
+	for _, corpusFile := range source.Files {
+		if err := reviewFreezeValidateSafePathV1(corpusFile.File, ""); err != nil {
+			return fmt.Errorf("contract corpus file: %w", err)
+		}
+		if corpusFile.File <= lastFile || corpusFile.VectorCount <= 0 {
+			return fmt.Errorf("contract corpus files 未排序、重复或 vector_count 非正=%q", corpusFile.File)
+		}
+		joined := filepath.ToSlash(filepath.Join(filepath.FromSlash(manifestDir), filepath.FromSlash(corpusFile.File)))
+		raw, err := loader(joined)
+		if err != nil {
+			return fmt.Errorf("读取 contract corpus file %s: %w", joined, err)
+		}
+		if err := reviewFreezeCheckSHA256V1(raw, corpusFile.SHA256); err != nil {
+			return fmt.Errorf("contract corpus file %s: %w", joined, err)
+		}
+		totalVectors += corpusFile.VectorCount
+		lastFile = corpusFile.File
+	}
+	if totalVectors != source.TotalVectorCount {
+		return fmt.Errorf("contract corpus files vector_count=%d want=%d", totalVectors, source.TotalVectorCount)
+	}
+	if err := reviewFreezeValidateSortedExactSetV1(source.FixtureIDs, "fixture_ids"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// reviewFreezeValidateOptionalDesignSourcesV1 在 manifest 声明设计源时逐项固定仓库路径和原始摘要。
+func reviewFreezeValidateOptionalDesignSourcesV1(sources []reviewFreezeDesignSourceV1, loader reviewFreezeArtifactLoaderV1) error {
+	lastPath := ""
+	for _, source := range sources {
+		if err := reviewFreezeValidateSafePathV1(source.Path, "docs/"); err != nil {
+			return fmt.Errorf("design source: %w", err)
+		}
+		if source.Path <= lastPath {
+			return fmt.Errorf("design_sources 未排序或重复=%q", source.Path)
+		}
+		raw, err := loader(source.Path)
+		if err != nil {
+			return fmt.Errorf("读取 design source %s: %w", source.Path, err)
+		}
+		if err := reviewFreezeCheckSHA256V1(raw, source.SHA256); err != nil {
+			return fmt.Errorf("design source %s: %w", source.Path, err)
+		}
+		lastPath = source.Path
 	}
 	return nil
 }
@@ -682,9 +823,6 @@ func reviewFreezeValidateFormalRecordV1(manifest reviewFreezeManifestV1, gate re
 	}
 	if err := reviewFreezeValidateUTCTimeV1(freeze.FrozenAt); err != nil {
 		return fmt.Errorf("frozen_at: %w", err)
-	}
-	if gate.Status == "reopened" && freeze.SupersedesFreezeID != "" {
-		return fmt.Errorf("reopened 必须保留 parent freeze，不得声明 supersedes")
 	}
 	if gate.Status != "reopened" && exceptionID == "" && freeze.SupersedesFreezeID != "" {
 		return fmt.Errorf("supersedes freeze 缺 CFE")
@@ -736,11 +874,7 @@ func reviewFreezeValidateOwnerApprovalV1(manifest reviewFreezeManifestV1, gate r
 	if err := reviewFreezeValidateOwnerSignaturesV1(manifest, gate.RequiredOwnerRoles, approval.OwnerApprovals); err != nil {
 		return err
 	}
-	approvalExceptionID := ""
-	if gate.Status == "approved" && gate.Freeze.SupersedesFreezeID != "" {
-		approvalExceptionID = exceptionID
-	}
-	wantSummary := reviewFreezeApprovalSummaryV1(gate, approvalExceptionID)
+	wantSummary := reviewFreezeApprovalSummaryV1(gate)
 	if ref.ApprovalSummarySHA256 != wantSummary || approval.ApprovalSummarySHA256 != wantSummary {
 		return fmt.Errorf("approval summary 不一致 ref=%q approval=%q want=%q", ref.ApprovalSummarySHA256, approval.ApprovalSummarySHA256, wantSummary)
 	}
@@ -869,22 +1003,36 @@ func reviewFreezeValidateExceptionV1(manifest reviewFreezeManifestV1, gate revie
 	return &exception, nil
 }
 
-// reviewFreezeApprovalSummaryV1 对正式冻结字段做无歧义摘要，防止审批引用被移花接木。
-func reviewFreezeApprovalSummaryV1(gate reviewFreezeGateV1, exceptionID string) string {
+// reviewFreezeApprovalSummaryV1 对正式冻结和可选 CFE 引用做无歧义摘要，防止审批引用被移花接木。
+func reviewFreezeApprovalSummaryV1(gate reviewFreezeGateV1) string {
 	freeze := gate.Freeze
+	reopenPath := ""
+	reopenManifestSHA := ""
+	reopenExceptionID := ""
+	reopenParentFreezeID := ""
+	if gate.ReopenException != nil {
+		reopenPath = gate.ReopenException.Path
+		reopenManifestSHA = gate.ReopenException.ExceptionManifestSHA256
+		reopenExceptionID = gate.ReopenException.ExceptionID
+		reopenParentFreezeID = gate.ReopenException.ParentFreezeID
+	}
 	canonical := strings.Join([]string{
-		"schema=" + reviewFreezeApprovalSummarySchemaV1,
+		"schema=" + reviewFreezeApprovalSummarySchemaV2,
 		"gate=" + gate.Gate,
 		"status=" + gate.Status,
 		"required_owner_roles=" + strings.Join(gate.RequiredOwnerRoles, "\x1f"),
 		"freeze_id=" + freeze.FreezeID,
 		"supersedes_freeze_id=" + freeze.SupersedesFreezeID,
+		"owner_approval_path=" + freeze.OwnerApprovalRef.Path,
 		"contract_manifest_path=" + freeze.ContractManifestPath,
 		"contract_manifest_sha256=" + freeze.ContractManifestSHA256,
 		"vector_ids=" + strings.Join(freeze.VectorIDs, "\x1f"),
 		"target_tests=" + strings.Join(freeze.TargetTests, "\x1f"),
 		"frozen_at=" + freeze.FrozenAt,
-		"reapproval_exception_id=" + exceptionID,
+		"reopen_exception_path=" + reopenPath,
+		"reopen_exception_manifest_sha256=" + reopenManifestSHA,
+		"reopen_exception_id=" + reopenExceptionID,
+		"reopen_parent_freeze_id=" + reopenParentFreezeID,
 	}, "\n")
 	return reviewFreezeSHA256V1([]byte(canonical))
 }
@@ -906,7 +1054,7 @@ func reviewFreezeValidateSortedExactSetV1(values []string, field string) error {
 
 // reviewFreezeValidateSafePathV1 拒绝绝对路径、清理后漂移、父目录逃逸和错误目录前缀。
 func reviewFreezeValidateSafePathV1(relative, requiredPrefix string) error {
-	if relative == "" || filepath.IsAbs(relative) || filepath.ToSlash(filepath.Clean(filepath.FromSlash(relative))) != relative || relative == ".." || strings.HasPrefix(relative, "../") {
+	if relative == "" || strings.ContainsAny(relative, "\x00\r\n\t\\") || filepath.IsAbs(relative) || filepath.ToSlash(filepath.Clean(filepath.FromSlash(relative))) != relative || relative == ".." || strings.HasPrefix(relative, "../") {
 		return fmt.Errorf("不安全路径=%q", relative)
 	}
 	if requiredPrefix != "" && !strings.HasPrefix(relative, requiredPrefix) {
@@ -1017,15 +1165,28 @@ func reviewFreezeSyntheticFormalV1(t *testing.T, status string, reapproved bool)
 	if reapproved {
 		contractVectors = []string{"V-001", "V-002"}
 	}
+	contractFixtureName := "vectors.json"
+	contractFixtureRaw := reviewFreezeMarshalV1(t, contractVectors)
 	contractRaw := reviewFreezeMarshalV1(t, reviewFreezeCorpusManifestV1{
-		SchemaVersion: "synthetic_contract_manifest.v1", VectorIDs: contractVectors,
+		SchemaVersion: "synthetic_contract_manifest.v1",
+		Files: []reviewFreezeCorpusFileV1{{
+			File: contractFixtureName, SHA256: reviewFreezeSHA256V1(contractFixtureRaw), VectorCount: len(contractVectors),
+		}},
+		FixtureIDs: []string{"synthetic.open"}, VectorIDs: contractVectors,
 		TotalVectorCount: len(contractVectors), TargetTests: []string{"TestSynthetic"},
 	})
+	cfeVectors := []string{"V-001", "V-002"}
+	cfeFixtureRaw := reviewFreezeMarshalV1(t, cfeVectors)
 	cfeContractRaw := reviewFreezeMarshalV1(t, reviewFreezeCorpusManifestV1{
-		SchemaVersion: "synthetic_contract_manifest.v1", VectorIDs: []string{"V-001", "V-002"},
-		TotalVectorCount: 2, TargetTests: []string{"TestSynthetic"},
+		SchemaVersion: "synthetic_contract_manifest.v1",
+		Files: []reviewFreezeCorpusFileV1{{
+			File: contractFixtureName, SHA256: reviewFreezeSHA256V1(cfeFixtureRaw), VectorCount: len(cfeVectors),
+		}},
+		FixtureIDs: []string{"synthetic.open"}, VectorIDs: cfeVectors,
+		TotalVectorCount: len(cfeVectors), TargetTests: []string{"TestSynthetic"},
 	})
 	overlay[contractPath] = contractRaw
+	overlay[filepath.ToSlash(filepath.Join(filepath.Dir(contractPath), contractFixtureName))] = contractFixtureRaw
 
 	freezeID := "CF-W2-R00-v1"
 	supersedes := ""
@@ -1084,11 +1245,8 @@ func reviewFreezeSyntheticFormalV1(t *testing.T, status string, reapproved bool)
 	}
 
 	approvalPath := "docs/design/agent/approvals/w2-review-freeze-owner-approvals/w2-r00.json"
-	approvalExceptionID := ""
-	if reapproved {
-		approvalExceptionID = exceptionID
-	}
-	approvalSummary := reviewFreezeApprovalSummaryV1(gate, approvalExceptionID)
+	gate.Freeze.OwnerApprovalRef.Path = approvalPath
+	approvalSummary := reviewFreezeApprovalSummaryV1(gate)
 	approval := reviewFreezeOwnerApprovalManifestV1{
 		SchemaVersion:          reviewFreezeOwnerApprovalSchemaV1,
 		ApprovalID:             "APR-W2-R00-001",
