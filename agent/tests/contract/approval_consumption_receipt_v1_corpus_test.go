@@ -27,13 +27,14 @@ const (
 
 // approvalConsumptionManifestV1 固定 R04 文件摘要、fixture/vector exact-set 和目标测试集合。
 type approvalConsumptionManifestV1 struct {
-	SchemaVersion    string                   `json:"schema_version"`
-	Files            []corpusManifestFileV1   `json:"files"`
-	ValidatorSources []corpusManifestSourceV1 `json:"validator_sources"`
-	FixtureIDs       []string                 `json:"fixture_ids"`
-	VectorIDs        []string                 `json:"vector_ids"`
-	TotalVectorCount int                      `json:"total_vector_count"`
-	TargetTests      []string                 `json:"target_tests"`
+	SchemaVersion         string                   `json:"schema_version"`
+	Files                 []corpusManifestFileV1   `json:"files"`
+	ValidatorSources      []corpusManifestSourceV1 `json:"validator_sources"`
+	ValidatorBuildSources []corpusManifestSourceV1 `json:"validator_build_sources"`
+	FixtureIDs            []string                 `json:"fixture_ids"`
+	VectorIDs             []string                 `json:"vector_ids"`
+	TotalVectorCount      int                      `json:"total_vector_count"`
+	TargetTests           []string                 `json:"target_tests"`
 }
 
 // approvalConsumptionCorpusV1 是 unsigned core 的测试专用机器真源。
@@ -288,12 +289,23 @@ type approvalConsumptionEvaluationV1 struct {
 
 func TestW2R04ApprovalConsumptionManifest(t *testing.T) {
 	manifest := loadApprovalConsumptionManifestV1(t)
-	wantValidatorSources := []string{
-		"agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
-		"agent/tests/contract/graph_tool_result_v1_corpus_test.go",
+	wantValidatorSources := contractPackageValidatorSourcePathsV1()
+	wantValidatorBuildSources := []string{
+		"agent/go.mod",
+		"agent/go.sum",
 	}
 	if err := validateCorpusManifestSourceClosureV1(contractManifestRepositoryRootV1(t), "validator", manifest.ValidatorSources, wantValidatorSources); err != nil {
 		t.Fatalf("R04 manifest validator_sources 未闭合: %v", err)
+	}
+	repositoryRoot := contractManifestRepositoryRootV1(t)
+	if err := validateCorpusManifestSourceClosureV1(repositoryRoot, "build", manifest.ValidatorBuildSources, wantValidatorBuildSources); err != nil {
+		t.Fatalf("R04 manifest validator_build_sources 未闭合: %v", err)
+	}
+	if err := validateCorpusManifestGoBuildInputsV1(repositoryRoot, manifest.ValidatorBuildSources); err != nil {
+		t.Fatalf("R04 manifest Go build inputs 非法: %v", err)
+	}
+	if err := validateCorpusManifestGoPackageExactSetV1(repositoryRoot, manifest.ValidatorSources); err != nil {
+		t.Fatalf("R04 manifest validator package source exact-set 未闭合: %v", err)
 	}
 	wantFixtures := []string{
 		"acr.creation_spec_activation.approved_recorded",

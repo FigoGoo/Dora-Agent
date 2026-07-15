@@ -51,14 +51,15 @@ type contractError struct {
 }
 
 type corpusManifestV1 struct {
-	SchemaVersion    string                   `json:"schema_version"`
-	Files            []corpusManifestFileV1   `json:"files"`
-	DesignSources    []corpusManifestSourceV1 `json:"design_sources"`
-	ValidatorSources []corpusManifestSourceV1 `json:"validator_sources"`
-	FixtureIDs       []string                 `json:"fixture_ids"`
-	VectorIDs        []string                 `json:"vector_ids"`
-	TotalVectorCount int                      `json:"total_vector_count"`
-	TargetTests      []string                 `json:"target_tests"`
+	SchemaVersion         string                   `json:"schema_version"`
+	Files                 []corpusManifestFileV1   `json:"files"`
+	DesignSources         []corpusManifestSourceV1 `json:"design_sources"`
+	ValidatorSources      []corpusManifestSourceV1 `json:"validator_sources"`
+	ValidatorBuildSources []corpusManifestSourceV1 `json:"validator_build_sources"`
+	FixtureIDs            []string                 `json:"fixture_ids"`
+	VectorIDs             []string                 `json:"vector_ids"`
+	TotalVectorCount      int                      `json:"total_vector_count"`
+	TargetTests           []string                 `json:"target_tests"`
 }
 
 type corpusManifestFileV1 struct {
@@ -239,7 +240,25 @@ func TestW2R01CorpusManifest(t *testing.T) {
 		"docs/design/agent/runner-session-lane-review-v1.md",
 		"docs/design/cross-module/aigc-contract-catalog.md",
 	}
-	wantValidatorSources := []string{
+	wantValidatorSources := contractPackageValidatorSourcePathsV1()
+	wantValidatorBuildSources := []string{
+		"agent/go.mod",
+		"agent/go.sum",
+	}
+	if err := validateCorpusManifestSourceClosureV1(repositoryRoot, "build", manifest.ValidatorBuildSources, wantValidatorBuildSources); err != nil {
+		t.Fatalf("manifest validator_build_sources 未闭合: %v", err)
+	}
+	if err := validateCorpusManifestGoBuildInputsV1(repositoryRoot, manifest.ValidatorBuildSources); err != nil {
+		t.Fatalf("manifest Go build inputs 非法: %v", err)
+	}
+	if err := validateCorpusManifestGoPackageExactSetV1(repositoryRoot, manifest.ValidatorSources); err != nil {
+		t.Fatalf("manifest validator package source exact-set 未闭合: %v", err)
+	}
+	/*
+		目标 Test 仍只来自以下两份语义校验器；完整 validator_sources 额外冻结同包所有参与编译的 Go 文件，
+		防止未登记 TestMain/init/共享全局改变进程行为。
+	*/
+	targetValidatorSources := []string{
 		"agent/tests/contract/graph_tool_result_v1_corpus_test.go",
 		"agent/tests/contract/tool_receipt_v1_corpus_test.go",
 	}
@@ -253,6 +272,9 @@ func TestW2R01CorpusManifest(t *testing.T) {
 		t.Fatalf("manifest 未绑定实际共享严格解码器源码: %v", err)
 	}
 	assertCorpusManifestSourceClosureRejectsV1(t, repositoryRoot, manifest.DesignSources, wantDesignSources, manifest.ValidatorSources, wantValidatorSources)
+	actualTests := contractManifestTargetTestNamesV1(t, []string{
+		filepath.Base(targetValidatorSources[0]), filepath.Base(targetValidatorSources[1]),
+	})
 	wantFiles := []corpusManifestFileV1{
 		{File: "graph_tool_result_v1.json", VectorCount: 48},
 		{File: "tool_receipt_v1.json", VectorCount: 39},
@@ -299,13 +321,26 @@ func TestW2R01CorpusManifest(t *testing.T) {
 	if !reflect.DeepEqual(manifest.TargetTests, wantTests) {
 		t.Fatalf("manifest target tests=%v want=%v", manifest.TargetTests, wantTests)
 	}
-	actualTests := contractManifestTargetTestNamesV1(t, []string{
-		"graph_tool_result_v1_corpus_test.go", "tool_receipt_v1_corpus_test.go",
-	})
 	manifestTests := append([]string(nil), manifest.TargetTests...)
 	sort.Strings(manifestTests)
 	if !reflect.DeepEqual(actualTests, manifestTests) {
 		t.Fatalf("manifest target tests 未绑定实际 Test 函数 actual=%v manifest=%v", actualTests, manifestTests)
+	}
+}
+
+func contractPackageValidatorSourcePathsV1() []string {
+	return []string{
+		"agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
+		"agent/tests/contract/approval_continuation_cross_object_evidence_v1_corpus_test.go",
+		"agent/tests/contract/graph_tool_result_v1_corpus_test.go",
+		"agent/tests/contract/immutable_turn_context_approval_manifest_v1_test.go",
+		"agent/tests/contract/session_event_marker_v1_corpus_test.go",
+		"agent/tests/contract/session_lane_ingress_v1_corpus_test.go",
+		"agent/tests/contract/session_lane_legacy_upgrade_v1_corpus_test.go",
+		"agent/tests/contract/session_lane_v1_corpus_test.go",
+		"agent/tests/contract/session_message_set_v1_corpus_test.go",
+		"agent/tests/contract/session_turn_context_v1_corpus_test.go",
+		"agent/tests/contract/tool_receipt_v1_corpus_test.go",
 	}
 }
 
@@ -382,8 +417,83 @@ func validateCorpusManifestSourcePathV1(sourceKind, sourcePath string) error {
 		if !strings.HasPrefix(sourcePath, "agent/tests/contract/") || pathpkg.Ext(sourcePath) != ".go" {
 			return fmt.Errorf("validator source 必须是 agent/tests/contract/ 下的 Go 文件: %s", sourcePath)
 		}
+	case "build":
+		if sourcePath != "agent/go.mod" && sourcePath != "agent/go.sum" {
+			return fmt.Errorf("validator build source 必须是 agent/go.mod 或 agent/go.sum: %s", sourcePath)
+		}
 	default:
 		return fmt.Errorf("未知 source kind: %s", sourceKind)
+	}
+	return nil
+}
+
+func validateCorpusManifestGoPackageExactSetV1(repositoryRoot string, sources []corpusManifestSourceV1) error {
+	declaredByDirectory := make(map[string][]string)
+	for _, source := range sources {
+		directory := pathpkg.Dir(source.Path)
+		declaredByDirectory[directory] = append(declaredByDirectory[directory], source.Path)
+	}
+	for directory, declared := range declaredByDirectory {
+		entries, err := os.ReadDir(filepath.Join(repositoryRoot, filepath.FromSlash(directory)))
+		if err != nil {
+			return fmt.Errorf("读取 validator package %s: %w", directory, err)
+		}
+		actual := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if pathpkg.Ext(entry.Name()) != ".go" {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil || !info.Mode().IsRegular() {
+				return fmt.Errorf("validator package Go source 不是普通文件: %s/%s", directory, entry.Name())
+			}
+			actual = append(actual, pathpkg.Join(directory, entry.Name()))
+		}
+		sort.Strings(actual)
+		sort.Strings(declared)
+		if !reflect.DeepEqual(actual, declared) {
+			return fmt.Errorf("validator package %s sources=%v want=%v", directory, declared, actual)
+		}
+	}
+	return validateCorpusManifestGoSourceExecutionShapeV1(repositoryRoot, sources)
+}
+
+func validateCorpusManifestGoSourceExecutionShapeV1(repositoryRoot string, sources []corpusManifestSourceV1) error {
+	buildConstraintPattern := regexp.MustCompile(`(?m)^//go:build(?:[\t ]|$)|^//[\t ]+\+build(?:[\t ]|$)`)
+	for _, source := range sources {
+		raw, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(source.Path)))
+		if err != nil {
+			return fmt.Errorf("读取 validator source %s: %w", source.Path, err)
+		}
+		if buildConstraintPattern.Match(raw) {
+			return fmt.Errorf("validator source 禁止 build constraint: %s", source.Path)
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), source.Path, raw, parser.SkipObjectResolution)
+		if err != nil {
+			return fmt.Errorf("解析 validator source %s: %w", source.Path, err)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if ok && function.Recv == nil && function.Name.Name == "TestMain" {
+				return fmt.Errorf("validator source 禁止 TestMain: %s", source.Path)
+			}
+		}
+	}
+	return nil
+}
+
+func validateCorpusManifestGoBuildInputsV1(repositoryRoot string, sources []corpusManifestSourceV1) error {
+	for _, source := range sources {
+		if source.Path != "agent/go.mod" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(source.Path)))
+		if err != nil {
+			return err
+		}
+		if regexp.MustCompile(`(?m)^\s*replace(?:\s|\()`).Match(raw) {
+			return fmt.Errorf("validator go.mod 禁止未闭合 replace")
+		}
 	}
 	return nil
 }

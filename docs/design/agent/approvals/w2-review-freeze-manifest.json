@@ -47,7 +47,7 @@
           "scope": "graph_tool_result_and_tool_receipt_current_candidate",
           "coverage": "partial_candidate",
           "contract_manifest_path": "agent/tests/contract/testdata/w2_r01/manifest.json",
-          "contract_manifest_sha256": "sha256:4fb54f2852e9db99db0d21df64e800d01f0d99523d61af447cb1e96f079229b1",
+          "contract_manifest_sha256": "sha256:5b97d5de758eeb6d80138dcc07f311c4ae8c1371d812f440df34ea97f7b8bcbc",
           "vector_ids": [
             "GTR-N01-malformed",
             "GTR-N02-duplicate-top-level",
@@ -174,7 +174,7 @@
         },
         {
           "code": "W2_R01_VALIDATOR_BUILD_CLOSURE_PENDING",
-          "statement": "当前 validator_sources 只绑定已登记文件；共享 Go package 的未登记 TestMain/init/全局与 go.mod/go.sum/toolchain/replace/第三方依赖仍可影响执行，正式 Freeze 前必须完成独立 stdlib-only 包或完整 package/build exact-set。"
+          "statement": "D0-04A 已绑定共享 contract_test 包 11 个直接 Go 源和 agent/go.mod/go.sum，并拒绝 replace；但 embed、agent/internal 传递源码、vendor/非 Go 输入、第三方模块执行边界与受信 toolchain/action digest 仍未闭合，正式 Freeze 前必须完成独立 stdlib-only verifier 或完整 transitive build-input exact-set。"
         },
         {
           "code": "W2_R01_VERSION_POLICY_PENDING",
@@ -248,7 +248,7 @@
           "scope": "creation_spec_activation_consumption_core_candidate",
           "coverage": "partial_candidate",
           "contract_manifest_path": "agent/tests/contract/testdata/w2_r04_approval_consumption/manifest.json",
-          "contract_manifest_sha256": "sha256:e442cbb99a726ed93a764b1c9914fe5bf7eff089f621eb2d475e3e2bcd5be77c",
+          "contract_manifest_sha256": "sha256:536a79174dd5c2d211df4223bfa822d7a0951586b119936f725e76921e642958",
           "vector_ids": [
             "ACR-N01-strict-malformed",
             "ACR-N02-strict-duplicate",
@@ -390,7 +390,7 @@
         },
         {
           "code": "W2_R04_VALIDATOR_BUILD_CLOSURE_PENDING",
-          "statement": "当前 validator_sources 只绑定已登记文件；共享 Go package 与未冻结构建依赖仍可改变 R04 校验语义，正式 Freeze 前必须完成独立 stdlib-only 包或完整 package/build exact-set。"
+          "statement": "D0-04A 已绑定共享 contract_test 包 11 个直接 Go 源和 agent/go.mod/go.sum，并拒绝 replace；但 embed、agent/internal 传递源码、vendor/非 Go 输入、第三方模块执行边界与受信 toolchain/action digest 仍未闭合，正式 Freeze 前必须完成独立 stdlib-only verifier 或完整 transitive build-input exact-set。"
         }
       ]
     },

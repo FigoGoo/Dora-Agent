@@ -66,6 +66,9 @@ func reviewFreezeValidateGitTransitionV1(repository reviewFreezeGitRepositoryV1,
 	if err := reviewFreezeValidateManifestV1(headManifest, headLoader); err != nil {
 		return fmt.Errorf("head shape: %w", err)
 	}
+	if err := reviewFreezeValidateHeadValidatorClosuresV1(repository, headSHA, headManifest); err != nil {
+		return fmt.Errorf("head validator closure: %w", err)
+	}
 
 	changedFiles, err := repository.changedFiles(baseSHA, headSHA)
 	if err != nil {

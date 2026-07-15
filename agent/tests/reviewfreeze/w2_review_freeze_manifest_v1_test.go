@@ -204,6 +204,8 @@ type reviewFreezeCorpusManifestV1 struct {
 	FixtureIDs []string `json:"fixture_ids"`
 	// ValidatorSources 必填绑定实际解释 Corpus 的 Go 契约测试源文件及原始字节摘要。
 	ValidatorSources []reviewFreezeValidatorSourceV1 `json:"validator_sources"`
+	// ValidatorBuildSources 必填绑定 Validator 所属 Go Module 的 go.mod/go.sum 原始字节摘要。
+	ValidatorBuildSources []reviewFreezeValidatorSourceV1 `json:"validator_build_sources"`
 	// DesignSources 可选绑定产生该 Corpus 的设计源文件及原始字节摘要。
 	DesignSources []reviewFreezeDesignSourceV1 `json:"design_sources,omitempty"`
 	// VectorIDs 是现有 manifest 声明的向量集合。
@@ -763,6 +765,9 @@ func reviewFreezeValidateContractRefV1(path, expectedSHA string, vectorIDs, targ
 	if err := reviewFreezeValidateValidatorSourcesV1(source.ValidatorSources, loader); err != nil {
 		return err
 	}
+	if err := reviewFreezeValidateValidatorBuildSourcesV1(source.ValidatorSources, source.ValidatorBuildSources, loader); err != nil {
+		return err
+	}
 	if err := reviewFreezeValidateOptionalDesignSourcesV1(source.DesignSources, loader); err != nil {
 		return err
 	}
@@ -1255,15 +1260,21 @@ func reviewFreezeSyntheticFormalV1(t *testing.T, status string, reapproved bool)
 	}
 	contractFixtureName := "vectors.json"
 	contractFixtureRaw := reviewFreezeMarshalV1(t, contractVectors)
-	validatorPath := "agent/tests/contract/w2_review_freeze_synthetic_validator_test.go"
+	validatorPath := "worker/tests/contract/w2_review_freeze_synthetic_validator_test.go"
 	validatorRaw := []byte("package contract_test\n\nfunc TestSynthetic() {}\n")
 	validatorSources := []reviewFreezeValidatorSourceV1{{Path: validatorPath, SHA256: reviewFreezeSHA256V1(validatorRaw)}}
+	validatorGoModRaw := []byte("module example.invalid/review-freeze-synthetic\n\ngo 1.26\n")
+	validatorGoSumRaw := []byte("example.invalid/dependency v1.0.0 h1:synthetic\n")
+	validatorBuildSources := []reviewFreezeValidatorSourceV1{
+		{Path: "worker/go.mod", SHA256: reviewFreezeSHA256V1(validatorGoModRaw)},
+		{Path: "worker/go.sum", SHA256: reviewFreezeSHA256V1(validatorGoSumRaw)},
+	}
 	contractRaw := reviewFreezeMarshalV1(t, reviewFreezeCorpusManifestV1{
 		SchemaVersion: "synthetic_contract_manifest.v1",
 		Files: []reviewFreezeCorpusFileV1{{
 			File: contractFixtureName, SHA256: reviewFreezeSHA256V1(contractFixtureRaw), VectorCount: len(contractVectors),
 		}},
-		FixtureIDs: []string{"synthetic.open"}, ValidatorSources: validatorSources, VectorIDs: contractVectors,
+		FixtureIDs: []string{"synthetic.open"}, ValidatorSources: validatorSources, ValidatorBuildSources: validatorBuildSources, VectorIDs: contractVectors,
 		TotalVectorCount: len(contractVectors), TargetTests: []string{"TestSynthetic"},
 	})
 	cfeVectors := []string{"V-001", "V-002"}
@@ -1273,12 +1284,14 @@ func reviewFreezeSyntheticFormalV1(t *testing.T, status string, reapproved bool)
 		Files: []reviewFreezeCorpusFileV1{{
 			File: contractFixtureName, SHA256: reviewFreezeSHA256V1(cfeFixtureRaw), VectorCount: len(cfeVectors),
 		}},
-		FixtureIDs: []string{"synthetic.open"}, ValidatorSources: validatorSources, VectorIDs: cfeVectors,
+		FixtureIDs: []string{"synthetic.open"}, ValidatorSources: validatorSources, ValidatorBuildSources: validatorBuildSources, VectorIDs: cfeVectors,
 		TotalVectorCount: len(cfeVectors), TargetTests: []string{"TestSynthetic"},
 	})
 	overlay[contractPath] = contractRaw
 	overlay[filepath.ToSlash(filepath.Join(filepath.Dir(contractPath), contractFixtureName))] = contractFixtureRaw
 	overlay[validatorPath] = validatorRaw
+	overlay["worker/go.mod"] = validatorGoModRaw
+	overlay["worker/go.sum"] = validatorGoSumRaw
 
 	freezeID := "CF-W2-R00-v1"
 	supersedes := ""
