@@ -4,7 +4,7 @@
 >
 > 审计日期：2026-07-16
 >
-> 事实基线：`codex/w2-r04-consumption-audit@3fcef58b`
+> 事实基线：`codex/w2-r04-consumption-audit@63999145`
 >
 > 结论边界：本文只把分散的 ADR、Review Freeze、Billing、Approval/Consumption 与 Structured Smoke 未决项整理成可逐项签核的决策包。本文不是 Owner 批准、不是机器 Review Freeze、不是 trust root，也不授权生产 Go、SQL Migration、IDL、生成代码、Graph、Runner、Billing、Approval、A2UI 或 Harness 实现。
 
@@ -51,6 +51,8 @@ a98059cfa4971f0123565d63ad56ab4d202ad354a0971bbecf99a0711bee616e
 - `integration_owner` 可以组织跨 Gate 收口，但不能代替任何语义 Owner。
 
 R02 的分散待决项已由 [`w2-r02-owner-decision-matrix-v1.md`](../agent/w2-r02-owner-decision-matrix-v1.md) 去重为 `R02-D01`～`R02-D19`，并映射既有 `PG-D01`～`PG-D08`、`TC-P01`～`TC-P10`、Owner 候选和最低关闭证据。该矩阵只关闭稳定引用缺口；全部决定仍为 `awaiting_owner_decision`，不构成 aggregate candidate、Owner approval 或生产解锁。
+
+[`DR-W2-R02-v1.json`](../agent/approvals/w2-r02-owner-decision-requests/DR-W2-R02-v1.json) 将 19 项推荐候选固定为严格待决请求，原始字节 SHA-256 为 `4b6356f9d6b4da7adf348c2207135e2cebd8c972349f84c67ade274f6d274fe9`。它只允许 `accept_recommendation/reject_keep_blocked` 两种请求选项，Owner role 集显式标记为 provisional，并固定 `implementation_unlocked=false`；Schema 不包含 selected option、approval、Review、actor 或 commit 自报字段。该请求不是 approval summary、Owner authority request、aggregate manifest 或 Formal Freeze 输入。
 
 ### 2.2 ADR-009 / Structured Smoke
 
@@ -327,6 +329,7 @@ candidate_unactivated
 
 - [ ] 为 ADR-001/002 增加生产模型 mapping、摘要迁移表与 golden vectors；
 - [x] 为 R02 待决项分配 `R02-D01`～`R02-D19`，映射 Owner 候选、最低关闭证据和源位置；
+- [x] 为 R02 建立严格的 `awaiting_owner_decision` 请求及 validator，禁止选择/批准/Review 身份字段和实现解锁；
 - [ ] 取得 R02 全部稳定决定及既有 `PG-Dxx/TC-Pxx` 的结构化结论，补齐 upgrade exact-set 并生成 aggregate manifest；
 - [ ] 关闭 `BILL-OPEN-001`～`012`，生成 R00 canonical manifest 和 exact vectors；
 - [ ] 冻结 R01/R03/R04 slot/ordinal/owner/query mapping 与 child exact-set；
@@ -350,4 +353,5 @@ candidate_unactivated
 - 推荐首切计费模式是 `preauthorized`，但尚未被选择；
 - Activation mapping 与 production projection Owner 已形成可评审候选，但尚未冻结；
 - R02 已有稳定 Owner 决策矩阵，但 19 项决定、既有 PG/TC 决定、aggregate manifest 与 Owner approval 均未关闭；
+- R02 待决请求已机械绑定矩阵、当前 Gate manifest 和 validator；它没有批准能力，不能推进 `expansion_frozen`；
 - 当前唯一允许继续的工作是 Owner 决策、版本化契约/manifest 准备与 authority 路线收口；生产实现和 Harness 继续失败关闭。
