@@ -54,6 +54,8 @@ R00 的 12 个位置式 Billing open item 已由 [`w2-r00-owner-decision-matrix-
 
 [`CPR-W2-R00-v1.json`](../agent/approvals/w2-r00-candidate-preparation-requests/CPR-W2-R00-v1.json) 将全部 14 项 readiness 基线与六项 incomplete candidate 仍缺少的输入/证据要求固定为只读准备清单，原始字节 SHA-256 为 `6d9cd4a033d19c127fcfec04e975abdcb047247dcaa56c9fd381068b6977c836`。它把真实前置与跨 Gate 对齐分开，不提交 Policy 数值、Provider 能力、ModelReceipt 字段、时钟阈值、slot ordinal、Owner role 或 ballot option；两个独立 stdlib-only validator/guard 共同绑定完整 items 语义摘要、live R00 零 candidate/null freeze/reopen 与源码 exact-set。该 CPR 不是 `DR-W2-R00-v1`、candidate manifest、Owner request/approval、build/trust closure 或实现解锁。
 
+[`CI-W2-R00-D09-v1`](../agent/approvals/w2-r00-candidate-inputs/R00-D09-v1/candidate-input.json) 已将 `R00-D09` 所需的 Provider-neutral terminal ModelReceipt 字段/类型 exact-set、条件 presence、domain-separated canonical digest、terminal first-write-wins 纯状态模型与 Business Finalize 只读投影整理为 `prepared_unregistered` 的版本化候选输入；原始字节 SHA-256 为 `f4d4f16d41d567041ccde282d61ff6faee89e9266242b97052e1ffa736028bbd`。配套语料原始摘要为 `4620fe379ee169790cf8268d2602c4ce1ea19dad68865716821f07657733216d`，固定 4 个合法 terminal golden、20 个 schema/binding 拒绝、4 个 terminal uniqueness 和 5 个 Finalize guard 向量；两个独立 stdlib-only validator/guard 绑定 source path/order/raw SHA、contract/vector semantic SHA、safe-integer、无需转义的安全 ASCII/NFC 子集、Provider disposition×authority 配对与 live Gate 失败关闭。该输入包没有登记到 `candidate_evidence`，没有创建 Owner request/approval，也没有补齐 D08 真实 Provider capability、R01/R02/R04 disposition、D11 时钟阈值、D13 slot ordinal、正式 IDL 或 PostgreSQL 证据；因此 CPR 的 live submission/readiness 结论不前移，`R00-D09` 仍不得进入 ballot。
+
 [`DR-W2-R01-v1.json`](../agent/approvals/w2-r01-owner-decision-requests/DR-W2-R01-v1.json) 将 `R01-D01`～`R01-D04` 与 `GOV-D01`～`GOV-D06` 的推荐候选、`R01-D05` 的 `candidate_incomplete_not_ballot_ready` 和 `R01-D06` 的 `scope_derivation_pending` 固定为严格待决请求，原始字节 SHA-256 为 `676c4f83a1e7570c5ac41e3d0ffc8556fb936b0b363b93a6c7b79b2da7552018`。D05/D06 只允许补充版本化候选或在范围关闭后反推角色，不提供接受推荐选项。两个独立 stdlib-only validator/guard package 交叉固定源码 exact-set，从两份 corpus 派生 87 个 vector ID、固定 4 个目标测试名，并与 live Gate、SHA-bound manifest 交叉核对；请求仍只绑定 `partial_candidate`，不产生 compile attestation、完整 Gate baseline、Owner approval、build/trust closure 或实现解锁。
 
 R02 的分散待决项已由 [`w2-r02-owner-decision-matrix-v1.md`](../agent/w2-r02-owner-decision-matrix-v1.md) 去重为 `R02-D01`～`R02-D19`，并映射既有 `PG-D01`～`PG-D08`、`TC-P01`～`TC-P10`、Owner 候选和最低关闭证据。该矩阵只关闭稳定引用缺口；全部决定仍为 `awaiting_owner_decision`，不构成 aggregate candidate、Owner approval 或生产解锁。
@@ -169,7 +171,7 @@ UI 源仍与 baseline 一致。API 源漂移意味着 v1 不能再声明当前 p
 
 **若任一必要 Owner 拒绝：** 不允许运行时 A/B 或 Feature Flag 切换；应修订为 `full_approval`，先独立冻结 billable Approval/Decision/Consumption/Query、quote/cap digest、过期/single-use 和认证 Query，再重新审核 R00/R03 与 Graph topology。
 
-**仍需按 `R00-D01`～`R00-D14` 关闭 `BILL-OPEN-001`～`BILL-OPEN-012`：** primary ordinal、授权模式、currency、policy cap/scope/暂停、Price Config↔Model Config、Provider 幂等/Query、ModelReceipt、Skill attribution、时钟、W4 reversal 边界、Prepare/Finalize ref slots 与 `authority_outcome` 映射。`R00-D06` 必须先冻结 `BILL-OPEN-005` 的责任分配；`R00-D05/D07/D08/D09/D11/D13` 补齐 exact candidate 前不得接受推荐。
+**仍需按 `R00-D01`～`R00-D14` 关闭 `BILL-OPEN-001`～`BILL-OPEN-012`：** primary ordinal、授权模式、currency、policy cap/scope/暂停、Price Config↔Model Config、Provider 幂等/Query、ModelReceipt、Skill attribution、时钟、W4 reversal 边界、Prepare/Finalize ref slots 与 `authority_outcome` 映射。`R00-D06` 必须先冻结 `BILL-OPEN-005` 的责任分配；`R00-D05/D07/D08/D11/D13` 仍缺真正 exact candidate，`R00-D09` 虽已有未注册的 Provider-neutral 输入包，但仍缺真实 Provider/跨 Gate/IDL/PG 关闭证据。以上任一项进入 live candidate submission/ballot 前都不得接受推荐。
 
 ### 3.6 ADR-008：契约 evaluator 进入生产入口
 
@@ -350,6 +352,7 @@ candidate_unactivated
 - [x] 为 R03 待决项分配 `R03-D01`～`R03-D14`，区分六类 identity、双向 Query、child/failed-after 与 Owner exact-set；
 - [x] 为 R04 待决项分配 `R04-D01`～`R04-D20`，映射 PLAN/Billing/P4、headless/R08 边界与完整 Gate 缺口；
 - [x] 为 R03/R04 建立严格的 `awaiting_owner_decision` 请求及互相交叉守卫的 stdlib-only validator/guard；R03 保持零 candidate，R04 只绑定当前 partial candidate，均禁止选择、批准、Review 身份与实现解锁；
+- [x] 为 `R00-D09` 建立 Provider-neutral、`prepared_unregistered` 的 terminal ModelReceipt 候选输入与双 validator/guard；只固定 contract/vector 候选，不登记 candidate evidence，不推进 ballot/readiness；
 - [ ] 取得 R02 全部稳定决定及既有 `PG-Dxx/TC-Pxx` 的结构化结论，补齐 upgrade exact-set 并生成 aggregate manifest；
 - [ ] 补齐 `R00-D05/D07/D08/D09/D11/D13` exact candidate，逐项关闭 `R00-D01`～`D14`，再生成 R00 canonical manifest 和 exact vectors；
 - [ ] 取得 R03/R04 全部 stable decision 的结构化结论，冻结 R01/R03/R04 slot/ordinal/owner/query mapping 与 child exact-set；
@@ -372,7 +375,7 @@ candidate_unactivated
 - ADR-009 为 `awaiting_owner_approval / candidate_unactivated / implementation_unlocked=false`；
 - 推荐首切计费模式是 `preauthorized`，但尚未被选择；
 - Activation mapping 与 production projection Owner 已形成可评审候选，但尚未冻结；
-- R00 已建立 14 项稳定决策和六项候选准备 CPR；六项实际候选仍未提交且不具备 ballot 条件，故没有生成 R00 待决请求、candidate manifest 或 candidate evidence；
+- R00 已建立 14 项稳定决策和六项候选准备 CPR；`R00-D09` 增加了未注册的 Provider-neutral 候选输入，其余五项仍只有准备清单，六项均未形成 live candidate submission/ballot 条件，故没有生成 R00 待决请求、candidate manifest 或 candidate evidence；
 - R01 已形成覆盖六项语义与六项治理决定的严格待决请求；它只绑定当前 87 条 partial candidate，不是完整 baseline、批准或解锁；
 - R02 已有稳定 Owner 决策矩阵，但 19 项决定、既有 PG/TC 决定、aggregate manifest 与 Owner approval 均未关闭；
 - R02 待决请求已机械绑定矩阵、当前 Gate manifest 和 validator；它没有批准能力，不能推进 `expansion_frozen`；
