@@ -1,0 +1,465 @@
+{
+  "schema_version": "w2_review_freeze_manifest.v1",
+  "governance_owner_role": "integration_owner",
+  "implementation_owner_roles": [
+    "agent_runtime_implementation_owner",
+    "business_domain_implementation_owner",
+    "frontend_smoke_implementation_owner",
+    "worker_implementation_owner"
+  ],
+  "gates": [
+    {
+      "gate": "W2-R00",
+      "status": "expansion_frozen",
+      "required_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "finance_owner",
+        "product_owner",
+        "security_owner"
+      ],
+      "candidate_evidence": [],
+      "freeze": null,
+      "reopen_exception": null,
+      "blockers": [
+        {
+          "code": "W2_R00_BILLING_REVIEW_PENDING",
+          "statement": "Graph Execution Billing v1 独立设计仅为 Draft、仍待联合批准；canonical contract manifest、向量 exact-set 与目标测试尚未形成。"
+        },
+        {
+          "code": "W2_R00_OWNER_APPROVAL_MISSING",
+          "statement": "Business、Agent、产品、财务与安全 Owner 尚未提交不可变联合审批清单。"
+        }
+      ]
+    },
+    {
+      "gate": "W2-R01",
+      "status": "awaiting_review",
+      "required_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "finance_owner",
+        "operations_owner",
+        "security_owner"
+      ],
+      "candidate_evidence": [
+        {
+          "scope": "graph_tool_result_and_tool_receipt_current_candidate",
+          "coverage": "gate_candidate",
+          "contract_manifest_path": "agent/tests/contract/testdata/w2_r01/manifest.json",
+          "contract_manifest_sha256": "sha256:d08c20bafb9f4119b13e07a419cbfa72224d3e85a9af8447c5f88313d38217cd",
+          "vector_ids": [
+            "GTR-N01-malformed",
+            "GTR-N02-duplicate-top-level",
+            "GTR-N03-duplicate-nested",
+            "GTR-N04-trailing-value",
+            "GTR-N05-null",
+            "GTR-N06-unknown-field",
+            "GTR-N07-unknown-version",
+            "GTR-N08-missing-summary",
+            "GTR-N09-unknown-status",
+            "GTR-N10-unregistered-code",
+            "GTR-N11-forbidden-internal-outcome",
+            "GTR-N12-retryable-policy-mismatch",
+            "GTR-N13-accepted-missing-operation",
+            "GTR-N14-accepted-missing-dispatch",
+            "GTR-N15-waiting-missing-approval",
+            "GTR-N16-waiting-with-operation",
+            "GTR-N17-partial-without-success",
+            "GTR-N18-partial-without-warning",
+            "GTR-N19-failed-with-resource",
+            "GTR-N20-cancelled-without-stage",
+            "GTR-N21-missing-receipt",
+            "GTR-N22-invalid-resource-id",
+            "GTR-N23-invalid-digest",
+            "GTR-N24-unsorted-resources",
+            "GTR-N25-duplicate-resource",
+            "GTR-N26-warning-param-shape",
+            "GTR-N27-null-array",
+            "GTR-N28-warning-param-extra",
+            "GTR-N29-invalid-uuid-variant",
+            "GTR-N30-unpaired-surrogate",
+            "GTR-N31-unknown-field-precedes-version",
+            "GTR-N32-missing-precedes-version",
+            "GTR-N33-forbidden-code-precedes-summary",
+            "GTR-N34-warning-integer-overflow",
+            "GTR-N35-warning-js-safe-integer-overflow",
+            "GTR-N36-null-precedes-duplicate",
+            "GTR-N37-duplicate-precedes-null",
+            "GTR-N38-unknown-precedes-type",
+            "GTR-N39-type-precedes-unknown",
+            "GTR-N40-cancellation-code-stage-mismatch",
+            "GTR-P01-completed",
+            "GTR-P02-accepted",
+            "GTR-P03-waiting-user",
+            "GTR-P04-partial",
+            "GTR-P05-failed",
+            "GTR-P06-cancelled",
+            "GTR-P07-unicode-canonical",
+            "GTR-P08-cancelled-after-side-effects",
+            "TR-E01-waiting-user",
+            "TR-E02-waiting-user-missing-approval",
+            "TR-E03-completed",
+            "TR-E04-completed-missing-resource",
+            "TR-E05-partial",
+            "TR-E06-partial-missing-resource",
+            "TR-E07-retryable-failed-after-side-effect",
+            "TR-E08-card-projection-mismatch",
+            "TR-E09-cancelled-after-side-effects",
+            "TR-E10-failed-before-side-effect",
+            "TR-E11-failed-hidden-policy-side-effect",
+            "TR-E12-cancelled-after-policy-side-effect",
+            "TR-E13-cancelled-after-missing-policy-side-effect",
+            "TR-N01-request-conflict",
+            "TR-N02-slot-conflict",
+            "TR-N03-ref-conflict",
+            "TR-N04-unresolved-freeze",
+            "TR-N05-frozen-append",
+            "TR-N06-result-digest-mismatch",
+            "TR-N07-stale-fence",
+            "TR-N08-version-conflict",
+            "TR-N09-result-ref-mismatch",
+            "TR-N10-illegal-result",
+            "TR-N11-forged-higher-fence",
+            "TR-N12-stale-freeze-version",
+            "TR-N13-unpinned-slot",
+            "TR-P01-reserve-operation",
+            "TR-P02-resolve-operation",
+            "TR-P03-reserve-batch",
+            "TR-P04-resolve-batch",
+            "TR-P05-reserve-dispatch",
+            "TR-P06-resolve-dispatch",
+            "TR-P07-freeze-accepted",
+            "TR-P08-replay-frozen",
+            "TR-P09-replay-open",
+            "TR-P10-replay-reserve-slot",
+            "TR-P11-replay-resolve-slot"
+          ],
+          "target_tests": [
+            "TestGraphToolResultV1Corpus",
+            "TestToolReceiptV1Corpus",
+            "TestW2R01CorpusManifest",
+            "TestWarningIntegerPolicySafeBoundaryV1"
+          ]
+        }
+      ],
+      "freeze": null,
+      "reopen_exception": null,
+      "blockers": [
+        {
+          "code": "W2_R01_ADR_REVIEW_PENDING",
+          "statement": "W2-ADR-001/002 与 failed-after/outcome-aware 最小缺口是否保留仍待 Owner 结论。"
+        },
+        {
+          "code": "W2_R01_OWNER_APPROVAL_MISSING",
+          "statement": "跨 Module Owner 尚未对当前候选 manifest 摘要、向量 exact-set 与目标测试签字。"
+        }
+      ]
+    },
+    {
+      "gate": "W2-R02",
+      "status": "expansion_frozen",
+      "required_owner_roles": [
+        "agent_owner",
+        "data_owner",
+        "operations_owner",
+        "security_owner"
+      ],
+      "candidate_evidence": [],
+      "freeze": null,
+      "reopen_exception": null,
+      "blockers": [
+        {
+          "code": "W2_R02_AGGREGATE_MANIFEST_MISSING",
+          "statement": "Lane、Ingress、Marker、Turn Context 与 Upgrade 尚无一个覆盖全 Gate 的 canonical aggregate manifest；Upgrade corpus 也未公开 vector_ids exact-set。"
+        },
+        {
+          "code": "W2_R02_OWNER_APPROVAL_MISSING",
+          "statement": "W2-ADR-001～004/008/010 与 PostgreSQL、Runtime、数据 Owner 联合审批尚未完成。"
+        }
+      ]
+    },
+    {
+      "gate": "W2-R03",
+      "status": "expansion_frozen",
+      "required_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "finance_owner",
+        "frontend_owner",
+        "product_owner",
+        "security_owner",
+        "test_owner"
+      ],
+      "candidate_evidence": [],
+      "freeze": null,
+      "reopen_exception": null,
+      "blockers": [
+        {
+          "code": "W2_R03_CHILD_CORPUS_PENDING",
+          "statement": "Continuation child Receipt、failed-after 与 Unknown Outcome 的 Owner 要求 exact-set 尚未形成。"
+        },
+        {
+          "code": "W2_R03_OWNER_APPROVAL_MISSING",
+          "statement": "Approval、Decision、Consumption、Continuation 与权限 Owner 尚未提交不可变联合审批清单。"
+        }
+      ]
+    },
+    {
+      "gate": "W2-R04",
+      "status": "expansion_frozen",
+      "required_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "finance_owner",
+        "operations_owner",
+        "product_owner",
+        "security_owner",
+        "test_owner"
+      ],
+      "candidate_evidence": [
+        {
+          "scope": "creation_spec_activation_consumption_core_candidate",
+          "coverage": "partial_candidate",
+          "contract_manifest_path": "agent/tests/contract/testdata/w2_r04_approval_consumption/manifest.json",
+          "contract_manifest_sha256": "sha256:dd546a612257a0c7f6682696427b675ab9b34fdd35027617912815baf89c8ab7",
+          "vector_ids": [
+            "ACR-N01-strict-malformed",
+            "ACR-N02-strict-duplicate",
+            "ACR-N03-strict-trailing",
+            "ACR-N04-strict-unknown-field",
+            "ACR-N05-strict-billing-field",
+            "ACR-N06-record-command-invalid",
+            "ACR-N07-query-command-invalid",
+            "ACR-N08-key-derivation",
+            "ACR-N09-identity-user",
+            "ACR-N10-identity-project",
+            "ACR-N100-query-multiple-single-use-index",
+            "ACR-N101-record-duplicate-core",
+            "ACR-N102-query-duplicate-core",
+            "ACR-N103-observation-evidence-missing",
+            "ACR-N104-observation-evidence-extra",
+            "ACR-N105-observation-evidence-duplicate",
+            "ACR-N11-causal-approval",
+            "ACR-N12-causal-decision-digest",
+            "ACR-N13-causal-source",
+            "ACR-N14-request-digest",
+            "ACR-N15-consumption-digest-conflict",
+            "ACR-N16-single-use-different-key",
+            "ACR-N17-rejected",
+            "ACR-N18-expired-state",
+            "ACR-N19-cancelled-state",
+            "ACR-N20-recorded-at-expiry",
+            "ACR-N21-tool-pin",
+            "ACR-N22-intent-digest",
+            "ACR-N23-scope-drift",
+            "ACR-N24-resource-version-drift",
+            "ACR-N25-resource-digest-drift",
+            "ACR-N26-target-drift",
+            "ACR-N27-policy-drift",
+            "ACR-N28-observation-order",
+            "ACR-N29-priority-command-key",
+            "ACR-N30-priority-key-identity",
+            "ACR-N31-priority-identity-causal",
+            "ACR-N32-priority-causal-request",
+            "ACR-N33-priority-request-existing",
+            "ACR-N34-priority-existing-eligibility",
+            "ACR-N35-priority-eligibility-tool",
+            "ACR-N36-priority-tool-scope",
+            "ACR-N37-priority-scope-resource",
+            "ACR-N38-priority-resource-target",
+            "ACR-N39-priority-target-policy",
+            "ACR-N40-query-priority-identity-key",
+            "ACR-N41-strict-nested-unknown",
+            "ACR-N42-strict-intent-null",
+            "ACR-N43-strict-first-write-null",
+            "ACR-N44-strict-record-signature",
+            "ACR-N45-strict-first-write-signature",
+            "ACR-N46-record-principal",
+            "ACR-N47-record-session",
+            "ACR-N48-query-principal",
+            "ACR-N49-causal-root-receipt",
+            "ACR-N50-causal-root-version",
+            "ACR-N51-causal-parent-result",
+            "ACR-N52-causal-child-receipt",
+            "ACR-N53-causal-source-formula",
+            "ACR-N54-causal-version-formula",
+            "ACR-N55-expiry-noncanonical",
+            "ACR-N56-recorded-at-noncanonical",
+            "ACR-N57-fixed-action",
+            "ACR-N58-fixed-resource-type",
+            "ACR-N59-fixed-tool-tuple",
+            "ACR-N60-frozen-scope-before-current",
+            "ACR-N61-stored-request-digest",
+            "ACR-N62-stored-observation-order",
+            "ACR-N63-stored-recorded-time",
+            "ACR-N64-stored-core-digest",
+            "ACR-N65-stored-policy-enum",
+            "ACR-N66-stored-parent-owner-ref",
+            "ACR-N67-stored-authorization-ref",
+            "ACR-N68-stored-resource-ref",
+            "ACR-N69-stored-policy-ref",
+            "ACR-N70-stored-tool-owner",
+            "ACR-N71-query-stored-before-scope",
+            "ACR-N72-query-stored-scope",
+            "ACR-N73-query-key-before-stored-scope",
+            "ACR-N74-query-expected-request",
+            "ACR-N75-query-expected-session",
+            "ACR-N76-query-expected-effect",
+            "ACR-N77-query-stored-validation",
+            "ACR-N78-replay-ignores-receipt",
+            "ACR-N79-replay-ignores-observation",
+            "ACR-N80-replay-ignores-current-schema",
+            "ACR-N81-replay-ignores-operational-schema",
+            "ACR-N82-exact-lookup-order-independent",
+            "ACR-N83-first-write-receipt-invalid",
+            "ACR-N84-first-write-observation-invalid",
+            "ACR-N85-record-stored-scope",
+            "ACR-N86-record-stored-validation-before-scope",
+            "ACR-N87-query-ignores-current-authority",
+            "ACR-N88-query-binding-valid",
+            "ACR-N89-backstop-index-malformed",
+            "ACR-N90-backstop-cross-scope",
+            "ACR-N91-backstop-before-current-drift",
+            "ACR-N92-backstop-ignores-current-authority",
+            "ACR-N93-replay-ignores-authority-schema",
+            "ACR-N94-replay-ignores-authority-frozen-drift",
+            "ACR-N95-stored-source-formula",
+            "ACR-N96-stored-resulting-version",
+            "ACR-N97-record-duplicate-exact-index",
+            "ACR-N98-query-duplicate-exact-index",
+            "ACR-N99-record-multiple-single-use-index",
+            "ACR-P01-first-write",
+            "ACR-P02-record-replay",
+            "ACR-P03-query-found",
+            "ACR-P04-replay-current-drift",
+            "ACR-P05-query-not-found",
+            "ACR-P06-operational-metadata-excluded"
+          ],
+          "target_tests": [
+            "TestApprovalConsumptionReceiptCoreV1Corpus",
+            "TestApprovalConsumptionReceiptCoreV1EligibilityAndRevalidation",
+            "TestApprovalConsumptionReceiptCoreV1ExactSets",
+            "TestApprovalConsumptionReceiptCoreV1FirstWrite",
+            "TestApprovalConsumptionReceiptCoreV1GoldenDigests",
+            "TestApprovalConsumptionReceiptCoreV1OperationalMetadataExcluded",
+            "TestApprovalConsumptionReceiptCoreV1ReasonPriority",
+            "TestApprovalConsumptionReceiptCoreV1ReplayAndQuery",
+            "TestApprovalConsumptionReceiptCoreV1SingleUseConflicts",
+            "TestApprovalConsumptionReceiptCoreV1StrictJSON",
+            "TestW2R04ApprovalConsumptionManifest"
+          ]
+        }
+      ],
+      "freeze": null,
+      "reopen_exception": null,
+      "blockers": [
+        {
+          "code": "W2_R04_FULL_GATE_BASELINE_MISSING",
+          "statement": "现有 111 条向量只覆盖 activation Consumption Core 候选，不能替代 Intent/Candidate、计费、Graph、Business RPC 与 child Receipt 的完整 Gate 基线。"
+        },
+        {
+          "code": "W2_R04_OWNER_APPROVAL_MISSING",
+          "statement": "PLAN-P0-01～PLAN-P0-10 与共享 R00～R03 的 Owner 审批尚未完成。"
+        }
+      ]
+    },
+    {
+      "gate": "W2-R05",
+      "status": "expansion_frozen",
+      "required_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "finance_owner",
+        "material_access_owner",
+        "product_owner",
+        "security_owner"
+      ],
+      "candidate_evidence": [],
+      "freeze": null,
+      "reopen_exception": null,
+      "blockers": [
+        {
+          "code": "W2_R05_CORPUS_MANIFEST_MISSING",
+          "statement": "素材 Evidence、partial 判定与权限/计费固定用例尚无 canonical corpus manifest。"
+        },
+        {
+          "code": "W2_R05_OWNER_APPROVAL_MISSING",
+          "statement": "Agent、Business、素材安全与产品 Owner 尚未联合审批。"
+        }
+      ]
+    },
+    {
+      "gate": "W2-R06",
+      "status": "expansion_frozen",
+      "required_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "finance_owner",
+        "product_owner",
+        "security_owner"
+      ],
+      "candidate_evidence": [],
+      "freeze": null,
+      "reopen_exception": null,
+      "blockers": [
+        {
+          "code": "W2_R06_CORPUS_MANIFEST_MISSING",
+          "statement": "Storyboard Owner/RPC、Element/Slot 标识、锁定项与候选/激活冲突尚无 canonical corpus manifest。"
+        },
+        {
+          "code": "W2_R06_OWNER_APPROVAL_MISSING",
+          "statement": "Agent、Business、产品与安全 Owner 尚未联合审批。"
+        }
+      ]
+    },
+    {
+      "gate": "W2-R07",
+      "status": "expansion_frozen",
+      "required_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "finance_owner",
+        "product_owner",
+        "security_owner"
+      ],
+      "candidate_evidence": [],
+      "freeze": null,
+      "reopen_exception": null,
+      "blockers": [
+        {
+          "code": "W2_R07_CORPUS_MANIFEST_MISSING",
+          "statement": "standalone/storyboard 模式、exact target set、PromptArtifact 与 ready 条件尚无 canonical corpus manifest。"
+        },
+        {
+          "code": "W2_R07_OWNER_APPROVAL_MISSING",
+          "statement": "Agent、Business、产品与安全 Owner 尚未联合审批。"
+        }
+      ]
+    },
+    {
+      "gate": "W2-R08",
+      "status": "expansion_frozen",
+      "required_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "frontend_owner",
+        "operations_owner",
+        "security_owner"
+      ],
+      "candidate_evidence": [],
+      "freeze": null,
+      "reopen_exception": null,
+      "blockers": [
+        {
+          "code": "W2_R08_CORPUS_MANIFEST_MISSING",
+          "statement": "A2UI 组件/Action 白名单、错误投影与无 Mock/fallback 的前后端 canonical contract manifest 尚未形成。"
+        },
+        {
+          "code": "W2_R08_OWNER_APPROVAL_MISSING",
+          "statement": "Agent、Business、前端、安全与运维 Owner 尚未联合审批。"
+        }
+      ]
+    }
+  ]
+}
