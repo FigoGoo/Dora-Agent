@@ -1,0 +1,245 @@
+{
+  "schema_version": "w2_r04_owner_decision_request.v1",
+  "request_id": "DR-W2-R04-v1",
+  "gate": "W2-R04",
+  "status": "awaiting_owner_decision",
+  "implementation_unlocked": false,
+  "owner_role_set_status": "provisional_candidates_not_final",
+  "decision_document": {
+    "path": "docs/design/agent/w2-r04-owner-decision-matrix-v1.md",
+    "sha256": "sha256:15e8250291e5b41a999eae8f313d1338bdad1fddddb400b6bccd654c79f6e957"
+  },
+  "gate_manifest": {
+    "path": "docs/design/agent/approvals/w2-review-freeze-manifest.json",
+    "sha256": "sha256:a98059cfa4971f0123565d63ad56ab4d202ad354a0971bbecf99a0711bee616e"
+  },
+  "candidate_contract_manifest": {
+    "path": "agent/tests/contract/testdata/w2_r04_approval_consumption/manifest.json",
+    "sha256": "sha256:6ad8c58dbeeaf514994fc3db8c8beca0192de6b2e52121201060f37a7c900ba0"
+  },
+  "validator_sources": [
+    {
+      "path": "agent/tests/contract/w2ownerdecision/owner_decision_request_v1_test.go",
+      "sha256": "sha256:02fbe5f5d3ff3f5eb20f1d99701ced2028821f63e935fce73671369854d8e792"
+    },
+    {
+      "path": "agent/tests/contract/w2ownerdecisionguard/owner_decision_request_guard_v1_test.go",
+      "sha256": "sha256:3a80a922e17207b2b74fa6dd58d46c7168212268cf3289b1d7867e982ac66684"
+    }
+  ],
+  "items": [
+    {
+      "decision_id": "R04-D01",
+      "title": "R04 scope、共享依赖与最终 Owner exact-set",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "finance_owner", "frontend_owner", "operations_owner", "product_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D01",
+      "block_code": "W2_R04_D01_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D02",
+      "title": "PlanCreationSpecIntentV1 strict schema",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "product_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D02",
+      "block_code": "W2_R04_D02_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D03",
+      "title": "Proposal/Candidate 边界",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "finance_owner", "product_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D03",
+      "block_code": "W2_R04_D03_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D04",
+      "title": "Candidate 生命周期",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "product_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D04",
+      "block_code": "W2_R04_D04_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D05",
+      "title": "Graph Output 与 unknown",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D05",
+      "block_code": "W2_R04_D05_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D06",
+      "title": "Typed State、execution refs 与 Checkpoint",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D06",
+      "block_code": "W2_R04_D06_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D07",
+      "title": "Graph topology、Node/Branch 与 typed fan-in",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D07",
+      "block_code": "W2_R04_D07_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D08",
+      "title": "首切 Billing authorization mode",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "finance_owner", "product_owner", "security_owner"],
+      "matrix_row_id": "R04-D08",
+      "block_code": "W2_R04_D08_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D09",
+      "title": "Billing model ordinal 与 correction",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "finance_owner", "test_owner"],
+      "matrix_row_id": "R04-D09",
+      "block_code": "W2_R04_D09_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D10",
+      "title": "Billing Registry slot 与 authority projection",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "finance_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D10",
+      "block_code": "W2_R04_D10_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D11",
+      "title": "Currency、Policy、cap 与 Price/Model mapping",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["business_owner", "finance_owner", "product_owner", "security_owner"],
+      "matrix_row_id": "R04-D11",
+      "block_code": "W2_R04_D11_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D12",
+      "title": "Invocation/Publisher attribution",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "finance_owner", "product_owner", "security_owner"],
+      "matrix_row_id": "R04-D12",
+      "block_code": "W2_R04_D12_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D13",
+      "title": "Business Billing RPC 与扣费原子性",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "finance_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D13",
+      "block_code": "W2_R04_D13_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D14",
+      "title": "Provider、dispatch marker、ModelReceipt 与 unknown",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D14",
+      "block_code": "W2_R04_D14_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D15",
+      "title": "失败不退款与 W4 reversal",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["business_owner", "finance_owner", "product_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D15",
+      "block_code": "W2_R04_D15_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D16",
+      "title": "Activation Approval/Decision identity 与 mapping",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "product_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D16",
+      "block_code": "W2_R04_D16_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D17",
+      "title": "Approval Consumption authority、single-use 与认证 Query",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D17",
+      "block_code": "W2_R04_D17_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D18",
+      "title": "Continuation child Receipt、slot 与 recovery",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D18",
+      "block_code": "W2_R04_D18_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D19",
+      "title": "Business Candidate Save/Get/Decide/Query",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D19",
+      "block_code": "W2_R04_D19_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R04-D20",
+      "title": "R08/A2UI、Release、Evidence 与 aggregate manifest 的边界",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "operations_owner", "product_owner", "security_owner", "test_owner"],
+      "matrix_row_id": "R04-D20",
+      "block_code": "W2_R04_D20_OWNER_DECISION_PENDING"
+    }
+  ],
+  "unmet_evidence": [
+    "ACTIVATION_CONSUMPTION_CANDIDATE_PARTIAL_ONLY",
+    "ADR_DISPOSITIONS_PENDING",
+    "BUILD_TRUST_CLOSURE_MISSING",
+    "FINAL_OWNER_ROLE_EXACT_SET_MISSING",
+    "FULL_GATE_BASELINE_MISSING",
+    "GOVERNANCE_AUTHORITY_NOT_ACTIVE",
+    "OWNER_DECISIONS_PENDING",
+    "R04_AGGREGATE_MANIFEST_MISSING",
+    "UPSTREAM_GATES_NOT_APPROVED"
+  ],
+  "blocked_production_gates": ["W2-B0b", "W2-B1"],
+  "block_statement": "本请求只登记推荐候选、待决 Owner 角色与当前 partial_candidate 绑定，不记录任何选择、批准或平台 Review；111 条向量不能替代 full-gate baseline，candidate_unactivated 不是构建证明。R04 仍为 expansion_frozen，禁止创建 production Candidate/Graph/Billing/Activation/Consumption/Business RPC/A2UI、aggregate、Formal Freeze 或 W2-B0b/W2-B1 实现。"
+}
