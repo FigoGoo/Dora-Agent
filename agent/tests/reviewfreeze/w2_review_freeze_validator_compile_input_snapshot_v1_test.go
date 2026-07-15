@@ -19,7 +19,6 @@ const (
 	reviewFreezeCompileInputSnapshotMaxRepositoryFileV1             = 8 << 20
 	reviewFreezeCompileInputSnapshotMaxModuleCacheFileV1            = 64 << 20
 	reviewFreezeCompileInputSnapshotRepositoryFileModeV1            = "100644"
-	reviewFreezeCompileInputSnapshotModuleCacheFileModeV1           = "0644"
 	reviewFreezeCompileInputSnapshotModuleGoInputV1                 = "go_command_input"
 	reviewFreezeCompileInputSnapshotModuleAcquisitionV1             = "acquisition_evidence"
 	reviewFreezeCompileInputSnapshotModuleMaterializationEvidenceV1 = "materialization_evidence"
@@ -425,6 +424,33 @@ func reviewFreezeCompileInputSnapshotModulePurposeV1(path string) (string, bool)
 	}
 }
 
+// reviewFreezeCompileInputSnapshotModuleModeV1 固定真实 Go module cache 权限：download
+// evidence 保持 0644，解压后的 materialized tree 必须为只读 0444。不得再用单一逻辑
+// mode 掩盖两类 leaf 的实际文件系统权限差异。
+func reviewFreezeCompileInputSnapshotModuleModeV1(path string) (string, bool) {
+	switch path {
+	case reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.info",
+		reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.mod",
+		reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.zip",
+		reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.ziphash":
+		return "0644", true
+	case reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/go.mod",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/transform/transform.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/composition.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/forminfo.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/input.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/iter.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/normalize.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/readwriter.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/tables15.0.0.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/transform.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/trie.go":
+		return "0444", true
+	default:
+		return "", false
+	}
+}
+
 func reviewFreezeValidateCompileInputSnapshotModuleFilesV1(files []reviewFreezeCompileInputSnapshotModuleFileV1, modules []reviewFreezeCompileAttestationModuleV1) error {
 	wantPaths := reviewFreezeCompileInputSnapshotModulePathsV1()
 	if files == nil || len(files) != len(wantPaths) {
@@ -446,8 +472,9 @@ func reviewFreezeValidateCompileInputSnapshotModuleFilesV1(files []reviewFreezeC
 			return fmt.Errorf("compile input snapshot module cache purpose=%q path=%q want=%q", file.Purpose, file.Path, wantPurpose)
 		}
 		purposeCounts[file.Purpose]++
-		if file.Mode != reviewFreezeCompileInputSnapshotModuleCacheFileModeV1 {
-			return fmt.Errorf("compile input snapshot module cache mode=%q path=%q", file.Mode, file.Path)
+		wantMode, exists := reviewFreezeCompileInputSnapshotModuleModeV1(file.Path)
+		if !exists || file.Mode != wantMode {
+			return fmt.Errorf("compile input snapshot module cache mode=%q path=%q want=%q", file.Mode, file.Path, wantMode)
 		}
 		if !reviewFreezePrefixedSHA256V1.MatchString(file.SHA256) || file.SHA256 == reviewFreezeSHA256V1(nil) {
 			return fmt.Errorf("compile input snapshot module cache sha256 非法 path=%q", file.Path)
@@ -565,10 +592,14 @@ func reviewFreezeCompileInputSnapshotFixtureModuleFilesV1(t *testing.T, module r
 		if !exists {
 			t.Fatalf("module file fixture path 未绑定 purpose=%q", path)
 		}
+		mode, exists := reviewFreezeCompileInputSnapshotModuleModeV1(path)
+		if !exists {
+			t.Fatalf("module file fixture path 未绑定 mode=%q", path)
+		}
 		file := reviewFreezeCompileInputSnapshotModuleFileV1{
 			Path:      path,
 			Purpose:   purpose,
-			Mode:      reviewFreezeCompileInputSnapshotModuleCacheFileModeV1,
+			Mode:      mode,
 			SizeBytes: int64(1024 + index),
 		}
 		switch path {
