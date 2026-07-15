@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	pathpkg "path"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,7 @@ func reviewFreezeCompileAttestationFixtureEmptyOtherBuildInputsV1() reviewFreeze
 		CFiles:       []string{},
 		CXXFiles:     []string{},
 		MFiles:       []string{},
+		HFiles:       []string{},
 		FFiles:       []string{},
 		SFiles:       []string{},
 		SysoFiles:    []string{},
@@ -327,6 +329,20 @@ func TestW2ReviewFreezeCompileAttestationStatementStrictJSONAdversarialV1(t *tes
 	illegalUTF8[marker] = 0xff
 	overDepth := append(bytes.Repeat([]byte("["), reviewFreezeCompileAttestationMaxJSONDepthV1+2), []byte("0")...)
 	overDepth = append(overDepth, bytes.Repeat([]byte("]"), reviewFreezeCompileAttestationMaxJSONDepthV1+2)...)
+	overArray := []byte("[" + strings.Repeat("0,", reviewFreezeCompileAttestationMaxJSONArrayElementsV1) + "0]")
+	overString := []byte(`"` + strings.Repeat("a", reviewFreezeCompileAttestationMaxJSONStringBytesV1+1) + `"`)
+	overNumber := []byte(strings.Repeat("1", reviewFreezeCompileAttestationMaxJSONNumberBytesV1+1))
+	var overObject strings.Builder
+	overObject.WriteByte('{')
+	for index := 0; index <= reviewFreezeCompileAttestationMaxJSONObjectFieldsV1; index++ {
+		if index != 0 {
+			overObject.WriteByte(',')
+		}
+		overObject.WriteString(`"field_`)
+		overObject.WriteString(strconv.Itoa(index))
+		overObject.WriteString(`":0`)
+	}
+	overObject.WriteByte('}')
 
 	tests := []struct {
 		name string
@@ -356,6 +372,10 @@ func TestW2ReviewFreezeCompileAttestationStatementStrictJSONAdversarialV1(t *tes
 		{name: "trailing JSON", raw: append(append([]byte{}, valid...), []byte("\n{}")...), want: "trailing JSON"},
 		{name: "size limit", raw: bytes.Repeat([]byte(" "), reviewFreezeCompileAttestationMaxJSONBytesV1+1), want: "statement size"},
 		{name: "depth limit", raw: overDepth, want: "JSON depth"},
+		{name: "array cardinality limit", raw: overArray, want: "array elements"},
+		{name: "object cardinality limit", raw: []byte(overObject.String()), want: "object fields"},
+		{name: "string size limit", raw: overString, want: "string bytes"},
+		{name: "number size limit", raw: overNumber, want: "number bytes"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

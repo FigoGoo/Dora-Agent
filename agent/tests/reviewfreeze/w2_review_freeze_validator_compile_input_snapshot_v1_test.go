@@ -14,15 +14,22 @@ import (
 )
 
 const (
-	reviewFreezeCompileInputSnapshotSchemaV1              = "w2_compile_input_snapshot.v1"
-	reviewFreezeCompileInputSnapshotSourceTreeSchemaV1    = "w2_validator_source_tree.v1"
-	reviewFreezeCompileInputSnapshotMaxRepositoryFileV1   = 8 << 20
-	reviewFreezeCompileInputSnapshotMaxModuleCacheFileV1  = 64 << 20
-	reviewFreezeCompileInputSnapshotRepositoryFileModeV1  = "100644"
-	reviewFreezeCompileInputSnapshotModuleCacheFileModeV1 = "0644"
-	reviewFreezeCompileInputSnapshotModuleDownloadRootV1  = "cache/download/golang.org/x/text/@v"
-	reviewFreezeCompileInputSnapshotModuleMaterializedV1  = "golang.org/x/text@v0.34.0"
-	reviewFreezeCompileInputSnapshotManifestSHA256V1      = "sha256:41e554faaec0f023e7542eb5d5cbe4638ccbb871c1179906e69215b52538f497"
+	reviewFreezeCompileInputSnapshotSchemaV1                        = "w2_compile_input_snapshot.v1"
+	reviewFreezeCompileInputSnapshotSourceTreeSchemaV1              = "w2_validator_source_tree.v1"
+	reviewFreezeCompileInputSnapshotMaxRepositoryFileV1             = 8 << 20
+	reviewFreezeCompileInputSnapshotMaxModuleCacheFileV1            = 64 << 20
+	reviewFreezeCompileInputSnapshotRepositoryFileModeV1            = "100644"
+	reviewFreezeCompileInputSnapshotModuleCacheFileModeV1           = "0644"
+	reviewFreezeCompileInputSnapshotModuleGoInputV1                 = "go_command_input"
+	reviewFreezeCompileInputSnapshotModuleAcquisitionV1             = "acquisition_evidence"
+	reviewFreezeCompileInputSnapshotModuleMaterializationEvidenceV1 = "materialization_evidence"
+	reviewFreezeCompileInputSnapshotModuleGoInputCountV1            = 12
+	reviewFreezeCompileInputSnapshotModuleAcquisitionCountV1        = 2
+	reviewFreezeCompileInputSnapshotModuleMaterializationCountV1    = 1
+	reviewFreezeCompileInputSnapshotModuleDownloadRootV1            = "cache/download/golang.org/x/text/@v"
+	reviewFreezeCompileInputSnapshotModuleMaterializedV1            = "golang.org/x/text@v0.34.0"
+	reviewFreezeCompileInputSnapshotModuleInfoTimeV1                = "2026-02-09T16:14:29Z"
+	reviewFreezeCompileInputSnapshotManifestSHA256V1                = "sha256:41e554faaec0f023e7542eb5d5cbe4638ccbb871c1179906e69215b52538f497"
 )
 
 // reviewFreezeCompileInputSnapshotV1 是 clean builder 在执行任何受管命令前后都必须重算的
@@ -71,6 +78,7 @@ type reviewFreezeCompileInputSnapshotRepoFileV1 struct {
 
 type reviewFreezeCompileInputSnapshotModuleFileV1 struct {
 	Path      string `json:"path"`
+	Purpose   string `json:"purpose"`
 	Mode      string `json:"mode"`
 	SHA256    string `json:"sha256"`
 	SizeBytes int64  `json:"size_bytes"`
@@ -370,8 +378,10 @@ func reviewFreezeCompileInputSnapshotSourceTreeSHA256V1(files map[string]reviewF
 
 func reviewFreezeCompileInputSnapshotModulePathsV1() []string {
 	return []string{
+		reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.info",
 		reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.mod",
 		reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.zip",
+		reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.ziphash",
 		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/go.mod",
 		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/transform/transform.go",
 		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/composition.go",
@@ -386,6 +396,35 @@ func reviewFreezeCompileInputSnapshotModulePathsV1() []string {
 	}
 }
 
+// reviewFreezeCompileInputSnapshotModulePurposeV1 区分 Go 命令实际读取的输入和为了
+// acquisition/materialization 可复核而保留的旁证。15 个文件共同组成规定的
+// provenance-complete cache snapshot，但只有 12 个属于 go_command_input；不得把
+// `.info`、`.zip` 或 materialized root go.mod 误称为编译执行必需文件。
+func reviewFreezeCompileInputSnapshotModulePurposeV1(path string) (string, bool) {
+	switch path {
+	case reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.info",
+		reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.zip":
+		return reviewFreezeCompileInputSnapshotModuleAcquisitionV1, true
+	case reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/go.mod":
+		return reviewFreezeCompileInputSnapshotModuleMaterializationEvidenceV1, true
+	case reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.mod",
+		reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.ziphash",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/transform/transform.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/composition.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/forminfo.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/input.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/iter.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/normalize.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/readwriter.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/tables15.0.0.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/transform.go",
+		reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/unicode/norm/trie.go":
+		return reviewFreezeCompileInputSnapshotModuleGoInputV1, true
+	default:
+		return "", false
+	}
+}
+
 func reviewFreezeValidateCompileInputSnapshotModuleFilesV1(files []reviewFreezeCompileInputSnapshotModuleFileV1, modules []reviewFreezeCompileAttestationModuleV1) error {
 	wantPaths := reviewFreezeCompileInputSnapshotModulePathsV1()
 	if files == nil || len(files) != len(wantPaths) {
@@ -393,6 +432,7 @@ func reviewFreezeValidateCompileInputSnapshotModuleFilesV1(files []reviewFreezeC
 	}
 	paths := make([]string, len(files))
 	byPath := make(map[string]reviewFreezeCompileInputSnapshotModuleFileV1, len(files))
+	purposeCounts := make(map[string]int, 3)
 	lastPath := ""
 	for index, file := range files {
 		if err := reviewFreezeValidateSafePathV1(file.Path, ""); err != nil {
@@ -401,6 +441,11 @@ func reviewFreezeValidateCompileInputSnapshotModuleFilesV1(files []reviewFreezeC
 		if file.Path <= lastPath {
 			return fmt.Errorf("compile input snapshot module_cache_files 未排序或重复=%q", file.Path)
 		}
+		wantPurpose, exists := reviewFreezeCompileInputSnapshotModulePurposeV1(file.Path)
+		if !exists || file.Purpose != wantPurpose {
+			return fmt.Errorf("compile input snapshot module cache purpose=%q path=%q want=%q", file.Purpose, file.Path, wantPurpose)
+		}
+		purposeCounts[file.Purpose]++
 		if file.Mode != reviewFreezeCompileInputSnapshotModuleCacheFileModeV1 {
 			return fmt.Errorf("compile input snapshot module cache mode=%q path=%q", file.Mode, file.Path)
 		}
@@ -417,18 +462,27 @@ func reviewFreezeValidateCompileInputSnapshotModuleFilesV1(files []reviewFreezeC
 	if !reflect.DeepEqual(paths, wantPaths) {
 		return fmt.Errorf("compile input snapshot module_cache_files exact-set=%v want=%v", paths, wantPaths)
 	}
+	if purposeCounts[reviewFreezeCompileInputSnapshotModuleGoInputV1] != reviewFreezeCompileInputSnapshotModuleGoInputCountV1 ||
+		purposeCounts[reviewFreezeCompileInputSnapshotModuleAcquisitionV1] != reviewFreezeCompileInputSnapshotModuleAcquisitionCountV1 ||
+		purposeCounts[reviewFreezeCompileInputSnapshotModuleMaterializationEvidenceV1] != reviewFreezeCompileInputSnapshotModuleMaterializationCountV1 {
+		return fmt.Errorf("compile input snapshot module purpose counts=%v want=%d/%d/%d", purposeCounts, reviewFreezeCompileInputSnapshotModuleGoInputCountV1, reviewFreezeCompileInputSnapshotModuleAcquisitionCountV1, reviewFreezeCompileInputSnapshotModuleMaterializationCountV1)
+	}
 	if len(modules) != 1 {
 		return fmt.Errorf("compile input snapshot external_modules exact-set 长度=%d want=1", len(modules))
 	}
 	module := modules[0]
+	moduleInfoRaw := []byte(`{"Version":"v0.34.0","Time":"` + reviewFreezeCompileInputSnapshotModuleInfoTimeV1 + `"}`)
+	moduleZipHashRaw := []byte(module.ModuleSum)
 	bindings := []struct {
 		name string
 		path string
 		sha  string
 		size int64
 	}{
+		{name: "module .info", path: reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.info", sha: reviewFreezeSHA256V1(moduleInfoRaw), size: int64(len(moduleInfoRaw))},
 		{name: "module .mod", path: reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.mod", sha: module.GoModSHA256, size: module.GoModSizeBytes},
 		{name: "module zip", path: reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.zip", sha: module.ZipSHA256, size: module.ZipSizeBytes},
+		{name: "module .ziphash", path: reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.ziphash", sha: reviewFreezeSHA256V1(moduleZipHashRaw), size: int64(len(moduleZipHashRaw))},
 		{name: "materialized root go.mod", path: reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/go.mod", sha: module.ZipRootGoModSHA256, size: module.ZipRootGoModSizeBytes},
 	}
 	for _, binding := range bindings {
@@ -507,16 +561,27 @@ func reviewFreezeCompileInputSnapshotFixtureModuleFilesV1(t *testing.T, module r
 	paths := reviewFreezeCompileInputSnapshotModulePathsV1()
 	files := make([]reviewFreezeCompileInputSnapshotModuleFileV1, len(paths))
 	for index, path := range paths {
+		purpose, exists := reviewFreezeCompileInputSnapshotModulePurposeV1(path)
+		if !exists {
+			t.Fatalf("module file fixture path 未绑定 purpose=%q", path)
+		}
 		file := reviewFreezeCompileInputSnapshotModuleFileV1{
 			Path:      path,
+			Purpose:   purpose,
 			Mode:      reviewFreezeCompileInputSnapshotModuleCacheFileModeV1,
 			SizeBytes: int64(1024 + index),
 		}
 		switch path {
+		case reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.info":
+			raw := []byte(`{"Version":"v0.34.0","Time":"` + reviewFreezeCompileInputSnapshotModuleInfoTimeV1 + `"}`)
+			file.SHA256, file.SizeBytes = reviewFreezeSHA256V1(raw), int64(len(raw))
 		case reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.mod":
 			file.SHA256, file.SizeBytes = module.GoModSHA256, module.GoModSizeBytes
 		case reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.zip":
 			file.SHA256, file.SizeBytes = module.ZipSHA256, module.ZipSizeBytes
+		case reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.ziphash":
+			raw := []byte(module.ModuleSum)
+			file.SHA256, file.SizeBytes = reviewFreezeSHA256V1(raw), int64(len(raw))
 		case reviewFreezeCompileInputSnapshotModuleMaterializedV1 + "/go.mod":
 			file.SHA256, file.SizeBytes = module.ZipRootGoModSHA256, module.ZipRootGoModSizeBytes
 		default:
@@ -659,11 +724,42 @@ func TestW2ReviewFreezeCompileInputSnapshotAdversarialV1(t *testing.T) {
 			want: "validator source tree digest",
 		},
 		{
+			name: "module purpose drift",
+			mutate: func(snapshot *reviewFreezeCompileInputSnapshotV1, _ *reviewFreezeValidatorCompileAttestationV1) {
+				snapshot.ModuleCacheFiles[0].Purpose = reviewFreezeCompileInputSnapshotModuleGoInputV1
+			},
+			want: "module cache purpose",
+		},
+		{
 			name: "module zip mismatch",
 			mutate: func(snapshot *reviewFreezeCompileInputSnapshotV1, _ *reviewFreezeValidatorCompileAttestationV1) {
-				snapshot.ModuleCacheFiles[1].SHA256 = reviewFreezeSHA256V1([]byte("other module zip"))
+				for index := range snapshot.ModuleCacheFiles {
+					if snapshot.ModuleCacheFiles[index].Path == reviewFreezeCompileInputSnapshotModuleDownloadRootV1+"/v0.34.0.zip" {
+						snapshot.ModuleCacheFiles[index].SHA256 = reviewFreezeSHA256V1([]byte("other module zip"))
+						return
+					}
+				}
 			},
 			want: "module zip digest/size",
+		},
+		{
+			name: "module info mismatch",
+			mutate: func(snapshot *reviewFreezeCompileInputSnapshotV1, _ *reviewFreezeValidatorCompileAttestationV1) {
+				snapshot.ModuleCacheFiles[0].SHA256 = reviewFreezeSHA256V1([]byte("other module info"))
+			},
+			want: "module .info digest/size",
+		},
+		{
+			name: "module ziphash mismatch",
+			mutate: func(snapshot *reviewFreezeCompileInputSnapshotV1, _ *reviewFreezeValidatorCompileAttestationV1) {
+				for index := range snapshot.ModuleCacheFiles {
+					if snapshot.ModuleCacheFiles[index].Path == reviewFreezeCompileInputSnapshotModuleDownloadRootV1+"/v0.34.0.ziphash" {
+						snapshot.ModuleCacheFiles[index].SHA256 = reviewFreezeSHA256V1([]byte("other module ziphash"))
+						return
+					}
+				}
+			},
+			want: "module .ziphash digest/size",
 		},
 		{
 			name: "command projection mismatch",

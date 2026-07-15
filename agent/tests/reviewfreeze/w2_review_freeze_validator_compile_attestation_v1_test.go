@@ -29,6 +29,11 @@ const (
 	reviewFreezeCompileAttestationBinaryPathV1                 = "/out/w2r01.test"
 	reviewFreezeCompileAttestationMaxJSONBytesV1               = 8 << 20
 	reviewFreezeCompileAttestationMaxJSONDepthV1               = 64
+	reviewFreezeCompileAttestationMaxJSONTokensV1              = 250000
+	reviewFreezeCompileAttestationMaxJSONObjectFieldsV1        = 256
+	reviewFreezeCompileAttestationMaxJSONArrayElementsV1       = 4096
+	reviewFreezeCompileAttestationMaxJSONStringBytesV1         = 64 << 10
+	reviewFreezeCompileAttestationMaxJSONNumberBytesV1         = 64
 	reviewFreezeCompileAttestationMaxGoArchiveV1               = 256 << 20
 	reviewFreezeCompileAttestationBuildClosureMaxBytesV1       = 8 << 20
 	reviewFreezeCompileAttestationInputSnapshotMaxBytesV1      = 16 << 20
@@ -238,6 +243,7 @@ type reviewFreezeGoListOtherBuildInputsV1 struct {
 	CFiles       []string `json:"c_files"`
 	CXXFiles     []string `json:"cxx_files"`
 	MFiles       []string `json:"m_files"`
+	HFiles       []string `json:"h_files"`
 	FFiles       []string `json:"f_files"`
 	SFiles       []string `json:"s_files"`
 	SysoFiles    []string `json:"syso_files"`
@@ -395,7 +401,8 @@ func reviewFreezeDecodeCompileAttestationStatementJSONV1(raw []byte) (reviewFree
 func reviewFreezeInspectCompileAttestationJSONV1(raw []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
-	if err := reviewFreezeInspectCompileAttestationJSONValueV1(decoder, 0); err != nil {
+	budget := reviewFreezeCompileAttestationJSONBudgetV1{}
+	if err := reviewFreezeInspectCompileAttestationJSONValueV1(decoder, 0, &budget); err != nil {
 		return err
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
@@ -407,11 +414,37 @@ func reviewFreezeInspectCompileAttestationJSONV1(raw []byte) error {
 	return nil
 }
 
-func reviewFreezeInspectCompileAttestationJSONValueV1(decoder *json.Decoder, depth int) error {
+type reviewFreezeCompileAttestationJSONBudgetV1 struct {
+	Tokens int
+}
+
+func reviewFreezeCompileAttestationNextJSONTokenV1(decoder *json.Decoder, budget *reviewFreezeCompileAttestationJSONBudgetV1) (json.Token, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	budget.Tokens++
+	if budget.Tokens > reviewFreezeCompileAttestationMaxJSONTokensV1 {
+		return nil, fmt.Errorf("compile attestation JSON token count=%d limit=%d", budget.Tokens, reviewFreezeCompileAttestationMaxJSONTokensV1)
+	}
+	switch value := token.(type) {
+	case string:
+		if len(value) > reviewFreezeCompileAttestationMaxJSONStringBytesV1 {
+			return nil, fmt.Errorf("compile attestation JSON string bytes=%d limit=%d", len(value), reviewFreezeCompileAttestationMaxJSONStringBytesV1)
+		}
+	case json.Number:
+		if len(value) > reviewFreezeCompileAttestationMaxJSONNumberBytesV1 {
+			return nil, fmt.Errorf("compile attestation JSON number bytes=%d limit=%d", len(value), reviewFreezeCompileAttestationMaxJSONNumberBytesV1)
+		}
+	}
+	return token, nil
+}
+
+func reviewFreezeInspectCompileAttestationJSONValueV1(decoder *json.Decoder, depth int, budget *reviewFreezeCompileAttestationJSONBudgetV1) error {
 	if depth > reviewFreezeCompileAttestationMaxJSONDepthV1 {
 		return fmt.Errorf("compile attestation JSON depth=%d limit=%d", depth, reviewFreezeCompileAttestationMaxJSONDepthV1)
 	}
-	token, err := decoder.Token()
+	token, err := reviewFreezeCompileAttestationNextJSONTokenV1(decoder, budget)
 	if err != nil {
 		return err
 	}
@@ -422,8 +455,13 @@ func reviewFreezeInspectCompileAttestationJSONValueV1(decoder *json.Decoder, dep
 	switch delimiter {
 	case '{':
 		seen := make(map[string]struct{})
+		fieldCount := 0
 		for decoder.More() {
-			keyToken, keyErr := decoder.Token()
+			fieldCount++
+			if fieldCount > reviewFreezeCompileAttestationMaxJSONObjectFieldsV1 {
+				return fmt.Errorf("compile attestation JSON object fields=%d limit=%d", fieldCount, reviewFreezeCompileAttestationMaxJSONObjectFieldsV1)
+			}
+			keyToken, keyErr := reviewFreezeCompileAttestationNextJSONTokenV1(decoder, budget)
 			if keyErr != nil {
 				return keyErr
 			}
@@ -435,21 +473,26 @@ func reviewFreezeInspectCompileAttestationJSONValueV1(decoder *json.Decoder, dep
 				return fmt.Errorf("compile attestation duplicate field %q", key)
 			}
 			seen[key] = struct{}{}
-			if err := reviewFreezeInspectCompileAttestationJSONValueV1(decoder, depth+1); err != nil {
+			if err := reviewFreezeInspectCompileAttestationJSONValueV1(decoder, depth+1, budget); err != nil {
 				return err
 			}
 		}
-		closing, closeErr := decoder.Token()
+		closing, closeErr := reviewFreezeCompileAttestationNextJSONTokenV1(decoder, budget)
 		if closeErr != nil || closing != json.Delim('}') {
 			return fmt.Errorf("compile attestation object close 非法")
 		}
 	case '[':
+		elementCount := 0
 		for decoder.More() {
-			if err := reviewFreezeInspectCompileAttestationJSONValueV1(decoder, depth+1); err != nil {
+			elementCount++
+			if elementCount > reviewFreezeCompileAttestationMaxJSONArrayElementsV1 {
+				return fmt.Errorf("compile attestation JSON array elements=%d limit=%d", elementCount, reviewFreezeCompileAttestationMaxJSONArrayElementsV1)
+			}
+			if err := reviewFreezeInspectCompileAttestationJSONValueV1(decoder, depth+1, budget); err != nil {
 				return err
 			}
 		}
-		closing, closeErr := decoder.Token()
+		closing, closeErr := reviewFreezeCompileAttestationNextJSONTokenV1(decoder, budget)
 		if closeErr != nil || closing != json.Delim(']') {
 			return fmt.Errorf("compile attestation array close 非法")
 		}
