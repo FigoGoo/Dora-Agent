@@ -22,7 +22,21 @@ import (
 const (
 	reviewFreezeCompileModuleLeafKindRegularV1 = "regular"
 	reviewFreezeCompileModuleLeafMaxTotalV1    = 80 << 20
+	reviewFreezeCompileModuleInfoMinimalRawV1  = `{"Version":"v0.34.0","Time":"2026-02-09T16:14:29Z"}`
+	reviewFreezeCompileModuleInfoOriginRawV1   = `{"Version":"v0.34.0","Time":"2026-02-09T16:14:29Z","Origin":{"VCS":"git","URL":"https://go.googlesource.com/text","Hash":"817fba9abd337b4d9097b10c61a540c74feaaeff","Ref":"refs/tags/v0.34.0"}}`
 )
+
+// reviewFreezeCanonicalizeCompileModuleInfoFixtureV1 只在宿主 Go cache 进入隔离测试
+// fixture 时识别两种已复现的 proxy 原始表示，并统一输出既有 51-byte canonical leaf。
+// v1 snapshot/validator 的 accepted-set 因而保持不变；任意第三种 JSON 表示都失败关闭。
+func reviewFreezeCanonicalizeCompileModuleInfoFixtureV1(raw []byte) ([]byte, error) {
+	switch string(raw) {
+	case reviewFreezeCompileModuleInfoMinimalRawV1, reviewFreezeCompileModuleInfoOriginRawV1:
+		return []byte(reviewFreezeCompileModuleInfoMinimalRawV1), nil
+	default:
+		return nil, fmt.Errorf("compile module fixture .info host raw 未命中 exact acquisition allowlist")
+	}
+}
 
 // reviewFreezeCompileModuleLeafListedV1 是 loader 在打开文件前提供的不可变对象身份。
 // Identity 必须来自同一隔离 module cache 的稳定对象标识，并在 Open 后再次返回；resolver
@@ -638,7 +652,8 @@ func reviewFreezeCompileModuleLeafModuleCacheRootV1(t *testing.T) string {
 }
 
 // reviewFreezeNewRealCompileModuleLeafFixtureV1 从当前 Go 构建已经选中的固定
-// golang.org/x/text@v0.34.0 cache 读取 15 项真实 bytes/mode，再由 resolver 独立重算。
+// golang.org/x/text@v0.34.0 cache 读取 15 项宿主对象与 mode；其中 14 个内容叶保留真实
+// bytes，`.info` 在严格识别宿主 51/191-byte 表示后收敛为既有 canonical fixture leaf。
 // import x/text/transform 保证 Go 在运行本测试前已取得同一固定 module，而非测试发起网络访问。
 func reviewFreezeNewRealCompileModuleLeafFixtureV1(t *testing.T) *reviewFreezeCompileModuleLeafFixtureV1 {
 	t.Helper()
@@ -664,13 +679,20 @@ func reviewFreezeNewRealCompileModuleLeafFixtureV1(t *testing.T) *reviewFreezeCo
 		if before.Size() <= 0 || before.Size() > reviewFreezeCompileInputSnapshotMaxModuleCacheFileV1 {
 			t.Fatalf("fixed x/text material size=%d path=%q", before.Size(), fullPath)
 		}
-		raw, err := os.ReadFile(fullPath)
+		hostRaw, err := os.ReadFile(fullPath)
 		if err != nil {
 			t.Fatalf("read fixed x/text material %q: %v", fullPath, err)
 		}
 		after, err := os.Lstat(fullPath)
-		if err != nil || !os.SameFile(before, after) || after.Size() != int64(len(raw)) || after.Mode() != before.Mode() {
+		if err != nil || !os.SameFile(before, after) || after.Size() != int64(len(hostRaw)) || after.Mode() != before.Mode() {
 			t.Fatalf("fixed x/text material fixture TOCTOU path=%q before=%v after=%v err=%v", fullPath, before, after, err)
+		}
+		raw := hostRaw
+		if leaf.Path == reviewFreezeCompileInputSnapshotModuleDownloadRootV1+"/v0.34.0.info" {
+			raw, err = reviewFreezeCanonicalizeCompileModuleInfoFixtureV1(hostRaw)
+			if err != nil {
+				t.Fatalf("canonicalize fixed x/text .info fixture %q: %v", fullPath, err)
+			}
 		}
 		files[leaf.Path] = raw
 		leaf.Mode = wantMode
@@ -807,6 +829,15 @@ func reviewFreezeCompileModuleLeafFixtureFileIndexV1(fixture *reviewFreezeCompil
 
 func TestW2ReviewFreezeCompileModuleLeafBundleV1Valid(t *testing.T) {
 	fixture := reviewFreezeNewRealCompileModuleLeafFixtureV1(t)
+	infoPath := reviewFreezeCompileInputSnapshotModuleDownloadRootV1 + "/v0.34.0.info"
+	infoIndex := reviewFreezeCompileModuleLeafFixtureFileIndexV1(fixture, infoPath)
+	wantInfoRaw := []byte(reviewFreezeCompileModuleInfoMinimalRawV1)
+	if infoIndex < 0 || !bytes.Equal(fixture.files[infoPath], wantInfoRaw) ||
+		!bytes.Equal(fixture.loader.objects[infoPath].raw, wantInfoRaw) ||
+		fixture.snapshot.ModuleCacheFiles[infoIndex].SHA256 != reviewFreezeSHA256V1(wantInfoRaw) ||
+		fixture.snapshot.ModuleCacheFiles[infoIndex].SizeBytes != int64(len(wantInfoRaw)) {
+		t.Fatal("real fixture .info 未在 snapshot/files/loader 三方收敛为既有 canonical leaf")
+	}
 	type contextKey string
 	ctx := context.WithValue(context.Background(), contextKey("admission"), "module-leaves")
 	snapshotRaw := fixture.snapshotRaw(t)
@@ -858,6 +889,62 @@ func TestW2ReviewFreezeCompileModuleLeafBundleV1Valid(t *testing.T) {
 		if fixture.loader.openCalls[path] != 1 {
 			t.Fatalf("immutable reuse 不应重复 Open path=%q calls=%d", path, fixture.loader.openCalls[path])
 		}
+	}
+}
+
+func TestW2ReviewFreezeCompileModuleInfoFixtureCanonicalizationV1(t *testing.T) {
+	originRaw := []byte(reviewFreezeCompileModuleInfoOriginRawV1)
+	if len(originRaw) != 191 || reviewFreezeSHA256V1(originRaw) != "sha256:1d44e5dc46abd9d3b552e466a3992a4845bd91c98d46ffde21e39dee7c3d8020" {
+		t.Fatalf("official Origin host .info identity=%d/%s", len(originRaw), reviewFreezeSHA256V1(originRaw))
+	}
+	for name, raw := range map[string][]byte{
+		"minimal": []byte(reviewFreezeCompileModuleInfoMinimalRawV1),
+		"origin":  originRaw,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := reviewFreezeCanonicalizeCompileModuleInfoFixtureV1(raw)
+			if err != nil {
+				t.Fatalf("canonicalize exact host .info: %v", err)
+			}
+			if string(got) != reviewFreezeCompileModuleInfoMinimalRawV1 || len(got) != 51 || reviewFreezeSHA256V1(got) != "sha256:28dd596571b8d43955f059757e0cefd9e6e76d17b4e6a042020172ac45325196" {
+				t.Fatalf("canonical .info identity=%q/%d/%s", string(got), len(got), reviewFreezeSHA256V1(got))
+			}
+			raw[0] ^= 0xff
+			if string(got) != reviewFreezeCompileModuleInfoMinimalRawV1 {
+				t.Fatal("canonical .info 输出与宿主输入共享可变底层字节")
+			}
+		})
+	}
+
+	origin := reviewFreezeCompileModuleInfoOriginRawV1
+	tests := map[string]string{
+		"version_drift":          strings.Replace(reviewFreezeCompileModuleInfoMinimalRawV1, `"v0.34.0"`, `"v0.34.1"`, 1),
+		"time_drift":             strings.Replace(reviewFreezeCompileModuleInfoMinimalRawV1, "16:14:29Z", "16:14:30Z", 1),
+		"origin_vcs_drift":       strings.Replace(origin, `"VCS":"git"`, `"VCS":"hg"`, 1),
+		"origin_url_drift":       strings.Replace(origin, "https://go.googlesource.com/text", "https://example.invalid/text", 1),
+		"origin_hash_drift":      strings.Replace(origin, "817fba9abd337b4d9097b10c61a540c74feaaeff", strings.Repeat("0", 40), 1),
+		"origin_ref_drift":       strings.Replace(origin, "refs/tags/v0.34.0", "refs/tags/v0.34.1", 1),
+		"origin_missing_vcs":     strings.Replace(origin, `"VCS":"git",`, "", 1),
+		"origin_missing_url":     strings.Replace(origin, `"URL":"https://go.googlesource.com/text",`, "", 1),
+		"origin_missing_hash":    strings.Replace(origin, `"Hash":"817fba9abd337b4d9097b10c61a540c74feaaeff",`, "", 1),
+		"origin_missing_ref":     strings.Replace(origin, `,"Ref":"refs/tags/v0.34.0"`, "", 1),
+		"top_unknown_field":      strings.Replace(reviewFreezeCompileModuleInfoMinimalRawV1, "}", `,"Unknown":true}`, 1),
+		"origin_unknown_field":   strings.Replace(origin, "}}", `,"Unknown":true}}`, 1),
+		"origin_null":            strings.Replace(reviewFreezeCompileModuleInfoMinimalRawV1, "}", `,"Origin":null}`, 1),
+		"duplicate_version":      strings.Replace(reviewFreezeCompileModuleInfoMinimalRawV1, `"Version":"v0.34.0"`, `"Version":"v0.34.0","Version":"v0.34.0"`, 1),
+		"noncanonical_order":     `{"Time":"2026-02-09T16:14:29Z","Version":"v0.34.0"}`,
+		"origin_reordered":       strings.Replace(origin, `"VCS":"git","URL":"https://go.googlesource.com/text"`, `"URL":"https://go.googlesource.com/text","VCS":"git"`, 1),
+		"extra_whitespace":       reviewFreezeCompileModuleInfoMinimalRawV1 + " ",
+		"trailing_newline":       reviewFreezeCompileModuleInfoMinimalRawV1 + "\n",
+		"trailing_second_object": reviewFreezeCompileModuleInfoMinimalRawV1 + `{}`,
+	}
+	for name, raw := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := reviewFreezeCanonicalizeCompileModuleInfoFixtureV1([]byte(raw))
+			if err == nil || len(got) != 0 || !strings.Contains(err.Error(), ".info") {
+				t.Fatalf("unsupported host .info 未失败关闭: raw=%q output=%q err=%v", raw, got, err)
+			}
+		})
 	}
 }
 
@@ -1025,6 +1112,9 @@ func TestW2ReviewFreezeCompileModuleLeafBundleV1SemanticFailClosed(t *testing.T)
 		}, want: ".info"},
 		{name: "info_time_drift", mutate: func(f *reviewFreezeCompileModuleLeafFixtureV1) {
 			f.files[infoPath] = []byte(`{"Version":"v0.34.0","Time":"2026-02-09T16:14:30Z"}`)
+		}, want: ".info"},
+		{name: "info_origin_raw_bypasses_fixture", mutate: func(f *reviewFreezeCompileModuleLeafFixtureV1) {
+			f.files[infoPath] = []byte(reviewFreezeCompileModuleInfoOriginRawV1)
 		}, want: ".info"},
 		{name: "ziphash_newline", mutate: func(f *reviewFreezeCompileModuleLeafFixtureV1) {
 			f.files[zipHashPath] = append(f.files[zipHashPath], '\n')
