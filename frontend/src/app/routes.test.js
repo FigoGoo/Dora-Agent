@@ -3,9 +3,12 @@ import {
   canAccessPage,
   getPageFromPath,
   getPathForPage,
+  getRequiredCapabilityForPage,
+  getSkillGovernanceDetailPath,
   getSkillReviewDetailPath,
   matchOwnerSkillBuilderPath,
   matchPublicSkillDetailPath,
+  matchSkillGovernanceDetailPath,
   matchSkillReviewDetailPath,
   PUBLIC_PAGES
 } from './routes.js';
@@ -74,5 +77,37 @@ describe('Skill routes', () => {
     expect(canAccessPage('skillReviews', ['admin'])).toBe(false);
     expect(canAccessPage('skillReviews', null)).toBe(false);
     expect(canAccessPage('home', [])).toBe(true);
+  });
+
+  it('accepts only the exact Governance queue and canonical lowercase UUIDv7 detail', () => {
+    const detailPath = `/admin/skills/governance/${SKILL_IDS.skill}`;
+    expect(getPageFromPath('/admin/skills/governance')).toBe('skillGovernance');
+    expect(getPathForPage('skillGovernance')).toBe('/admin/skills/governance');
+    expect(getPageFromPath(detailPath)).toBe('skillGovernanceDetail');
+    expect(matchSkillGovernanceDetailPath(detailPath)).toEqual({ skillID: SKILL_IDS.skill });
+    expect(getSkillGovernanceDetailPath(SKILL_IDS.skill)).toBe(detailPath);
+
+    expect(getPageFromPath('/admin/skills/governance/')).toBe('skillGovernanceDetail');
+    expect(matchSkillGovernanceDetailPath('/admin/skills/governance/')).toBeNull();
+    expect(matchSkillGovernanceDetailPath(`${detailPath}/`)).toBeNull();
+    expect(matchSkillGovernanceDetailPath(`/admin/skills/governance/${SKILL_IDS.skill.toUpperCase()}`)).toBeNull();
+    expect(matchSkillGovernanceDetailPath('/admin/skills/governance/not-a-uuid')).toBeNull();
+    expect(matchSkillGovernanceDetailPath(`/admin/skills/governance/${SKILL_IDS.skill.replace(/^0/, '%30')}`)).toBeNull();
+    expect(() => getSkillGovernanceDetailPath('not-a-uuid')).toThrow('规范小写 UUIDv7');
+    expect(PUBLIC_PAGES.has('skillGovernance')).toBe(false);
+    expect(PUBLIC_PAGES.has('skillGovernanceDetail')).toBe(false);
+  });
+
+  it('keeps Governance and Reviewer capabilities exact, separate, and denial-latched', () => {
+    expect(getRequiredCapabilityForPage('skillGovernance')).toBe('skill.govern');
+    expect(getRequiredCapabilityForPage('skillGovernanceDetail')).toBe('skill.govern');
+    expect(getRequiredCapabilityForPage('skillReviews')).toBe('skill.review');
+    expect(canAccessPage('skillGovernance', ['skill.govern'])).toBe(true);
+    expect(canAccessPage('skillGovernanceDetail', ['project.read', 'skill.govern'])).toBe(true);
+    expect(canAccessPage('skillGovernance', ['skill.review'])).toBe(false);
+    expect(canAccessPage('skillReviews', ['skill.govern'])).toBe(false);
+    expect(canAccessPage('skillGovernance', ['skill.govern'], ['skill.govern'])).toBe(false);
+    expect(canAccessPage('skillGovernance', ['skill.review', 'skill.govern'])).toBe(true);
+    expect(canAccessPage('skillReviews', ['skill.review', 'skill.govern'])).toBe(true);
   });
 });

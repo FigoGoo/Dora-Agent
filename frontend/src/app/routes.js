@@ -8,6 +8,9 @@ export const PUBLIC_SKILL_DETAIL_ROUTE_PATTERN = /^\/skills\/([^/]+)$/;
 export const SKILL_REVIEW_QUEUE_ROUTE = '/admin/skills/reviews';
 export const SKILL_REVIEW_DETAIL_ROUTE_PATTERN = /^\/admin\/skills\/reviews\/([^/]+)$/;
 export const SKILL_REVIEW_CAPABILITY = 'skill.review';
+export const SKILL_GOVERNANCE_QUEUE_ROUTE = '/admin/skills/governance';
+export const SKILL_GOVERNANCE_DETAIL_ROUTE_PATTERN = /^\/admin\/skills\/governance\/([^/]+)$/;
+export const SKILL_GOVERNANCE_CAPABILITY = 'skill.govern';
 const UUID_V7_ROUTE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export const CLIENT_ROUTES = {
@@ -17,6 +20,7 @@ export const CLIENT_ROUTES = {
   skills: '/skills',
   mySkills: '/my/skills',
   skillReviews: SKILL_REVIEW_QUEUE_ROUTE,
+  skillGovernance: SKILL_GOVERNANCE_QUEUE_ROUTE,
   works: '/works',
   credits: '/credits'
 };
@@ -33,7 +37,10 @@ const ROUTE_TO_PAGE = Object.entries(CLIENT_ROUTES).reduce((routes, [page, path]
 }, { ...CLIENT_ROUTE_ALIASES });
 
 export function normalizePath(pathname) {
-  if (pathname !== SKILL_REVIEW_QUEUE_ROUTE && pathname.startsWith(`${SKILL_REVIEW_QUEUE_ROUTE}/`)) {
+  if (
+    (pathname !== SKILL_REVIEW_QUEUE_ROUTE && pathname.startsWith(`${SKILL_REVIEW_QUEUE_ROUTE}/`))
+    || (pathname !== SKILL_GOVERNANCE_QUEUE_ROUTE && pathname.startsWith(`${SKILL_GOVERNANCE_QUEUE_ROUTE}/`))
+  ) {
     return pathname;
   }
   const path = pathname.replace(/\/+$/, '');
@@ -48,6 +55,7 @@ export function getPageFromPath(pathname) {
     || (path.startsWith('/my/skills/') && path.endsWith('/edit'))
   ) return 'skillBuilder';
   if (path.startsWith(`${SKILL_REVIEW_QUEUE_ROUTE}/`)) return 'skillReviewDetail';
+  if (path.startsWith(`${SKILL_GOVERNANCE_QUEUE_ROUTE}/`)) return 'skillGovernanceDetail';
   if (PUBLIC_SKILL_DETAIL_ROUTE_PATTERN.test(path) || path.startsWith('/skills/')) return 'skillDetail';
   return ROUTE_TO_PAGE[path] || 'home';
 }
@@ -74,10 +82,24 @@ export function getSkillReviewDetailPath(reviewID) {
   return `${SKILL_REVIEW_QUEUE_ROUTE}/${reviewID}`;
 }
 
+export function matchSkillGovernanceDetailPath(pathname) {
+  const match = normalizePath(pathname).match(SKILL_GOVERNANCE_DETAIL_ROUTE_PATTERN);
+  if (!match) return null;
+  const skillID = match[1];
+  return UUID_V7_ROUTE_PATTERN.test(skillID) ? { skillID } : null;
+}
+
+export function getSkillGovernanceDetailPath(skillID) {
+  if (!UUID_V7_ROUTE_PATTERN.test(String(skillID || ''))) {
+    throw new TypeError('Skill 治理详情路由需要规范小写 UUIDv7 skill_id');
+  }
+  return `${SKILL_GOVERNANCE_QUEUE_ROUTE}/${skillID}`;
+}
+
 export function getRequiredCapabilityForPage(page) {
-  return page === 'skillReviews' || page === 'skillReviewDetail'
-    ? SKILL_REVIEW_CAPABILITY
-    : '';
+  if (page === 'skillReviews' || page === 'skillReviewDetail') return SKILL_REVIEW_CAPABILITY;
+  if (page === 'skillGovernance' || page === 'skillGovernanceDetail') return SKILL_GOVERNANCE_CAPABILITY;
+  return '';
 }
 
 export function canAccessPage(page, capabilities, deniedCapabilities = []) {
