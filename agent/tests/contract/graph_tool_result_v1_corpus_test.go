@@ -461,6 +461,9 @@ func validateCorpusManifestGoPackageExactSetV1(repositoryRoot string, sources []
 func validateCorpusManifestGoSourceExecutionShapeV1(repositoryRoot string, sources []corpusManifestSourceV1) error {
 	buildConstraintPattern := regexp.MustCompile(`(?m)^//go:build(?:[\t ]|$)|^//[\t ]+\+build(?:[\t ]|$)`)
 	for _, source := range sources {
+		if err := validateCorpusManifestGoSourceFilenameV1(source.Path); err != nil {
+			return err
+		}
 		raw, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(source.Path)))
 		if err != nil {
 			return fmt.Errorf("读取 validator source %s: %w", source.Path, err)
@@ -478,6 +481,32 @@ func validateCorpusManifestGoSourceExecutionShapeV1(repositoryRoot string, sourc
 				return fmt.Errorf("validator source 禁止 TestMain: %s", source.Path)
 			}
 		}
+	}
+	return nil
+}
+
+func validateCorpusManifestGoSourceFilenameV1(sourcePath string) error {
+	base := pathpkg.Base(sourcePath)
+	if strings.HasPrefix(base, ".") || strings.HasPrefix(base, "_") {
+		return fmt.Errorf("validator source filename 会被 Go 忽略: %s", sourcePath)
+	}
+	stem := strings.TrimSuffix(base, ".go")
+	parts := strings.Split(stem, "_")
+	if len(parts) > 0 && parts[len(parts)-1] == "test" {
+		parts = parts[:len(parts)-1]
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	knownOSArch := map[string]struct{}{
+		"386": {}, "aix": {}, "amd64": {}, "amd64p32": {}, "android": {}, "arm": {}, "arm64": {}, "arm64be": {}, "armbe": {},
+		"darwin": {}, "dragonfly": {}, "freebsd": {}, "hurd": {}, "illumos": {}, "ios": {}, "js": {}, "linux": {}, "loong64": {},
+		"mips": {}, "mips64": {}, "mips64le": {}, "mips64p32": {}, "mips64p32le": {}, "mipsle": {}, "nacl": {}, "netbsd": {},
+		"openbsd": {}, "plan9": {}, "ppc": {}, "ppc64": {}, "ppc64le": {}, "riscv": {}, "riscv64": {}, "s390": {}, "s390x": {},
+		"solaris": {}, "sparc": {}, "sparc64": {}, "wasip1": {}, "wasm": {}, "windows": {}, "zos": {},
+	}
+	if _, constrained := knownOSArch[parts[len(parts)-1]]; constrained {
+		return fmt.Errorf("validator source filename 禁止 GOOS/GOARCH build constraint: %s", sourcePath)
 	}
 	return nil
 }

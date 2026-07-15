@@ -61,6 +61,9 @@ func reviewFreezeValidateValidatorBuildSourcesV1(validatorSources, buildSources 
 // reviewFreezeValidateValidatorExecutionShapeV1 禁止 build constraint 与 TestMain 控制目标测试的选择或退出码。
 func reviewFreezeValidateValidatorExecutionShapeV1(sources []reviewFreezeValidatorSourceV1, loader reviewFreezeArtifactLoaderV1) error {
 	for _, source := range sources {
+		if err := reviewFreezeValidateValidatorSourceFilenameV1(source.Path); err != nil {
+			return err
+		}
 		raw, err := loader(source.Path)
 		if err != nil {
 			return fmt.Errorf("读取 validator source %s: %w", source.Path, err)
@@ -78,6 +81,32 @@ func reviewFreezeValidateValidatorExecutionShapeV1(sources []reviewFreezeValidat
 				return fmt.Errorf("validator source %s 禁止 TestMain", source.Path)
 			}
 		}
+	}
+	return nil
+}
+
+func reviewFreezeValidateValidatorSourceFilenameV1(sourcePath string) error {
+	base := pathpkg.Base(sourcePath)
+	if strings.HasPrefix(base, ".") || strings.HasPrefix(base, "_") {
+		return fmt.Errorf("validator source filename 会被 Go 忽略=%s", sourcePath)
+	}
+	stem := strings.TrimSuffix(base, ".go")
+	parts := strings.Split(stem, "_")
+	if len(parts) > 0 && parts[len(parts)-1] == "test" {
+		parts = parts[:len(parts)-1]
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	knownOSArch := map[string]struct{}{
+		"386": {}, "aix": {}, "amd64": {}, "amd64p32": {}, "android": {}, "arm": {}, "arm64": {}, "arm64be": {}, "armbe": {},
+		"darwin": {}, "dragonfly": {}, "freebsd": {}, "hurd": {}, "illumos": {}, "ios": {}, "js": {}, "linux": {}, "loong64": {},
+		"mips": {}, "mips64": {}, "mips64le": {}, "mips64p32": {}, "mips64p32le": {}, "mipsle": {}, "nacl": {}, "netbsd": {},
+		"openbsd": {}, "plan9": {}, "ppc": {}, "ppc64": {}, "ppc64le": {}, "riscv": {}, "riscv64": {}, "s390": {}, "s390x": {},
+		"solaris": {}, "sparc": {}, "sparc64": {}, "wasip1": {}, "wasm": {}, "windows": {}, "zos": {},
+	}
+	if _, constrained := knownOSArch[parts[len(parts)-1]]; constrained {
+		return fmt.Errorf("validator source filename 禁止 GOOS/GOARCH build constraint=%s", sourcePath)
 	}
 	return nil
 }
@@ -319,6 +348,16 @@ func TestW2ReviewFreezeTransitionGitV1ValidatorBuildAdversarial(t *testing.T) {
 		{name: "registered build constraint with rebound digest", mutate: func(t *testing.T, root string) {
 			reviewFreezeWriteTestFileV1(t, root, "agent/tests/contract/b_test.go", []byte("//go:build !linux\n\npackage contract_test\n\nfunc TestB() {}\n"))
 		}, rewriteManifest: true, want: "build constraint"},
+		{name: "registered platform filename with rebound digest", mutate: func(t *testing.T, root string) {
+			if err := os.Rename(filepath.Join(root, "agent/tests/contract/b_test.go"), filepath.Join(root, "agent/tests/contract/b_windows_test.go")); err != nil {
+				t.Fatal(err)
+			}
+		}, rewriteManifest: true, want: "filename"},
+		{name: "registered ignored filename with rebound digest", mutate: func(t *testing.T, root string) {
+			if err := os.Rename(filepath.Join(root, "agent/tests/contract/b_test.go"), filepath.Join(root, "agent/tests/contract/_b_test.go")); err != nil {
+				t.Fatal(err)
+			}
+		}, rewriteManifest: true, want: "filename"},
 		{name: "go mod replace with rebound digest", mutate: func(t *testing.T, root string) {
 			reviewFreezeWriteTestFileV1(t, root, "agent/go.mod", []byte("module example.invalid/agent\n\ngo 1.26\n\nreplace example.invalid/dependency => ../dependency\n"))
 		}, rewriteManifest: true, want: "replace"},
@@ -421,7 +460,17 @@ func reviewFreezeWriteTestValidatorClosureV1(t *testing.T, root string) string {
 // reviewFreezeWriteTestValidatorManifestV1 重新计算测试仓库声明源摘要，供 replace 已绑定但仍失败关闭的用例使用。
 func reviewFreezeWriteTestValidatorManifestV1(t *testing.T, root, manifestPath string) {
 	t.Helper()
-	sourcePaths := []string{"agent/tests/contract/a_test.go", "agent/tests/contract/b_test.go"}
+	entries, err := os.ReadDir(filepath.Join(root, "agent/tests/contract"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourcePaths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() && pathpkg.Ext(entry.Name()) == ".go" {
+			sourcePaths = append(sourcePaths, pathpkg.Join("agent/tests/contract", entry.Name()))
+		}
+	}
+	sort.Strings(sourcePaths)
 	buildPaths := []string{"agent/go.mod", "agent/go.sum"}
 	readSources := func(paths []string) []reviewFreezeValidatorSourceV1 {
 		sources := make([]reviewFreezeValidatorSourceV1, 0, len(paths))

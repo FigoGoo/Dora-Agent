@@ -15,7 +15,7 @@
   "design_sources": [
     {
       "path": "docs/design/agent/graph-tool-result-receipt-contract-v1.md",
-      "sha256": "sha256:988312af2bbca2e2df607faae99b7091f16ff13364fffa4bf6e3d6088169a0a3"
+      "sha256": "sha256:c409c5cfa56d8137c148cd2e34ee9cd8f93889a9fa07855b83d87781fb9d37e0"
     },
     {
       "path": "docs/design/agent/runner-session-lane-review-v1.md",
@@ -37,7 +37,7 @@
     },
     {
       "path": "agent/tests/contract/graph_tool_result_v1_corpus_test.go",
-      "sha256": "sha256:6f45935916c37624d0f589081a2d879926a81371d2afdc17f4f91752b0948591"
+      "sha256": "sha256:4ee5aca3407dc0fd0f97979462faf5981fc295139528cd36c4dac56395cf5867"
     },
     {
       "path": "agent/tests/contract/immutable_turn_context_approval_manifest_v1_test.go",

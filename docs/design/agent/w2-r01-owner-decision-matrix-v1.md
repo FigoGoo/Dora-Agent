@@ -40,7 +40,7 @@ W2-R01 已有测试专用候选语料，但当前仍存在跨 Module 语义、Ow
 | `GOV-D05` | 验证器源码如何防止被同一 PR 降级 | workflow 与 Review Freeze verifier 从默认分支 trust root 执行；候选 manifest 绑定设计源和 validator source 摘要；正式候选迁移期间禁止修改 trust root | 从 PR head checkout 后直接执行脚本，或只冻结测试名称不冻结源码 | base/head Git-object 对抗测试、symlink/mode/tree 拒绝、源码摘要闭包 |
 | `GOV-D06` | Go 测试包及构建输入能否影响冻结测试 | 优先把每个 Gate verifier 迁入独立、stdlib-only 且无未登记 embed 输入的包；否则冻结完整 transitive build-input closure，包括直接 package source、embed inputs、内部 Go 依赖源码、第三方模块、`go.mod/go.sum`、toolchain 与 workflow/action trust root，不得只绑定若干测试文件或 Module metadata | 允许未绑定的 `TestMain`、`init`、共享全局、新增测试文件、embed 文件、内部依赖源码、第三方依赖、toolchain/action 或 dependency replacement 参与正式 verifier 进程 | 独立 stdlib-only verifier，或完整 transitive build-input manifest；额外源码/embed/内部依赖、dependency replacement、toolchain/action 漂移均有失败测试 |
 
-`GOV-D06` 当前只完成 D0-04A：共享 `contract_test` 包 11 个直接 `.go` 文件与 `agent/go.mod/go.sum` 已形成 exact-set/SHA 绑定，modern/legacy build constraint、package-level `TestMain`、`replace`、直接源码增删及已登记文件 mode/symlink 漂移已有失败测试。D0-04B 仍未完成：包内 `//go:embed`、`agent/internal/**` 传递源码、第三方依赖，以及受信 toolchain/workflow action digest 尚未进入闭包。因此当前进展不能证明完整 build closure，`GOV-D06` 仍是 formal Freeze blocker。
+`GOV-D06` 当前只完成 D0-04A：共享 `contract_test` 包 11 个直接 `.go` 文件与 `agent/go.mod/go.sum` 已形成 exact-set/SHA 绑定，modern/legacy build constraint、Go 忽略/GOOS/GOARCH 平台选择文件名、package-level `TestMain`、`replace`、直接源码增删及已登记文件 mode/symlink 漂移已有失败测试。D0-04B 仍未完成：包内 `//go:embed`、`agent/internal/**` 传递源码、第三方依赖，以及受信 toolchain/workflow action digest 尚未进入闭包。因此当前进展不能证明完整 build closure，`GOV-D06` 仍是 formal Freeze blocker。
 
 ## 4. 状态迁移入口
 

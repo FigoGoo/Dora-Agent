@@ -47,7 +47,7 @@
           "scope": "graph_tool_result_and_tool_receipt_current_candidate",
           "coverage": "partial_candidate",
           "contract_manifest_path": "agent/tests/contract/testdata/w2_r01/manifest.json",
-          "contract_manifest_sha256": "sha256:5b97d5de758eeb6d80138dcc07f311c4ae8c1371d812f440df34ea97f7b8bcbc",
+          "contract_manifest_sha256": "sha256:1f98573f2666dfb6c4e4fd494a6c2ddad85c37b9297380eace28816c7659ca5b",
           "vector_ids": [
             "GTR-N01-malformed",
             "GTR-N02-duplicate-top-level",
@@ -248,7 +248,7 @@
           "scope": "creation_spec_activation_consumption_core_candidate",
           "coverage": "partial_candidate",
           "contract_manifest_path": "agent/tests/contract/testdata/w2_r04_approval_consumption/manifest.json",
-          "contract_manifest_sha256": "sha256:536a79174dd5c2d211df4223bfa822d7a0951586b119936f725e76921e642958",
+          "contract_manifest_sha256": "sha256:ecc2a919ea08dce90faacc39dc16130bb3c8ceb07bcf412d1cba688f26f6f887",
           "vector_ids": [
             "ACR-N01-strict-malformed",
             "ACR-N02-strict-duplicate",

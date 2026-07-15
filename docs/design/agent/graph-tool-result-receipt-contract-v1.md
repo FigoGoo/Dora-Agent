@@ -428,7 +428,7 @@ GOWORK=off /Users/figo/sdk/go1.26.3/bin/go -C agent test ./tests/contract -count
 GOWORK=off /Users/figo/sdk/go1.26.3/bin/go -C agent test -race ./tests/contract -count=1
 ```
 
-测试代码只存在于 `_test.go`，不会进入 `agent-service` 二进制。未来 TS 只读取同一 raw Corpus 验证投影/Reducer，不复制 Result 作为浏览器生产 Transport。当前 `validator_sources` 必须与 `agent/tests/contract` 目录内全部 11 个直接 `.go` 文件形成 exact-set，并逐文件绑定 raw SHA-256；新增、删除或替换 `init`、共享全局或任意直接测试源码都会使门禁失败。Execution-shape 校验还拒绝任意 modern/legacy build constraint 与 package-level `TestMain`，防止重新绑定摘要后选择性排除目标测试或绕过 `m.Run()`。`validator_build_sources` 进一步以 exact-set 绑定 `agent/go.mod`、`agent/go.sum`，校验器拒绝 `go.mod` 中的任何 `replace`，Git transition 还要求这些已登记输入为普通 `100644 blob`。这已经完成 direct package source、test-selection shape 与 Module metadata closure，关闭了未登记直接 Go 文件、build-tag/TestMain 和显式 `replace` 的注入窗口。
+测试代码只存在于 `_test.go`，不会进入 `agent-service` 二进制。未来 TS 只读取同一 raw Corpus 验证投影/Reducer，不复制 Result 作为浏览器生产 Transport。当前 `validator_sources` 必须与 `agent/tests/contract` 目录内全部 11 个直接 `.go` 文件形成 exact-set，并逐文件绑定 raw SHA-256；新增、删除或替换 `init`、共享全局或任意直接测试源码都会使门禁失败。Execution-shape 校验还拒绝任意 modern/legacy build constraint、package-level `TestMain`、以 `.`/`_` 开头会被 Go 忽略的文件名，以及带已知 GOOS/GOARCH suffix 的平台选择文件，防止重新绑定摘要后选择性排除目标测试或绕过 `m.Run()`。`validator_build_sources` 进一步以 exact-set 绑定 `agent/go.mod`、`agent/go.sum`，校验器拒绝 `go.mod` 中的任何 `replace`，Git transition 还要求这些已登记输入为普通 `100644 blob`。这已经完成 direct package source、test-selection shape 与 Module metadata closure，关闭了未登记直接 Go 文件、build-tag/filename/TestMain 和显式 `replace` 的注入窗口。
 
 该阶段仍不是完整 build-input closure。共享 `contract_test` 包包含 `//go:embed` 输入，且导入 `agent/internal/event`、`agent/internal/session`、`agent/internal/skill` 与 `github.com/google/uuid`；当前 R01/R04 manifest 没有冻结全部 embed input exact-set、内部 Go 传递依赖源码、第三方依赖内容，也没有冻结受信 Go toolchain 与 CI Action digest。因此这些未绑定输入仍可能改变 verifier 进程，`GOV-D06` 和 formal Review Freeze 的构建闭包阻塞继续保留。
 
@@ -446,7 +446,7 @@ GOWORK=off /Users/figo/sdk/go1.26.3/bin/go -C agent test -race ./tests/contract 
 - [x] ToolReceipt self ref 与外部 result refs 分离；
 - [x] 同义重放、异义冲突、旧 Fence、过期 Version、frozen append 固定向量可执行；
 - [x] reserve/resolve 同义重放先校验命令互斥字段，夹带字段失败关闭；Snapshot 与 slot policy 的 Tool Key 仅允许六 Tool exact-set；当前 7 条 policy 仍只是代表性子集；
-- [x] R01 Validator 已冻结共享 `contract_test` 包全部 11 个直接 `.go` 文件及 `agent/go.mod/go.sum`，拒绝 build constraint、package-level `TestMain` 与显式 `replace` 注入，完成 direct source + test-selection shape + Module metadata closure；
+- [x] R01 Validator 已冻结共享 `contract_test` 包全部 11 个直接 `.go` 文件及 `agent/go.mod/go.sum`，拒绝 build constraint、忽略/平台选择文件名、package-level `TestMain` 与显式 `replace` 注入，完成 direct source + test-selection shape + Module metadata closure；
 - [ ] 正式 Review Freeze 前将 R01 verifier 迁入独立 stdlib-only、无未登记 embed 输入的包；若保留共享包，则冻结 embed、内部 Go 传递依赖、第三方模块、受信 toolchain 与 CI Action digest 的完整 transitive build-input exact-set；
 - [ ] Agent/Business/安全/运维/财务完成跨角色审核；
 - [ ] `aigc-contract-catalog.md` 整体跨 Module Approved，并明确 Agent 内部 Result exact-version 例外；
