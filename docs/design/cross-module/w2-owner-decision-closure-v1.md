@@ -4,7 +4,7 @@
 >
 > 审计日期：2026-07-16
 >
-> 事实基线：`codex/w2-r04-consumption-audit@8ea78c2b`
+> 事实基线：`codex/w2-r04-consumption-audit@7860467b`
 >
 > 结论边界：本文只把分散的 ADR、Review Freeze、Billing、Approval/Consumption 与 Structured Smoke 未决项整理成可逐项签核的决策包。本文不是 Owner 批准、不是机器 Review Freeze、不是 trust root，也不授权生产 Go、SQL Migration、IDL、生成代码、Graph、Runner、Billing、Approval、A2UI 或 Harness 实现。
 
@@ -61,6 +61,8 @@ R00 的 12 个位置式 Billing open item 已由 [`w2-r00-owner-decision-matrix-
 R02 的分散待决项已由 [`w2-r02-owner-decision-matrix-v1.md`](../agent/w2-r02-owner-decision-matrix-v1.md) 去重为 `R02-D01`～`R02-D19`，并映射既有 `PG-D01`～`PG-D08`、`TC-P01`～`TC-P10`、Owner 候选和最低关闭证据。该矩阵只关闭稳定引用缺口；全部决定仍为 `awaiting_owner_decision`，不构成 aggregate candidate、Owner approval 或生产解锁。
 
 [`DR-W2-R02-v1.json`](../agent/approvals/w2-r02-owner-decision-requests/DR-W2-R02-v1.json) 将 19 项推荐候选固定为严格待决请求，原始字节 SHA-256 为 `4b6356f9d6b4da7adf348c2207135e2cebd8c972349f84c67ade274f6d274fe9`。它只允许 `accept_recommendation/reject_keep_blocked` 两种请求选项，Owner role 集显式标记为 provisional，并固定 `implementation_unlocked=false`；Schema 不包含 selected option、approval、Review、actor 或 commit 自报字段。该请求不是 approval summary、Owner authority request、aggregate manifest 或 Formal Freeze 输入。
+
+[`W2-R02 legacy-upgrade child manifest v2`](../../../agent/tests/contract/testdata/w2_r02_upgrade_v2/manifest.json) 已在不修改 v1 manifest 和两份既有 corpus 的前提下，机械派生并固定 3 个 fixture ID、107 个 vector ID 与 14 个 target test 的排序 exact-set，原始字节 SHA-256 为 `3b11053b2a3d7de283f0f437f3afe9d161cbb316ae74e981754c0d012404d134`。两个独立 stdlib-only validator/guard 绑定 v1 manifest/corpus 原始摘要、ID/计数/源码 exact-set 与 regular 0644 文件边界；状态仅为 `prepared_unregistered / candidate_only / implementation_unlocked=false`。它不登记 live `candidate_evidence`、不创建 aggregate、不记录 Owner 选择/批准或 Formal Freeze，因此 R02 仍为 5 个 live child manifest、无 aggregate candidate 且生产 A1/A2 未解锁。
 
 R03 的分散 Approval、Decision、Continuation、Consumption、child Receipt 与双向 Query 待决项已由 [`w2-r03-owner-decision-matrix-v1.md`](../agent/w2-r03-owner-decision-matrix-v1.md) 去重为 `R03-D01`～`R03-D14`。该矩阵显式区分 Decision key、Continuation SourceID、child ToolReceipt key、Agent-local Consumption key、Business `tr:` command key 与领域 backstop，也区分 Business→Agent Consumption Authority Query 和 Agent→Business CreationSpec Decision Query；全部决定仍为 `awaiting_owner_decision`。
 
@@ -231,7 +233,7 @@ ADR-011 批准前还必须关闭 `R01-D05`：`approval_consumption` 的 Receipt/
 | `P4-C04` | exact-version 与 Catalog 同主版本兼容策略冲突 | R01 v1 推荐 exact-version；另一策略只能作为新版本迁移 |
 | `P4-C05` | `waiting_user.card_id` 的 R01/R08 Owner 冲突 | R01 仅冻结 Approval 因果引用；Card 生命周期交 R08，形成字段责任表 |
 | `P4-C06` | R01 代表性 Tool key 与正式六 Tool Registry exact-set 不一致 | Owner 选择“机制+六 key”或缩小 Gate；当前 partial 不得冒充全量 |
-| `P4-C07` | R02 现有 5 个 child manifest 只能机械小计为 298 向量/58 个唯一 target tests；upgrade 未公开 fixture/vector exact-set，且没有全 Gate aggregate | 按 [R02 Owner 决策矩阵](../agent/w2-r02-owner-decision-matrix-v1.md) 关闭语义、ADR scope、Owner exact-set 与 build/trust closure 后，版本化补齐 upgrade 并生成一个全 Gate aggregate manifest |
+| `P4-C07` | R02 现有 5 个 live child manifest 只能机械小计为 298 向量/58 个唯一 target tests；v1 upgrade 未公开 fixture/vector exact-set，新 v2 仅为 `prepared_unregistered`，且没有全 Gate aggregate | 按 [R02 Owner 决策矩阵](../agent/w2-r02-owner-decision-matrix-v1.md) 关闭语义、ADR scope、Owner exact-set 与 build/trust closure 后，再评审/登记已准备的 upgrade v2 exact-set 并生成一个全 Gate aggregate manifest |
 | `P4-C08` | ADR-008/010 对 A1/A2 的适用范围含糊 | 明确接受 A1 carve-out 或追加 A1 Gate，不得靠实现猜测 |
 | `P4-C09` | R02 corpus 包含 approval/batch 来源，A1 仅支持 `user_message` | 冻结“corpus 保留、A1 production unavailable”，不提前扩实现 |
 | `P4-C10` | R02 Runtime/Ingress/PostgreSQL/legacy/Marker/Turn Context 的位置式 P0 引用会漂移 | 已以 `R02-D01`～`R02-D19` 建立稳定编号、Owner 候选、关闭证据和源 crosswalk；语义决定、最终 Owner exact-set 与正式 review 仍未完成 |
@@ -349,11 +351,12 @@ candidate_unactivated
 - [x] 为 R01 建立严格的 `awaiting_owner_decision` 请求及互相交叉守卫的 stdlib-only validator/guard，只绑定当前 1 fixture/87 vectors/4 tests partial candidate；
 - [x] 为 R02 待决项分配 `R02-D01`～`R02-D19`，映射 Owner 候选、最低关闭证据和源位置；
 - [x] 为 R02 建立严格的 `awaiting_owner_decision` 请求及 validator，禁止选择/批准/Review 身份字段和实现解锁；
+- [x] 为 R02 legacy-upgrade 既有 v1 corpus 建立 `prepared_unregistered` v2 child manifest 及双 validator/guard，机械固定 3 fixtures/107 vectors/14 tests 且不登记 live candidate evidence；
 - [x] 为 R03 待决项分配 `R03-D01`～`R03-D14`，区分六类 identity、双向 Query、child/failed-after 与 Owner exact-set；
 - [x] 为 R04 待决项分配 `R04-D01`～`R04-D20`，映射 PLAN/Billing/P4、headless/R08 边界与完整 Gate 缺口；
 - [x] 为 R03/R04 建立严格的 `awaiting_owner_decision` 请求及互相交叉守卫的 stdlib-only validator/guard；R03 保持零 candidate，R04 只绑定当前 partial candidate，均禁止选择、批准、Review 身份与实现解锁；
 - [x] 为 `R00-D09` 建立 Provider-neutral、`prepared_unregistered` 的 terminal ModelReceipt 候选输入与双 validator/guard；只固定 contract/vector 候选，不登记 candidate evidence，不推进 ballot/readiness；
-- [ ] 取得 R02 全部稳定决定及既有 `PG-Dxx/TC-Pxx` 的结构化结论，补齐 upgrade exact-set 并生成 aggregate manifest；
+- [ ] 取得 R02 全部稳定决定及既有 `PG-Dxx/TC-Pxx` 的结构化结论，审核/登记已准备的 upgrade v2 exact-set 并生成 aggregate manifest；
 - [ ] 补齐 `R00-D05/D07/D08/D09/D11/D13` exact candidate，逐项关闭 `R00-D01`～`D14`，再生成 R00 canonical manifest 和 exact vectors；
 - [ ] 取得 R03/R04 全部 stable decision 的结构化结论，冻结 R01/R03/R04 slot/ordinal/owner/query mapping 与 child exact-set；
 - [ ] 激活 GOV-D01～D06 对应的 base-owned trust root、build closure 和真实 PR authority。
@@ -377,7 +380,7 @@ candidate_unactivated
 - Activation mapping 与 production projection Owner 已形成可评审候选，但尚未冻结；
 - R00 已建立 14 项稳定决策和六项候选准备 CPR；`R00-D09` 增加了未注册的 Provider-neutral 候选输入，其余五项仍只有准备清单，六项均未形成 live candidate submission/ballot 条件，故没有生成 R00 待决请求、candidate manifest 或 candidate evidence；
 - R01 已形成覆盖六项语义与六项治理决定的严格待决请求；它只绑定当前 87 条 partial candidate，不是完整 baseline、批准或解锁；
-- R02 已有稳定 Owner 决策矩阵，但 19 项决定、既有 PG/TC 决定、aggregate manifest 与 Owner approval 均未关闭；
+- R02 已有稳定 Owner 决策矩阵，legacy-upgrade v2 也已机械固定既有 3 fixtures/107 vectors/14 tests，但该 manifest 仍为 `prepared_unregistered`；19 项决定、既有 PG/TC 决定、aggregate manifest 与 Owner approval 均未关闭；
 - R02 待决请求已机械绑定矩阵、当前 Gate manifest 和 validator；它没有批准能力，不能推进 `expansion_frozen`；
 - R03/R04 已分别建立 14 项和 20 项稳定 Owner 决策矩阵，但语义、child/full-gate manifest、最终 Owner exact-set 与批准均未关闭；
 - 当前唯一允许继续的工作是 Owner 决策、版本化契约/manifest 准备与 authority 路线收口；生产实现和 Harness 继续失败关闭。
