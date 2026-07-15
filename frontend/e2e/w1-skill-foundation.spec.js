@@ -6,11 +6,16 @@ const email = process.env.DORA_E2E_USER_EMAIL || '';
 const password = process.env.DORA_E2E_USER_PASSWORD || '';
 const reviewerEmail = process.env.DORA_E2E_REVIEWER_EMAIL || '';
 const reviewerPassword = process.env.DORA_E2E_REVIEWER_PASSWORD || '';
+const governorEmail = process.env.DORA_E2E_GOVERNOR_EMAIL || '';
+const governorPassword = process.env.DORA_E2E_GOVERNOR_PASSWORD || '';
 const w1ResultPath = process.env.DORA_E2E_W1_RESULT_PATH || '';
 const publicMarketControlDir = process.env.DORA_E2E_W1_PUBLIC_MARKET_CONTROL_DIR || '';
+const governanceControlDir = process.env.DORA_E2E_W1_GOVERNANCE_CONTROL_DIR || '';
 
 const PUBLIC_MARKET_CHECKPOINT_SCHEMA = 'w1.public-market-preselection.checkpoint.v1';
 const PUBLIC_MARKET_ACK_SCHEMA = 'w1.public-market-preselection.database-ack.v1';
+const GOVERNANCE_CHECKPOINT_SCHEMA = 'w1.governor-revocation.checkpoint.v1';
+const GOVERNANCE_ACK_SCHEMA = 'w1.governor-revocation.database-ack.v1';
 const QUICK_CREATE_DATABASE_COUNT_KEYS = [
   'binding_audits',
   'binding_sets',
@@ -105,6 +110,46 @@ async function checkpointPublicMarketPreselection({ phase, consumerID, skillID, 
   expect(Object.values(ack.database_counts).every((value) => Number.isInteger(value) && value >= 0)).toBe(true);
 }
 
+async function checkpointGovernorRevocation({ governorID, skillID }) {
+  if (!governanceControlDir) return;
+
+  const checkpointPath = `${governanceControlDir}/before_revocation.checkpoint.json`;
+  const checkpointTemporaryPath = `${checkpointPath}.${process.pid}.tmp`;
+  await writeFile(checkpointTemporaryPath, `${JSON.stringify({
+    schema_version: GOVERNANCE_CHECKPOINT_SCHEMA,
+    phase: 'before_revocation',
+    governor_id: governorID,
+    skill_id: skillID
+  })}\n`, { encoding: 'utf8', mode: 0o600 });
+  await chmod(checkpointTemporaryPath, 0o600);
+  await rename(checkpointTemporaryPath, checkpointPath);
+
+  const ackPath = `${governanceControlDir}/before_revocation.ack.json`;
+  const deadline = Date.now() + 180_000;
+  let ack = null;
+  while (Date.now() < deadline) {
+    try {
+      ack = JSON.parse(await readFile(ackPath, 'utf8'));
+      break;
+    } catch (error) {
+      if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  expect(ack, 'Governor revocation ACK must arrive within the shared Playwright budget').not.toBeNull();
+  expect(Object.keys(ack).sort()).toEqual([
+    'accepted', 'assignment_version', 'governor_id', 'phase', 'schema_version', 'skill_id'
+  ]);
+  expect(ack).toEqual({
+    schema_version: GOVERNANCE_ACK_SCHEMA,
+    phase: 'before_revocation',
+    governor_id: governorID,
+    skill_id: skillID,
+    assignment_version: 2,
+    accepted: true
+  });
+}
+
 async function findSkillReviewCardAcrossPages(page, skillName) {
   const reviewCard = page.locator('article.skill-review-card').filter({ hasText: skillName });
   for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
@@ -125,6 +170,48 @@ async function findSkillReviewCardAcrossPages(page, skillName) {
   return reviewCard;
 }
 
+async function findGovernanceSkillAcrossPages(page, skillName) {
+  const governanceCard = page.locator('article.skill-review-card').filter({ hasText: skillName });
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    if (await governanceCard.count() === 1) return governanceCard;
+    const loadMore = page.getByRole('button', { name: '加载更多' });
+    if (await loadMore.count() === 0) break;
+    const responsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET'
+        && url.pathname === '/api/v1/admin/skill-governance'
+        && url.searchParams.get('status') === 'active'
+        && Boolean(url.searchParams.get('cursor'));
+    });
+    await loadMore.click();
+    const response = await responsePromise;
+    expect(response.status()).toBe(200);
+    expect(response.headers()['cache-control']).toBe('no-store');
+    await expect(page.getByRole('button', { name: '正在加载…' })).toHaveCount(0);
+  }
+  return governanceCard;
+}
+
+function isStrictGovernanceForbiddenResponse(result, pathname, search = '') {
+  const responseURL = new URL(result.responseURL);
+  const error = result.payload?.error;
+  return responseURL.pathname === pathname
+    && responseURL.search === search
+    && result.status === 403
+    && result.contentType === 'application/json; charset=utf-8'
+    && result.cacheControl === 'no-store'
+    && Object.keys(result.payload || {}).join(',') === 'error'
+    && Object.keys(error || {}).sort().join(',') === 'code,details,message,request_id,retryable'
+    && error?.code === 'SKILL_GOVERNANCE_CAPABILITY_REQUIRED'
+    && error?.message === '当前账号没有 Skill 治理权限'
+    && error?.retryable === false
+    && error?.details !== null
+    && typeof error?.details === 'object'
+    && !Array.isArray(error?.details)
+    && Object.keys(error.details).length === 0
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(error?.request_id || '');
+}
+
 async function ownerResponseObservation(response) {
   const responseText = await response.text();
   let payload = null;
@@ -140,6 +227,73 @@ async function ownerResponseObservation(response) {
     responseURL: response.url(),
     responseText,
     payload
+  };
+}
+
+async function submitGovernanceDecision(page, {
+  skillID,
+  actionLabel,
+  submitLabel,
+  action,
+  reasonCode,
+  approvalReference,
+  csrfToken,
+  governanceETag,
+  expectedStatus,
+  expectedEpoch,
+  expectedAllowedActions
+}) {
+  await page.getByRole('button', { name: actionLabel, exact: true }).click();
+  await page.getByLabel('原因代码').selectOption(reasonCode);
+  await page.getByLabel('外部审批引用').fill(approvalReference);
+  const responsePromise = page.waitForResponse((response) => (
+    isSkillResponse(response, 'POST', `/api/v1/admin/skill-governance/${skillID}/decisions`)
+  ));
+  await page.getByRole('button', { name: submitLabel, exact: true }).click();
+  const response = await responsePromise;
+  const requestHeaders = response.request().headers();
+  expect(response.status()).toBe(200);
+  expect(response.headers()['content-type']).toBe('application/json; charset=utf-8');
+  expect(response.headers()['cache-control']).toBe('no-store');
+  expect(requestHeaders['x-csrf-token']).toBe(csrfToken);
+  expect(requestHeaders['if-match']).toBe(governanceETag);
+  expect(requestHeaders['idempotency-key']).toMatch(/^skill-governance-decision-[0-9a-f-]{36}$/);
+  expect(response.request().postDataJSON()).toEqual({
+    action,
+    reason_code: reasonCode,
+    approval_reference: approvalReference
+  });
+
+  const payload = await response.json();
+  expect(Object.keys(payload).sort()).toEqual(['request_id', 'skill']);
+  expect(Object.keys(payload.skill || {}).sort()).toEqual([
+    'allowed_actions',
+    'governance_epoch',
+    'governance_etag',
+    'governance_status',
+    'skill_id',
+    'transitioned_at'
+  ]);
+  expect(payload.request_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(payload.skill).toMatchObject({
+    skill_id: skillID,
+    governance_status: expectedStatus,
+    governance_epoch: expectedEpoch,
+    allowed_actions: expectedAllowedActions
+  });
+  const responseETag = String(payload.skill?.governance_etag || '');
+  expect(responseETag).toMatch(/^"[^"\r\n]+"$/);
+  expect(response.headers().etag).toBe(responseETag);
+  expect(payload.skill?.transitioned_at).toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/);
+  await expect(page.getByText('治理处置已完成，页面已更新为权威结果。')).toBeVisible();
+
+  return {
+    governanceETag: responseETag,
+    status: payload.skill.governance_status,
+    epoch: payload.skill.governance_epoch,
+    allowedActions: payload.skill.allowed_actions,
+    requestHeadersValid: true,
+    responseContractValid: true
   };
 }
 
@@ -348,6 +502,8 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     expect(password, 'DORA_E2E_USER_PASSWORD must be preflighted').toBeTruthy();
     expect(reviewerEmail, 'DORA_E2E_REVIEWER_EMAIL must be preflighted').toBeTruthy();
     expect(reviewerPassword, 'DORA_E2E_REVIEWER_PASSWORD must be preflighted').toBeTruthy();
+    expect(governorEmail, 'DORA_E2E_GOVERNOR_EMAIL must be preflighted').toBeTruthy();
+    expect(governorPassword, 'DORA_E2E_GOVERNOR_PASSWORD must be preflighted').toBeTruthy();
 
     const runSuffix = `${Date.now()}`;
     const skillName = `W1 Reviewer Skill ${runSuffix}`;
@@ -443,6 +599,62 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
       'Creator Reviewer API denial must match the strict non-sensitive 403 contract'
     ).toBe(true);
 
+    const governanceRequestsBeforeCreatorRoute = businessRequests.filter((request) => (
+      request.pathname.startsWith('/api/v1/admin/skill-governance')
+    )).length;
+    await page.goto('/admin/skills/governance');
+    const creatorGovernanceDeniedHeading = page.getByRole('heading', { name: '无 Skill 治理权限' });
+    const creatorGovernanceDeniedAlert = page.getByRole('alert');
+    await expect(creatorGovernanceDeniedHeading).toBeVisible();
+    await expect(creatorGovernanceDeniedAlert).toHaveText('当前会话不能使用 skill.govern，未加载任何治理数据。');
+    await expect(page.getByRole('button', { name: 'Skill 治理' })).toHaveCount(0);
+    await page.waitForLoadState('networkidle');
+    const governanceRequestsAfterCreatorRoute = businessRequests.filter((request) => (
+      request.pathname.startsWith('/api/v1/admin/skill-governance')
+    )).length;
+    const creatorGovernanceRouteBlocked = await creatorGovernanceDeniedHeading.isVisible()
+      && await creatorGovernanceDeniedAlert.textContent() === '当前会话不能使用 skill.govern，未加载任何治理数据。';
+    const creatorGovernanceImplicitAPIBlocked = governanceRequestsAfterCreatorRoute
+      === governanceRequestsBeforeCreatorRoute;
+    expect(creatorGovernanceRouteBlocked).toBe(true);
+    expect(creatorGovernanceImplicitAPIBlocked).toBe(true);
+
+    const creatorGovernanceAPIResponse = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/admin/skill-governance?status=active', {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'application/json' }
+      });
+      const responseText = await response.text();
+      let payload = null;
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        // The outer strict assertion fails closed for malformed JSON.
+      }
+      return {
+        status: response.status,
+        contentType: response.headers.get('content-type') || '',
+        cacheControl: response.headers.get('cache-control') || '',
+        responseURL: response.url,
+        responseText,
+        payload
+      };
+    });
+    const creatorGovernanceDenialRequestID = String(creatorGovernanceAPIResponse.payload?.error?.request_id || '');
+    const creatorGovernancePageText = await page.locator('body').innerText();
+    const creatorGovernanceAPIForbidden = isStrictGovernanceForbiddenResponse(
+      creatorGovernanceAPIResponse,
+      '/api/v1/admin/skill-governance',
+      '?status=active'
+    ) && creatorSensitiveValues.every((value) => (
+      !creatorGovernanceAPIResponse.responseText.includes(value) && !creatorGovernancePageText.includes(value)
+    ));
+    expect(
+      creatorGovernanceAPIForbidden,
+      'Creator Governance API denial must match the strict non-sensitive 403 contract'
+    ).toBe(true);
+
     await page.goto('/my/skills/new');
     await expect(page.getByRole('heading', { name: '创建 Skill' })).toBeVisible();
     await fillReviewerSmokeSkill(page, { skillName, summary: sentinelA });
@@ -507,6 +719,72 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     const reviewerCSRFToken = String(reviewerLogin.csrf_token || '');
     expect(Boolean(reviewerCSRFToken)).toBe(true);
     await expect(page.getByRole('button', { name: 'Skill 审核' })).toBeVisible();
+
+    const governanceRequestsBeforeReviewerRoute = businessRequests.filter((request) => (
+      request.pathname.startsWith('/api/v1/admin/skill-governance')
+    )).length;
+    await page.goto('/admin/skills/governance');
+    const reviewerGovernanceDeniedHeading = page.getByRole('heading', { name: '无 Skill 治理权限' });
+    const reviewerGovernanceDeniedAlert = page.getByRole('alert');
+    await expect(reviewerGovernanceDeniedHeading).toBeVisible();
+    await expect(reviewerGovernanceDeniedAlert).toHaveText('当前会话不能使用 skill.govern，未加载任何治理数据。');
+    await expect(page.getByRole('button', { name: 'Skill 治理' })).toHaveCount(0);
+    await page.waitForLoadState('networkidle');
+    const governanceRequestsAfterReviewerRoute = businessRequests.filter((request) => (
+      request.pathname.startsWith('/api/v1/admin/skill-governance')
+    )).length;
+    const reviewerGovernanceRouteBlocked = await reviewerGovernanceDeniedHeading.isVisible()
+      && await reviewerGovernanceDeniedAlert.textContent() === '当前会话不能使用 skill.govern，未加载任何治理数据。';
+    const reviewerGovernanceImplicitAPIBlocked = governanceRequestsAfterReviewerRoute
+      === governanceRequestsBeforeReviewerRoute;
+    expect(reviewerGovernanceRouteBlocked).toBe(true);
+    expect(reviewerGovernanceImplicitAPIBlocked).toBe(true);
+
+    const reviewerGovernanceAPIResponse = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/admin/skill-governance?status=active', {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'application/json' }
+      });
+      const responseText = await response.text();
+      let payload = null;
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        // The outer strict assertion fails closed for malformed JSON.
+      }
+      return {
+        status: response.status,
+        contentType: response.headers.get('content-type') || '',
+        cacheControl: response.headers.get('cache-control') || '',
+        responseURL: response.url,
+        responseText,
+        payload
+      };
+    });
+    const reviewerGovernanceDenialRequestID = String(reviewerGovernanceAPIResponse.payload?.error?.request_id || '');
+    const reviewerGovernancePageText = await page.locator('body').innerText();
+    const reviewerGovernanceSensitiveValues = [
+      skillName,
+      sentinelA,
+      sentinelB,
+      reviewID,
+      email,
+      password,
+      reviewerEmail,
+      reviewerPassword
+    ].filter(Boolean);
+    const reviewerGovernanceAPIForbidden = isStrictGovernanceForbiddenResponse(
+      reviewerGovernanceAPIResponse,
+      '/api/v1/admin/skill-governance',
+      '?status=active'
+    ) && reviewerGovernanceSensitiveValues.every((value) => (
+      !reviewerGovernanceAPIResponse.responseText.includes(value) && !reviewerGovernancePageText.includes(value)
+    ));
+    expect(
+      reviewerGovernanceAPIForbidden,
+      'Reviewer Governance API denial must match the strict non-sensitive 403 contract'
+    ).toBe(true);
 
     const ownerDetailPath = `/api/v1/skills/${skillID}`;
     const ownerDraftPath = `${ownerDetailPath}/draft`;
@@ -911,6 +1189,221 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     }
     await expect(toolCatalog.getByRole('button')).toHaveCount(0);
 
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: '用户菜单' })).toBeVisible();
+    await logoutFromCurrentContext(page);
+    await page.goto('/');
+    const governorLogin = await loginAs(page, governorEmail, governorPassword);
+    const governorID = exactPrincipalID(governorLogin);
+    const governorCSRFToken = String(governorLogin.csrf_token || '');
+    const governorRoleIsolated = governorID !== creatorID
+      && governorID !== reviewerID
+      && governorLogin.principal?.roles?.length === 1
+      && governorLogin.principal.roles[0] === 'skill_governor'
+      && governorLogin.principal?.capabilities?.length === 1
+      && governorLogin.principal.capabilities[0] === 'skill.govern';
+    expect(governorRoleIsolated).toBe(true);
+    expect(Boolean(governorCSRFToken)).toBe(true);
+    await expect(page.getByRole('button', { name: 'Skill 治理' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Skill 审核' })).toHaveCount(0);
+
+    const governanceQueueResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET'
+        && url.pathname === '/api/v1/admin/skill-governance'
+        && url.search === '?status=active';
+    });
+    await page.getByRole('button', { name: 'Skill 治理' }).click();
+    const governanceQueueResponse = await governanceQueueResponsePromise;
+    const governanceQueuePayload = await governanceQueueResponse.json();
+    expect(governanceQueueResponse.status()).toBe(200);
+    expect(governanceQueueResponse.headers()['content-type']).toBe('application/json; charset=utf-8');
+    expect(governanceQueueResponse.headers()['cache-control']).toBe('no-store');
+    expect(Object.keys(governanceQueuePayload).sort()).toEqual(['items', 'next_cursor', 'request_id']);
+    expect(governanceQueuePayload.request_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    await expect(page.getByRole('heading', { name: '治理队列' })).toBeVisible();
+    await expect(page.getByText('正在加载 Skill 治理队列…')).toHaveCount(0);
+    const governanceCard = await findGovernanceSkillAcrossPages(page, skillName);
+    await expect(governanceCard).toHaveCount(1);
+    await expect(governanceCard).toContainText(sentinelA);
+    await expect(governanceCard).not.toContainText(sentinelB);
+    const governorGovernanceList = true;
+
+    const governanceDetailResponsePromise = page.waitForResponse((response) => (
+      isSkillResponse(response, 'GET', `/api/v1/admin/skill-governance/${skillID}`)
+    ));
+    await governanceCard.getByRole('button', { name: '查看治理详情' }).click();
+    const governanceDetailResponse = await governanceDetailResponsePromise;
+    const governanceDetailPayload = await governanceDetailResponse.json();
+    expect(governanceDetailResponse.status()).toBe(200);
+    expect(governanceDetailResponse.headers()['content-type']).toBe('application/json; charset=utf-8');
+    expect(governanceDetailResponse.headers()['cache-control']).toBe('no-store');
+    expect(Object.keys(governanceDetailPayload).sort()).toEqual(['request_id', 'skill']);
+    expect(Object.keys(governanceDetailPayload.skill || {}).sort()).toEqual([
+      'allowed_actions',
+      'definition',
+      'governance_epoch',
+      'governance_etag',
+      'governance_status',
+      'published_at',
+      'skill_id'
+    ]);
+    expect(governanceDetailPayload.request_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(governanceDetailPayload.skill).toMatchObject({
+      skill_id: skillID,
+      governance_status: 'active',
+      governance_epoch: 1,
+      allowed_actions: ['suspend', 'offline']
+    });
+    expect(governanceDetailPayload.skill?.definition?.summary).toBe(sentinelA);
+    expect(JSON.stringify(governanceDetailPayload.skill?.definition || null)).not.toContain(sentinelB);
+    let governanceETag = String(governanceDetailPayload.skill?.governance_etag || '');
+    expect(governanceETag).toMatch(/^"[^"\r\n]+"$/);
+    expect(governanceDetailResponse.headers().etag).toBe(governanceETag);
+    await expect(page).toHaveURL((url) => url.pathname === `/admin/skills/governance/${skillID}`);
+    const publishedDefinitionRegion = page.getByRole('region', { name: '当前发布 Skill Definition' });
+    await expect(publishedDefinitionRegion).toContainText(sentinelA);
+    await expect(publishedDefinitionRegion).not.toContainText(sentinelB);
+    const governorDefinitionReadOnly = await page.locator('form.skill-builder-form').count() === 0
+      && await publishedDefinitionRegion.locator('input, textarea, select').count() === 0;
+    expect(governorDefinitionReadOnly).toBe(true);
+    const governorGovernanceDetail = true;
+
+    const suspendResult = await submitGovernanceDecision(page, {
+      skillID,
+      actionLabel: '暂停',
+      submitLabel: '提交暂停处置',
+      action: 'suspend',
+      reasonCode: 'incident_containment',
+      approvalReference: `SMOKEGOV-SUSPEND-${runSuffix}`,
+      csrfToken: governorCSRFToken,
+      governanceETag,
+      expectedStatus: 'suspended',
+      expectedEpoch: 2,
+      expectedAllowedActions: ['resume', 'offline']
+    });
+    governanceETag = suspendResult.governanceETag;
+    await expect(page.locator('.skill-review-status')).toHaveText('已暂停');
+    await expect(page.getByRole('button', { name: '暂停', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '恢复', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '永久下架', exact: true })).toBeVisible();
+
+    const resumeResult = await submitGovernanceDecision(page, {
+      skillID,
+      actionLabel: '恢复',
+      submitLabel: '提交恢复处置',
+      action: 'resume',
+      reasonCode: 'incident_resolved',
+      approvalReference: `SMOKEGOV-RESUME-${runSuffix}`,
+      csrfToken: governorCSRFToken,
+      governanceETag,
+      expectedStatus: 'active',
+      expectedEpoch: 3,
+      expectedAllowedActions: ['suspend', 'offline']
+    });
+    governanceETag = resumeResult.governanceETag;
+    await expect(page.locator('.skill-review-status')).toHaveText('正常');
+    await expect(page.getByRole('button', { name: '暂停', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '恢复', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '永久下架', exact: true })).toBeVisible();
+
+    const offlineResult = await submitGovernanceDecision(page, {
+      skillID,
+      actionLabel: '永久下架',
+      submitLabel: '提交永久下架处置',
+      action: 'offline',
+      reasonCode: 'repeated_violation',
+      approvalReference: `SMOKEGOV-OFFLINE-${runSuffix}`,
+      csrfToken: governorCSRFToken,
+      governanceETag,
+      expectedStatus: 'offline',
+      expectedEpoch: 4,
+      expectedAllowedActions: []
+    });
+    await expect(page.locator('.skill-review-status')).toHaveText('已永久下架');
+    await expect(page.getByRole('heading', { name: '该 Skill 已永久下架' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '暂停', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '恢复', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '永久下架', exact: true })).toHaveCount(0);
+    await expect(publishedDefinitionRegion).toContainText(sentinelA);
+    await expect(publishedDefinitionRegion).not.toContainText(sentinelB);
+    const governorDecisionHeaders = suspendResult.requestHeadersValid
+      && resumeResult.requestHeadersValid
+      && offlineResult.requestHeadersValid;
+    const governorDecisionResponses = suspendResult.responseContractValid
+      && resumeResult.responseContractValid
+      && offlineResult.responseContractValid;
+    const governorStateMachine = suspendResult.status === 'suspended'
+      && suspendResult.epoch === 2
+      && JSON.stringify(suspendResult.allowedActions) === JSON.stringify(['resume', 'offline'])
+      && resumeResult.status === 'active'
+      && resumeResult.epoch === 3
+      && JSON.stringify(resumeResult.allowedActions) === JSON.stringify(['suspend', 'offline'])
+      && offlineResult.status === 'offline'
+      && offlineResult.epoch === 4
+      && offlineResult.allowedActions.length === 0;
+    const governorOfflineTerminal = true;
+    expect(governorDecisionHeaders).toBe(true);
+    expect(governorDecisionResponses).toBe(true);
+    expect(governorStateMachine).toBe(true);
+
+    await checkpointGovernorRevocation({ governorID, skillID });
+    const governanceRequestsBeforeRevocationReload = businessRequests.filter((request) => (
+      request.pathname.startsWith('/api/v1/admin/skill-governance')
+    )).length;
+    const revokedSessionResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/v1/auth/session'
+    ));
+    await page.reload();
+    const revokedSessionResponse = await revokedSessionResponsePromise;
+    const revokedSessionPayload = await revokedSessionResponse.json();
+    expect(revokedSessionResponse.status()).toBe(200);
+    expect(revokedSessionPayload.principal?.id).toBe(governorID);
+    expect(revokedSessionPayload.principal?.roles).toEqual([]);
+    expect(revokedSessionPayload.principal?.capabilities).toEqual([]);
+    const revokedGovernorDeniedHeading = page.getByRole('heading', { name: '无 Skill 治理权限' });
+    await expect(revokedGovernorDeniedHeading).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Skill 治理' })).toHaveCount(0);
+    await page.waitForLoadState('networkidle');
+    const governanceRequestsAfterRevocationReload = businessRequests.filter((request) => (
+      request.pathname.startsWith('/api/v1/admin/skill-governance')
+    )).length;
+    const revokedGovernorImplicitAPIBlocked = governanceRequestsAfterRevocationReload
+      === governanceRequestsBeforeRevocationReload;
+
+    const revokedGovernorAPIResponse = await page.evaluate(async (path) => {
+      const response = await fetch(path, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'application/json' }
+      });
+      const responseText = await response.text();
+      let payload = null;
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        // The outer strict assertion fails closed for malformed JSON.
+      }
+      return {
+        status: response.status,
+        contentType: response.headers.get('content-type') || '',
+        cacheControl: response.headers.get('cache-control') || '',
+        responseURL: response.url,
+        responseText,
+        payload
+      };
+    }, `/api/v1/admin/skill-governance/${skillID}`);
+    const governorRevocationDenialRequestID = String(revokedGovernorAPIResponse.payload?.error?.request_id || '');
+    const governorRevocationSameCookie = revokedGovernorImplicitAPIBlocked
+      && await revokedGovernorDeniedHeading.isVisible()
+      && isStrictGovernanceForbiddenResponse(
+        revokedGovernorAPIResponse,
+        `/api/v1/admin/skill-governance/${skillID}`
+      );
+    expect(governorRevocationSameCookie).toBe(true);
+    const governorNoLegacyAPI = businessRequests.every((request) => !request.pathname.startsWith('/api/aigc/'));
+    expect(governorNoLegacyAPI).toBe(true);
+
     expect(businessRequests.every((request) => request.origin === appOrigin)).toBe(true);
     expect(businessRequests.some((request) => request.pathname.startsWith('/api/aigc/'))).toBe(false);
     expect(businessRequests).toEqual(expect.arrayContaining([
@@ -923,12 +1416,15 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
       expect.objectContaining({ method: 'GET', pathname: '/api/v1/skill-market' }),
       expect.objectContaining({ method: 'GET', pathname: `/api/v1/skill-market/${skillID}` }),
       expect.objectContaining({ method: 'POST', pathname: '/api/v1/projects:quick-create' }),
-      expect.objectContaining({ method: 'GET', pathname: `/api/v1/agent/sessions/${workspaceSessionID}/tools` })
+      expect.objectContaining({ method: 'GET', pathname: `/api/v1/agent/sessions/${workspaceSessionID}/tools` }),
+      expect.objectContaining({ method: 'GET', pathname: '/api/v1/admin/skill-governance' }),
+      expect.objectContaining({ method: 'GET', pathname: `/api/v1/admin/skill-governance/${skillID}` }),
+      expect.objectContaining({ method: 'POST', pathname: `/api/v1/admin/skill-governance/${skillID}/decisions` })
     ]));
 
     if (w1ResultPath) {
       await writeFile(w1ResultPath, JSON.stringify({
-        schema_version: 'w1.real-review-result.v5',
+        schema_version: 'w1.real-review-result.v6',
         creator_id: creatorID,
         creator_admin_route_blocked: creatorAdminRouteBlocked,
         creator_admin_implicit_api_blocked: creatorAdminImplicitAPIBlocked,
@@ -957,7 +1453,29 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
         tool_catalog_request_id: toolCatalogPayload.request_id,
         tool_catalog_exact_unavailable: true,
         submitted_summary: sentinelA,
-        current_draft_summary: sentinelB
+        current_draft_summary: sentinelB,
+        governance: {
+          creator_api_forbidden: creatorGovernanceAPIForbidden,
+          creator_denial_request_id: creatorGovernanceDenialRequestID,
+          creator_implicit_api_blocked: creatorGovernanceImplicitAPIBlocked,
+          creator_route_blocked: creatorGovernanceRouteBlocked,
+          definition_read_only: governorDefinitionReadOnly,
+          decision_headers: governorDecisionHeaders,
+          decision_responses: governorDecisionResponses,
+          detail_contract: governorGovernanceDetail,
+          governor_id: governorID,
+          list_found: governorGovernanceList,
+          no_legacy_api: governorNoLegacyAPI,
+          offline_terminal: governorOfflineTerminal,
+          reviewer_api_forbidden: reviewerGovernanceAPIForbidden,
+          reviewer_denial_request_id: reviewerGovernanceDenialRequestID,
+          reviewer_implicit_api_blocked: reviewerGovernanceImplicitAPIBlocked,
+          reviewer_route_blocked: reviewerGovernanceRouteBlocked,
+          revocation_denial_request_id: governorRevocationDenialRequestID,
+          role_isolated: governorRoleIsolated,
+          same_cookie_revocation: governorRevocationSameCookie,
+          state_machine: governorStateMachine
+        }
       }), { encoding: 'utf8', mode: 0o600 });
     }
   });

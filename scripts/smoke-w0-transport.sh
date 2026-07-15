@@ -52,7 +52,9 @@ w05_browser_result_temp=""
 w05_retention_control_dir=""
 w05_retention_injector_pid=""
 w1_public_market_control_dir=""
+w1_governance_control_dir=""
 w1_browser_playwright_pid=""
+w1_browser_frontend_port=""
 w1_toctou_lock_shell_pid=""
 w1_toctou_lock_database_pid=""
 w1_toctou_governance_shell_pid=""
@@ -70,6 +72,7 @@ reviewer_seed_creator_user_id=""
 provisioner_user_id=""
 governor_password=""
 governor_assignment_id=""
+governor_browser_assignment_id=""
 governor_user_id=""
 governor_cookie_jar=""
 governor_curl_config=""
@@ -229,6 +232,9 @@ stop_processes() {
   if [[ -n "$w1_public_market_control_dir" ]]; then
     rm -rf "$w1_public_market_control_dir"
   fi
+  if [[ -n "$w1_governance_control_dir" ]]; then
+    rm -rf "$w1_governance_control_dir"
+  fi
   if [[ -n "$agent_restart_workspace_temp" ]]; then
     rm -f "$agent_restart_workspace_temp"
   fi
@@ -241,6 +247,31 @@ stop_processes() {
   if [[ -n "$w1_temp_dir" ]]; then
     rm -rf "$w1_temp_dir"
   fi
+}
+
+# revoke_w1_role_assignment_on_cleanup 只清理本次已知且仍 active 的本地 Smoke 角色，避免失败运行污染下一次 Seeder。
+revoke_w1_role_assignment_on_cleanup() {
+  local assignment_id="$1"
+  local target_user_id="$2"
+  local role_key="$3"
+  local active_count=""
+
+  [[ "$assignment_id" =~ ^[0-9a-f-]{36}$ && "$target_user_id" =~ ^[0-9a-f-]{36}$ \
+    && "$provisioner_user_id" =~ ^[0-9a-f-]{36}$ && -n "$postgres_container" \
+    && -n "${BUSINESS_DATABASE_URL:-}" ]] || return 0
+  active_count="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT COUNT(*) FROM business.user_role_assignment
+    WHERE id = '$assignment_id'::uuid AND user_id = '$target_user_id'::uuid
+      AND role_key = '$role_key' AND status = 'active' AND version = 1;" 2>/dev/null || true)"
+  [[ "$active_count" == "1" ]] || return 0
+  (
+    cd "$repo_root/business"
+    DORA_ROLE_ADMIN_POSTGRES_DSN="$BUSINESS_DATABASE_URL" GOWORK=off "$go_bin" run ./cmd/business-role-admin \
+      -action revoke -assignment-id "$assignment_id" -expected-version 1 \
+      -target-user-id "$target_user_id" -actor-user-id "$provisioner_user_id" \
+      -role "$role_key" -reason local_smoke_failed_run_cleanup \
+      -approval-reference "local-smoke-failed-run-cleanup-${run_id}"
+  ) >/dev/null 2>&1 || true
 }
 
 cleanup_on_exit() {
@@ -257,6 +288,11 @@ cleanup_on_exit() {
       wait "$background_pid" >/dev/null 2>&1 || true
     fi
   done
+  if [[ "$exit_code" -ne 0 && "$w1_skill_smoke_enabled" == "1" ]]; then
+    revoke_w1_role_assignment_on_cleanup "$reviewer_assignment_id" "$owner_b_seed_user_id" "skill_reviewer"
+    revoke_w1_role_assignment_on_cleanup "$governor_assignment_id" "$governor_user_id" "skill_governor"
+    revoke_w1_role_assignment_on_cleanup "$governor_browser_assignment_id" "$governor_user_id" "skill_governor"
+  fi
   if [[ "$w1_skill_market_fixtures_present" == "true" && -n "$postgres_container" ]]; then
     cleanup_w1_skill_market_fixtures "$postgres_container" >/dev/null 2>&1 || true
   fi
@@ -778,6 +814,90 @@ run_w1_public_market_preselection_controller() {
     and all(.before_login[]; ((. | type) == "number" and . >= 0 and . == floor))' "$fact_file" >/dev/null || \
     fail "W1 Public Market 登录预选数据库双阶段事实漂移"
   write_w1_public_market_ack "before_submit" "$before_submit_counts" "$browser_skill_id"
+}
+
+# run_w1_governor_revocation_controller 在浏览器完成治理终态后正式撤权，并只向握手与 Evidence 写入脱敏事实。
+run_w1_governor_revocation_controller() {
+  local playwright_pid="$1"
+  local checkpoint_file="$w1_governance_control_dir/before_revocation.checkpoint.json"
+  local ack_file="$w1_governance_control_dir/before_revocation.ack.json"
+  local ack_temp="$ack_file.$$.tmp"
+  local revoke_output="$w1_temp_dir/browser-governor-revoke.json"
+  local fact_file="$evidence_dir/responses/w1-browser-governor-revocation.json"
+  local process_state=""
+  local file_mode=""
+  local browser_skill_id=""
+  local assignment_fact=""
+
+  [[ -n "$governor_browser_assignment_id" ]] || fail "W1 Browser Governor 缺少独立 active assignment"
+  for _ in $(seq 1 3600); do
+    if [[ -s "$checkpoint_file" ]]; then
+      file_mode="$(stat -c '%a' "$checkpoint_file" 2>/dev/null || stat -f '%Lp' "$checkpoint_file" 2>/dev/null || true)"
+      [[ "$file_mode" == "600" ]] || fail "W1 Governor 撤权 checkpoint 权限不是 0600"
+      jq -e --arg governor "$governor_user_id" '
+        keys == ["governor_id","phase","schema_version","skill_id"]
+        and .schema_version == "w1.governor-revocation.checkpoint.v1"
+        and .phase == "before_revocation" and .governor_id == $governor
+        and (.skill_id | test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))' \
+        "$checkpoint_file" >/dev/null || fail "W1 Governor 撤权 checkpoint 契约或身份漂移"
+      browser_skill_id="$(jq -er '.skill_id' "$checkpoint_file")"
+      break
+    fi
+    process_state="$(ps -o stat= -p "$playwright_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+    if ! kill -0 "$playwright_pid" 2>/dev/null || [[ "$process_state" == Z* ]]; then
+      sed -n '1,280p' "$evidence_dir/frontend-w1-playwright.log" >&2 || true
+      fail "W1 Playwright 在 Governor 撤权 checkpoint 前提前退出"
+    fi
+    sleep 0.05
+  done
+  [[ -n "$browser_skill_id" ]] || fail "等待 W1 Governor 撤权 checkpoint 超时"
+
+  (
+    cd "$repo_root/business"
+    DORA_ROLE_ADMIN_POSTGRES_DSN="$BUSINESS_DATABASE_URL" GOWORK=off "$go_bin" run ./cmd/business-role-admin \
+      -action revoke -assignment-id "$governor_browser_assignment_id" -expected-version 1 \
+      -target-user-id "$governor_user_id" -actor-user-id "$provisioner_user_id" \
+      -role skill_governor -reason local_smoke_browser_governance_cleanup \
+      -approval-reference "local-smoke-browser-governor-revoke-${run_id}"
+  ) >"$revoke_output"
+  jq -e --arg assignment "$governor_browser_assignment_id" --arg governor "$governor_user_id" '
+    .action == "revoke" and .assignment_id == $assignment and .target_user_id == $governor
+    and .role == "skill_governor" and .status == "revoked" and .version == 2' \
+    "$revoke_output" >/dev/null || fail "W1 Browser Governor 正式撤权结果漂移"
+
+  assignment_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'target_assignment_revoked', EXISTS (
+        SELECT 1 FROM business.user_role_assignment
+        WHERE id = '$governor_browser_assignment_id'::uuid AND user_id = '$governor_user_id'::uuid
+          AND role_key = 'skill_governor' AND status = 'revoked' AND version = 2
+      ),
+      'active_assignment_count', (
+        SELECT COUNT(*) FROM business.user_role_assignment
+        WHERE user_id = '$governor_user_id'::uuid AND role_key = 'skill_governor' AND status = 'active'
+      )
+    );")" || fail "W1 Browser Governor 撤权数据库事实读取失败"
+  jq -e '.target_assignment_revoked and .active_assignment_count == 0' <<<"$assignment_fact" >/dev/null || \
+    fail "W1 Browser Governor 撤权后仍存在 active assignment"
+
+  jq -n --arg governor "$governor_user_id" --arg skill "$browser_skill_id" --argjson assignment "$assignment_fact" '
+    {schema_version:"w1.governor-revocation.database-fact.v1",governor_id:$governor,skill_id:$skill,
+      assignment_version:2,target_assignment_revoked:$assignment.target_assignment_revoked,
+      active_assignment_count:$assignment.active_assignment_count}' >"$fact_file"
+  jq -e --arg governor "$governor_user_id" --arg skill "$browser_skill_id" '
+    keys == ["active_assignment_count","assignment_version","governor_id","schema_version","skill_id","target_assignment_revoked"]
+    and .schema_version == "w1.governor-revocation.database-fact.v1"
+    and .governor_id == $governor and .skill_id == $skill
+    and .assignment_version == 2 and .target_assignment_revoked and .active_assignment_count == 0' \
+    "$fact_file" >/dev/null || fail "W1 Browser Governor 撤权脱敏事实漂移"
+
+  jq -n --arg governor "$governor_user_id" --arg skill "$browser_skill_id" '
+    {schema_version:"w1.governor-revocation.database-ack.v1",phase:"before_revocation",
+      governor_id:$governor,skill_id:$skill,assignment_version:2,accepted:true}' >"$ack_temp"
+  chmod 600 "$ack_temp"
+  mv "$ack_temp" "$ack_file"
+  file_mode="$(stat -c '%a' "$ack_file" 2>/dev/null || stat -f '%Lp' "$ack_file" 2>/dev/null || true)"
+  [[ "$file_mode" == "600" ]] || fail "W1 Governor 撤权 ACK 权限不是 0600"
 }
 
 # assert_w1_skill_market_list_contract 验证公开列表 exact-set、发布快照投影与 no-store。
@@ -2898,9 +3018,10 @@ run_w1_skill_governance_smoke() {
     --argjson existing_session_snapshot_unchanged "$existing_session_snapshot_unchanged" \
     --argjson final_ready_status "$final_ready_status" \
     --argjson database "$final_fact" '
-    {schema_version:"w1.skill-governance.smoke.evidence.v1",status:"pending",run_id:$run_id,produced_at:$produced_at,
+    {schema_version:"w1.skill-governance.smoke.evidence.v2",status:"pending",run_id:$run_id,produced_at:$produced_at,
       source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,agent_binary_sha256:$agent_binary_sha256,
       skill_id:$skill_id,resumed_project_id:$resumed_project_id,offline_review_id:$offline_review_id,
+      browser:null,
       facts:{governance_status:$database.governance_status,governance_epoch:$database.governance_epoch,
         governance_receipts:$database.governance_receipts,governance_audits:$database.governance_audits,
         linked_governance_facts:$database.linked_governance_facts,published_count:$database.published_count,
@@ -2929,13 +3050,22 @@ run_w1_skill_governance_smoke() {
           and $offline_update_status == 200 and $offline_submit_status == 201 and $offline_review_detail_status == 200
           and $offline_approve_status == 409 and $database.governance_status == "offline" and $database.governance_epoch == 4
           and $database.published_count == 1 and $database.new_review_reviewing
-          and $database.failed_approve_receipts == 0 and $database.failed_approve_audits == 0)
+          and $database.failed_approve_receipts == 0 and $database.failed_approve_audits == 0),
+        skill_governance_browser_list_detail:false,
+        skill_governance_browser_decisions:false,
+        skill_governance_browser_isolation:false,
+        skill_governance_browser_database:false
       }}' >"$governance_pending_evidence_file"
-  jq -e 'keys == ["agent_binary_sha256","assertions","business_binary_sha256","facts","offline_review_id","produced_at","resumed_project_id","run_id","schema_version","skill_id","source_digest_sha256","status"]
-    and .schema_version == "w1.skill-governance.smoke.evidence.v1" and .status == "pending"
+  jq -e 'keys == ["agent_binary_sha256","assertions","browser","business_binary_sha256","facts","offline_review_id","produced_at","resumed_project_id","run_id","schema_version","skill_id","source_digest_sha256","status"]
+    and .schema_version == "w1.skill-governance.smoke.evidence.v2" and .status == "pending" and .browser == null
     and (.facts | keys) == ["existing_session_snapshot_unchanged","governance_audits","governance_epoch","governance_receipts","governance_status","linked_governance_facts","offline_resume_state_unchanged","published_count","review_count","strict_governance_linkage"]
-    and (.assertions | keys) == ["skill_governance_idempotency","skill_governance_offline_terminal","skill_governance_quickcreate_gate","skill_governor_rbac","skill_governor_revocation"]
-    and all(.assertions[]; ((. | type) == "boolean" and . == true))' "$governance_pending_evidence_file" >/dev/null || \
+    and (.assertions | keys) == ["skill_governance_browser_database","skill_governance_browser_decisions","skill_governance_browser_isolation","skill_governance_browser_list_detail","skill_governance_idempotency","skill_governance_offline_terminal","skill_governance_quickcreate_gate","skill_governor_rbac","skill_governor_revocation"]
+    and all([.assertions.skill_governor_rbac,.assertions.skill_governor_revocation,
+      .assertions.skill_governance_idempotency,.assertions.skill_governance_quickcreate_gate,
+      .assertions.skill_governance_offline_terminal][]; ((. | type) == "boolean" and . == true))
+    and all([.assertions.skill_governance_browser_list_detail,.assertions.skill_governance_browser_decisions,
+      .assertions.skill_governance_browser_isolation,.assertions.skill_governance_browser_database][];
+      ((. | type) == "boolean" and . == false))' "$governance_pending_evidence_file" >/dev/null || \
     fail "Skill Governance Evidence 含未通过或非闭集断言"
 
   jq -n --arg run_id "$run_id" --arg produced_at "$governance_produced_at" \
@@ -3023,9 +3153,17 @@ run_w1_browser_frozen_smoke() {
   local browser_catalog_request_id=""
   local browser_catalog_exact_unavailable=""
   local creator_admin_denial_request_id=""
+  local browser_governor_id=""
+  local creator_governance_denial_request_id=""
+  local reviewer_governance_denial_request_id=""
+  local governor_revocation_denial_request_id=""
   local creator_admin_denial_audit_fact=""
   local creator_admin_denial_audit_count=""
   local creator_admin_denial_audited="false"
+  local governance_denial_audit_fact=""
+  local governance_denials_audited="false"
+  local browser_governance_database_fact=""
+  local browser_governance_evidence_temp=""
   local submitted_summary=""
   local current_draft_summary=""
   local submitted_summary_b64=""
@@ -3039,9 +3177,9 @@ run_w1_browser_frozen_smoke() {
   local public_market_browser_fact=""
 
   [[ -s "$browser_result_file" ]] || fail "W1 浏览器未产出结构化真实结果"
-  jq -e --arg creator "$user_id" --arg reviewer "$owner_b_seed_user_id" '
-    keys == ["creator_admin_api_forbidden","creator_admin_denial_request_id","creator_admin_implicit_api_blocked","creator_admin_route_blocked","creator_id","current_draft_summary","market_public_detail","market_public_list","market_published_projection_safe","project_id","public_market_consumer_id","public_market_login_preselection_recovered","public_market_pre_submit_quickcreate_count","public_market_project_id","public_market_selected_skill_id","public_market_session_id","public_market_submit_quickcreate_count","published_snapshot_id","review_id","reviewer_id","reviewer_owner_read_not_found","reviewer_owner_resource_facts_not_disclosed","reviewer_owner_route_not_found","reviewer_owner_write_not_found","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
-    and .schema_version == "w1.real-review-result.v5"
+  jq -e --arg creator "$user_id" --arg reviewer "$owner_b_seed_user_id" --arg governor "$governor_user_id" '
+    keys == ["creator_admin_api_forbidden","creator_admin_denial_request_id","creator_admin_implicit_api_blocked","creator_admin_route_blocked","creator_id","current_draft_summary","governance","market_public_detail","market_public_list","market_published_projection_safe","project_id","public_market_consumer_id","public_market_login_preselection_recovered","public_market_pre_submit_quickcreate_count","public_market_project_id","public_market_selected_skill_id","public_market_session_id","public_market_submit_quickcreate_count","published_snapshot_id","review_id","reviewer_id","reviewer_owner_read_not_found","reviewer_owner_resource_facts_not_disclosed","reviewer_owner_route_not_found","reviewer_owner_write_not_found","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
+    and .schema_version == "w1.real-review-result.v6"
     and .creator_admin_route_blocked == true
     and .creator_admin_implicit_api_blocked == true
     and .creator_admin_api_forbidden == true
@@ -3058,7 +3196,19 @@ run_w1_browser_frozen_smoke() {
     and .public_market_login_preselection_recovered == true
     and .public_market_pre_submit_quickcreate_count == 0
     and .public_market_submit_quickcreate_count == 1
+    and (.governance | keys) == ["creator_api_forbidden","creator_denial_request_id","creator_implicit_api_blocked","creator_route_blocked","decision_headers","decision_responses","definition_read_only","detail_contract","governor_id","list_found","no_legacy_api","offline_terminal","reviewer_api_forbidden","reviewer_denial_request_id","reviewer_implicit_api_blocked","reviewer_route_blocked","revocation_denial_request_id","role_isolated","same_cookie_revocation","state_machine"]
+    and .governance.governor_id == $governor and $governor != $creator and $governor != $reviewer
+    and all([.governance.creator_api_forbidden,.governance.creator_implicit_api_blocked,
+      .governance.creator_route_blocked,.governance.decision_headers,.governance.decision_responses,
+      .governance.definition_read_only,.governance.detail_contract,.governance.list_found,
+      .governance.no_legacy_api,.governance.offline_terminal,.governance.reviewer_api_forbidden,
+      .governance.reviewer_implicit_api_blocked,.governance.reviewer_route_blocked,
+      .governance.role_isolated,.governance.same_cookie_revocation,.governance.state_machine][];
+      ((. | type) == "boolean" and . == true))
     and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id,.public_market_project_id,.public_market_session_id,.tool_catalog_session_id,.tool_catalog_request_id,.creator_admin_denial_request_id]
+      | all(.[]; test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
+    and ([.governance.governor_id,.governance.creator_denial_request_id,
+      .governance.reviewer_denial_request_id,.governance.revocation_denial_request_id]
       | all(.[]; test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
     and .tool_catalog_exact_unavailable == true
     and (.submitted_summary | type) == "string" and (.submitted_summary | length) > 0
@@ -3080,6 +3230,10 @@ run_w1_browser_frozen_smoke() {
   browser_catalog_request_id="$(jq -er '.tool_catalog_request_id' "$browser_result_file")"
   browser_catalog_exact_unavailable="$(jq -er '.tool_catalog_exact_unavailable' "$browser_result_file")"
   creator_admin_denial_request_id="$(jq -er '.creator_admin_denial_request_id' "$browser_result_file")"
+  browser_governor_id="$(jq -er '.governance.governor_id' "$browser_result_file")"
+  creator_governance_denial_request_id="$(jq -er '.governance.creator_denial_request_id' "$browser_result_file")"
+  reviewer_governance_denial_request_id="$(jq -er '.governance.reviewer_denial_request_id' "$browser_result_file")"
+  governor_revocation_denial_request_id="$(jq -er '.governance.revocation_denial_request_id' "$browser_result_file")"
   submitted_summary="$(jq -er '.submitted_summary' "$browser_result_file")"
   current_draft_summary="$(jq -er '.current_draft_summary' "$browser_result_file")"
   submitted_summary_b64="$(printf '%s' "$submitted_summary" | base64 | tr -d '\n')"
@@ -3136,6 +3290,31 @@ run_w1_browser_frozen_smoke() {
   creator_admin_denial_audited="$(jq -er '.audited' <<<"$creator_admin_denial_audit_fact")"
   [[ "$creator_admin_denial_audit_count" == "1" && "$creator_admin_denial_audited" == "true" ]] || \
     fail "W1 Creator Reviewer API 拒绝未关联唯一结构化授权审计事件"
+
+  governance_denial_audit_fact="$(sed -n '/^{/p' "$evidence_dir/business.log" \
+    | jq -cs --arg creator "$browser_creator_id" --arg creator_request "$creator_governance_denial_request_id" \
+      --arg reviewer "$browser_reviewer_id" --arg reviewer_request "$reviewer_governance_denial_request_id" \
+      --arg governor "$browser_governor_id" --arg governor_request "$governor_revocation_denial_request_id" '
+      def exact_event($actor; $request; $route; $action):
+        map(select(.actor_id == $actor and .request_id == $request)) as $events
+        | (($events | length) == 1
+          and $events[0].event_type == "security.authorization.v1"
+          and $events[0].route == $route
+          and $events[0].action == $action
+          and $events[0].decision == "denied"
+          and $events[0].actor_id == $actor
+          and $events[0].request_id == $request
+          and $events[0].error_code == "SKILL_GOVERNANCE_CAPABILITY_REQUIRED");
+      {
+        creator:(exact_event($creator;$creator_request;"/api/v1/admin/skill-governance";"list")),
+        reviewer:(exact_event($reviewer;$reviewer_request;"/api/v1/admin/skill-governance";"list")),
+        revoked_governor:(exact_event($governor;$governor_request;"/api/v1/admin/skill-governance/:skill_id";"detail"))
+      }
+      | .all = (.creator and .reviewer and .revoked_governor)')" || \
+    fail "W1 Browser Governance 拒绝审计读取失败"
+  governance_denials_audited="$(jq -er '.all' <<<"$governance_denial_audit_fact")"
+  [[ "$governance_denials_audited" == "true" ]] || \
+    fail "W1 Browser Creator/Reviewer/撤权 Governor 拒绝未关联唯一结构化授权审计"
 
   owner_api_status="$(curl --silent --show-error --max-time 10 -b "$cookie_jar" \
     -o "$owner_api_raw" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/skills/${browser_skill_id}")"
@@ -3217,6 +3396,9 @@ run_w1_browser_frozen_smoke() {
       'resolution_item_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution_item
         WHERE project_id = '$browser_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid
           AND published_snapshot_id = '$browser_snapshot_id'::uuid),
+      'resolution_governance_epoch', (SELECT governance_epoch FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$browser_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND published_snapshot_id = '$browser_snapshot_id'::uuid),
       'published_content_digest', (SELECT encode(content_digest,'hex') FROM business.skill_published_snapshot
         WHERE id = '$browser_snapshot_id'::uuid),
       'resolution_content_digest', (SELECT encode(content_digest,'hex') FROM business.project_session_skill_resolution_item
@@ -3228,6 +3410,7 @@ run_w1_browser_frozen_smoke() {
   jq -e '.review_fact_count == 1 and .published_fact_count == 1 and .frozen_publication_matches
     and .submitted_summary_is_a and .current_draft_summary_is_b and .published_summary_is_a
     and .project_owner_matches and .session_binding_matches and .resolution_item_count == 1
+    and .resolution_governance_epoch == 1
     and (.published_content_digest | test("^[0-9a-f]{64}$"))
     and (.resolution_content_digest | test("^[0-9a-f]{64}$"))
     and (.resolution_runtime_digest | test("^[0-9a-f]{64}$"))' \
@@ -3245,6 +3428,8 @@ run_w1_browser_frozen_smoke() {
       'item_matches', EXISTS (SELECT 1 FROM agent.session_skill_snapshot_item
         WHERE session_id = '$browser_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid
           AND published_snapshot_id = '$browser_snapshot_id'::uuid),
+      'governance_epoch', (SELECT governance_epoch FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$browser_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid),
       'content_digest', (SELECT content_digest FROM agent.session_skill_snapshot_item
         WHERE session_id = '$browser_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid),
       'runtime_content_digest', (SELECT runtime_content_digest FROM agent.session_skill_snapshot_item
@@ -3253,6 +3438,7 @@ run_w1_browser_frozen_smoke() {
   printf '%s\n' "$agent_fact" >"$evidence_dir/responses/w1-browser-frozen-agent.json"
   jq -e '.session_count == 1 and .snapshot_kind == "published_refs" and .skill_count == 1
     and .item_count == 1 and .item_matches and (.snapshot_digest | test("^[0-9a-f]{64}$"))
+    and .governance_epoch == 1
     and (.content_digest | test("^[0-9a-f]{64}$")) and (.runtime_content_digest | test("^[0-9a-f]{64}$"))' \
     "$evidence_dir/responses/w1-browser-frozen-agent.json" >/dev/null || \
     fail "W1 Browser Agent DB Snapshot 事实漂移"
@@ -3268,6 +3454,118 @@ run_w1_browser_frozen_smoke() {
     and .skills[0].skill_id == $skill and .skills[0].published_snapshot_id == $snapshot' \
     "$verifier_file" >/dev/null || fail "W1 Browser Agent Snapshot 解密验证结果漂移"
 
+  browser_governance_database_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT json_build_object(
+      'migration_version', (SELECT version FROM public.schema_migrations LIMIT 1),
+      'migration_dirty', (SELECT dirty FROM public.schema_migrations LIMIT 1),
+      'governance_status', skill_record.governance_status,
+      'governance_epoch', skill_record.governance_epoch,
+      'current_published_pointer_unchanged', skill_record.current_published_snapshot_id = '$browser_snapshot_id'::uuid,
+      'publication_revision', skill_record.publication_revision,
+      'published_count', (SELECT COUNT(*) FROM business.skill_published_snapshot WHERE skill_id = skill_record.id),
+      'review_count', (SELECT COUNT(*) FROM business.skill_review_submission WHERE skill_id = skill_record.id),
+      'governance_receipts', (SELECT COUNT(*) FROM business.skill_command_receipt
+        WHERE result_skill_id = skill_record.id AND command_type = 'governance_transition'),
+      'governance_audits', (SELECT COUNT(*) FROM business.skill_governance_audit
+        WHERE skill_id = skill_record.id AND action IN ('governance_suspended','governance_resumed','governance_offlined')),
+      'linked_governance_facts', (SELECT COUNT(*)
+        FROM business.skill_command_receipt AS receipt
+        JOIN business.skill_governance_audit AS audit ON audit.command_receipt_id = receipt.id
+        WHERE receipt.result_skill_id = skill_record.id AND receipt.command_type = 'governance_transition'
+          AND receipt.actor_user_id = '$browser_governor_id'::uuid
+          AND receipt.actor_user_id = audit.actor_user_id
+          AND receipt.request_id = audit.request_id
+          AND receipt.response_governance_status = audit.to_status
+          AND receipt.response_governance_epoch = audit.governance_epoch
+          AND receipt.result_published_snapshot_id = skill_record.current_published_snapshot_id
+          AND receipt.response_published_snapshot_id = skill_record.current_published_snapshot_id
+          AND audit.actor_role_key = 'skill_governor'),
+      'transition_matrix_matches', (SELECT COUNT(*) FROM business.skill_governance_audit
+        WHERE skill_id = skill_record.id AND (
+          (action = 'governance_suspended' AND from_status = 'active' AND to_status = 'suspended' AND governance_epoch = 2)
+          OR (action = 'governance_resumed' AND from_status = 'suspended' AND to_status = 'active' AND governance_epoch = 3)
+          OR (action = 'governance_offlined' AND from_status = 'active' AND to_status = 'offline' AND governance_epoch = 4)
+        )),
+      'business_session_snapshot_unchanged', EXISTS (
+        SELECT 1 FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$browser_project_id'::uuid AND skill_id = skill_record.id
+          AND published_snapshot_id = '$browser_snapshot_id'::uuid AND governance_epoch = 1
+      ),
+      'governor_active_assignment_count', (SELECT COUNT(*) FROM business.user_role_assignment
+        WHERE user_id = '$browser_governor_id'::uuid AND role_key = 'skill_governor' AND status = 'active')
+    ) FROM business.skill AS skill_record WHERE skill_record.id = '$browser_skill_id'::uuid;")" || \
+    fail "W1 Browser Governance 数据库事实读取失败"
+  printf '%s\n' "$browser_governance_database_fact" >"$evidence_dir/responses/w1-browser-governance-database.json"
+  jq -e --argjson agent "$agent_fact" '
+    .migration_version >= 20260714000700 and .migration_dirty == false
+    and .governance_status == "offline" and .governance_epoch == 4
+    and .current_published_pointer_unchanged and .publication_revision == 1
+    and .published_count == 1 and .review_count == 1
+    and .governance_receipts == 3 and .governance_audits == 3
+    and .linked_governance_facts == 3 and .transition_matrix_matches == 3
+    and .business_session_snapshot_unchanged
+    and $agent.item_matches and $agent.governance_epoch == 1
+    and .governor_active_assignment_count == 0' \
+    "$evidence_dir/responses/w1-browser-governance-database.json" >/dev/null || \
+    fail "W1 Browser Governance 迁移、回执审计、发布指针或既有 Session 冻结事实漂移"
+
+  browser_governance_evidence_temp="$governance_pending_evidence_file.browser.tmp"
+  jq --slurpfile browser "$browser_result_file" \
+    --slurpfile database "$evidence_dir/responses/w1-browser-governance-database.json" \
+    --slurpfile revocation "$evidence_dir/responses/w1-browser-governor-revocation.json" \
+    --arg session_id "$browser_session_id" --argjson denial_audits "$governance_denials_audited" '
+    .browser = {
+      schema_version:"w1.skill-governance.browser-fact.v1",
+      skill_id:$browser[0].skill_id,
+      governor_id:$browser[0].governance.governor_id,
+      project_id:$browser[0].project_id,
+      session_id:$session_id,
+      migration_version:$database[0].migration_version,
+      governance_status:$database[0].governance_status,
+      governance_epoch:$database[0].governance_epoch,
+      governance_receipts:$database[0].governance_receipts,
+      governance_audits:$database[0].governance_audits,
+      linked_governance_facts:$database[0].linked_governance_facts,
+      current_published_pointer_unchanged:$database[0].current_published_pointer_unchanged,
+      existing_session_snapshot_unchanged:($database[0].business_session_snapshot_unchanged == true),
+      governor_active_assignment_count:$database[0].governor_active_assignment_count,
+      denial_audits:$denial_audits,
+      no_legacy_api:$browser[0].governance.no_legacy_api
+    }
+    | .assertions.skill_governance_browser_list_detail = (
+        $browser[0].governance.list_found and $browser[0].governance.detail_contract
+        and $browser[0].governance.definition_read_only
+        and $database[0].current_published_pointer_unchanged)
+    | .assertions.skill_governance_browser_decisions = (
+        $browser[0].governance.decision_headers and $browser[0].governance.decision_responses
+        and $browser[0].governance.state_machine and $browser[0].governance.offline_terminal
+        and $database[0].governance_status == "offline" and $database[0].governance_epoch == 4
+        and $database[0].governance_receipts == 3 and $database[0].governance_audits == 3)
+    | .assertions.skill_governance_browser_isolation = (
+        $browser[0].governance.creator_route_blocked
+        and $browser[0].governance.creator_implicit_api_blocked
+        and $browser[0].governance.creator_api_forbidden
+        and $browser[0].governance.reviewer_route_blocked
+        and $browser[0].governance.reviewer_implicit_api_blocked
+        and $browser[0].governance.reviewer_api_forbidden
+        and $browser[0].governance.role_isolated
+        and $browser[0].governance.same_cookie_revocation
+        and $browser[0].governance.no_legacy_api and $denial_audits
+        and $revocation[0].target_assignment_revoked
+        and $revocation[0].active_assignment_count == 0)
+    | .assertions.skill_governance_browser_database = (
+        $database[0].migration_version >= 20260714000700 and ($database[0].migration_dirty | not)
+        and $database[0].current_published_pointer_unchanged
+        and $database[0].linked_governance_facts == 3
+        and $database[0].transition_matrix_matches == 3
+        and $database[0].business_session_snapshot_unchanged
+        and $database[0].governor_active_assignment_count == 0)' \
+    "$governance_pending_evidence_file" >"$browser_governance_evidence_temp" || \
+    fail "W1 Governance Evidence v2 浏览器扩展生成失败"
+  chmod 600 "$browser_governance_evidence_temp"
+  mv "$browser_governance_evidence_temp" "$governance_pending_evidence_file"
+  browser_governance_evidence_temp=""
+
   jq -n --slurpfile api "$evidence_dir/responses/w1-browser-frozen-api.json" \
     --slurpfile browser "$browser_result_file" \
     --slurpfile preselection "$preselection_database_file" \
@@ -3281,7 +3579,7 @@ run_w1_browser_frozen_smoke() {
       reviewer_owner_read_not_found:$browser[0].reviewer_owner_read_not_found,
       reviewer_owner_write_not_found:$browser[0].reviewer_owner_write_not_found,
       reviewer_owner_resource_facts_not_disclosed:$browser[0].reviewer_owner_resource_facts_not_disclosed,
-      browser_result_contract:($browser[0].schema_version == "w1.real-review-result.v5"
+      browser_result_contract:($browser[0].schema_version == "w1.real-review-result.v6"
         and $browser[0].creator_admin_route_blocked == true
         and $browser[0].creator_admin_implicit_api_blocked == true
         and $browser[0].creator_admin_api_forbidden == true
@@ -3299,6 +3597,22 @@ run_w1_browser_frozen_smoke() {
         and $browser[0].public_market_login_preselection_recovered == true
         and $browser[0].public_market_pre_submit_quickcreate_count == 0
         and $browser[0].public_market_submit_quickcreate_count == 1
+        and all([$browser[0].governance.creator_api_forbidden,
+          $browser[0].governance.creator_implicit_api_blocked,
+          $browser[0].governance.creator_route_blocked,
+          $browser[0].governance.decision_headers,
+          $browser[0].governance.decision_responses,
+          $browser[0].governance.definition_read_only,
+          $browser[0].governance.detail_contract,
+          $browser[0].governance.list_found,
+          $browser[0].governance.no_legacy_api,
+          $browser[0].governance.offline_terminal,
+          $browser[0].governance.reviewer_api_forbidden,
+          $browser[0].governance.reviewer_implicit_api_blocked,
+          $browser[0].governance.reviewer_route_blocked,
+          $browser[0].governance.role_isolated,
+          $browser[0].governance.same_cookie_revocation,
+          $browser[0].governance.state_machine][]; . == true)
         and $preselection[0].consumer_id == $browser[0].public_market_consumer_id
         and $preselection[0].skill_id == $browser[0].public_market_selected_skill_id
         and $preselection[0].database_counts_unchanged == true
@@ -3392,6 +3706,8 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   chmod 700 "$w1_temp_dir"
   w1_public_market_control_dir="$w1_temp_dir/public-market-preselection-control"
   mkdir -m 700 "$w1_public_market_control_dir"
+  w1_governance_control_dir="$w1_temp_dir/governance-control"
+  mkdir -m 700 "$w1_governance_control_dir"
   governance_pending_evidence_file="$evidence_dir/governance-evidence.pending.json"
   skill_market_pending_evidence_file="$evidence_dir/skill-market-evidence.pending.json"
   skill_market_binding_pending_evidence_file="$evidence_dir/skill-market-binding-evidence.pending.json"
@@ -4055,29 +4371,60 @@ fi
 
 if [[ "$w1_browser_smoke_enabled" == "1" ]]; then
   [[ -x "$repo_root/frontend/node_modules/.bin/playwright" ]] || fail "未安装前端 Playwright 依赖，请先在 frontend 执行 npm install"
-  [[ -n "$DORA_SMOKE_USER_EMAIL" && -n "$DORA_SMOKE_USER_PASSWORD" && -n "$owner_b_email" && -n "$owner_b_password" ]] || \
-    fail "W1 Reviewer 浏览器门禁缺少 Creator/Reviewer 凭据"
+  [[ -n "$DORA_SMOKE_USER_EMAIL" && -n "$DORA_SMOKE_USER_PASSWORD" && -n "$owner_b_email" && -n "$owner_b_password" \
+    && -n "$governor_email" && -n "$governor_password" ]] || \
+    fail "W1 浏览器门禁缺少 Creator/Reviewer/Governor 凭据"
+  governor_browser_grant_output="$w1_temp_dir/browser-governor-grant.json"
+  (
+    cd "$repo_root/business"
+    DORA_ROLE_ADMIN_POSTGRES_DSN="$BUSINESS_DATABASE_URL" GOWORK=off "$go_bin" run ./cmd/business-role-admin \
+      -action grant -target-user-id "$governor_user_id" -actor-user-id "$provisioner_user_id" \
+      -role skill_governor -reason local_smoke_browser_governance_fixture \
+      -approval-reference "local-smoke-browser-governor-grant-${run_id}"
+  ) >"$governor_browser_grant_output"
+  governor_browser_assignment_id="$(jq -er '.assignment_id | strings | select(test("^[0-9a-f-]{36}$"))' "$governor_browser_grant_output")"
+  jq -e --arg assignment "$governor_browser_assignment_id" --arg governor "$governor_user_id" '
+    .action == "grant" and .assignment_id == $assignment and .target_user_id == $governor
+    and .role == "skill_governor" and .status == "active" and .version == 1' \
+    "$governor_browser_grant_output" >/dev/null || fail "W1 Browser Governor 正式重授予结果漂移"
+  w1_browser_frontend_port="$(node -e '
+    const net = require("node:net");
+    const server = net.createServer();
+    server.unref();
+    server.on("error", () => process.exit(1));
+    server.listen(0, "127.0.0.1", () => {
+      process.stdout.write(String(server.address().port));
+      server.close();
+    });
+  ')" || fail "W1 Browser 无法分配隔离前端端口"
+  [[ "$w1_browser_frontend_port" =~ ^[0-9]+$ ]] || fail "W1 Browser 隔离前端端口无效"
   w1_browser_result="$w1_temp_dir/browser-real-review-result.json"
   rm -f "$w1_browser_result"
   rm -f "$w1_public_market_control_dir"/*.json "$w1_public_market_control_dir"/*.tmp
+  rm -f "$w1_governance_control_dir"/*.json "$w1_governance_control_dir"/*.tmp
   (
     cd "$repo_root/frontend"
     DORA_E2E_USER_EMAIL="$DORA_SMOKE_USER_EMAIL" \
     DORA_E2E_USER_PASSWORD="$DORA_SMOKE_USER_PASSWORD" \
     DORA_E2E_REVIEWER_EMAIL="$owner_b_email" \
     DORA_E2E_REVIEWER_PASSWORD="$owner_b_password" \
+    DORA_E2E_GOVERNOR_EMAIL="$governor_email" \
+    DORA_E2E_GOVERNOR_PASSWORD="$governor_password" \
+    DORA_E2E_BASE_URL="http://127.0.0.1:${w1_browser_frontend_port}" \
     DORA_E2E_BUSINESS_API_TARGET="http://127.0.0.1:18081" \
     DORA_E2E_OUTPUT_DIR="../.local/playwright/w1-skill-foundation" \
     DORA_E2E_W1_RESULT_PATH="$w1_browser_result" \
     DORA_E2E_W1_PUBLIC_MARKET_CONTROL_DIR="$w1_public_market_control_dir" \
+    DORA_E2E_W1_GOVERNANCE_CONTROL_DIR="$w1_governance_control_dir" \
     exec npm run test:e2e:w1-real-review
   ) >"$evidence_dir/frontend-w1-playwright.log" 2>&1 &
   w1_browser_playwright_pid="$!"
   run_w1_public_market_preselection_controller "$w1_browser_playwright_pid"
+  run_w1_governor_revocation_controller "$w1_browser_playwright_pid"
   if ! wait "$w1_browser_playwright_pid"; then
     w1_browser_playwright_pid=""
     sed -n '1,240p' "$evidence_dir/frontend-w1-playwright.log" >&2
-    fail "W1 Creator→Reviewer→QuickCreate v2 浏览器真实链路失败"
+    fail "W1 Creator→Reviewer→QuickCreate v2→Governor 浏览器真实链路失败"
   fi
   w1_browser_playwright_pid=""
   run_w1_browser_frozen_smoke "$postgres_container" "$w1_browser_result"
@@ -4316,8 +4663,8 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   [[ "$w1_skill_governance_smoke_ran" == "true" && -s "$governance_pending_evidence_file" ]] || \
     fail "W1 Governance Smoke 未产生独立 pending Evidence"
   jq -e '
-    keys == ["agent_binary_sha256","assertions","business_binary_sha256","facts","offline_review_id","produced_at","resumed_project_id","run_id","schema_version","skill_id","source_digest_sha256","status"]
-    and .schema_version == "w1.skill-governance.smoke.evidence.v1"
+    keys == ["agent_binary_sha256","assertions","browser","business_binary_sha256","facts","offline_review_id","produced_at","resumed_project_id","run_id","schema_version","skill_id","source_digest_sha256","status"]
+    and .schema_version == "w1.skill-governance.smoke.evidence.v2"
     and .status == "pending"
     and (.run_id | type) == "string" and (.run_id | length) > 0
     and (.produced_at | type) == "string"
@@ -4333,7 +4680,17 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
       ((. | type) == "number" and . >= 0 and . == floor))
     and all([.facts.strict_governance_linkage,.facts.offline_resume_state_unchanged,
       .facts.existing_session_snapshot_unchanged][]; ((. | type) == "boolean" and . == true))
-    and (.assertions | keys) == ["skill_governance_idempotency","skill_governance_offline_terminal","skill_governance_quickcreate_gate","skill_governor_rbac","skill_governor_revocation"]
+    and (.browser | keys) == ["current_published_pointer_unchanged","denial_audits","existing_session_snapshot_unchanged","governance_audits","governance_epoch","governance_receipts","governance_status","governor_active_assignment_count","governor_id","linked_governance_facts","migration_version","no_legacy_api","project_id","schema_version","session_id","skill_id"]
+    and .browser.schema_version == "w1.skill-governance.browser-fact.v1"
+    and all([.browser.skill_id,.browser.governor_id,.browser.project_id,.browser.session_id][];
+      ((. | type) == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
+    and .browser.migration_version >= 20260714000700
+    and .browser.governance_status == "offline" and .browser.governance_epoch == 4
+    and .browser.governance_receipts == 3 and .browser.governance_audits == 3
+    and .browser.linked_governance_facts == 3 and .browser.governor_active_assignment_count == 0
+    and all([.browser.current_published_pointer_unchanged,.browser.existing_session_snapshot_unchanged,
+      .browser.denial_audits,.browser.no_legacy_api][]; ((. | type) == "boolean" and . == true))
+    and (.assertions | keys) == ["skill_governance_browser_database","skill_governance_browser_decisions","skill_governance_browser_isolation","skill_governance_browser_list_detail","skill_governance_idempotency","skill_governance_offline_terminal","skill_governance_quickcreate_gate","skill_governor_rbac","skill_governor_revocation"]
     and all(.assertions[]; ((. | type) == "boolean" and . == true))' "$governance_pending_evidence_file" >/dev/null || \
     fail "W1 Governance Evidence 含未通过断言，禁止发布 passed summary"
   [[ "$w1_skill_market_smoke_ran" == "true" && -s "$skill_market_pending_evidence_file" ]] || \
@@ -4402,6 +4759,8 @@ assert_evidence_excludes_regex '(?i)"password"[[:space:]]*:' "密码字段"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   assert_evidence_excludes_literal "$provisioner_password" "Reviewer Provisioner 密码"
   assert_evidence_excludes_literal "$governor_password" "Skill Governor 密码"
+  assert_evidence_excludes_literal "$governor_email" "Skill Governor 邮箱凭据"
+  assert_evidence_excludes_literal "$owner_b_email" "Skill Reviewer 邮箱凭据"
   assert_evidence_excludes_literal "$governor_csrf_token" "Skill Governor CSRF"
   assert_evidence_excludes_literal "$governor_cookie_token" "Skill Governor Cookie"
   assert_evidence_excludes_literal "$w1_skill_name" "W1 Skill 原始名称"
@@ -4413,8 +4772,8 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   assert_evidence_excludes_regex '"definition"[[:space:]]*:' "W1 Skill 完整定义正文"
   assert_evidence_excludes_regex '(?i)"(payload_nonce|payload_ciphertext|runtime_content_ciphertext)"[[:space:]]*:' "W1 密文或 Nonce 字段"
   assert_evidence_excludes_regex '"governance_etag"[[:space:]]*:|"sg1-' "Skill Governance ETag"
-  assert_evidence_excludes_regex 'incident_containment|incident_resolved|repeated_violation|risk_cleared|SMOKE-(SUSPEND|RESUME|OFFLINE)' "Skill Governance 原因或审批引用"
-  assert_evidence_excludes_regex 'governance-(suspend|resume|offline|suspended-project|resumed-project|offline-project)' "Skill Governance 原始幂等键"
+  assert_evidence_excludes_regex 'incident_containment|incident_resolved|repeated_violation|risk_cleared|(SMOKE|SMOKEGOV)-(SUSPEND|RESUME|OFFLINE)|local-smoke-browser-governor-(grant|revoke)' "Skill Governance 原因或审批引用"
+  assert_evidence_excludes_regex 'governance-(suspend|resume|offline|suspended-project|resumed-project|offline-project)|skill-governance-decision-[0-9a-f-]{36}' "Skill Governance 原始幂等键"
   assert_evidence_excludes_regex '(public-market-(binding|stale)|public-market-mixed-(success|suspended)|mixed-owner-private-(create|review|approve))-[0-9]' "Public Market Binding 原始幂等键"
   assert_evidence_excludes_regex 'W1 Public Market QuickCreate [0-9]+' "W1 Public Market 浏览器完整 Prompt"
   assert_evidence_excludes_regex '"schema_version":"project_skill_permission_snapshot\.v2"' "Public Market Permission Canonical"

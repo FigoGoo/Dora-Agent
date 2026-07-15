@@ -67,20 +67,37 @@ browser_spec="$repo_root/frontend/e2e/w1-skill-foundation.spec.js"
   exit 1
 }
 for fragment in \
-  'w1.skill-governance.smoke.evidence.v1' \
+  'w1.skill-governance.smoke.evidence.v2' \
+  'w1.skill-governance.browser-fact.v1' \
   'skill_governor_rbac' \
   'skill_governor_revocation' \
   'skill_governance_idempotency' \
   'skill_governance_quickcreate_gate' \
   'skill_governance_offline_terminal' \
+  'skill_governance_browser_list_detail' \
+  'skill_governance_browser_decisions' \
+  'skill_governance_browser_isolation' \
+  'skill_governance_browser_database' \
   'DORA_SMOKE_GOVERNOR_EMAIL' \
   'DORA_SMOKE_GOVERNOR_PASSWORD' \
+  'DORA_E2E_GOVERNOR_EMAIL="$governor_email"' \
+  'DORA_E2E_GOVERNOR_PASSWORD="$governor_password"' \
+  'DORA_E2E_W1_GOVERNANCE_CONTROL_DIR="$w1_governance_control_dir"' \
+  'DORA_E2E_BASE_URL="http://127.0.0.1:${w1_browser_frontend_port}"' \
+  'run_w1_governor_revocation_controller "$w1_browser_playwright_pid"' \
+  'w1.governor-revocation.checkpoint.v1' \
+  'w1.governor-revocation.database-ack.v1' \
   '-role skill_governor'; do
   grep -F -- "$fragment" "$smoke_script" >/dev/null || {
     printf 'canonical W1 governance smoke is missing %s\n' "$fragment" >&2
     exit 1
   }
 done
+grep -F 'reuseExistingServer: process.env.DORA_E2E_REUSE_EXISTING_SERVER === '\''1'\''' \
+  "$repo_root/frontend/playwright.config.js" >/dev/null || {
+  printf 'canonical Playwright config may silently reuse a stale frontend server\n' >&2
+  exit 1
+}
 
 for fragment in \
   'w1.skill-market.smoke.evidence.v2' \
@@ -93,7 +110,7 @@ for fragment in \
   'public_market_mixed_binding_atomicity' \
   'public_market_login_preselection_recovered' \
   'public_market_idempotency_frozen_replay' \
-  'w1.real-review-result.v5' \
+  'w1.real-review-result.v6' \
   'w1.public-market-preselection.checkpoint.v1' \
   'w1.public-market-preselection.database-ack.v1' \
   'w1.public-market-preselection.database-fact.v1' \
@@ -133,7 +150,7 @@ fi
 for fragment in \
   'keys == ["agent_binary_sha256","assertions","business_binary_sha256","produced_at","project_skill_binding","run_id","schema_version","skill_foundation","source_digest_sha256","status","transport_prerequisite"]' \
   'and (.assertions | keys) == ["agent_v2_snapshot_encrypted","browser_agent_snapshot_matches_published"' \
-  'keys == ["agent_binary_sha256","assertions","business_binary_sha256","facts","offline_review_id","produced_at","resumed_project_id","run_id","schema_version","skill_id","source_digest_sha256","status"]' \
+  'keys == ["agent_binary_sha256","assertions","browser","business_binary_sha256","facts","offline_review_id","produced_at","resumed_project_id","run_id","schema_version","skill_id","source_digest_sha256","status"]' \
   'and all(.assertions[]; ((. | type) == "boolean" and . == true))'; do
   grep -F -- "$fragment" "$smoke_script" >/dev/null || {
     printf 'canonical W1 Foundation/Governance Evidence exact-set gate is missing %s\n' "$fragment" >&2
@@ -150,6 +167,21 @@ for fragment in \
   'quickCreateCount: publicMarketPreSubmitQuickCreateCount'; do
   grep -F -- "$fragment" "$browser_spec" >/dev/null || {
     printf 'W1 browser Public Market two-phase checkpoint is missing %s\n' "$fragment" >&2
+    exit 1
+  }
+done
+for fragment in \
+  'DORA_E2E_W1_GOVERNANCE_CONTROL_DIR' \
+  'w1.governor-revocation.checkpoint.v1' \
+  'w1.governor-revocation.database-ack.v1' \
+  'checkpointGovernorRevocation({ governorID, skillID })' \
+  "schema_version: 'w1.real-review-result.v6'" \
+  'creator_api_forbidden: creatorGovernanceAPIForbidden' \
+  'reviewer_api_forbidden: reviewerGovernanceAPIForbidden' \
+  'same_cookie_revocation: governorRevocationSameCookie' \
+  'no_legacy_api: governorNoLegacyAPI'; do
+  grep -F -- "$fragment" "$browser_spec" >/dev/null || {
+    printf 'W1 browser Governance contract is missing %s\n' "$fragment" >&2
     exit 1
   }
 done
