@@ -32,6 +32,7 @@ func TestW2R00R03R04OwnerDecisionMatricesV1(t *testing.T) {
 		"当前不得生成 `DR-W2-R00-v1`",
 		"W2-B0a/W2-B1` 均未解锁",
 	})
+	assertR00DecisionReadinessV1(t, r00)
 	assertOwnerDecisionMatrixFragmentsV1(t, "R03", r03, []string{
 		"decision_status=awaiting_owner_decision",
 		"implementation_status=prohibited",
@@ -71,6 +72,46 @@ func TestW2R00R03R04OwnerDecisionMatricesV1(t *testing.T) {
 		if !strings.Contains(projectPlan, fragment) {
 			t.Fatalf("Canonical 计划缺少稳定矩阵引用 %q", fragment)
 		}
+	}
+}
+
+// assertR00DecisionReadinessV1 固定 R00 的 open-item crosswalk 与逐项 readiness，避免为不完整候选生成接受请求。
+func assertR00DecisionReadinessV1(t *testing.T, document string) {
+	t.Helper()
+
+	for _, fragment := range []string{
+		"`R00-D01` | P4-C11 / Gate | `scope_derivation_pending`",
+		"`R00-D05` | `BILL-OPEN-004` | `candidate_incomplete_not_ballot_ready`",
+		"`R00-D06` | `BILL-OPEN-005` / P4-C11 | `awaiting_owner_decision`",
+		"源契约的 Owner 在本决定被接受前继续保持“未登记、不得预填”",
+		"`R00-D07` | `BILL-OPEN-005` | `candidate_incomplete_not_ballot_ready`",
+		"`R00-D08` | `BILL-OPEN-006` | `candidate_incomplete_not_ballot_ready`",
+		"`R00-D09` | `BILL-OPEN-007` | `candidate_incomplete_not_ballot_ready`",
+		"`R00-D11` | `BILL-OPEN-009` | `candidate_incomplete_not_ballot_ready`",
+		"`R00-D13` | `BILL-OPEN-011` | `candidate_incomplete_not_ballot_ready`",
+		"严格待决请求不能给 `candidate_incomplete_not_ballot_ready` 项提供“接受推荐”能力",
+	} {
+		if !strings.Contains(document, fragment) {
+			t.Fatalf("R00 Owner 决策矩阵缺少 readiness 边界 %q", fragment)
+		}
+	}
+
+	pattern := regexp.MustCompile(`BILL-OPEN-[0-9]{3}`)
+	seen := make(map[string]struct{})
+	for _, openID := range pattern.FindAllString(document, -1) {
+		seen[openID] = struct{}{}
+	}
+	actual := make([]string, 0, len(seen))
+	for openID := range seen {
+		actual = append(actual, openID)
+	}
+	sort.Strings(actual)
+	expected := make([]string, 0, 12)
+	for ordinal := 1; ordinal <= 12; ordinal++ {
+		expected = append(expected, fmt.Sprintf("BILL-OPEN-%03d", ordinal))
+	}
+	if strings.Join(actual, ",") != strings.Join(expected, ",") {
+		t.Fatalf("R00 Billing open-item exact-set=%v want=%v", actual, expected)
 	}
 }
 
