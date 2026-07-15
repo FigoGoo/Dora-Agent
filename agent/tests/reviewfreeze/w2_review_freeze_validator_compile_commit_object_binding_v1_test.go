@@ -254,6 +254,91 @@ func reviewFreezeVerifyCompileCommitObjectBindingV1(
 	if int64(len(payload)) != descriptor.BodySizeBytes || reviewFreezeSHA256V1(payload) != descriptor.BodySHA256 {
 		return nil, fmt.Errorf("compile commit payload descriptor drift size=%d/%d sha=%q/%q", len(payload), descriptor.BodySizeBytes, reviewFreezeSHA256V1(payload), descriptor.BodySHA256)
 	}
+	return reviewFreezeFinalizeCompileCommitObjectBindingV1(statement, frame, payload)
+}
+
+// reviewFreezeVerifyCompileCommitObjectBindingFromRawBundleV1 直接消费 resolver 已冻结的
+// body-only bundle，不再构造兼容旧接口的 List/Open/ReadCloser view。该边界仍独立重验
+// descriptor exact-set、descriptor/object/body 三方一致性、canonical Git frame 内容身份，
+// 以及 statement 的 commit/tree 绑定，避免把上游验证结论当作可变内存的永久事实。
+func reviewFreezeVerifyCompileCommitObjectBindingFromRawBundleV1(
+	ctx context.Context,
+	statement reviewFreezeValidatorCompileAttestationV1,
+	bundle *reviewFreezeCompileGitRawObjectBundleV1,
+) (*reviewFreezeVerifiedCompileCommitBindingV1, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("compile commit raw bundle context 不能为空")
+	}
+	if bundle == nil {
+		return nil, fmt.Errorf("compile commit raw bundle 不能为空")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("compile commit raw bundle context before validation: %w", err)
+	}
+	if err := reviewFreezeValidateCompileAttestationStatementV1(statement); err != nil {
+		return nil, fmt.Errorf("compile commit raw bundle statement: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("compile commit raw bundle context before descriptor snapshot: %w", err)
+	}
+
+	descriptors := bundle.Descriptors()
+	if err := reviewFreezeValidateCompileGitRawDescriptorsV1(descriptors); err != nil {
+		return nil, fmt.Errorf("compile commit raw bundle descriptors: %w", err)
+	}
+	var listedCommit reviewFreezeCompileGitRawObjectDescriptorV1
+	for _, descriptor := range descriptors {
+		if descriptor.Kind == "commit" {
+			listedCommit = descriptor
+			break
+		}
+	}
+	if listedCommit.ObjectID != statement.Subject.BaseCommitSHA {
+		return nil, fmt.Errorf("compile commit raw bundle listed commit=%q want BaseCommitSHA=%q", listedCommit.ObjectID, statement.Subject.BaseCommitSHA)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("compile commit raw bundle context after descriptor snapshot: %w", err)
+	}
+
+	objectDescriptor, exists := bundle.Descriptor(statement.Subject.BaseCommitSHA)
+	if !exists {
+		return nil, fmt.Errorf("compile commit raw bundle missing object=%q", statement.Subject.BaseCommitSHA)
+	}
+	if objectDescriptor != listedCommit {
+		return nil, fmt.Errorf("compile commit raw bundle descriptor drift actual=%+v listed=%+v", objectDescriptor, listedCommit)
+	}
+	body, exists := bundle.BodyBytes(statement.Subject.BaseCommitSHA)
+	if !exists {
+		return nil, fmt.Errorf("compile commit raw bundle missing body=%q", statement.Subject.BaseCommitSHA)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("compile commit raw bundle context after body snapshot: %w", err)
+	}
+	actualBodySHA256 := reviewFreezeSHA256V1(body)
+	if int64(len(body)) != listedCommit.BodySizeBytes || actualBodySHA256 != listedCommit.BodySHA256 {
+		return nil, fmt.Errorf(
+			"compile commit raw bundle body descriptor drift size=%d/%d sha=%q/%q",
+			len(body),
+			listedCommit.BodySizeBytes,
+			actualBodySHA256,
+			listedCommit.BodySHA256,
+		)
+	}
+
+	frame := reviewFreezeCompileGitRawCanonicalFrameV1(listedCommit.Kind, body)
+	return reviewFreezeFinalizeCompileCommitObjectBindingV1(statement, frame, body)
+}
+
+// reviewFreezeFinalizeCompileCommitObjectBindingV1 在 legacy loader 和 direct raw bundle
+// 两条入口完成各自 descriptor/body 冻结后，共享内容身份、commit header 语义与结果构造。
+func reviewFreezeFinalizeCompileCommitObjectBindingV1(
+	statement reviewFreezeValidatorCompileAttestationV1,
+	frame []byte,
+	payload []byte,
+) (*reviewFreezeVerifiedCompileCommitBindingV1, error) {
+	if actualSHA := reviewFreezeCompileCommitObjectSHAV1(frame); actualSHA != statement.Subject.BaseCommitSHA {
+		return nil, fmt.Errorf("compile commit framed SHA-1=%q want=%q", actualSHA, statement.Subject.BaseCommitSHA)
+	}
 	parsed, err := reviewFreezeParseCompileCommitPayloadV1(payload, statement.Subject.BaseCommitSHA)
 	if err != nil {
 		return nil, err
@@ -689,6 +774,184 @@ func reviewFreezeCompileCommitFixtureV1(t *testing.T, payload []byte, treeSHA st
 	return statement, &reviewFreezeCompileCommitLoaderFixtureV1{
 		descriptor: reviewFreezeCompileCommitDescriptorV1(commitSHA, payload),
 		frame:      frame,
+	}
+}
+
+// reviewFreezeCompileCommitRawBundleCloneV1 只供 direct API 对抗测试复制冻结值；body
+// 已使用 immutable string 保存，因此 map value 的值复制不会与源 bundle 共享可变字节。
+func reviewFreezeCompileCommitRawBundleCloneV1(source *reviewFreezeCompileGitRawObjectBundleV1) *reviewFreezeCompileGitRawObjectBundleV1 {
+	if source == nil {
+		return nil
+	}
+	clone := &reviewFreezeCompileGitRawObjectBundleV1{
+		descriptors: append([]reviewFreezeCompileGitRawObjectDescriptorV1(nil), source.descriptors...),
+		objects:     make(map[string]reviewFreezeCompileGitRawFrozenObjectV1, len(source.objects)),
+	}
+	for objectID, object := range source.objects {
+		clone.objects[objectID] = object
+	}
+	return clone
+}
+
+// TestW2ReviewFreezeCompileCommitObjectBindingFromRawBundleV1Golden 证明 direct API 只消费
+// 已冻结 accessor，不回访外部 CAS，也不改变既有 UsedObjectIDs/Scope 证明边界。
+func TestW2ReviewFreezeCompileCommitObjectBindingFromRawBundleV1Golden(t *testing.T) {
+	loader, commitSHA, treeSHA := reviewFreezeCompileGitRawValidFixtureV1()
+	bundle, err := reviewFreezeResolveCompileGitRawObjectBundleV1(context.Background(), loader)
+	if err != nil {
+		t.Fatalf("resolve raw bundle: %v", err)
+	}
+	statement := reviewFreezeCompileAttestationFixtureStatementV1(t)
+	statement.Subject.BaseCommitSHA = commitSHA
+	statement.Subject.BaseTreeSHA = treeSHA
+	openBeforeDirect := loader.openCallSnapshot()
+
+	// 修改 accessor 返回副本不能污染后续 direct 校验。
+	descriptorCopies := bundle.Descriptors()
+	descriptorCopies[0].Kind = "tag"
+	bodyCopy, exists := bundle.BodyBytes(commitSHA)
+	if !exists || len(bodyCopy) == 0 {
+		t.Fatalf("fixture commit body missing object=%s", commitSHA)
+	}
+	bodyCopy[0] ^= 0xff
+
+	binding, err := reviewFreezeVerifyCompileCommitObjectBindingFromRawBundleV1(context.Background(), statement, bundle)
+	if err != nil {
+		t.Fatalf("direct raw bundle binding rejected: %v", err)
+	}
+	if binding.CommitSHA() != commitSHA || binding.TreeSHA() != treeSHA {
+		t.Fatalf("direct binding identity commit=%q/%q tree=%q/%q", binding.CommitSHA(), commitSHA, binding.TreeSHA(), treeSHA)
+	}
+	if parents := binding.ParentSHAs(); len(parents) != 0 {
+		t.Fatalf("direct binding parents=%v want=[]", parents)
+	}
+	wantBody, exists := bundle.BodyBytes(commitSHA)
+	if !exists {
+		t.Fatalf("fixture commit body disappeared object=%s", commitSHA)
+	}
+	wantFrame := reviewFreezeCompileGitRawCanonicalFrameV1("commit", wantBody)
+	if !bytes.Equal(binding.FramedObjectBytes(), wantFrame) {
+		t.Fatalf("direct binding canonical frame drift")
+	}
+	if used := binding.UsedObjectIDs(); !reviewFreezeCompileCommitEqualStringsV1(used, []string{commitSHA}) {
+		t.Fatalf("direct binding used objects=%v want=[%s]", used, commitSHA)
+	}
+	scope := binding.Scope()
+	wantGaps := []string{
+		reviewFreezeCompileCommitSourceEqualityGapV1,
+		reviewFreezeCompileCommitAncestryGapV1,
+		reviewFreezeCompileCommitRemoteAuthorityGapV1,
+	}
+	if scope.VerifiedClaim != reviewFreezeCompileCommitBindingVerifiedClaimV1 ||
+		!scope.BaseCommitToTreeBound ||
+		scope.TrustedSourceCommitEqual ||
+		scope.CommitAncestryProven ||
+		scope.GitHubAuthorityProven ||
+		scope.FormalFreezeStatus != reviewFreezeCompileCommitFormalFreezeStatusV1 ||
+		scope.RequiredTypedAnchorSchema != reviewFreezeCompileCommitRequiredAnchorSchemaV1 ||
+		!reviewFreezeCompileCommitEqualStringsV1(scope.OpenGaps, wantGaps) {
+		t.Fatalf("direct binding scope drift=%+v", scope)
+	}
+	if openAfterDirect := loader.openCallSnapshot(); !reviewFreezeCompileGitRawEqualStringIntMapV1(openBeforeDirect, openAfterDirect) {
+		t.Fatalf("direct binding revisited external CAS before=%v after=%v", openBeforeDirect, openAfterDirect)
+	}
+
+	// 返回值中的 slice/bytes 也必须保持副本语义。
+	usedCopy := binding.UsedObjectIDs()
+	usedCopy[0] = strings.Repeat("f", 40)
+	scope.OpenGaps[0] = "mutated"
+	frameCopy := binding.FramedObjectBytes()
+	frameCopy[0] ^= 0xff
+	if binding.UsedObjectIDs()[0] != commitSHA ||
+		binding.Scope().OpenGaps[0] != reviewFreezeCompileCommitSourceEqualityGapV1 ||
+		!bytes.Equal(binding.FramedObjectBytes(), wantFrame) {
+		t.Fatalf("direct binding accessor mutation leaked into frozen result")
+	}
+}
+
+// TestW2ReviewFreezeCompileCommitObjectBindingFromRawBundleV1RejectsAdversaries
+// 覆盖 direct 边界必须自行关闭的 context、kind、OID、body 与 statement 漂移。
+func TestW2ReviewFreezeCompileCommitObjectBindingFromRawBundleV1RejectsAdversaries(t *testing.T) {
+	loader, commitSHA, treeSHA := reviewFreezeCompileGitRawValidFixtureV1()
+	validBundle, err := reviewFreezeResolveCompileGitRawObjectBundleV1(context.Background(), loader)
+	if err != nil {
+		t.Fatalf("resolve raw bundle: %v", err)
+	}
+	validStatement := reviewFreezeCompileAttestationFixtureStatementV1(t)
+	validStatement.Subject.BaseCommitSHA = commitSHA
+	validStatement.Subject.BaseTreeSHA = treeSHA
+
+	canceledContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		statement reviewFreezeValidatorCompileAttestationV1
+		bundle    *reviewFreezeCompileGitRawObjectBundleV1
+		mutate    func(*reviewFreezeCompileGitRawObjectBundleV1)
+	}{
+		{name: "nil context", ctx: nil, statement: validStatement, bundle: validBundle},
+		{name: "nil bundle", ctx: context.Background(), statement: validStatement},
+		{name: "pre-canceled context", ctx: canceledContext, statement: validStatement, bundle: validBundle},
+		{
+			name:      "listed kind drift",
+			ctx:       context.Background(),
+			statement: validStatement,
+			bundle:    validBundle,
+			mutate: func(bundle *reviewFreezeCompileGitRawObjectBundleV1) {
+				for index := range bundle.descriptors {
+					if bundle.descriptors[index].ObjectID == commitSHA {
+						bundle.descriptors[index].Kind = "tree"
+						return
+					}
+				}
+			},
+		},
+		{
+			name:      "object descriptor OID drift",
+			ctx:       context.Background(),
+			statement: validStatement,
+			bundle:    validBundle,
+			mutate: func(bundle *reviewFreezeCompileGitRawObjectBundleV1) {
+				object := bundle.objects[commitSHA]
+				object.descriptor.ObjectID = strings.Repeat("f", 40)
+				bundle.objects[commitSHA] = object
+			},
+		},
+		{
+			name:      "frozen body drift",
+			ctx:       context.Background(),
+			statement: validStatement,
+			bundle:    validBundle,
+			mutate: func(bundle *reviewFreezeCompileGitRawObjectBundleV1) {
+				object := bundle.objects[commitSHA]
+				body := []byte(object.body)
+				body[len(body)-1] ^= 0xff
+				object.body = string(body)
+				bundle.objects[commitSHA] = object
+			},
+		},
+		{
+			name: "statement tree mismatch",
+			ctx:  context.Background(),
+			statement: func() reviewFreezeValidatorCompileAttestationV1 {
+				statement := validStatement
+				statement.Subject.BaseTreeSHA = strings.Repeat("e", 40)
+				return statement
+			}(),
+			bundle: validBundle,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bundle := reviewFreezeCompileCommitRawBundleCloneV1(test.bundle)
+			if test.mutate != nil {
+				test.mutate(bundle)
+			}
+			if _, err := reviewFreezeVerifyCompileCommitObjectBindingFromRawBundleV1(test.ctx, test.statement, bundle); err == nil {
+				t.Fatal("direct raw bundle adversary unexpectedly accepted")
+			}
+		})
 	}
 }
 

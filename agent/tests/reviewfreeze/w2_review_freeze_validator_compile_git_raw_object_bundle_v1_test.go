@@ -336,164 +336,6 @@ func reviewFreezeCompileGitRawCanonicalFrameV1(kind string, body []byte) []byte 
 	return frame
 }
 
-// reviewFreezeCompileGitRawCommitLoaderViewV1 将 bundle 单次投影为旧 commit verifier 契约。
-// view 只读取冻结对象并现场构造 frame，不会再次访问底层 CAS。
-type reviewFreezeCompileGitRawCommitLoaderViewV1 struct {
-	bundle *reviewFreezeCompileGitRawObjectBundleV1
-	mu     sync.Mutex
-	listed bool
-	opened bool
-}
-
-// NewCommitObjectLoaderView 创建一个仅允许 List/Open 各一次的 commit 只读视图。
-func (bundle *reviewFreezeCompileGitRawObjectBundleV1) NewCommitObjectLoaderView() *reviewFreezeCompileGitRawCommitLoaderViewV1 {
-	return &reviewFreezeCompileGitRawCommitLoaderViewV1{bundle: bundle}
-}
-
-// ListCommitObjects 投影唯一 commit descriptor；BodySHA256 保持 body 摘要语义。
-func (view *reviewFreezeCompileGitRawCommitLoaderViewV1) ListCommitObjects(ctx context.Context) ([]reviewFreezeCompileCommitObjectDescriptorV1, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("git raw commit view context 不能为空")
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	view.mu.Lock()
-	defer view.mu.Unlock()
-	if view.bundle == nil {
-		return nil, fmt.Errorf("git raw commit view bundle 不能为空")
-	}
-	if view.listed {
-		return nil, fmt.Errorf("git raw commit view List 只能调用一次")
-	}
-	view.listed = true
-	listed := make([]reviewFreezeCompileCommitObjectDescriptorV1, 0, 1)
-	for _, descriptor := range view.bundle.descriptors {
-		if descriptor.Kind != "commit" {
-			continue
-		}
-		listed = append(listed, reviewFreezeCompileCommitObjectDescriptorV1{
-			ObjectID:      descriptor.ObjectID,
-			ObjectKind:    descriptor.Kind,
-			BodySizeBytes: descriptor.BodySizeBytes,
-			BodySHA256:    descriptor.BodySHA256,
-		})
-	}
-	return listed, nil
-}
-
-// OpenCommitObject 返回 bundle 内 commit 的 canonical frame 副本；同一视图拒绝重复 Open。
-func (view *reviewFreezeCompileGitRawCommitLoaderViewV1) OpenCommitObject(ctx context.Context, objectID string) (reviewFreezeCompileCommitObjectOpenedV1, error) {
-	if ctx == nil {
-		return reviewFreezeCompileCommitObjectOpenedV1{}, fmt.Errorf("git raw commit view context 不能为空")
-	}
-	if err := ctx.Err(); err != nil {
-		return reviewFreezeCompileCommitObjectOpenedV1{}, err
-	}
-	view.mu.Lock()
-	defer view.mu.Unlock()
-	if view.bundle == nil || !view.listed {
-		return reviewFreezeCompileCommitObjectOpenedV1{}, fmt.Errorf("git raw commit view 必须先 List")
-	}
-	if view.opened {
-		return reviewFreezeCompileCommitObjectOpenedV1{}, fmt.Errorf("git raw commit view Open 只能调用一次")
-	}
-	object, exists := view.bundle.object(objectID)
-	if !exists || object.descriptor.Kind != "commit" {
-		return reviewFreezeCompileCommitObjectOpenedV1{}, fmt.Errorf("git raw commit view object 不存在或类型错误=%q", objectID)
-	}
-	view.opened = true
-	descriptor := reviewFreezeCompileCommitObjectDescriptorV1{
-		ObjectID:      object.descriptor.ObjectID,
-		ObjectKind:    object.descriptor.Kind,
-		BodySizeBytes: object.descriptor.BodySizeBytes,
-		BodySHA256:    object.descriptor.BodySHA256,
-	}
-	frame := reviewFreezeCompileGitRawCanonicalFrameV1(object.descriptor.Kind, []byte(object.body))
-	return reviewFreezeCompileCommitObjectOpenedV1{Descriptor: descriptor, Reader: io.NopCloser(bytes.NewReader(frame))}, nil
-}
-
-// reviewFreezeCompileGitRawTreeLoaderViewV1 将 bundle 单次投影为旧 tree verifier 契约。
-// 每个 tree OID 最多 Open 一次；SHA256 按旧契约覆盖现场构造的完整 frame。
-type reviewFreezeCompileGitRawTreeLoaderViewV1 struct {
-	bundle *reviewFreezeCompileGitRawObjectBundleV1
-	mu     sync.Mutex
-	listed bool
-	opened map[string]struct{}
-}
-
-// NewTreeObjectLoaderView 创建一个单次 List、逐 tree 单次 Open 的只读视图。
-func (bundle *reviewFreezeCompileGitRawObjectBundleV1) NewTreeObjectLoaderView() *reviewFreezeCompileGitRawTreeLoaderViewV1 {
-	return &reviewFreezeCompileGitRawTreeLoaderViewV1{bundle: bundle, opened: make(map[string]struct{})}
-}
-
-// List 投影全部 tree descriptor，并把 body 摘要转换为旧契约要求的完整 frame 摘要。
-func (view *reviewFreezeCompileGitRawTreeLoaderViewV1) List(ctx context.Context) ([]reviewFreezeCompileGitObjectDescriptorV1, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("git raw tree view context 不能为空")
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	view.mu.Lock()
-	defer view.mu.Unlock()
-	if view.bundle == nil {
-		return nil, fmt.Errorf("git raw tree view bundle 不能为空")
-	}
-	if view.listed {
-		return nil, fmt.Errorf("git raw tree view List 只能调用一次")
-	}
-	view.listed = true
-	listed := make([]reviewFreezeCompileGitObjectDescriptorV1, 0, len(view.bundle.descriptors))
-	for _, descriptor := range view.bundle.descriptors {
-		if descriptor.Kind != "tree" {
-			continue
-		}
-		frame, exists := view.bundle.CanonicalFrameBytes(descriptor.ObjectID)
-		if !exists {
-			return nil, fmt.Errorf("git raw tree view frozen object missing=%s", descriptor.ObjectID)
-		}
-		listed = append(listed, reviewFreezeCompileGitObjectDescriptorV1{
-			ObjectID:         descriptor.ObjectID,
-			Kind:             descriptor.Kind,
-			DeclaredBodySize: descriptor.BodySizeBytes,
-			SHA256:           reviewFreezeSHA256V1(frame),
-		})
-	}
-	return listed, nil
-}
-
-// Open 返回指定 tree 的 canonical frame 副本；重复或非 tree OID 均失败关闭。
-func (view *reviewFreezeCompileGitRawTreeLoaderViewV1) Open(ctx context.Context, objectID string) (reviewFreezeCompileGitObjectOpenedV1, error) {
-	if ctx == nil {
-		return reviewFreezeCompileGitObjectOpenedV1{}, fmt.Errorf("git raw tree view context 不能为空")
-	}
-	if err := ctx.Err(); err != nil {
-		return reviewFreezeCompileGitObjectOpenedV1{}, err
-	}
-	view.mu.Lock()
-	defer view.mu.Unlock()
-	if view.bundle == nil || !view.listed {
-		return reviewFreezeCompileGitObjectOpenedV1{}, fmt.Errorf("git raw tree view 必须先 List")
-	}
-	if _, duplicate := view.opened[objectID]; duplicate {
-		return reviewFreezeCompileGitObjectOpenedV1{}, fmt.Errorf("git raw tree view duplicate Open object=%s", objectID)
-	}
-	object, exists := view.bundle.object(objectID)
-	if !exists || object.descriptor.Kind != "tree" {
-		return reviewFreezeCompileGitObjectOpenedV1{}, fmt.Errorf("git raw tree view object 不存在或类型错误=%q", objectID)
-	}
-	view.opened[objectID] = struct{}{}
-	frame := reviewFreezeCompileGitRawCanonicalFrameV1(object.descriptor.Kind, []byte(object.body))
-	return reviewFreezeCompileGitObjectOpenedV1{ObjectID: objectID, Reader: io.NopCloser(bytes.NewReader(frame))}, nil
-}
-
-// 编译期接口断言保证两个适配器持续满足既有 commit/tree verifier 边界。
-var (
-	_ reviewFreezeCompileCommitObjectLoaderV1 = (*reviewFreezeCompileGitRawCommitLoaderViewV1)(nil)
-	_ reviewFreezeCompileGitObjectLoaderV1    = (*reviewFreezeCompileGitRawTreeLoaderViewV1)(nil)
-)
-
 // reviewFreezeCompileGitRawFixtureObjectV1 描述测试输入中的 kind/body；OID 和摘要必须由 fixture 工厂重算。
 type reviewFreezeCompileGitRawFixtureObjectV1 struct {
 	Kind string
@@ -788,25 +630,25 @@ func TestW2ReviewFreezeCompileGitRawObjectBundleV1HEADTreeCleanWorktreeUnifiedGa
 			t.Fatalf("HEAD/worktree underlying Open object=%s calls=%d", descriptor.ObjectID, loader.openCalls[descriptor.ObjectID])
 		}
 	}
-	openBeforeViews := loader.openCallSnapshot()
+	openBeforeDirect := loader.openCallSnapshot()
 
-	commitBinding, err := reviewFreezeVerifyCompileCommitObjectBindingV1(
+	commitBinding, err := reviewFreezeVerifyCompileCommitObjectBindingFromRawBundleV1(
 		context.Background(),
 		fixture.Statement,
-		bundle.NewCommitObjectLoaderView(),
+		bundle,
 	)
 	if err != nil {
-		t.Fatalf("HEAD/worktree commit view rejected: %v", err)
+		t.Fatalf("HEAD/worktree direct commit rejected: %v", err)
 	}
-	treeMembership, err := reviewFreezeVerifyCompileGitBaseTreeMembershipV1(
+	treeMembership, err := reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleV1(
 		context.Background(),
 		fixture.SnapshotRaw,
 		fixture.Statement,
 		fixture.Leaves,
-		bundle.NewTreeObjectLoaderView(),
+		bundle,
 	)
 	if err != nil {
-		t.Fatalf("HEAD/worktree tree view rejected: %v", err)
+		t.Fatalf("HEAD/worktree direct tree rejected: %v", err)
 	}
 	if commitBinding.CommitSHA() != fixture.Statement.Subject.BaseCommitSHA ||
 		commitBinding.TreeSHA() != fixture.Statement.Subject.BaseTreeSHA ||
@@ -818,8 +660,8 @@ func TestW2ReviewFreezeCompileGitRawObjectBundleV1HEADTreeCleanWorktreeUnifiedGa
 	if !reviewFreezeCompileGitRawEqualStringsV1(usedObjectIDs, bundle.ObjectIDs()) {
 		t.Fatalf("HEAD/worktree exact object set used=%v listed=%v", usedObjectIDs, bundle.ObjectIDs())
 	}
-	if openAfterViews := loader.openCallSnapshot(); !reviewFreezeCompileGitRawEqualStringIntMapV1(openBeforeViews, openAfterViews) {
-		t.Fatalf("views revisited external CAS before=%v after=%v", openBeforeViews, openAfterViews)
+	if openAfterDirect := loader.openCallSnapshot(); !reviewFreezeCompileGitRawEqualStringIntMapV1(openBeforeDirect, openAfterDirect) {
+		t.Fatalf("direct verifiers revisited external CAS before=%v after=%v", openBeforeDirect, openAfterDirect)
 	}
 }
 
@@ -1090,15 +932,16 @@ func TestW2ReviewFreezeCompileGitRawObjectBundleV1CancellationClosesBlockingRead
 	}
 }
 
-// TestW2ReviewFreezeCompileGitRawObjectBundleV1ImmutableAccessorsAndSingleUseViews 验证
-// accessor/view 只消费冻结副本，调用方 mutation 与底层 CAS mutation 均不能改变 bundle。
-func TestW2ReviewFreezeCompileGitRawObjectBundleV1ImmutableAccessorsAndSingleUseViews(t *testing.T) {
+// TestW2ReviewFreezeCompileGitRawObjectBundleV1ImmutableAccessorsAndDirectConsumer 验证
+// accessor/direct consumer 只消费冻结副本，调用方 mutation 与底层 CAS mutation
+// 均不能改变 bundle。
+func TestW2ReviewFreezeCompileGitRawObjectBundleV1ImmutableAccessorsAndDirectConsumer(t *testing.T) {
 	loader, commitID, treeID := reviewFreezeCompileGitRawValidFixtureV1()
 	bundle, err := reviewFreezeResolveCompileGitRawObjectBundleV1(context.Background(), loader)
 	if err != nil {
 		t.Fatalf("resolve valid raw bundle: %v", err)
 	}
-	openBeforeViews := loader.openCallSnapshot()
+	openBeforeDirect := loader.openCallSnapshot()
 	descriptors := bundle.Descriptors()
 	descriptors[0].Kind = "blob"
 	if bundle.Descriptors()[0].Kind == "blob" {
@@ -1138,37 +981,15 @@ func TestW2ReviewFreezeCompileGitRawObjectBundleV1ImmutableAccessorsAndSingleUse
 	statement := reviewFreezeCompileAttestationFixtureStatementV1(t)
 	statement.Subject.BaseCommitSHA = commitID
 	statement.Subject.BaseTreeSHA = treeID
-	commitView := bundle.NewCommitObjectLoaderView()
-	binding, err := reviewFreezeVerifyCompileCommitObjectBindingV1(context.Background(), statement, commitView)
+	binding, err := reviewFreezeVerifyCompileCommitObjectBindingFromRawBundleV1(context.Background(), statement, bundle)
 	if err != nil {
-		t.Fatalf("commit single-use view rejected: %v", err)
+		t.Fatalf("direct commit binding rejected: %v", err)
 	}
 	if binding.CommitSHA() != commitID || binding.TreeSHA() != treeID {
-		t.Fatalf("commit single-use binding=%s/%s want=%s/%s", binding.CommitSHA(), binding.TreeSHA(), commitID, treeID)
+		t.Fatalf("direct commit binding=%s/%s want=%s/%s", binding.CommitSHA(), binding.TreeSHA(), commitID, treeID)
 	}
-	if _, err := commitView.ListCommitObjects(context.Background()); err == nil {
-		t.Fatal("commit view repeated List unexpectedly accepted")
-	}
-	treeView := bundle.NewTreeObjectLoaderView()
-	listedTrees, err := treeView.List(context.Background())
-	if err != nil || len(listedTrees) != 1 || listedTrees[0].ObjectID != treeID {
-		t.Fatalf("tree view List=%+v err=%v", listedTrees, err)
-	}
-	openedTree, err := treeView.Open(context.Background(), treeID)
-	if err != nil {
-		t.Fatalf("tree view Open: %v", err)
-	}
-	if _, err := io.ReadAll(openedTree.Reader); err != nil {
-		t.Fatalf("read tree view frame: %v", err)
-	}
-	if err := openedTree.Reader.Close(); err != nil {
-		t.Fatalf("close tree view frame: %v", err)
-	}
-	if _, err := treeView.Open(context.Background(), treeID); err == nil {
-		t.Fatal("tree view repeated Open unexpectedly accepted")
-	}
-	if openAfterViews := loader.openCallSnapshot(); !reviewFreezeCompileGitRawEqualStringIntMapV1(openBeforeViews, openAfterViews) {
-		t.Fatalf("immutable views revisited external CAS before=%v after=%v", openBeforeViews, openAfterViews)
+	if openAfterDirect := loader.openCallSnapshot(); !reviewFreezeCompileGitRawEqualStringIntMapV1(openBeforeDirect, openAfterDirect) {
+		t.Fatalf("direct immutable consumer revisited external CAS before=%v after=%v", openBeforeDirect, openAfterDirect)
 	}
 }
 

@@ -27,6 +27,13 @@ const (
 	reviewFreezeCompileGitTreeMaxDepthV1       = 16
 	reviewFreezeCompileGitTreeMaxEntriesV1     = 32768
 
+	reviewFreezeCompileGitDirectMaxTreeBodyBytesV1  = reviewFreezeCompileGitRawBundleMaxTreeBodyV1
+	reviewFreezeCompileGitDirectMaxTotalBodyBytesV1 = reviewFreezeCompileGitRawBundleMaxTreeTotalBodyV1
+	reviewFreezeCompileGitDirectMaxObjectsV1        = reviewFreezeCompileGitRawBundleMaxTreeObjectsV1
+	reviewFreezeCompileGitDirectMaxDepthV1          = reviewFreezeCompileGitTreeMaxDepthV1
+	reviewFreezeCompileGitDirectMaxEntriesPerTreeV1 = 4096
+	reviewFreezeCompileGitDirectMaxTotalEntriesV1   = reviewFreezeCompileGitTreeMaxEntriesV1
+
 	reviewFreezeCompileGitBaseTreeClaimV1           = "base_tree_membership_verified"
 	reviewFreezeCompileGitBaseCommitGapV1           = "base_commit_binding_unverified"
 	reviewFreezeCompileGitCommitAncestryGapV1       = "commit_ancestry_unverified"
@@ -38,6 +45,8 @@ const (
 	reviewFreezeCompileGitTreeDirectoryModeV1       = "40000"
 	reviewFreezeCompileGitTreeSubmoduleCommitModeV1 = "160000"
 )
+
+var errReviewFreezeCompileGitTreeEntryBudgetV1 = errors.New("git tree parser entry budget exhausted")
 
 // reviewFreezeCompileGitObjectOpenedV1 是 CAS 对一次 object Open 的原子观察。
 // ObjectID 必须在打开后重新返回，Reader.Close 必须能主动打断阻塞 Read。
@@ -71,6 +80,17 @@ type reviewFreezeCompileGitTreeBudgetsV1 struct {
 	MaxObjectBytes int64
 	MaxDepth       int
 	MaxEntries     int
+}
+
+// reviewFreezeCompileGitDirectTreeBudgetsV1 是 raw-bundle 后的纯语义预算。
+// 它按唯一 used tree body 计费，不重复承担 resolver 已完成的外部 I/O、OID 或摘要门禁。
+type reviewFreezeCompileGitDirectTreeBudgetsV1 struct {
+	MaxTreeBodyBytes  int64
+	MaxTotalBodyBytes int64
+	MaxObjects        int
+	MaxDepth          int
+	MaxEntriesPerTree int
+	MaxTotalEntries   int
 }
 
 // reviewFreezeCompileGitTreeEntryV1 是 raw Git tree payload 的一个严格条目。
@@ -190,6 +210,24 @@ type reviewFreezeCompileGitTreeVerifierV1 struct {
 	paths       []string
 }
 
+// reviewFreezeCompileGitDirectTreeVerifierV1 直接遍历 raw bundle 的冻结 tree body。
+// cache 允许同一 tree 在 DAG 的不同已退出分支复用；active 只表示当前递归栈，用来
+// 拒绝祖先回边。body/framed/entry 计数均只对唯一 used OID 记一次。
+type reviewFreezeCompileGitDirectTreeVerifierV1 struct {
+	ctx              context.Context
+	bundle           *reviewFreezeCompileGitRawObjectBundleV1
+	budgets          reviewFreezeCompileGitDirectTreeBudgetsV1
+	cache            map[string][]reviewFreezeCompileGitTreeEntryV1
+	active           map[string]struct{}
+	used             map[string]struct{}
+	objectCount      int
+	totalBodyBytes   int64
+	totalFramedBytes int64
+	totalEntries     int
+	maxDepth         int
+	paths            []string
+}
+
 // reviewFreezeVerifyCompileGitBaseTreeMembershipV1 使用生产候选默认预算验证 BaseTree。
 func reviewFreezeVerifyCompileGitBaseTreeMembershipV1(
 	ctx context.Context,
@@ -212,6 +250,105 @@ func reviewFreezeVerifyCompileGitBaseTreeMembershipV1(
 			MaxEntries:     reviewFreezeCompileGitTreeMaxEntriesV1,
 		},
 	)
+}
+
+// reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleV1 直接消费 resolver 已冻结的
+// tree body。该入口不创建 List/Open view，不读取 Reader，也不重算 body digest、Git OID
+// 或 transport frame；这些外部边界只归 raw resolver。tree 层只执行目标 membership、
+// raw tree grammar、DAG/cycle 与 used-object 语义预算。
+func reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleV1(
+	ctx context.Context,
+	snapshotRaw []byte,
+	statement reviewFreezeValidatorCompileAttestationV1,
+	leaves *reviewFreezeVerifiedCompileRepositoryLeafBundleV1,
+	bundle *reviewFreezeCompileGitRawObjectBundleV1,
+) (*reviewFreezeVerifiedCompileGitBaseTreeV1, error) {
+	return reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleWithBudgetsV1(
+		ctx,
+		snapshotRaw,
+		statement,
+		leaves,
+		bundle,
+		reviewFreezeCompileGitDirectDefaultBudgetsV1(),
+	)
+}
+
+// reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleWithBudgetsV1 是 direct 入口的
+// 可测核心。extra bundle object 故意不在这里拒绝；commit/tree union exact-set 由更高层
+// admission 统一判断，tree semantic 层只返回实际 Used ObjectIDs。
+func reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleWithBudgetsV1(
+	ctx context.Context,
+	snapshotRaw []byte,
+	statement reviewFreezeValidatorCompileAttestationV1,
+	leaves *reviewFreezeVerifiedCompileRepositoryLeafBundleV1,
+	bundle *reviewFreezeCompileGitRawObjectBundleV1,
+	budgets reviewFreezeCompileGitDirectTreeBudgetsV1,
+) (*reviewFreezeVerifiedCompileGitBaseTreeV1, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("git direct base tree context 不能为空")
+	}
+	if leaves == nil {
+		return nil, fmt.Errorf("git direct base tree verified repository leaves 不能为空")
+	}
+	if bundle == nil {
+		return nil, fmt.Errorf("git direct base tree raw bundle 不能为空")
+	}
+	if budgets.MaxTreeBodyBytes <= 0 || budgets.MaxTotalBodyBytes <= 0 || budgets.MaxObjects <= 0 || budgets.MaxDepth < 0 || budgets.MaxEntriesPerTree <= 0 || budgets.MaxTotalEntries <= 0 {
+		return nil, fmt.Errorf("git direct base tree budgets 非法=%+v", budgets)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("git direct base tree context: %w", err)
+	}
+	if !reviewFreezeGitSHA1V1.MatchString(statement.Subject.BaseTreeSHA) || statement.Subject.BaseTreeSHA == strings.Repeat("0", 40) {
+		return nil, fmt.Errorf("git direct base tree SHA-1 非法=%q", statement.Subject.BaseTreeSHA)
+	}
+
+	expected, _, err := reviewFreezeDeriveCompileRepositoryLeavesV1(snapshotRaw, statement)
+	if err != nil {
+		return nil, fmt.Errorf("git direct base tree strict inputs: %w", err)
+	}
+	if err := reviewFreezeValidateCompileGitLeafBundleBindingV1(expected, leaves); err != nil {
+		return nil, err
+	}
+	targets, err := reviewFreezeBuildCompileGitTargetTrieV1(expected)
+	if err != nil {
+		return nil, err
+	}
+	verifier := &reviewFreezeCompileGitDirectTreeVerifierV1{
+		ctx:     ctx,
+		bundle:  bundle,
+		budgets: budgets,
+		cache:   make(map[string][]reviewFreezeCompileGitTreeEntryV1),
+		active:  make(map[string]struct{}),
+		used:    make(map[string]struct{}),
+		paths:   make([]string, 0, len(expected)),
+	}
+	if err := verifier.walk(statement.Subject.BaseTreeSHA, targets, "", 0); err != nil {
+		return nil, err
+	}
+	wantPaths := make([]string, len(expected))
+	for index := range expected {
+		wantPaths[index] = expected[index].Path
+	}
+	sort.Strings(verifier.paths)
+	if !reflect.DeepEqual(verifier.paths, wantPaths) {
+		return nil, fmt.Errorf("git direct base tree verified path exact-set=%v want=%v", verifier.paths, wantPaths)
+	}
+	objectIDs := make([]string, 0, len(verifier.used))
+	for objectID := range verifier.used {
+		objectIDs = append(objectIDs, objectID)
+	}
+	sort.Strings(objectIDs)
+	return &reviewFreezeVerifiedCompileGitBaseTreeV1{
+		baseTreeSHA: statement.Subject.BaseTreeSHA,
+		paths:       append([]string(nil), verifier.paths...),
+		objectIDs:   objectIDs,
+		objectCount: verifier.objectCount,
+		// TotalBytes 保持 legacy 的 canonical framed 统计口径；语义预算使用
+		// totalBodyBytes，绝不把派生 header 字节挤占 8 MiB tree body 上限。
+		totalBytes: verifier.totalFramedBytes,
+		maxDepth:   verifier.maxDepth,
+	}, nil
 }
 
 // reviewFreezeVerifyCompileGitBaseTreeMembershipWithBudgetsV1 先完成 strict snapshot 与
@@ -403,6 +540,124 @@ func (verifier *reviewFreezeCompileGitTreeVerifierV1) listExactDescriptors(rootO
 		return fmt.Errorf("git tree descriptor missing root OID=%q", rootObjectID)
 	}
 	return nil
+}
+
+// walk 执行 direct raw-bundle 的统一目标遍历。active 只覆盖当前递归调用栈，因此
+// ancestor 回边失败关闭，而已经退出的相同 OID 可从 cache 在另一 DAG 分支复用。
+func (verifier *reviewFreezeCompileGitDirectTreeVerifierV1) walk(treeID string, targets *reviewFreezeCompileGitTargetNodeV1, prefix string, depth int) error {
+	if err := verifier.ctx.Err(); err != nil {
+		return fmt.Errorf("git direct base tree context before walk prefix=%q: %w", prefix, err)
+	}
+	if depth > verifier.budgets.MaxDepth {
+		return fmt.Errorf("git direct base tree depth budget prefix=%q depth=%d limit=%d", prefix, depth, verifier.budgets.MaxDepth)
+	}
+	if _, cyclic := verifier.active[treeID]; cyclic {
+		return fmt.Errorf("git direct base tree active recursion cycle prefix=%q object=%s", prefix, treeID)
+	}
+	entries, err := verifier.loadTree(treeID)
+	if err != nil {
+		return fmt.Errorf("git direct base tree load prefix=%q object=%s: %w", prefix, treeID, err)
+	}
+	if depth > verifier.maxDepth {
+		verifier.maxDepth = depth
+	}
+	verifier.active[treeID] = struct{}{}
+	defer delete(verifier.active, treeID)
+
+	byName := make(map[string]reviewFreezeCompileGitTreeEntryV1, len(entries))
+	for _, entry := range entries {
+		byName[entry.Name] = entry
+	}
+	targetNames := make([]string, 0, len(targets.children))
+	for name := range targets.children {
+		targetNames = append(targetNames, name)
+	}
+	sort.Strings(targetNames)
+	for _, name := range targetNames {
+		child := targets.children[name]
+		entry, exists := byName[name]
+		path := reviewFreezeCompileGitJoinPathV1(prefix, name)
+		if !exists {
+			return fmt.Errorf("git direct base tree target missing path=%q", path)
+		}
+		if child.leaf != nil {
+			if len(child.children) != 0 {
+				return fmt.Errorf("git direct base tree internal leaf/children conflict path=%q", path)
+			}
+			if entry.Mode != reviewFreezeCompileGitTreeRegularBlobModeV1 {
+				return fmt.Errorf("git direct base tree target 必须是 exact 100644 blob path=%q mode=%q", path, entry.Mode)
+			}
+			if entry.ObjectID != child.leaf.GitBlobSHA {
+				return fmt.Errorf("git direct base tree target blob drift path=%q actual=%q want=%q", path, entry.ObjectID, child.leaf.GitBlobSHA)
+			}
+			verifier.paths = append(verifier.paths, path)
+			continue
+		}
+		if entry.Mode != reviewFreezeCompileGitTreeDirectoryModeV1 {
+			return fmt.Errorf("git direct base tree target ancestor 必须是 tree path=%q mode=%q", path, entry.Mode)
+		}
+		if err := verifier.walk(entry.ObjectID, child, path, depth+1); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// loadTree 从 frozen bundle 取得一个 tree body 并执行纯语义预算/grammar。
+// 它不调用 transport accessor、不构造 frame、不重算 OID 或 body digest；同一 OID 的
+// cache 命中不重复计对象、body 或 entries 预算。
+func (verifier *reviewFreezeCompileGitDirectTreeVerifierV1) loadTree(objectID string) ([]reviewFreezeCompileGitTreeEntryV1, error) {
+	if entries, exists := verifier.cache[objectID]; exists {
+		return append([]reviewFreezeCompileGitTreeEntryV1(nil), entries...), nil
+	}
+	if verifier.objectCount >= verifier.budgets.MaxObjects {
+		return nil, fmt.Errorf("git direct tree object count budget limit=%d", verifier.budgets.MaxObjects)
+	}
+	descriptor, exists := verifier.bundle.Descriptor(objectID)
+	if !exists {
+		return nil, fmt.Errorf("git direct tree frozen object missing=%q", objectID)
+	}
+	if descriptor.Kind != "tree" {
+		return nil, fmt.Errorf("git direct tree object kind=%q want=tree object=%s", descriptor.Kind, objectID)
+	}
+	body, exists := verifier.bundle.BodyBytes(objectID)
+	if !exists {
+		return nil, fmt.Errorf("git direct tree frozen body missing=%q", objectID)
+	}
+	bodyBytes := int64(len(body))
+	if bodyBytes > verifier.budgets.MaxTreeBodyBytes {
+		return nil, fmt.Errorf("git direct tree body budget object=%s actual=%d limit=%d", objectID, bodyBytes, verifier.budgets.MaxTreeBodyBytes)
+	}
+	if bodyBytes > verifier.budgets.MaxTotalBodyBytes-verifier.totalBodyBytes {
+		return nil, fmt.Errorf("git direct tree total body budget object=%s consumed=%d actual=%d limit=%d", objectID, verifier.totalBodyBytes, bodyBytes, verifier.budgets.MaxTotalBodyBytes)
+	}
+	remainingEntries := verifier.budgets.MaxTotalEntries - verifier.totalEntries
+	entryLimit := verifier.budgets.MaxEntriesPerTree
+	entryBudgetName := "per-tree"
+	if remainingEntries < entryLimit {
+		entryLimit = remainingEntries
+		entryBudgetName = "total"
+	}
+	entries, err := reviewFreezeParseCompileGitTreePayloadBoundedV1(body, entryLimit)
+	if err != nil {
+		if errors.Is(err, errReviewFreezeCompileGitTreeEntryBudgetV1) {
+			return nil, fmt.Errorf("git direct tree %s entry budget object=%s consumed=%d limit=%d: %w", entryBudgetName, objectID, verifier.totalEntries, entryLimit, err)
+		}
+		return nil, err
+	}
+	if len(entries) > verifier.budgets.MaxEntriesPerTree {
+		return nil, fmt.Errorf("git direct tree per-tree entry budget object=%s actual=%d limit=%d", objectID, len(entries), verifier.budgets.MaxEntriesPerTree)
+	}
+	if len(entries) > verifier.budgets.MaxTotalEntries-verifier.totalEntries {
+		return nil, fmt.Errorf("git direct tree total entry budget object=%s consumed=%d actual=%d limit=%d", objectID, verifier.totalEntries, len(entries), verifier.budgets.MaxTotalEntries)
+	}
+	verifier.objectCount++
+	verifier.totalBodyBytes += bodyBytes
+	verifier.totalFramedBytes += reviewFreezeCompileGitTreeFramedSizeV1(bodyBytes)
+	verifier.totalEntries += len(entries)
+	verifier.used[objectID] = struct{}{}
+	verifier.cache[objectID] = append([]reviewFreezeCompileGitTreeEntryV1(nil), entries...)
+	return append([]reviewFreezeCompileGitTreeEntryV1(nil), entries...), nil
 }
 
 // walk 只递归目标 path 的 ancestor tree。无关条目只经过 raw Git framing、排序、
@@ -609,9 +864,21 @@ func reviewFreezeParseCompileGitTreeObjectV1(objectID string, raw []byte) ([]rev
 // `<mode> <name>\x00<20-byte-object-id>`。Git path 是 raw bytes，不要求 UTF-8，
 // 也不把反斜杠、控制字符、dot entry 或大小写并存误判为 object framing 非法。
 func reviewFreezeParseCompileGitTreePayloadV1(payload []byte) ([]reviewFreezeCompileGitTreeEntryV1, error) {
+	return reviewFreezeParseCompileGitTreePayloadBoundedV1(payload, int(^uint(0)>>1))
+}
+
+// reviewFreezeParseCompileGitTreePayloadBoundedV1 在解析第 maxEntries+1 个 entry 的任何
+// append/allocation 前失败，避免“先完整 materialize 再检查”让 entry 预算失去防线意义。
+func reviewFreezeParseCompileGitTreePayloadBoundedV1(payload []byte, maxEntries int) ([]reviewFreezeCompileGitTreeEntryV1, error) {
+	if maxEntries < 0 {
+		return nil, fmt.Errorf("git tree parser max entries 非法=%d", maxEntries)
+	}
 	entries := make([]reviewFreezeCompileGitTreeEntryV1, 0)
 	seen := make(map[string]struct{})
 	for offset := 0; offset < len(payload); {
+		if len(entries) >= maxEntries {
+			return nil, fmt.Errorf("%w limit=%d", errReviewFreezeCompileGitTreeEntryBudgetV1, maxEntries)
+		}
 		spaceRelative := bytes.IndexByte(payload[offset:], ' ')
 		if spaceRelative <= 0 {
 			return nil, fmt.Errorf("git tree entry mode/name 分隔非法 offset=%d", offset)
@@ -890,6 +1157,88 @@ type reviewFreezeCompileGitBaseTreeFixtureV1 struct {
 	Statement   reviewFreezeValidatorCompileAttestationV1
 	Leaves      *reviewFreezeVerifiedCompileRepositoryLeafBundleV1
 	Objects     map[string][]byte
+}
+
+// reviewFreezeCompileGitDirectRawBundleFixtureV1 先让共享 resolver 完成唯一一次外部
+// List/Open/OID/digest/body 预算，再把冻结 bundle 交给 direct semantic 测试。
+func reviewFreezeCompileGitDirectRawBundleFixtureV1(
+	t *testing.T,
+	fixture reviewFreezeCompileGitBaseTreeFixtureV1,
+	extraTreeBodies ...[]byte,
+) (*reviewFreezeCompileGitRawObjectBundleV1, *reviewFreezeCompileGitRawLoaderFixtureV1) {
+	t.Helper()
+	objects := []reviewFreezeCompileGitRawFixtureObjectV1{{
+		Kind: "commit",
+		Body: reviewFreezeCompileCommitPayloadV1(fixture.Statement.Subject.BaseTreeSHA),
+	}}
+	for _, frame := range fixture.Objects {
+		nul := bytes.IndexByte(frame, 0)
+		if nul <= 0 || !bytes.HasPrefix(frame[:nul], []byte("tree ")) {
+			t.Fatalf("direct raw fixture tree frame 非法 header=%q", frame[:max(nul, 0)])
+		}
+		objects = append(objects, reviewFreezeCompileGitRawFixtureObjectV1{
+			Kind: "tree",
+			Body: append([]byte(nil), frame[nul+1:]...),
+		})
+	}
+	for _, body := range extraTreeBodies {
+		objects = append(objects, reviewFreezeCompileGitRawFixtureObjectV1{Kind: "tree", Body: append([]byte(nil), body...)})
+	}
+	loader := reviewFreezeCompileGitRawLoaderFixtureNewV1(objects)
+	bundle, err := reviewFreezeResolveCompileGitRawObjectBundleV1(context.Background(), loader)
+	if err != nil {
+		t.Fatalf("resolve direct raw bundle fixture: %v", err)
+	}
+	return bundle, loader
+}
+
+// reviewFreezeCompileGitDirectCloneBundleWithBodyV1 只用于 active-stack 对抗：它克隆
+// resolver 产物并替换一个 frozen body，同时保持对象 ID 不变，以隔离验证 semantic
+// traversal 即使面对被破坏的内部不变量也不会因 cache 掩盖 recursion cycle。
+func reviewFreezeCompileGitDirectCloneBundleWithBodyV1(
+	t *testing.T,
+	bundle *reviewFreezeCompileGitRawObjectBundleV1,
+	objectID string,
+	body []byte,
+) *reviewFreezeCompileGitRawObjectBundleV1 {
+	t.Helper()
+	cloned := &reviewFreezeCompileGitRawObjectBundleV1{
+		descriptors: bundle.Descriptors(),
+		objects:     make(map[string]reviewFreezeCompileGitRawFrozenObjectV1, len(bundle.ObjectIDs())),
+	}
+	for _, descriptor := range cloned.descriptors {
+		originalBody, exists := bundle.BodyBytes(descriptor.ObjectID)
+		if !exists {
+			t.Fatalf("clone direct raw bundle body missing=%s", descriptor.ObjectID)
+		}
+		if descriptor.ObjectID == objectID {
+			originalBody = append([]byte(nil), body...)
+			descriptor.BodySizeBytes = int64(len(originalBody))
+			descriptor.BodySHA256 = reviewFreezeSHA256V1(originalBody)
+		}
+		cloned.objects[descriptor.ObjectID] = reviewFreezeCompileGitRawFrozenObjectV1{
+			descriptor: descriptor,
+			body:       string(originalBody),
+		}
+		for index := range cloned.descriptors {
+			if cloned.descriptors[index].ObjectID == descriptor.ObjectID {
+				cloned.descriptors[index] = descriptor
+				break
+			}
+		}
+	}
+	return cloned
+}
+
+func reviewFreezeCompileGitDirectDefaultBudgetsV1() reviewFreezeCompileGitDirectTreeBudgetsV1 {
+	return reviewFreezeCompileGitDirectTreeBudgetsV1{
+		MaxTreeBodyBytes:  reviewFreezeCompileGitDirectMaxTreeBodyBytesV1,
+		MaxTotalBodyBytes: reviewFreezeCompileGitDirectMaxTotalBodyBytesV1,
+		MaxObjects:        reviewFreezeCompileGitDirectMaxObjectsV1,
+		MaxDepth:          reviewFreezeCompileGitDirectMaxDepthV1,
+		MaxEntriesPerTree: reviewFreezeCompileGitDirectMaxEntriesPerTreeV1,
+		MaxTotalEntries:   reviewFreezeCompileGitDirectMaxTotalEntriesV1,
+	}
 }
 
 // reviewFreezeCompileGitBindBaseV1 只重绑 statement/snapshot 的 BaseCommit/BaseTree 和
@@ -1245,6 +1594,208 @@ func TestW2ReviewFreezeCompileGitBaseTreeDeterministicOpenOrderV1(t *testing.T) 
 	}
 	if len(orders[0]) == 0 || !reflect.DeepEqual(orders[0], orders[1]) {
 		t.Fatalf("CAS Open order 不确定 first=%v second=%v", orders[0], orders[1])
+	}
+}
+
+func TestW2ReviewFreezeCompileGitBaseTreeDirectRawBundleV1(t *testing.T) {
+	fixture := reviewFreezeCompileGitControlledFixtureV1(t)
+	bundle, rawLoader := reviewFreezeCompileGitDirectRawBundleFixtureV1(t, fixture)
+	openSnapshot := rawLoader.openCallSnapshot()
+	verified, err := reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleV1(
+		context.Background(), fixture.SnapshotRaw, fixture.Statement, fixture.Leaves, bundle,
+	)
+	if err != nil {
+		t.Fatalf("direct raw-bundle base tree rejected: %v", err)
+	}
+	if !reviewFreezeCompileGitRawEqualStringIntMapV1(openSnapshot, rawLoader.openCallSnapshot()) {
+		t.Fatal("direct tree semantic 回访了 raw resolver 外部 CAS")
+	}
+	wantObjectIDs := make([]string, 0, len(fixture.Objects))
+	wantFramedBytes := int64(0)
+	for objectID, frame := range fixture.Objects {
+		wantObjectIDs = append(wantObjectIDs, objectID)
+		wantFramedBytes += int64(len(frame))
+	}
+	sort.Strings(wantObjectIDs)
+	if verified.BaseTreeSHA() != fixture.Statement.Subject.BaseTreeSHA ||
+		!reflect.DeepEqual(verified.Paths(), reviewFreezeCompileInputSnapshotRepositoryPathsV1()) ||
+		!reflect.DeepEqual(verified.ObjectIDs(), wantObjectIDs) ||
+		verified.TotalBytes() != wantFramedBytes || verified.ObjectCount() != len(wantObjectIDs) {
+		t.Fatalf("direct tree result drift sha=%s paths=%v objects=%v/%d bytes=%d wantObjects=%v bytes=%d", verified.BaseTreeSHA(), verified.Paths(), verified.ObjectIDs(), verified.ObjectCount(), verified.TotalBytes(), wantObjectIDs, wantFramedBytes)
+	}
+	scope := verified.Scope()
+	if !scope.BaseTreeMembership || scope.BaseCommitBinding || scope.CommitAncestry || scope.GitHubAuthority || scope.FormalFreezeStatus != reviewFreezeCompileGitFormalFreezeNotProvenV1 {
+		t.Fatalf("direct tree scope overclaim=%+v", scope)
+	}
+
+	// bundle/result accessor 都返回副本；修改调用方视图不会污染已形成的语义结论。
+	body, exists := bundle.BodyBytes(fixture.Statement.Subject.BaseTreeSHA)
+	if !exists || len(body) == 0 {
+		t.Fatal("direct root body fixture missing")
+	}
+	body[0] ^= 0xff
+	paths := verified.Paths()
+	paths[0] = "forged"
+	objectIDs := verified.ObjectIDs()
+	objectIDs[0] = strings.Repeat("f", 40)
+	scope.OpenGaps[0] = "forged"
+	if !reflect.DeepEqual(verified.Paths(), reviewFreezeCompileInputSnapshotRepositoryPathsV1()) ||
+		!reflect.DeepEqual(verified.ObjectIDs(), wantObjectIDs) ||
+		verified.Scope().OpenGaps[0] == "forged" {
+		t.Fatal("direct tree result/bundle 不是 immutable projection")
+	}
+}
+
+func TestW2ReviewFreezeCompileGitBaseTreeDirectAllowsExtraBundleObjectV1(t *testing.T) {
+	fixture := reviewFreezeCompileGitControlledFixtureV1(t)
+	extraBody := []byte{}
+	extraFrame := reviewFreezeCompileGitRawCanonicalFrameV1("tree", extraBody)
+	extraDigest := sha1.Sum(extraFrame)
+	extraObjectID := hex.EncodeToString(extraDigest[:])
+	bundle, _ := reviewFreezeCompileGitDirectRawBundleFixtureV1(t, fixture, extraBody)
+	verified, err := reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleV1(
+		context.Background(), fixture.SnapshotRaw, fixture.Statement, fixture.Leaves, bundle,
+	)
+	if err != nil {
+		t.Fatalf("direct tree 不应接管 union extra-object policy: %v", err)
+	}
+	usedObjectIDs := verified.ObjectIDs()
+	usedIndex := sort.SearchStrings(usedObjectIDs, extraObjectID)
+	if usedIndex < len(usedObjectIDs) && usedObjectIDs[usedIndex] == extraObjectID {
+		t.Fatalf("extra bundle tree 被错误标记为 used=%s", extraObjectID)
+	}
+	if _, listed := bundle.Descriptor(extraObjectID); !listed {
+		t.Fatalf("extra bundle fixture 未包含 object=%s", extraObjectID)
+	}
+}
+
+func TestW2ReviewFreezeCompileGitBaseTreeDirectBudgetsV1(t *testing.T) {
+	fixture := reviewFreezeCompileGitControlledFixtureV1(t)
+	bundle, _ := reviewFreezeCompileGitDirectRawBundleFixtureV1(t, fixture)
+	rootBody, exists := bundle.BodyBytes(fixture.Statement.Subject.BaseTreeSHA)
+	if !exists || len(rootBody) < 2 {
+		t.Fatal("direct budget root body fixture missing")
+	}
+	tests := []struct {
+		name   string
+		mutate func(*reviewFreezeCompileGitDirectTreeBudgetsV1)
+		want   string
+	}{
+		{name: "per tree body", mutate: func(b *reviewFreezeCompileGitDirectTreeBudgetsV1) { b.MaxTreeBodyBytes = int64(len(rootBody) - 1) }, want: "tree body budget"},
+		{name: "total body", mutate: func(b *reviewFreezeCompileGitDirectTreeBudgetsV1) { b.MaxTotalBodyBytes = int64(len(rootBody)) }, want: "total body budget"},
+		{name: "object count", mutate: func(b *reviewFreezeCompileGitDirectTreeBudgetsV1) { b.MaxObjects = 1 }, want: "object count budget"},
+		{name: "depth", mutate: func(b *reviewFreezeCompileGitDirectTreeBudgetsV1) { b.MaxDepth = 0 }, want: "depth budget"},
+		{name: "per tree entries allocation before", mutate: func(b *reviewFreezeCompileGitDirectTreeBudgetsV1) { b.MaxEntriesPerTree = 1 }, want: "per-tree entry budget"},
+		{name: "total entries allocation before", mutate: func(b *reviewFreezeCompileGitDirectTreeBudgetsV1) { b.MaxTotalEntries = 2 }, want: "total entry budget"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			budgets := reviewFreezeCompileGitDirectDefaultBudgetsV1()
+			test.mutate(&budgets)
+			_, err := reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleWithBudgetsV1(
+				context.Background(), fixture.SnapshotRaw, fixture.Statement, fixture.Leaves, bundle, budgets,
+			)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("direct budget error=%v want contains %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestW2ReviewFreezeCompileGitBaseTreeDirectRejectsActiveStackCycleV1(t *testing.T) {
+	fixture := reviewFreezeCompileGitControlledFixtureV1(t)
+	bundle, _ := reviewFreezeCompileGitDirectRawBundleFixtureV1(t, fixture)
+	rootID := fixture.Statement.Subject.BaseTreeSHA
+	rootBody, exists := bundle.BodyBytes(rootID)
+	if !exists {
+		t.Fatal("cycle root body fixture missing")
+	}
+	entries, err := reviewFreezeParseCompileGitTreePayloadV1(rootBody)
+	if err != nil {
+		t.Fatalf("parse cycle root fixture: %v", err)
+	}
+	entries = reviewFreezeCompileGitMutateEntryV1(t, entries, "agent", func(entry *reviewFreezeCompileGitTreeEntryV1) {
+		entry.ObjectID = rootID
+	})
+	cyclicBundle := reviewFreezeCompileGitDirectCloneBundleWithBodyV1(t, bundle, rootID, reviewFreezeEncodeCompileGitTreePayloadV1(entries))
+	_, err = reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleV1(
+		context.Background(), fixture.SnapshotRaw, fixture.Statement, fixture.Leaves, cyclicBundle,
+	)
+	if err == nil || !strings.Contains(err.Error(), "active recursion cycle") {
+		t.Fatalf("direct active-stack cycle error=%v", err)
+	}
+}
+
+func TestW2ReviewFreezeCompileGitBaseTreeDirectAllowsDAGCacheReuseV1(t *testing.T) {
+	fixture := reviewFreezeCompileGitControlledFixtureV1(t)
+	rootID := fixture.Statement.Subject.BaseTreeSHA
+	rootEntries, err := reviewFreezeParseCompileGitTreeObjectV1(rootID, fixture.Objects[rootID])
+	if err != nil {
+		t.Fatalf("parse DAG root fixture: %v", err)
+	}
+	entryByName := make(map[string]reviewFreezeCompileGitTreeEntryV1, len(rootEntries))
+	for _, entry := range rootEntries {
+		entryByName[entry.Name] = entry
+	}
+	agentEntry, agentExists := entryByName["agent"]
+	docsEntry, docsExists := entryByName["docs"]
+	if !agentExists || !docsExists {
+		t.Fatalf("DAG root fixture missing agent/docs=%v", rootEntries)
+	}
+	agentEntries, err := reviewFreezeParseCompileGitTreeObjectV1(agentEntry.ObjectID, fixture.Objects[agentEntry.ObjectID])
+	if err != nil {
+		t.Fatalf("parse DAG agent fixture: %v", err)
+	}
+	docsEntries, err := reviewFreezeParseCompileGitTreeObjectV1(docsEntry.ObjectID, fixture.Objects[docsEntry.ObjectID])
+	if err != nil {
+		t.Fatalf("parse DAG docs fixture: %v", err)
+	}
+	sharedEntries := append(append([]reviewFreezeCompileGitTreeEntryV1(nil), agentEntries...), docsEntries...)
+	reviewFreezeCompileGitSortEntriesV1(sharedEntries)
+	sharedID, sharedFrame := reviewFreezeCompileGitTreeFrameV1(reviewFreezeEncodeCompileGitTreePayloadV1(sharedEntries))
+	for index := range rootEntries {
+		if rootEntries[index].Name == "agent" || rootEntries[index].Name == "docs" {
+			rootEntries[index].ObjectID = sharedID
+		}
+	}
+	newRootID, newRootFrame := reviewFreezeCompileGitTreeFrameV1(reviewFreezeEncodeCompileGitTreePayloadV1(rootEntries))
+	objects := make(map[string][]byte, len(fixture.Objects)+2)
+	for objectID, frame := range fixture.Objects {
+		objects[objectID] = append([]byte(nil), frame...)
+	}
+	objects[sharedID] = sharedFrame
+	objects[newRootID] = newRootFrame
+	dagFixture := reviewFreezeCompileGitRebindRootV1(t, fixture, newRootID)
+	dagFixture.Objects = objects
+	bundle, _ := reviewFreezeCompileGitDirectRawBundleFixtureV1(t, dagFixture)
+	verified, err := reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleV1(
+		context.Background(), dagFixture.SnapshotRaw, dagFixture.Statement, dagFixture.Leaves, bundle,
+	)
+	if err != nil {
+		t.Fatalf("valid direct DAG rejected: %v", err)
+	}
+	sharedUses := 0
+	uniqueBodyBytes := int64(0)
+	for _, objectID := range verified.ObjectIDs() {
+		if objectID == sharedID {
+			sharedUses++
+		}
+		body, exists := bundle.BodyBytes(objectID)
+		if !exists {
+			t.Fatalf("DAG used body missing=%s", objectID)
+		}
+		uniqueBodyBytes += int64(len(body))
+	}
+	if sharedUses != 1 {
+		t.Fatalf("DAG shared tree used IDs count=%d want=1 ids=%v", sharedUses, verified.ObjectIDs())
+	}
+	budgets := reviewFreezeCompileGitDirectDefaultBudgetsV1()
+	budgets.MaxTotalBodyBytes = uniqueBodyBytes
+	budgets.MaxObjects = verified.ObjectCount()
+	if _, err := reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleWithBudgetsV1(
+		context.Background(), dagFixture.SnapshotRaw, dagFixture.Statement, dagFixture.Leaves, bundle, budgets,
+	); err != nil {
+		t.Fatalf("DAG cache 对 shared tree 重复计 body/object 预算: %v", err)
 	}
 }
 

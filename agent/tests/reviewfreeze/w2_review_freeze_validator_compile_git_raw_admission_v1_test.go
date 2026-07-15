@@ -218,8 +218,8 @@ func reviewFreezeAdmitCompileGitRawV1(
 }
 
 // reviewFreezeAdmitCompileGitRawComponentsV1 先让 prior admission 完成 repository/module
-// 单次读取，再让共享 raw resolver 恰好 Resolve 一次。commit/tree verifier 只消费 bundle
-// 的只读 view，不回访底层 CAS；任一步失败都不返回部分 evidence。
+// 单次读取，再让共享 raw resolver 恰好 Resolve 一次。commit/tree verifier 直接消费
+// bundle 的 immutable body 副本，不回访底层 CAS；任一步失败都不返回部分 evidence。
 func reviewFreezeAdmitCompileGitRawComponentsV1(
 	ctx context.Context,
 	verified *reviewFreezeVerifiedAttestationMaterialBundleV1,
@@ -251,16 +251,16 @@ func reviewFreezeAdmitCompileGitRawComponentsV1(
 	if err != nil {
 		return nil, fmt.Errorf("compile git raw strict statement: %w", err)
 	}
-	commitBinding, err := reviewFreezeVerifyCompileCommitObjectBindingV1(ctx, statement, rawBundle.NewCommitObjectLoaderView())
+	commitBinding, err := reviewFreezeVerifyCompileCommitObjectBindingFromRawBundleV1(ctx, statement, rawBundle)
 	if err != nil {
 		return nil, fmt.Errorf("compile git raw commit binding: %w", err)
 	}
-	treeMembership, err := reviewFreezeVerifyCompileGitBaseTreeMembershipV1(
+	treeMembership, err := reviewFreezeVerifyCompileGitBaseTreeMembershipFromRawBundleV1(
 		ctx,
 		leafComponents.SnapshotRaw(),
 		statement,
 		leafComponents.RepositoryLeaves(),
-		rawBundle.NewTreeObjectLoaderView(),
+		rawBundle,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("compile git raw tree membership: %w", err)
@@ -648,7 +648,7 @@ func reviewFreezeNewCompileGitRawAdmissionFixtureV1(t *testing.T) reviewFreezeCo
 
 // TestW2ReviewFreezeCompileGitRawAdmissionV1HEADTreeCleanWorktreeEndToEnd 证明当前 HEAD
 // commit/tree 与 worktree 的 14 个目标 leaf clean gate 可以形成组合结论。它不是脱离
-// worktree 的纯 HEAD golden；view 消费也不会导致底层 CAS 二次 Open。
+// worktree 的纯 HEAD golden；direct consumer 也不会导致底层 CAS 二次 Open。
 func TestW2ReviewFreezeCompileGitRawAdmissionV1HEADTreeCleanWorktreeEndToEnd(t *testing.T) {
 	fixture := reviewFreezeNewCompileGitRawAdmissionFixtureV1(t)
 	repositoryLoader := reviewFreezeCompileRepositoryLeafLoaderFixtureNewV1(fixture.repository)
