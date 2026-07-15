@@ -4,7 +4,7 @@
 >
 > 审计日期：2026-07-16
 >
-> 事实基线：`codex/w2-r04-consumption-audit@c450544f`
+> 事实基线：`codex/w2-r04-consumption-audit@3fcef58b`
 >
 > 结论边界：本文只把分散的 ADR、Review Freeze、Billing、Approval/Consumption 与 Structured Smoke 未决项整理成可逐项签核的决策包。本文不是 Owner 批准、不是机器 Review Freeze、不是 trust root，也不授权生产 Go、SQL Migration、IDL、生成代码、Graph、Runner、Billing、Approval、A2UI 或 Harness 实现。
 
@@ -12,7 +12,7 @@
 
 P4 当前只做四件事：
 
-1. 把 `W2-ADR-001/002/005/008/010/011` 与 `W2-R00/R01/R02/R03/R04` 的待决问题缩减为明确选项；
+1. 把 `W2-ADR-001/002/003/004/005/008/010/011` 与 `W2-R00/R01/R02/R03/R04` 的待决问题缩减为明确选项；
 2. 给出首切计费授权模式、Activation Approval/Consumption 字段映射和生产 projection Owner 的推荐候选；
 3. 单独列出 `W2-ADR-009` 的七方批准、版本化 trust root 与原子 unlock 前置；
 4. 固定批准后的最短实施顺序，使 Owner 可以看清每项批准真正解锁什么、仍不解锁什么。
@@ -91,7 +91,7 @@ sha256=c673d57d36fabd6fb0eae05b9890a6c8fd7a95f0c877e9b2aa1e06531ba397ed
 
 UI 源仍与 baseline 一致。API 源漂移意味着 v1 不能再声明当前 parity/closure；Test Owner 必须决定版本化 baseline refresh 的 exact-set，并由七方重新审阅。禁止静默修改已绑定 v1。
 
-## 3. 六项 ADR 的决策 ballot
+## 3. 八项 ADR 的决策 ballot
 
 本节“推荐接受”只是建议的 ballot 默认项，只有正式 Owner authority 在同一候选提交上验证通过后才成为 Accepted。
 
@@ -127,7 +127,19 @@ UI 源仍与 baseline 一致。API 源漂移意味着 v1 不能再声明当前 p
 - schema/version 升级规则、正反向 golden vectors 和跨 Module 兼容矩阵；
 - exact-version 与“同主版本忽略未知可选字段”只能保留一个正式口径。当前推荐 R01 v1 exact-version、未知字段失败关闭。
 
-### 3.3 ADR-005：首切计费授权唯一模式
+### 3.3 ADR-003：Activation command identity
+
+**推荐接受：** Activation 的公开 Command/Query 只暴露 `tr:<child_receipt_id>:<ref_slot>:v1`；`approval_id + decision_version` 不再构成第二套公开幂等身份。Approval version 必须拆成 presented/resulting；Business 领域唯一约束 `(candidate_id, decision_id, decision_action)` 只作同一业务事实的 backstop，不能成为第二个公开 command key。
+
+**批准前必须补齐：** R01 `approval_consumption` slot 的 Receipt/segment scope 与 ordinal、R03/R04 child Receipt identity、Business Command Receipt/IDL、同键重放/异键同资源冲突和 Unknown Outcome Query。当前只记录推荐候选，不得据此创建 Activation Handler 或 Migration。
+
+### 3.4 ADR-004：Consumption authority Query
+
+**推荐接受：** v1 由 Business 通过服务认证的 Agent Query 校验 Approval/Decision/Consumption 权威事实；同一信任域内不提前引入签名信封与 Key Rotation。离线消费或跨信任域出现后再以新版本评审签名方案，不能把 test-only unsigned Core 当作生产授权。
+
+**批准前必须补齐：** 双向 RPC 依赖、调用身份与 scope、Query exact schema、NOT_FOUND/late commit、超时/熔断/重放、权限审计，以及 child 文档中签名/Key Rotation 目标语义的统一 disposition。
+
+### 3.5 ADR-005：首切计费授权唯一模式
 
 **推荐接受 `authorization_mode=preauthorized`：**
 
@@ -143,19 +155,19 @@ UI 源仍与 baseline 一致。API 源漂移意味着 v1 不能再声明当前 p
 
 **仍需关闭 `BILL-OPEN-001`～`BILL-OPEN-012`：** primary ordinal、授权模式、currency、policy cap/scope/暂停、Price Config↔Model Config、Provider 幂等/Query、ModelReceipt、Skill attribution、时钟、W4 reversal 边界、Prepare/Finalize ref slots 与 `authority_outcome` 映射。`BILL-OPEN-005` 必须先补 Owner。
 
-### 3.4 ADR-008：契约 evaluator 进入生产入口
+### 3.6 ADR-008：契约 evaluator 进入生产入口
 
 **推荐接受：** 相应 Gate Approved 后，把 canonicalizer、validator 和状态迁移放入生产包；契约测试直接调用生产入口；跨 Module 只共享 IDL/golden vectors，不共享 `internal` Go 包，也不保留平行 evaluator。
 
 **范围决定：** ADR-008 不应阻塞只实现 lane/lease/fence 且不提交 resolved/Receipt 的 W2-A1；它是 W2-A2 生产 execution/ref/projection 的进入门禁。Owner 必须显式接受该 A1 carve-out，或把 ADR-008 加入 A1 Gate，不能保持含糊。
 
-### 3.5 ADR-010：Feature Builder 与 bootstrap 边界
+### 3.7 ADR-010：Feature Builder 与 bootstrap 边界
 
 **推荐接受：** 每个纵切提供显式 Feature Builder，返回 Handler/Runner、生命周期与 readiness；顶层 bootstrap 只校验配置、排序启动、失败回滚和反向关闭。
 
 **范围决定：** 与 ADR-008 相同，当前长期计划把它放在 W2-A2。Owner 必须明确 A1 的最小 lane feature 装配是否也受其约束；无论选择哪一项，都必须有独立构建与关闭顺序测试。
 
-### 3.6 ADR-011：Activation 与 Billing 字段命名
+### 3.8 ADR-011：Activation 与 Billing 字段命名
 
 **推荐接受以下 exact mapping：**
 
@@ -207,6 +219,29 @@ ADR-011 批准前还必须关闭 `R01-D05`：`approval_consumption` 的 Receipt/
 | `P4-C10` | R02 Runtime/Ingress/PostgreSQL/legacy/Marker/Turn Context 的位置式 P0 引用会漂移 | 已以 `R02-D01`～`R02-D19` 建立稳定编号、Owner 候选、关闭证据和源 crosswalk；语义决定、最终 Owner exact-set 与正式 review 仍未完成 |
 | `P4-C11` | R00 Owner/Projection 映射不完整 | 补 `BILL-OPEN-005` Owner，并按范围裁决 Operations/Test/Integration 责任 |
 | `P4-C12` | Structured Smoke v1 baseline API 源摘要已漂移 | 版本化 refresh、更新 binding、七方重新审批；不改写 v1 |
+| `P4-C13` | R03/R04 的 Activation 仍混有 `approval_id + decision_version` 与 `tr:` 两套公开 identity | 裁决 ADR-003，统一公开 command key、presented/resulting version、领域唯一 backstop 与 child Receipt identity |
+| `P4-C14` | R03/R04 的 unsigned Consumption Core、认证 Query 与 child 签名/Key Rotation 目标口径冲突 | 裁决 ADR-004；v1 认证 Query 或新版本签名方案只能保留一个正式口径，并冻结 RPC/权限/审计边界 |
+
+### 5.1 P4 ballot 机械依赖映射
+
+本表只建立追踪关系，不代表对应 ADR、Gate 或 stable decision 已被接受。`R03/R04 待建` 表示该 Gate 尚无可替代 Owner 结论的稳定 decision record。
+
+| P4 缺口 | ADR 依赖 | Gate | Stable decision / open item | 进入 Owner review 前置 |
+| --- | --- | --- | --- | --- |
+| `P4-C01` | ADR-001 | R00/R01/R04 | `R01-D02`、`BILL-OPEN-012` | 冻结普通 Query 与 terminal no-effect authority 的唯一 resolve 规则 |
+| `P4-C02` | ADR-001 | R01/R02 | `R01-D05`、`R02-D09` | 冻结 root/segment/slot/observation identity、Receipt scope 与原子 terminal 拓扑 |
+| `P4-C03` | ADR-002 | R01/R02 | `R01-D01`、`R02-D19` | 提供 old→new 摘要字段表、domain/version 与 golden vectors |
+| `P4-C04` | ADR-002 | R01 | `R01-D01` | 在 exact-version 与同主版本兼容中选择唯一 v1 口径 |
+| `P4-C05` | R08 contract ballot | R01/R08 | `R01-D03` | 冻结 Approval 因果引用与 Card 展示生命周期字段责任表 |
+| `P4-C06` | Tool Registry ballot | R01 | `R01-D04` | 选择“机制+六 key”或版本化缩小 Gate |
+| `P4-C07` | ADR-001/002/008/010 | R02 | `R02-D01`～`D19`、`PG-D01`～`D08`、`TC-P01`～`P10` | 全部语义 disposition、upgrade fixture 口径、build/trust closure 后才生成 aggregate |
+| `P4-C08` | ADR-008/010 | R02 | `R02-D19` | 冻结 A1 carve-out/追加 Gate 与 Feature lifecycle 要求 |
+| `P4-C09` | R02 A1 scope | R02 | `R02-D03`、`R02-D19` | 冻结 Approval/Batch corpus 保留但 production unavailable |
+| `P4-C10` | R02 stable reference | R02 | `R02-D01`～`D19` | 稳定 ID 已建立；逐项 Owner ballot、最终 role exact-set 仍待完成 |
+| `P4-C11` | ADR-005 | R00 | `BILL-OPEN-001`～`012` | 先补 `BILL-OPEN-005` Owner，再裁决计费/Provider/时钟/Registry/Test 责任 |
+| `P4-C12` | ADR-009 | W2-S0 | 无；七方独立轮次 | Test Owner 冻结 refresh exact-set，版本化 baseline 后七方重审 |
+| `P4-C13` | ADR-003 | R01/R03/R04 | `R01-D05`；R03/R04 待建 | 冻结唯一 `tr:` identity、version 语义、Business backstop 与 child Receipt |
+| `P4-C14` | ADR-004 | R03/R04 | `R01-D02`、`R02-D18`；R03/R04 待建 | 冻结认证 Query 或新版本签名方案，以及 RPC/权限/审计 exact-set |
 
 ## 6. 最短批准与实施顺序
 
@@ -218,7 +253,7 @@ ADR-011 批准前还必须关闭 `R01-D05`：`approval_consumption` 的 Receipt/
 | 2 | ADR-005 + R00，推荐 `preauthorized`，关闭 12 个 Billing open item | `W2-B0a` Business Prepare/Get/Finalize 最小计费 | Graph、Candidate、Activation Core；若选 full approval，未批 R03 billable Core 前仍不解锁 |
 | 3 | ADR-009 七方路线选择、版本化 baseline、Candidate-Preparation/Bootstrap/Activation/Unlock | 仅在最终 compound unlock 后允许后续独立 Harness PR | Candidate/Bootstrap/Unlock PR 均不得夹带 Harness 或业务实现 |
 | 4 | R01/R02 + ADR-001/002/008/010 | `W2-A2` execution/ref/Receipt projection | Approval、Consumption、A2UI、业务 Graph |
-| 5 | ADR-011 + R03/R04 及共享 R00～R02；其余 Graph ADR | headless `plan_creation_spec`、Candidate、Activation、Continuation | A2UI 仍需 R08；其他五 Tool 仍 unavailable |
+| 5 | ADR-003/004/011 + R03/R04 及共享 R00～R02；其余 Graph ADR | headless `plan_creation_spec`、Candidate、Activation、Continuation | A2UI 仍需 R08；其他五 Tool 仍 unavailable |
 
 不能为了“更快”把多个 Gate 写成一次笼统批准。每项批准必须绑定 exact contract manifest、向量/测试 exact-set、当前 head 与有效 Owner exact-set。
 
@@ -281,10 +316,12 @@ candidate_unactivated
 
 - [ ] Agent / Business / Security / Test：接受或拒绝 ADR-001 写模型与 `not_committed` 规则；
 - [ ] Agent / Business / Security / Test：接受或拒绝 ADR-002 摘要域及 exact-version 口径；
+- [ ] Agent / Business / Security / Test：接受或拒绝 ADR-003 的唯一 `tr:` Activation identity；
+- [ ] Agent / Business / Operations / Security / Test：接受或拒绝 ADR-004 的 v1 认证 Authority Query；
 - [ ] Product / Finance / Security / Business / Agent：接受 `preauthorized`，或明确转入完整 `full_approval` 设计；
 - [ ] Agent / Operations：裁决 ADR-008/010 对 A1 的 carve-out；
 - [ ] Agent / Business / Product / Finance / Security / Test：接受或修订 ADR-011 Activation mapping；
-- [ ] R01/R02/R03/R04 语义 Owner：关闭 `P4-C01`～`P4-C12` 并推导最终 role exact-set；R02 按 `R02-D01`～`R02-D19` 逐项 ballot，不得笼统批准。
+- [ ] R01/R02/R03/R04 语义 Owner：关闭 `P4-C01`～`P4-C14` 并推导最终 role exact-set；R02 按 `R02-D01`～`R02-D19` 逐项 ballot，不得笼统批准。
 
 ### 9.2 第二轮：可验证候选
 
@@ -307,7 +344,7 @@ candidate_unactivated
 
 截至本次审计：
 
-- 六项 ADR 均只有推荐候选，没有 Accepted 记录；
+- 八项 ADR 均只有推荐候选，没有 Accepted 记录；
 - R00～R04 均为 `expansion_frozen`，没有 formal freeze 或 Owner approval；
 - ADR-009 为 `awaiting_owner_approval / candidate_unactivated / implementation_unlocked=false`；
 - 推荐首切计费模式是 `preauthorized`，但尚未被选择；

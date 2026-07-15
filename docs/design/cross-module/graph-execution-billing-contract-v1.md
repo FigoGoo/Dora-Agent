@@ -828,7 +828,7 @@ R00 的 machine-readable baseline 由 Integration Owner 在 `docs/design/agent/a
 | `BILL-OPEN-002` | 首切授权模式 | 批准低额 preauthorized | B0a/Graph topology 保持关闭 | 产品、财务、安全、Business |
 | `BILL-OPEN-003` | 积分 currency 稳定代码 | 候选 `DORA_POINT` | Price/Receipt DTO 无法 Freeze | 财务、Business |
 | `BILL-OPEN-004` | Policy cap 数值、作用域、生效/紧急暂停规则 | 版本化 Business Policy | 安全与费用上限无法验收 | 产品、财务、安全 |
-| `BILL-OPEN-005` | Price Config/Model Config 精确关联 | Business 显式映射并冻结 digest | Agent 可能提交不可核价模型 |
+| `BILL-OPEN-005` | Price Config/Model Config 精确关联 | Business 显式映射并冻结 digest | Agent 可能提交不可核价模型 | 未登记（`P4-C11` blocker；不得预填） |
 | `BILL-OPEN-006` | 真实 Provider request id/idempotency/Query 能力 | Model Sandbox 前专项评审 | post-dispatch unknown 只能 quarantine | Agent、安全、运维 |
 | `BILL-OPEN-007` | ModelReceipt terminal schema/digest | 与 R01/R02 联合冻结 | Finalize DTO 无法 Approved | Agent、Business |
 | `BILL-OPEN-008` | Skill attribution W2 最小字段 | 只存引用，收益延后 | 未来收益无法可靠回溯 | Business、Agent、财务 |
