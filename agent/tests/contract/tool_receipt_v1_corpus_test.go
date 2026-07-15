@@ -17,9 +17,17 @@ const (
 )
 
 var (
-	refSlotPattern      = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}$`)
-	dottedSchemaPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,95}$`)
-	idempotencyPattern  = regexp.MustCompile(`^[a-z0-9._:-]{1,160}$`)
+	refSlotPattern               = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}$`)
+	dottedSchemaPattern          = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,95}$`)
+	idempotencyPattern           = regexp.MustCompile(`^[a-z0-9._:-]{1,160}$`)
+	toolReceiptAllowedToolKeysV1 = [...]string{
+		"plan_creation_spec",
+		"analyze_materials",
+		"plan_storyboard",
+		"generate_media",
+		"write_prompts",
+		"assemble_output",
+	}
 )
 
 type receiptCorpusV1 struct {
@@ -207,7 +215,7 @@ func TestToolReceiptV1Corpus(t *testing.T) {
 		})
 	}
 
-	required := []string{"TR-P01-reserve-operation", "TR-P02-resolve-operation", "TR-P03-reserve-batch", "TR-P04-resolve-batch", "TR-P05-reserve-dispatch", "TR-P06-resolve-dispatch", "TR-P07-freeze-accepted", "TR-P08-replay-frozen", "TR-P09-replay-open", "TR-P10-replay-reserve-slot", "TR-P11-replay-resolve-slot", "TR-N01-request-conflict", "TR-N02-slot-conflict", "TR-N03-ref-conflict", "TR-N04-unresolved-freeze", "TR-N05-frozen-append", "TR-N06-result-digest-mismatch", "TR-N07-stale-fence", "TR-N08-version-conflict", "TR-N09-result-ref-mismatch", "TR-N10-illegal-result", "TR-N11-forged-higher-fence", "TR-N12-stale-freeze-version", "TR-N13-unpinned-slot"}
+	required := []string{"TR-P01-reserve-operation", "TR-P02-resolve-operation", "TR-P03-reserve-batch", "TR-P04-resolve-batch", "TR-P05-reserve-dispatch", "TR-P06-resolve-dispatch", "TR-P07-freeze-accepted", "TR-P08-replay-frozen", "TR-P09-replay-open", "TR-P10-replay-reserve-slot", "TR-P11-replay-resolve-slot", "TR-N01-request-conflict", "TR-N02-slot-conflict", "TR-N03-ref-conflict", "TR-N04-unresolved-freeze", "TR-N05-frozen-append", "TR-N06-result-digest-mismatch", "TR-N07-stale-fence", "TR-N08-version-conflict", "TR-N09-result-ref-mismatch", "TR-N10-illegal-result", "TR-N11-forged-higher-fence", "TR-N12-stale-freeze-version", "TR-N13-unpinned-slot", "TR-N14-replay-reserve-piggyback", "TR-N15-replay-resolve-piggyback"}
 	if len(seenCases) != len(required) {
 		t.Fatalf("transition exact-set 数量=%d want=%d", len(seenCases), len(required))
 	}
@@ -299,7 +307,7 @@ func loadReceiptCorpus(t *testing.T) receiptCorpusV1 {
 	if err := strictDecode(raw, &corpus); err != nil {
 		t.Fatalf("解析 receipt corpus: %v", err)
 	}
-	if corpus.SchemaVersion != "tool_receipt_v1_corpus.v1" || corpus.InitialState.StateID == "" || len(corpus.SlotPolicies) != 7 || len(corpus.TransitionCases) != 24 || len(corpus.EvidenceCases) != 13 {
+	if corpus.SchemaVersion != "tool_receipt_v1_corpus.v1" || corpus.InitialState.StateID == "" || len(corpus.SlotPolicies) != 7 || len(corpus.TransitionCases) != 26 || len(corpus.EvidenceCases) != 13 {
 		t.Fatalf("receipt corpus 版本或覆盖不足: version=%q slots=%d transitions=%d evidence=%d", corpus.SchemaVersion, len(corpus.SlotPolicies), len(corpus.TransitionCases), len(corpus.EvidenceCases))
 	}
 	return corpus
@@ -310,7 +318,7 @@ func buildSlotPolicies(t *testing.T, fixtures []executionSlotPolicyV1) map[strin
 	policies := make(map[string]executionSlotPolicyV1, len(fixtures))
 	lastKey := ""
 	for _, policy := range fixtures {
-		if !snakeKeyPattern.MatchString(policy.ToolKey) || !dottedSchemaPattern.MatchString(policy.DefinitionVersion) ||
+		if !toolReceiptToolKeyAllowedV1(policy.ToolKey) || !dottedSchemaPattern.MatchString(policy.DefinitionVersion) ||
 			!refSlotPattern.MatchString(policy.RefSlot) || !safePositiveIntegerV1(policy.SlotOrdinal) || !snakeKeyPattern.MatchString(policy.RefType) ||
 			!dottedSchemaPattern.MatchString(policy.RefSchemaVersion) || !dottedSchemaPattern.MatchString(policy.QueryContract) ||
 			(policy.AuthorityOwner != "agent" && policy.AuthorityOwner != "business" && policy.AuthorityOwner != "worker") ||
@@ -335,8 +343,8 @@ func applyReceiptCommandV1(before toolReceiptSnapshotV1, command receiptCommandV
 		return toolReceiptSnapshotV1{}, reject("TOOL_RECEIPT_CONFLICT", "request_semantic_digest")
 	}
 	if command.Kind == "replay" {
-		if command.ExpectedReceiptVersion != 0 || command.OwnerFence != 0 || command.Slot != nil || command.RefSlot != "" || command.AuthorityRef != nil || len(command.Result) != 0 || command.ClaimedResultDigest != "" || command.ResultRefSlots != nil {
-			return toolReceiptSnapshotV1{}, reject("INVALID_TOOL_RECEIPT", "replay command")
+		if err := validateReceiptCommandShapeV1(command); err != nil {
+			return toolReceiptSnapshotV1{}, err
 		}
 		return before, nil
 	}
@@ -368,6 +376,30 @@ func applyReceiptCommandV1(before toolReceiptSnapshotV1, command receiptCommandV
 	}
 }
 
+func validateReceiptCommandShapeV1(command receiptCommandV1) error {
+	switch command.Kind {
+	case "replay":
+		if command.ExpectedReceiptVersion != 0 || command.OwnerFence != 0 || command.Slot != nil || command.RefSlot != "" || command.AuthorityRef != nil || len(command.Result) != 0 || command.ClaimedResultDigest != "" || command.ResultRefSlots != nil {
+			return reject("INVALID_TOOL_RECEIPT", "replay command")
+		}
+	case "reserve_slot":
+		if command.Slot == nil || command.RefSlot != "" || command.AuthorityRef != nil || len(command.Result) != 0 || command.ClaimedResultDigest != "" || command.ResultRefSlots != nil {
+			return reject("INVALID_TOOL_RECEIPT", "reserve command")
+		}
+	case "resolve_slot":
+		if command.RefSlot == "" || command.AuthorityRef == nil || command.Slot != nil || len(command.Result) != 0 || command.ClaimedResultDigest != "" || command.ResultRefSlots != nil {
+			return reject("INVALID_TOOL_RECEIPT", "resolve command")
+		}
+	case "freeze":
+		if len(command.Result) == 0 || command.Slot != nil || command.RefSlot != "" || command.AuthorityRef != nil || command.ResultRefSlots == nil {
+			return reject("INVALID_TOOL_RECEIPT", "freeze command")
+		}
+	default:
+		return reject("INVALID_TOOL_RECEIPT", "command kind")
+	}
+	return nil
+}
+
 func replayExistingSlotV1(before toolReceiptSnapshotV1, command receiptCommandV1) (toolReceiptSnapshotV1, bool, error) {
 	switch command.Kind {
 	case "reserve_slot":
@@ -377,6 +409,11 @@ func replayExistingSlotV1(before toolReceiptSnapshotV1, command receiptCommandV1
 		for _, existing := range before.ExecutionSlots {
 			if existing.RefSlot != command.Slot.RefSlot {
 				continue
+			}
+			// 只有即将命中同 slot 的只读重放需要提前校验互斥字段；
+			// frozen/fence/version 等既有优先级仍由调用方保持。
+			if err := validateReceiptCommandShapeV1(command); err != nil {
+				return toolReceiptSnapshotV1{}, true, err
 			}
 			if equalJSON(existing, *command.Slot) {
 				return before, true, nil
@@ -390,6 +427,9 @@ func replayExistingSlotV1(before toolReceiptSnapshotV1, command receiptCommandV1
 		for _, existing := range before.ExecutionSlots {
 			if existing.RefSlot != command.RefSlot || existing.ResolutionState != "resolved" {
 				continue
+			}
+			if err := validateReceiptCommandShapeV1(command); err != nil {
+				return toolReceiptSnapshotV1{}, true, err
 			}
 			if equalJSON(*existing.AuthorityRef, *command.AuthorityRef) {
 				return before, true, nil
@@ -540,7 +580,7 @@ func validateToolReceiptSnapshotStructureV1(snapshot toolReceiptSnapshotV1, poli
 			return reject("INVALID_TOOL_RECEIPT", "identity")
 		}
 	}
-	if !snakeKeyPattern.MatchString(snapshot.ToolKey) || !dottedSchemaPattern.MatchString(snapshot.DefinitionVersion) || !dottedSchemaPattern.MatchString(snapshot.IntentSchemaVersion) || !digestPattern.MatchString(snapshot.RequestSemanticDigest) || !safePositiveIntegerV1(snapshot.ReceiptVersion) || !safePositiveIntegerV1(snapshot.OwnerFence) || snapshot.ExecutionSlots == nil || snapshot.ResultRefs == nil {
+	if !toolReceiptToolKeyAllowedV1(snapshot.ToolKey) || !dottedSchemaPattern.MatchString(snapshot.DefinitionVersion) || !dottedSchemaPattern.MatchString(snapshot.IntentSchemaVersion) || !digestPattern.MatchString(snapshot.RequestSemanticDigest) || !safePositiveIntegerV1(snapshot.ReceiptVersion) || !safePositiveIntegerV1(snapshot.OwnerFence) || snapshot.ExecutionSlots == nil || snapshot.ResultRefs == nil {
 		return reject("INVALID_TOOL_RECEIPT", "base fields")
 	}
 	if snapshot.WriteState != "open" && snapshot.WriteState != "frozen" {
@@ -641,6 +681,15 @@ func executionRefDigestV1(snapshot toolReceiptSnapshotV1, slot executionSlotV1, 
 
 func slotPolicyKey(toolKey, definitionVersion, refSlot string) string {
 	return toolKey + "\x00" + definitionVersion + "\x00" + refSlot
+}
+
+func toolReceiptToolKeyAllowedV1(toolKey string) bool {
+	for _, allowed := range toolReceiptAllowedToolKeysV1 {
+		if toolKey == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 func slotMatchesPolicy(slot executionSlotV1, policy executionSlotPolicyV1) bool {

@@ -14,6 +14,9 @@ func reviewFreezeValidateGateTransitionV1(base, head reviewFreezeGateV1) error {
 	if base.Gate != head.Gate {
 		return fmt.Errorf("gate identity changed from %q to %q", base.Gate, head.Gate)
 	}
+	if err := reviewFreezeValidateRequiredOwnerRolesTransitionV1(base, head); err != nil {
+		return err
+	}
 
 	switch base.Status {
 	case "expansion_frozen":
@@ -63,6 +66,20 @@ func reviewFreezeValidateGateTransitionV1(base, head reviewFreezeGateV1) error {
 	default:
 		return fmt.Errorf("%s base status 非法=%q", base.Gate, base.Status)
 	}
+}
+
+// reviewFreezeValidateRequiredOwnerRolesTransitionV1 允许扩展冻结阶段修正受影响 Owner；候选送审后或正式 authority 形成后禁止顺带换签字集合。
+func reviewFreezeValidateRequiredOwnerRolesTransitionV1(base, head reviewFreezeGateV1) error {
+	if reflect.DeepEqual(base.RequiredOwnerRoles, head.RequiredOwnerRoles) {
+		return nil
+	}
+	if base.Status == "expansion_frozen" && head.Status == "expansion_frozen" {
+		return nil
+	}
+	if reviewFreezeIsFormalStatusV1(base.Status) || reviewFreezeIsFormalStatusV1(head.Status) {
+		return fmt.Errorf("%s formal authority 形成后 required_owner_roles 不可变", base.Gate)
+	}
+	return fmt.Errorf("%s pre-formal required_owner_roles 调整只允许 expansion_frozen -> expansion_frozen", base.Gate)
 }
 
 // reviewFreezeValidateInitialFormalTransitionV1 要求首个正式 Freeze 从完整候选生成 v1，且不得携带 CFE 或 supersedes。
@@ -226,6 +243,36 @@ func TestW2ReviewFreezeTransitionPolicyV1StateMatrix(t *testing.T) {
 	}
 }
 
+// TestW2ReviewFreezeTransitionPolicyV1RequiredOwnerRoles 证明 Owner 集合只能在 expansion_frozen 同态中受控修正。
+func TestW2ReviewFreezeTransitionPolicyV1RequiredOwnerRoles(t *testing.T) {
+	baseExpansion := reviewFreezePolicyPreFormalGateV1("expansion_frozen", false)
+	baseAwaiting := reviewFreezePolicyPreFormalGateV1("awaiting_review", true)
+	baseApproved := reviewFreezePolicyFormalGateV1("approved", 1, "", false)
+	changedRoles := []string{"agent_owner", "business_owner", "security_owner"}
+
+	tests := []struct {
+		name    string
+		base    reviewFreezeGateV1
+		head    reviewFreezeGateV1
+		wantErr bool
+	}{
+		{name: "expansion same-state adjustment", base: baseExpansion, head: reviewFreezePolicyWithOwnerRolesV1(reviewFreezePolicyPreFormalGateV1("expansion_frozen", false), changedRoles)},
+		{name: "expansion to awaiting adjustment", base: baseExpansion, head: reviewFreezePolicyWithOwnerRolesV1(reviewFreezePolicyPreFormalGateV1("awaiting_review", true), changedRoles), wantErr: true},
+		{name: "awaiting same-state adjustment", base: baseAwaiting, head: reviewFreezePolicyWithOwnerRolesV1(reviewFreezePolicyPreFormalGateV1("awaiting_review", true), changedRoles), wantErr: true},
+		{name: "awaiting back to expansion adjustment", base: baseAwaiting, head: reviewFreezePolicyWithOwnerRolesV1(reviewFreezePolicyPreFormalGateV1("expansion_frozen", false), changedRoles), wantErr: true},
+		{name: "awaiting formal adjustment", base: baseAwaiting, head: reviewFreezePolicyWithOwnerRolesV1(reviewFreezePolicyFormalGateV1("review_frozen", 1, "", false), changedRoles), wantErr: true},
+		{name: "formal same-state adjustment", base: baseApproved, head: reviewFreezePolicyWithOwnerRolesV1(reviewFreezePolicyFormalGateV1("approved", 1, "", false), changedRoles), wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := reviewFreezeValidateGateTransitionV1(tc.base, tc.head)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("error=%v wantErr=%v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // TestW2ReviewFreezeTransitionPolicyV1FormalLineage 覆盖正式状态不可变、CFE parent 和连续版本规则。
 func TestW2ReviewFreezeTransitionPolicyV1FormalLineage(t *testing.T) {
 	reviewFrozen := reviewFreezePolicyFormalGateV1("review_frozen", 1, "", false)
@@ -268,7 +315,7 @@ func TestW2ReviewFreezeTransitionPolicyV1FormalLineage(t *testing.T) {
 
 // reviewFreezePolicyPreFormalGateV1 构造纯迁移策略测试使用的 pre-formal Gate。
 func reviewFreezePolicyPreFormalGateV1(status string, completeCandidate bool) reviewFreezeGateV1 {
-	gate := reviewFreezeGateV1{Gate: "W2-R00", Status: status}
+	gate := reviewFreezeGateV1{Gate: "W2-R00", Status: status, RequiredOwnerRoles: reviewFreezePolicyOwnerRolesV1()}
 	if completeCandidate {
 		gate.CandidateEvidence = []reviewFreezeCandidateEvidenceV1{reviewFreezePolicyCandidateV1()}
 	}
@@ -278,7 +325,7 @@ func reviewFreezePolicyPreFormalGateV1(status string, completeCandidate bool) re
 // reviewFreezePolicyFormalGateV1 构造纯迁移策略测试使用的正式 Gate，字段只用于 lineage 比较而不替代 shape validator。
 func reviewFreezePolicyFormalGateV1(status string, version int, supersedes string, withCFE bool) reviewFreezeGateV1 {
 	gate := reviewFreezeGateV1{
-		Gate: "W2-R00", Status: status,
+		Gate: "W2-R00", Status: status, RequiredOwnerRoles: reviewFreezePolicyOwnerRolesV1(),
 		CandidateEvidence: []reviewFreezeCandidateEvidenceV1{reviewFreezePolicyCandidateV1()},
 		Freeze: &reviewFreezeRecordV1{
 			FreezeID: fmt.Sprintf("CF-W2-R00-v%d", version), SupersedesFreezeID: supersedes,
@@ -303,6 +350,17 @@ func reviewFreezePolicyFormalGateV1(status string, version int, supersedes strin
 	return gate
 }
 
+// reviewFreezePolicyOwnerRolesV1 返回纯迁移策略测试使用的稳定 Owner exact-set。
+func reviewFreezePolicyOwnerRolesV1() []string {
+	return []string{"agent_owner", "business_owner", "finance_owner", "product_owner", "security_owner"}
+}
+
+// reviewFreezePolicyWithOwnerRolesV1 为负向策略用例替换 Owner exact-set，且不共享底层 Slice。
+func reviewFreezePolicyWithOwnerRolesV1(gate reviewFreezeGateV1, ownerRoles []string) reviewFreezeGateV1 {
+	gate.RequiredOwnerRoles = append([]string(nil), ownerRoles...)
+	return gate
+}
+
 // reviewFreezePolicyCandidateV1 返回策略测试使用的稳定完整候选。
 func reviewFreezePolicyCandidateV1() reviewFreezeCandidateEvidenceV1 {
 	return reviewFreezeCandidateEvidenceV1{
@@ -316,6 +374,7 @@ func reviewFreezePolicyCandidateV1() reviewFreezeCandidateEvidenceV1 {
 // reviewFreezePolicyCloneGateV1 深拷贝策略测试 Gate，避免负向用例共享 Slice/Pointer。
 func reviewFreezePolicyCloneGateV1(source reviewFreezeGateV1) reviewFreezeGateV1 {
 	clone := source
+	clone.RequiredOwnerRoles = append([]string(nil), source.RequiredOwnerRoles...)
 	clone.CandidateEvidence = append([]reviewFreezeCandidateEvidenceV1(nil), source.CandidateEvidence...)
 	if source.Freeze != nil {
 		freeze := *source.Freeze

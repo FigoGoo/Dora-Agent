@@ -42,7 +42,7 @@ type reviewFreezeGateV1 struct {
 	Gate string `json:"gate"`
 	// Status 区分扩展冻结、待评审、正式冻结、批准与重开。
 	Status string `json:"status"`
-	// RequiredOwnerRoles 固定正式冻结和 CFE 必须签字的受影响 Owner exact-set。
+	// RequiredOwnerRoles 声明正式冻结和 CFE 必须签字的受影响 Owner exact-set；进入正式 authority 后不可变。
 	RequiredOwnerRoles []string `json:"required_owner_roles"`
 	// CandidateEvidence 只记录可复核候选，不产生批准或实现授权。
 	CandidateEvidence []reviewFreezeCandidateEvidenceV1 `json:"candidate_evidence"`
@@ -202,6 +202,8 @@ type reviewFreezeCorpusManifestV1 struct {
 	Files []reviewFreezeCorpusFileV1 `json:"files"`
 	// FixtureIDs 固定 Corpus 使用的初始状态夹具 exact-set。
 	FixtureIDs []string `json:"fixture_ids"`
+	// ValidatorSources 必填绑定实际解释 Corpus 的 Go 契约测试源文件及原始字节摘要。
+	ValidatorSources []reviewFreezeValidatorSourceV1 `json:"validator_sources"`
 	// DesignSources 可选绑定产生该 Corpus 的设计源文件及原始字节摘要。
 	DesignSources []reviewFreezeDesignSourceV1 `json:"design_sources,omitempty"`
 	// VectorIDs 是现有 manifest 声明的向量集合。
@@ -220,6 +222,14 @@ type reviewFreezeCorpusFileV1 struct {
 	SHA256 string `json:"sha256"`
 	// VectorCount 是该文件实际承载的向量数。
 	VectorCount int `json:"vector_count"`
+}
+
+// reviewFreezeValidatorSourceV1 描述解释 Corpus 的仓库 Go 契约测试源文件。
+type reviewFreezeValidatorSourceV1 struct {
+	// Path 是仓库相对契约测试 Go 源文件路径。
+	Path string `json:"path"`
+	// SHA256 固定 Validator 源文件原始字节摘要。
+	SHA256 string `json:"sha256"`
 }
 
 // reviewFreezeDesignSourceV1 描述可选的仓库设计源绑定。
@@ -343,13 +353,13 @@ func TestW2ReviewFreezeManifestV1FailClosedGuards(t *testing.T) {
 			want: "gate exact-set",
 		},
 		{
-			name: "required owner policy drift",
+			name: "required owner roles invalid exact set",
 			make: func(t *testing.T) (reviewFreezeManifestV1, map[string][]byte) {
 				manifest, _ := reviewFreezeLoadCurrentV1(t)
-				manifest.Gates[0].RequiredOwnerRoles = []string{"agent_owner", "business_owner", "finance_owner", "product_owner"}
+				manifest.Gates[0].RequiredOwnerRoles = []string{"security_owner", "agent_owner"}
 				return manifest, nil
 			},
-			want: "required_owner_roles policy",
+			want: "required_owner_roles",
 		},
 		{
 			name: "blocker belongs to another gate",
@@ -529,6 +539,50 @@ func TestW2ReviewFreezeManifestV1FailClosedGuards(t *testing.T) {
 	}
 }
 
+// TestW2ReviewFreezeManifestV1ValidatorSources 覆盖 Validator 源必填、路径白名单、排序和逐文件摘要的失败关闭语义。
+func TestW2ReviewFreezeManifestV1ValidatorSources(t *testing.T) {
+	firstPath := "agent/tests/contract/a_validator_test.go"
+	secondPath := "agent/tests/contract/b_validator_test.go"
+	firstRaw := []byte("package contract_test\n")
+	secondRaw := []byte("package contract_test\n\nfunc TestB() {}\n")
+	values := map[string][]byte{firstPath: firstRaw, secondPath: secondRaw}
+	loader := func(path string) ([]byte, error) {
+		raw, ok := values[path]
+		if !ok {
+			return nil, os.ErrNotExist
+		}
+		return raw, nil
+	}
+	valid := []reviewFreezeValidatorSourceV1{
+		{Path: firstPath, SHA256: reviewFreezeSHA256V1(firstRaw)},
+		{Path: secondPath, SHA256: reviewFreezeSHA256V1(secondRaw)},
+	}
+	if err := reviewFreezeValidateValidatorSourcesV1(valid, loader); err != nil {
+		t.Fatalf("valid validator sources rejected: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		sources []reviewFreezeValidatorSourceV1
+		want    string
+	}{
+		{name: "missing", sources: nil, want: "不能为空"},
+		{name: "outside contract tests", sources: []reviewFreezeValidatorSourceV1{{Path: "agent/internal/validator.go", SHA256: reviewFreezeSHA256V1(firstRaw)}}, want: "contract test Go"},
+		{name: "not go", sources: []reviewFreezeValidatorSourceV1{{Path: "agent/tests/contract/validator.json", SHA256: reviewFreezeSHA256V1(firstRaw)}}, want: "contract test Go"},
+		{name: "unsorted", sources: []reviewFreezeValidatorSourceV1{valid[1], valid[0]}, want: "未排序或重复"},
+		{name: "duplicate", sources: []reviewFreezeValidatorSourceV1{valid[0], valid[0]}, want: "未排序或重复"},
+		{name: "digest drift", sources: []reviewFreezeValidatorSourceV1{{Path: firstPath, SHA256: reviewFreezeSHA256V1(secondRaw)}}, want: "sha256="},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := reviewFreezeValidateValidatorSourcesV1(tc.sources, loader)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error=%v want substring=%q", err, tc.want)
+			}
+		})
+	}
+}
+
 // reviewFreezeValidateManifestV1 对治理状态、候选证据和正式审批执行统一失败关闭校验。
 func reviewFreezeValidateManifestV1(manifest reviewFreezeManifestV1, loader reviewFreezeArtifactLoaderV1) error {
 	if manifest.SchemaVersion != reviewFreezeSchemaV1 {
@@ -547,17 +601,6 @@ func reviewFreezeValidateManifestV1(manifest reviewFreezeManifestV1, loader revi
 		return fmt.Errorf("implementation_owner_roles=%v", manifest.ImplementationOwnerRoles)
 	}
 	wantGates := []string{"W2-R00", "W2-R01", "W2-R02", "W2-R03", "W2-R04", "W2-R05", "W2-R06", "W2-R07", "W2-R08"}
-	wantRequiredOwnerRoles := [][]string{
-		{"agent_owner", "business_owner", "finance_owner", "product_owner", "security_owner"},
-		{"agent_owner", "business_owner", "finance_owner", "operations_owner", "security_owner"},
-		{"agent_owner", "data_owner", "operations_owner", "security_owner"},
-		{"agent_owner", "business_owner", "finance_owner", "frontend_owner", "product_owner", "security_owner", "test_owner"},
-		{"agent_owner", "business_owner", "finance_owner", "operations_owner", "product_owner", "security_owner", "test_owner"},
-		{"agent_owner", "business_owner", "finance_owner", "material_access_owner", "product_owner", "security_owner"},
-		{"agent_owner", "business_owner", "finance_owner", "product_owner", "security_owner"},
-		{"agent_owner", "business_owner", "finance_owner", "product_owner", "security_owner"},
-		{"agent_owner", "business_owner", "frontend_owner", "operations_owner", "security_owner"},
-	}
 	if len(manifest.Gates) != len(wantGates) {
 		return fmt.Errorf("gate exact-set 长度=%d want=%d", len(manifest.Gates), len(wantGates))
 	}
@@ -565,9 +608,6 @@ func reviewFreezeValidateManifestV1(manifest reviewFreezeManifestV1, loader revi
 		gate := manifest.Gates[index]
 		if gate.Gate != wantGates[index] {
 			return fmt.Errorf("gate exact-set[%d]=%q want=%q", index, gate.Gate, wantGates[index])
-		}
-		if !reflect.DeepEqual(gate.RequiredOwnerRoles, wantRequiredOwnerRoles[index]) {
-			return fmt.Errorf("%s required_owner_roles policy=%v want=%v", gate.Gate, gate.RequiredOwnerRoles, wantRequiredOwnerRoles[index])
 		}
 		if err := reviewFreezeValidateGateV1(manifest, gate, loader); err != nil {
 			return fmt.Errorf("%s: %w", gate.Gate, err)
@@ -657,7 +697,7 @@ func reviewFreezeValidateGateV1(manifest reviewFreezeManifestV1, gate reviewFree
 	return nil
 }
 
-// reviewFreezeValidateOwnerRoleSetV1 要求每个 Gate 在任何状态下都固定非空、排序、唯一的 Owner 角色集合。
+// reviewFreezeValidateOwnerRoleSetV1 要求每个 Gate 在任何状态下都具有非空、排序、唯一的 Owner 角色集合。
 func reviewFreezeValidateOwnerRoleSetV1(ownerRoles []string) error {
 	if err := reviewFreezeValidateSortedExactSetV1(ownerRoles, "required_owner_roles"); err != nil {
 		return err
@@ -720,6 +760,9 @@ func reviewFreezeValidateContractRefV1(path, expectedSHA string, vectorIDs, targ
 	if err := reviewFreezeValidateCorpusFilesV1(path, source, loader); err != nil {
 		return err
 	}
+	if err := reviewFreezeValidateValidatorSourcesV1(source.ValidatorSources, loader); err != nil {
+		return err
+	}
 	if err := reviewFreezeValidateOptionalDesignSourcesV1(source.DesignSources, loader); err != nil {
 		return err
 	}
@@ -731,6 +774,51 @@ func reviewFreezeValidateContractRefV1(path, expectedSHA string, vectorIDs, targ
 		return fmt.Errorf("contract manifest %s 的 vector/target-test exact-set 漂移", path)
 	}
 	return nil
+}
+
+// reviewFreezeValidateValidatorSourcesV1 校验非空、排序唯一的 Validator 源 exact-set，并通过当前 Git/worktree loader 固定逐文件原始摘要。
+func reviewFreezeValidateValidatorSourcesV1(sources []reviewFreezeValidatorSourceV1, loader reviewFreezeArtifactLoaderV1) error {
+	if len(sources) == 0 {
+		return fmt.Errorf("validator_sources exact-set 不能为空")
+	}
+	lastPath := ""
+	for _, source := range sources {
+		if err := reviewFreezeValidateValidatorSourcePathV1(source.Path); err != nil {
+			return fmt.Errorf("validator source: %w", err)
+		}
+		if source.Path <= lastPath {
+			return fmt.Errorf("validator_sources 未排序或重复=%q", source.Path)
+		}
+		raw, err := loader(source.Path)
+		if err != nil {
+			return fmt.Errorf("读取 validator source %s: %w", source.Path, err)
+		}
+		if err := reviewFreezeCheckSHA256V1(raw, source.SHA256); err != nil {
+			return fmt.Errorf("validator source %s: %w", source.Path, err)
+		}
+		lastPath = source.Path
+	}
+	return nil
+}
+
+// reviewFreezeValidateValidatorSourcePathV1 将 Validator authority 限定到既有 contract test 目录中的 Go 源文件。
+func reviewFreezeValidateValidatorSourcePathV1(path string) error {
+	if err := reviewFreezeValidateSafePathV1(path, ""); err != nil {
+		return err
+	}
+	allowedPrefixes := []string{
+		"agent/tests/contract/",
+		"business/tests/contract/",
+		"frontend/tests/contract/",
+		"smoke/contracts/",
+		"worker/tests/contract/",
+	}
+	for _, prefix := range allowedPrefixes {
+		if strings.HasPrefix(path, prefix) && strings.HasSuffix(path, ".go") {
+			return nil
+		}
+	}
+	return fmt.Errorf("validator source 路径不是允许的 contract test Go 文件=%q", path)
 }
 
 // reviewFreezeValidateCorpusFilesV1 校验 Corpus 文件 exact-set、逐文件摘要及总向量数，防止只固定顶层 manifest 而替换底层向量。
@@ -1167,12 +1255,15 @@ func reviewFreezeSyntheticFormalV1(t *testing.T, status string, reapproved bool)
 	}
 	contractFixtureName := "vectors.json"
 	contractFixtureRaw := reviewFreezeMarshalV1(t, contractVectors)
+	validatorPath := "agent/tests/contract/w2_review_freeze_synthetic_validator_test.go"
+	validatorRaw := []byte("package contract_test\n\nfunc TestSynthetic() {}\n")
+	validatorSources := []reviewFreezeValidatorSourceV1{{Path: validatorPath, SHA256: reviewFreezeSHA256V1(validatorRaw)}}
 	contractRaw := reviewFreezeMarshalV1(t, reviewFreezeCorpusManifestV1{
 		SchemaVersion: "synthetic_contract_manifest.v1",
 		Files: []reviewFreezeCorpusFileV1{{
 			File: contractFixtureName, SHA256: reviewFreezeSHA256V1(contractFixtureRaw), VectorCount: len(contractVectors),
 		}},
-		FixtureIDs: []string{"synthetic.open"}, VectorIDs: contractVectors,
+		FixtureIDs: []string{"synthetic.open"}, ValidatorSources: validatorSources, VectorIDs: contractVectors,
 		TotalVectorCount: len(contractVectors), TargetTests: []string{"TestSynthetic"},
 	})
 	cfeVectors := []string{"V-001", "V-002"}
@@ -1182,11 +1273,12 @@ func reviewFreezeSyntheticFormalV1(t *testing.T, status string, reapproved bool)
 		Files: []reviewFreezeCorpusFileV1{{
 			File: contractFixtureName, SHA256: reviewFreezeSHA256V1(cfeFixtureRaw), VectorCount: len(cfeVectors),
 		}},
-		FixtureIDs: []string{"synthetic.open"}, VectorIDs: cfeVectors,
+		FixtureIDs: []string{"synthetic.open"}, ValidatorSources: validatorSources, VectorIDs: cfeVectors,
 		TotalVectorCount: len(cfeVectors), TargetTests: []string{"TestSynthetic"},
 	})
 	overlay[contractPath] = contractRaw
 	overlay[filepath.ToSlash(filepath.Join(filepath.Dir(contractPath), contractFixtureName))] = contractFixtureRaw
+	overlay[validatorPath] = validatorRaw
 
 	freezeID := "CF-W2-R00-v1"
 	supersedes := ""

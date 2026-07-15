@@ -96,14 +96,15 @@ func reviewFreezeValidateGitTransitionV1(repository reviewFreezeGitRepositoryV1,
 	if err != nil {
 		return fmt.Errorf("读取 base manifest: %w", err)
 	}
-	if err := reviewFreezeValidateManifestV1(baseManifest, repository.loader(baseSHA)); err != nil {
-		return fmt.Errorf("base shape: %w", err)
-	}
 	if !baseTrustRootExists {
-		// 首次激活 trust root 不能把既有正式 authority 降级伪装成 bootstrap；base/head 都必须为 pre-formal。
+		// Trust root 激活前的受信 base 可能来自旧 shape（例如尚无 validator_sources）。
+		// 此处只允许 pre-formal 历史迁移；HEAD 必须先通过当前完整 shape，且首次激活不能把既有正式 authority 降级伪装成 bootstrap。
 		if err := reviewFreezeValidateTrustRootActivationBootstrapV1(baseManifest, headManifest); err != nil {
 			return err
 		}
+	} else if err := reviewFreezeValidateManifestV1(baseManifest, repository.loader(baseSHA)); err != nil {
+		// Trust root 一旦存在，base checker/schema 即不可由同一 PR 修改，必须继续满足完整 shape。
+		return fmt.Errorf("base shape: %w", err)
 	}
 	if err := reviewFreezeValidateManifestEnvelopeTransitionV1(baseManifest, headManifest); err != nil {
 		return err
@@ -187,15 +188,15 @@ func reviewFreezeValidateImmutableTrustRootV1(changedFiles []string) error {
 	return nil
 }
 
-// reviewFreezeValidateManifestEnvelopeTransitionV1 保持治理 Owner、Gate 顺序和 Owner policy 不被 transition PR 顺带替换。
+// reviewFreezeValidateManifestEnvelopeTransitionV1 保持治理 Owner 与 Gate 顺序不被 transition PR 顺带替换；逐 Gate Owner policy 由状态迁移规则约束。
 func reviewFreezeValidateManifestEnvelopeTransitionV1(base, head reviewFreezeManifestV1) error {
 	if base.SchemaVersion != head.SchemaVersion || base.GovernanceOwnerRole != head.GovernanceOwnerRole ||
 		!reflect.DeepEqual(base.ImplementationOwnerRoles, head.ImplementationOwnerRoles) || len(base.Gates) != len(head.Gates) {
 		return fmt.Errorf("manifest governance envelope 不得在状态迁移中改变")
 	}
 	for index := range base.Gates {
-		if base.Gates[index].Gate != head.Gates[index].Gate || !reflect.DeepEqual(base.Gates[index].RequiredOwnerRoles, head.Gates[index].RequiredOwnerRoles) {
-			return fmt.Errorf("gate/required_owner_roles policy 不得在状态迁移中改变: index=%d", index)
+		if base.Gates[index].Gate != head.Gates[index].Gate {
+			return fmt.Errorf("gate identity/order 不得在状态迁移中改变: index=%d", index)
 		}
 	}
 	return nil

@@ -28,7 +28,7 @@
     {"tool_key": "generate_media", "definition_version": "generate_media.2026-07-14", "ref_slot": "dispatch.primary", "slot_ordinal": 3, "ref_type": "dispatch_receipt", "ref_schema_version": "dispatch_receipt.v1", "authority_owner": "agent", "query_contract": "agent.dispatch.query.v1", "effect_class": "side_effect"},
     {"tool_key": "generate_media", "definition_version": "generate_media.2026-07-14", "ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "query_contract": "agent.operation.query.v1", "effect_class": "side_effect"},
     {"tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "ref_slot": "approval.primary", "slot_ordinal": 1, "ref_type": "approval", "ref_schema_version": "approval_ref.v1", "authority_owner": "agent", "query_contract": "agent.approval.query.v1", "effect_class": "side_effect"},
-    {"tool_key": "storyboard_generation", "definition_version": "storyboard_generation.2026-07-14", "ref_slot": "consumption.primary", "slot_ordinal": 1, "ref_type": "approval_consumption_receipt", "ref_schema_version": "approval_consumption_receipt.v1", "authority_owner": "agent", "query_contract": "agent.approval_consumption.query.v1", "effect_class": "side_effect"},
+    {"tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "ref_slot": "consumption.primary", "slot_ordinal": 1, "ref_type": "approval_consumption_receipt", "ref_schema_version": "approval_consumption_receipt.v1", "authority_owner": "agent", "query_contract": "agent.approval_consumption.query.v1", "effect_class": "side_effect"},
     {"tool_key": "write_prompts", "definition_version": "write_prompts.2026-07-14", "ref_slot": "resource.primary", "slot_ordinal": 1, "ref_type": "resource", "ref_schema_version": "resource_ref.v1", "authority_owner": "business", "query_contract": "business.resource.query.v1", "effect_class": "side_effect"}
   ],
   "transition_cases": [
@@ -396,6 +396,39 @@
         "owner_fence": 7,
         "slot": {"ref_slot": "operation.secondary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.secondary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"}
       }
+    },
+    {
+      "id": "TR-N14-replay-reserve-piggyback",
+      "from_state": "open.operation-prepared",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "INVALID_TOOL_RECEIPT",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 1,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.primary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"},
+        "ref_slot": "operation.primary"
+      }
+    },
+    {
+      "id": "TR-N15-replay-resolve-piggyback",
+      "from_state": "open.batch-resolved",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "INVALID_TOOL_RECEIPT",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "resolve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 2,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.primary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"},
+        "ref_slot": "operation.primary",
+        "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000201", "authority_version": 1, "authority_semantic_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"}
+      }
     }
   ],
   "evidence_cases": [
@@ -475,21 +508,21 @@
     },
     {
       "id": "TR-E11-failed-hidden-policy-side-effect",
-      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000001103", "session_id": "019f0000-0000-7000-8000-000000001111", "turn_id": "019f0000-0000-7000-8000-000000001112", "run_id": "019f0000-0000-7000-8000-000000001113", "tool_call_id": "019f0000-0000-7000-8000-000000001114", "tool_key": "storyboard_generation", "definition_version": "storyboard_generation.2026-07-14", "intent_schema_version": "storyboard_generation_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "write_state": "open", "receipt_version": 1, "owner_fence": 14, "execution_slots": [], "result_refs": []},
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000001103", "session_id": "019f0000-0000-7000-8000-000000001111", "turn_id": "019f0000-0000-7000-8000-000000001112", "run_id": "019f0000-0000-7000-8000-000000001113", "tool_call_id": "019f0000-0000-7000-8000-000000001114", "tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "intent_schema_version": "plan_creation_spec_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "write_state": "open", "receipt_version": 1, "owner_fence": 14, "execution_slots": [], "result_refs": []},
       "setup_slots": [{"slot": {"ref_slot": "consumption.primary", "slot_ordinal": 1, "ref_type": "approval_consumption_receipt", "ref_schema_version": "approval_consumption_receipt.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000001103:consumption.primary:v1", "request_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "query_contract": "agent.approval_consumption.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000001101", "authority_version": 1, "authority_semantic_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],
       "result": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "DEPENDENCY_UNAVAILABLE", "summary": "依赖暂时不可用。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000001103"}, "warnings": [], "retryable": true},
       "result_ref_slots": [], "expect": "reject", "error_code": "RESULT_REF_MISMATCH", "expected_snapshot_digest": ""
     },
     {
       "id": "TR-E12-cancelled-after-policy-side-effect",
-      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000001103", "session_id": "019f0000-0000-7000-8000-000000001111", "turn_id": "019f0000-0000-7000-8000-000000001112", "run_id": "019f0000-0000-7000-8000-000000001113", "tool_call_id": "019f0000-0000-7000-8000-000000001114", "tool_key": "storyboard_generation", "definition_version": "storyboard_generation.2026-07-14", "intent_schema_version": "storyboard_generation_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "write_state": "open", "receipt_version": 1, "owner_fence": 14, "execution_slots": [], "result_refs": []},
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000001103", "session_id": "019f0000-0000-7000-8000-000000001111", "turn_id": "019f0000-0000-7000-8000-000000001112", "run_id": "019f0000-0000-7000-8000-000000001113", "tool_call_id": "019f0000-0000-7000-8000-000000001114", "tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "intent_schema_version": "plan_creation_spec_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "write_state": "open", "receipt_version": 1, "owner_fence": 14, "execution_slots": [], "result_refs": []},
       "setup_slots": [{"slot": {"ref_slot": "consumption.primary", "slot_ordinal": 1, "ref_type": "approval_consumption_receipt", "ref_schema_version": "approval_consumption_receipt.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000001103:consumption.primary:v1", "request_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "query_contract": "agent.approval_consumption.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000001101", "authority_version": 1, "authority_semantic_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],
       "result": {"schema_version": "graph_tool_result.v1", "status": "cancelled", "result_code": "RUN_CANCELLED_AFTER_SIDE_EFFECTS_RESOLVED", "summary": "已核对并收口批准消费副作用。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000001103"}, "warnings": [], "cancellation_stage": "after_side_effects_resolved", "retryable": false},
-      "result_ref_slots": ["consumption.primary"], "expect": "accept", "error_code": "", "expected_snapshot_digest": "sha256:5859746a74b0d8ae2ecd19ccbe5a732d432d6d25f87a64b295ba8e77de39db62"
+      "result_ref_slots": ["consumption.primary"], "expect": "accept", "error_code": "", "expected_snapshot_digest": "sha256:d6abda7c98e2f3299d2cb921e8d45213c16655b8c2c98dc293ae337a0c07df12"
     },
     {
       "id": "TR-E13-cancelled-after-missing-policy-side-effect",
-      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000001103", "session_id": "019f0000-0000-7000-8000-000000001111", "turn_id": "019f0000-0000-7000-8000-000000001112", "run_id": "019f0000-0000-7000-8000-000000001113", "tool_call_id": "019f0000-0000-7000-8000-000000001114", "tool_key": "storyboard_generation", "definition_version": "storyboard_generation.2026-07-14", "intent_schema_version": "storyboard_generation_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "write_state": "open", "receipt_version": 1, "owner_fence": 14, "execution_slots": [], "result_refs": []},
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000001103", "session_id": "019f0000-0000-7000-8000-000000001111", "turn_id": "019f0000-0000-7000-8000-000000001112", "run_id": "019f0000-0000-7000-8000-000000001113", "tool_call_id": "019f0000-0000-7000-8000-000000001114", "tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "intent_schema_version": "plan_creation_spec_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "write_state": "open", "receipt_version": 1, "owner_fence": 14, "execution_slots": [], "result_refs": []},
       "setup_slots": [{"slot": {"ref_slot": "consumption.primary", "slot_ordinal": 1, "ref_type": "approval_consumption_receipt", "ref_schema_version": "approval_consumption_receipt.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000001103:consumption.primary:v1", "request_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "query_contract": "agent.approval_consumption.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000001101", "authority_version": 1, "authority_semantic_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],
       "result": {"schema_version": "graph_tool_result.v1", "status": "cancelled", "result_code": "RUN_CANCELLED_AFTER_SIDE_EFFECTS_RESOLVED", "summary": "已核对并收口批准消费副作用。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000001103"}, "warnings": [], "cancellation_stage": "after_side_effects_resolved", "retryable": false},
       "result_ref_slots": [], "expect": "reject", "error_code": "RESULT_REF_MISMATCH", "expected_snapshot_digest": ""

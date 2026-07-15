@@ -47,7 +47,7 @@
           "scope": "graph_tool_result_and_tool_receipt_current_candidate",
           "coverage": "partial_candidate",
           "contract_manifest_path": "agent/tests/contract/testdata/w2_r01/manifest.json",
-          "contract_manifest_sha256": "sha256:d08c20bafb9f4119b13e07a419cbfa72224d3e85a9af8447c5f88313d38217cd",
+          "contract_manifest_sha256": "sha256:4fb54f2852e9db99db0d21df64e800d01f0d99523d61af447cb1e96f079229b1",
           "vector_ids": [
             "GTR-N01-malformed",
             "GTR-N02-duplicate-top-level",
@@ -123,6 +123,8 @@
             "TR-N11-forged-higher-fence",
             "TR-N12-stale-freeze-version",
             "TR-N13-unpinned-slot",
+            "TR-N14-replay-reserve-piggyback",
+            "TR-N15-replay-resolve-piggyback",
             "TR-P01-reserve-operation",
             "TR-P02-resolve-operation",
             "TR-P03-reserve-batch",
@@ -156,7 +158,7 @@
         },
         {
           "code": "W2_R01_CORPUS_SCOPE_INCOMPLETE",
-          "statement": "现有 85 向量是可靠候选子集，但尚未覆盖文档声明的 failed-after/outcome-aware 与 Billing authority projection，因此不得称完整 Gate candidate。"
+          "statement": "现有 87 向量是可靠候选子集，但尚未覆盖文档声明的 failed-after/outcome-aware 与 Billing authority projection，因此不得称完整 Gate candidate。"
         },
         {
           "code": "W2_R01_OWNER_APPROVAL_MISSING",
@@ -165,6 +167,14 @@
         {
           "code": "W2_R01_OWNER_SCOPE_PENDING",
           "statement": "若 R01 保留 card_id 与产品状态语义，是否追加 Frontend/Product Owner 仍待决定；当前 required_owner_roles 不代表该问题已关闭。"
+        },
+        {
+          "code": "W2_R01_SLOT_REGISTRY_ORDINAL_PENDING",
+          "statement": "plan_creation_spec 的 Approval/Consumption 代表性 policy 分属独立 Receipt fixture 且都使用 ordinal 1；Registry identity、Receipt/segment scope、slot 名与 ordinal 唯一性尚待 Owner 裁决，当前七条 policy 只能是 partial candidate。"
+        },
+        {
+          "code": "W2_R01_VALIDATOR_BUILD_CLOSURE_PENDING",
+          "statement": "当前 validator_sources 只绑定已登记文件；共享 Go package 的未登记 TestMain/init/全局与 go.mod/go.sum/toolchain/replace/第三方依赖仍可影响执行，正式 Freeze 前必须完成独立 stdlib-only 包或完整 package/build exact-set。"
         },
         {
           "code": "W2_R01_VERSION_POLICY_PENDING",
@@ -238,7 +248,7 @@
           "scope": "creation_spec_activation_consumption_core_candidate",
           "coverage": "partial_candidate",
           "contract_manifest_path": "agent/tests/contract/testdata/w2_r04_approval_consumption/manifest.json",
-          "contract_manifest_sha256": "sha256:dd546a612257a0c7f6682696427b675ab9b34fdd35027617912815baf89c8ab7",
+          "contract_manifest_sha256": "sha256:e442cbb99a726ed93a764b1c9914fe5bf7eff089f621eb2d475e3e2bcd5be77c",
           "vector_ids": [
             "ACR-N01-strict-malformed",
             "ACR-N02-strict-duplicate",
@@ -377,6 +387,10 @@
         {
           "code": "W2_R04_OWNER_APPROVAL_MISSING",
           "statement": "PLAN-P0-01～PLAN-P0-10 与共享 R00～R03 的 Owner 审批尚未完成。"
+        },
+        {
+          "code": "W2_R04_VALIDATOR_BUILD_CLOSURE_PENDING",
+          "statement": "当前 validator_sources 只绑定已登记文件；共享 Go package 与未冻结构建依赖仍可改变 R04 校验语义，正式 Freeze 前必须完成独立 stdlib-only 包或完整 package/build exact-set。"
         }
       ]
     },

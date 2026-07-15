@@ -27,12 +27,13 @@ const (
 
 // approvalConsumptionManifestV1 固定 R04 文件摘要、fixture/vector exact-set 和目标测试集合。
 type approvalConsumptionManifestV1 struct {
-	SchemaVersion    string                     `json:"schema_version"`
-	Files            []messageSetManifestFileV1 `json:"files"`
-	FixtureIDs       []string                   `json:"fixture_ids"`
-	VectorIDs        []string                   `json:"vector_ids"`
-	TotalVectorCount int                        `json:"total_vector_count"`
-	TargetTests      []string                   `json:"target_tests"`
+	SchemaVersion    string                   `json:"schema_version"`
+	Files            []corpusManifestFileV1   `json:"files"`
+	ValidatorSources []corpusManifestSourceV1 `json:"validator_sources"`
+	FixtureIDs       []string                 `json:"fixture_ids"`
+	VectorIDs        []string                 `json:"vector_ids"`
+	TotalVectorCount int                      `json:"total_vector_count"`
+	TargetTests      []string                 `json:"target_tests"`
 }
 
 // approvalConsumptionCorpusV1 是 unsigned core 的测试专用机器真源。
@@ -287,6 +288,13 @@ type approvalConsumptionEvaluationV1 struct {
 
 func TestW2R04ApprovalConsumptionManifest(t *testing.T) {
 	manifest := loadApprovalConsumptionManifestV1(t)
+	wantValidatorSources := []string{
+		"agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
+		"agent/tests/contract/graph_tool_result_v1_corpus_test.go",
+	}
+	if err := validateCorpusManifestSourceClosureV1(contractManifestRepositoryRootV1(t), "validator", manifest.ValidatorSources, wantValidatorSources); err != nil {
+		t.Fatalf("R04 manifest validator_sources 未闭合: %v", err)
+	}
 	wantFixtures := []string{
 		"acr.creation_spec_activation.approved_recorded",
 		"acr.creation_spec_activation.approved_recorded_current_drift",

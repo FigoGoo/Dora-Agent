@@ -138,7 +138,7 @@ flowchart LR
 
 ### 4.3 非法组合
 
-原八类候选已扩展为可执行契约中的 `GTR-N01..N40`、`TR-N01..N13` 与 `TR-E01..E13`，覆盖严格 JSON、Unicode/UUID、跨层与同层稳定错误优先级、JS safe integer、版本/字段、ResultCode/取消阶段 Registry、typed Warning、状态矩阵、pinned prepared/resolved slot 与 effect class、Fence/Version、全状态 result digest/ref evidence 和 frozen write guard。完整表见 [`graph-tool-result-receipt-contract-v1.md` 第 5 节](./graph-tool-result-receipt-contract-v1.md#5-非法组合与固定拒绝分类)。
+原八类候选已扩展为可执行契约中的 `GTR-N01..N40`、`TR-N01..N15` 与 `TR-E01..E13`，覆盖严格 JSON、Unicode/UUID、跨层与同层稳定错误优先级、JS safe integer、版本/字段、ResultCode/取消阶段 Registry、typed Warning、状态矩阵、pinned prepared/resolved slot 与 effect class、Fence/Version、全状态 result digest/ref evidence、frozen write guard，以及 reserve/resolve 同义重放夹带互斥字段的失败关闭。完整表见 [`graph-tool-result-receipt-contract-v1.md` 第 5 节](./graph-tool-result-receipt-contract-v1.md#5-非法组合与固定拒绝分类)。
 
 `completed` 仍关联 pending Approval/活动 Operation、Approval 在 freeze 前失效、unknown outcome 错误终结、Result status 更新其他聚合等依赖权威状态的组合，必须在后续 Repository/PostgreSQL 集成测试拒绝，不能只靠 JSON 校验器代替。
 
@@ -747,7 +747,7 @@ Agent PostgreSQL EventLog 至少包含：
 ### 15.1 GraphToolResult/Receipt 契约测试
 
 - [x] 八个合法向量覆盖六状态、Unicode canonical edge 与已解决副作用取消，并逐字段/摘要校验；
-- [x] 测试专用 Corpus 已拒绝 `GTR-N01..N40`、`TR-N01..N13` 并执行 `TR-E01..E13`，覆盖严格 JSON、状态矩阵、Registry、slot/ref/effect class、Fence/Version、全状态 evidence、digest 和 frozen guard；依赖权威数据库状态的组合仍待 Repository 集成测试；
+- [x] 测试专用 Corpus 已拒绝 `GTR-N01..N40`、`TR-N01..N15` 并执行 `TR-E01..E13`，覆盖严格 JSON、状态矩阵、Registry、slot/ref/effect class、Fence/Version、命令 shape、全状态 evidence、digest 和 frozen guard；依赖权威数据库状态的组合仍待 Repository 集成测试；
 - [ ] 同 ToolReceipt key + 同 `request_semantic_digest` 返回字节级等价语义结果；
 - [ ] 同 key + 不同 `request_semantic_digest` 返回冲突且不覆盖；
 - [ ] 后生成 PromptArtifact/Model/Approval/Consumption/Quote/Charge/Business Write/Operation/Resource 先按稳定 slot append-once 写 `execution_refs`；同 slot 同 digest 重放、异 digest 冲突；不能改变请求摘要；

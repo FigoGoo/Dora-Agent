@@ -7,6 +7,16 @@
       "vector_count": 111
     }
   ],
+  "validator_sources": [
+    {
+      "path": "agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
+      "sha256": "sha256:b52d354d128047674992be5d153ffb71099e13bbbd114a41dc44eae0d71c70cf"
+    },
+    {
+      "path": "agent/tests/contract/graph_tool_result_v1_corpus_test.go",
+      "sha256": "sha256:95b3113edfc179aa6f6d645b98fd6b3f2be7eb627d86b800fb3d13ea5f361bbd"
+    }
+  ],
   "fixture_ids": [
     "acr.creation_spec_activation.approved_recorded",
     "acr.creation_spec_activation.approved_recorded_current_drift",

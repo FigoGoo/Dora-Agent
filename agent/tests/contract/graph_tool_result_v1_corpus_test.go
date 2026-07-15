@@ -14,6 +14,7 @@ import (
 	"go/token"
 	"io"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -50,18 +51,25 @@ type contractError struct {
 }
 
 type corpusManifestV1 struct {
-	SchemaVersion    string                 `json:"schema_version"`
-	Files            []corpusManifestFileV1 `json:"files"`
-	FixtureIDs       []string               `json:"fixture_ids"`
-	VectorIDs        []string               `json:"vector_ids"`
-	TotalVectorCount int                    `json:"total_vector_count"`
-	TargetTests      []string               `json:"target_tests"`
+	SchemaVersion    string                   `json:"schema_version"`
+	Files            []corpusManifestFileV1   `json:"files"`
+	DesignSources    []corpusManifestSourceV1 `json:"design_sources"`
+	ValidatorSources []corpusManifestSourceV1 `json:"validator_sources"`
+	FixtureIDs       []string                 `json:"fixture_ids"`
+	VectorIDs        []string                 `json:"vector_ids"`
+	TotalVectorCount int                      `json:"total_vector_count"`
+	TargetTests      []string                 `json:"target_tests"`
 }
 
 type corpusManifestFileV1 struct {
 	File        string `json:"file"`
 	SHA256      string `json:"sha256"`
 	VectorCount int    `json:"vector_count"`
+}
+
+type corpusManifestSourceV1 struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
 }
 
 func (e *contractError) Error() string { return e.code + ": " + e.path }
@@ -221,12 +229,33 @@ func TestW2R01CorpusManifest(t *testing.T) {
 	if err := strictDecode(raw, &manifest); err != nil {
 		t.Fatalf("解析 manifest: %v", err)
 	}
-	if manifest.SchemaVersion != "w2_r01_contract_corpus_manifest.v1" || len(manifest.Files) != 2 || manifest.TotalVectorCount != 85 {
+	if manifest.SchemaVersion != "w2_r01_contract_corpus_manifest.v1" || len(manifest.Files) != 2 || manifest.TotalVectorCount != 87 {
 		t.Fatalf("manifest 版本或文件数错误: %+v", manifest)
 	}
+	// 设计与校验器源码属于候选语义的一部分；固定 exact-set 和 raw digest，避免只改文档或测试实现却沿用旧 Corpus 审核结论。
+	repositoryRoot := contractManifestRepositoryRootV1(t)
+	wantDesignSources := []string{
+		"docs/design/agent/graph-tool-result-receipt-contract-v1.md",
+		"docs/design/agent/runner-session-lane-review-v1.md",
+		"docs/design/cross-module/aigc-contract-catalog.md",
+	}
+	wantValidatorSources := []string{
+		"agent/tests/contract/graph_tool_result_v1_corpus_test.go",
+		"agent/tests/contract/tool_receipt_v1_corpus_test.go",
+	}
+	if err := validateCorpusManifestSourceClosureV1(repositoryRoot, "design", manifest.DesignSources, wantDesignSources); err != nil {
+		t.Fatalf("manifest design_sources 未闭合: %v", err)
+	}
+	if err := validateCorpusManifestSourceClosureV1(repositoryRoot, "validator", manifest.ValidatorSources, wantValidatorSources); err != nil {
+		t.Fatalf("manifest validator_sources 未闭合: %v", err)
+	}
+	if err := validateCorpusManifestDecoderSourcesV1(repositoryRoot, manifest.ValidatorSources); err != nil {
+		t.Fatalf("manifest 未绑定实际共享严格解码器源码: %v", err)
+	}
+	assertCorpusManifestSourceClosureRejectsV1(t, repositoryRoot, manifest.DesignSources, wantDesignSources, manifest.ValidatorSources, wantValidatorSources)
 	wantFiles := []corpusManifestFileV1{
 		{File: "graph_tool_result_v1.json", VectorCount: 48},
-		{File: "tool_receipt_v1.json", VectorCount: 37},
+		{File: "tool_receipt_v1.json", VectorCount: 39},
 	}
 	for index, item := range manifest.Files {
 		if item.File != wantFiles[index].File || item.VectorCount != wantFiles[index].VectorCount || !digestPattern.MatchString(item.SHA256) {
@@ -278,6 +307,180 @@ func TestW2R01CorpusManifest(t *testing.T) {
 	if !reflect.DeepEqual(actualTests, manifestTests) {
 		t.Fatalf("manifest target tests 未绑定实际 Test 函数 actual=%v manifest=%v", actualTests, manifestTests)
 	}
+}
+
+func contractManifestRepositoryRootV1(t *testing.T) string {
+	t.Helper()
+	directory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repositoryRoot := filepath.Clean(filepath.Join(directory, "..", "..", ".."))
+	if _, err := os.Stat(filepath.Join(repositoryRoot, "agent", "go.mod")); err != nil {
+		t.Fatalf("定位仓库根目录: %v", err)
+	}
+	return repositoryRoot
+}
+
+func validateCorpusManifestSourceClosureV1(repositoryRoot, sourceKind string, sources []corpusManifestSourceV1, wantPaths []string) error {
+	if err := validateCorpusManifestSourceSetV1(sourceKind, sources, wantPaths); err != nil {
+		return err
+	}
+	for _, source := range sources {
+		fullPath, err := corpusManifestSourceFullPathV1(repositoryRoot, source.Path)
+		if err != nil {
+			return err
+		}
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			return fmt.Errorf("读取 %s: %w", source.Path, err)
+		}
+		actual := sha256.Sum256(content)
+		if got := "sha256:" + hex.EncodeToString(actual[:]); got != source.SHA256 {
+			return fmt.Errorf("%s raw digest=%s want=%s", source.Path, got, source.SHA256)
+		}
+	}
+	return nil
+}
+
+func validateCorpusManifestSourceSetV1(sourceKind string, sources []corpusManifestSourceV1, wantPaths []string) error {
+	if len(sources) != len(wantPaths) {
+		return fmt.Errorf("%s source count=%d want=%d", sourceKind, len(sources), len(wantPaths))
+	}
+	for index, source := range sources {
+		if err := validateCorpusManifestSourcePathV1(sourceKind, source.Path); err != nil {
+			return err
+		}
+		if !digestPattern.MatchString(source.SHA256) {
+			return fmt.Errorf("%s 摘要格式非法: %s", source.Path, source.SHA256)
+		}
+		if index > 0 && sources[index-1].Path >= source.Path {
+			return fmt.Errorf("%s sources 必须按 path 严格升序且唯一", sourceKind)
+		}
+		if source.Path != wantPaths[index] {
+			return fmt.Errorf("%s source[%d]=%s want=%s", sourceKind, index, source.Path, wantPaths[index])
+		}
+	}
+	return nil
+}
+
+func validateCorpusManifestSourcePathV1(sourceKind, sourcePath string) error {
+	if sourcePath == "" || !utf8.ValidString(sourcePath) || strings.Contains(sourcePath, "\\") || pathpkg.Clean(sourcePath) != sourcePath || strings.HasPrefix(sourcePath, "/") {
+		return fmt.Errorf("%s source path 非安全仓库相对路径: %q", sourceKind, sourcePath)
+	}
+	for _, current := range sourcePath {
+		if unicode.IsControl(current) {
+			return fmt.Errorf("%s source path 含控制字符: %q", sourceKind, sourcePath)
+		}
+	}
+	switch sourceKind {
+	case "design":
+		if !strings.HasPrefix(sourcePath, "docs/") {
+			return fmt.Errorf("design source 越出 docs/: %s", sourcePath)
+		}
+	case "validator":
+		if !strings.HasPrefix(sourcePath, "agent/tests/contract/") || pathpkg.Ext(sourcePath) != ".go" {
+			return fmt.Errorf("validator source 必须是 agent/tests/contract/ 下的 Go 文件: %s", sourcePath)
+		}
+	default:
+		return fmt.Errorf("未知 source kind: %s", sourceKind)
+	}
+	return nil
+}
+
+func corpusManifestSourceFullPathV1(repositoryRoot, sourcePath string) (string, error) {
+	fullPath := filepath.Join(repositoryRoot, filepath.FromSlash(sourcePath))
+	relative, err := filepath.Rel(repositoryRoot, fullPath)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("source path 越出仓库: %s", sourcePath)
+	}
+	info, err := os.Lstat(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("检查 %s: %w", sourcePath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("source 不是普通文件: %s", sourcePath)
+	}
+	return fullPath, nil
+}
+
+func validateCorpusManifestDecoderSourcesV1(repositoryRoot string, sources []corpusManifestSourceV1) error {
+	wantOwners := []struct {
+		functionName string
+		sourcePath   string
+	}{
+		{functionName: "inspectJSON", sourcePath: "agent/tests/contract/graph_tool_result_v1_corpus_test.go"},
+		{functionName: "strictDecode", sourcePath: "agent/tests/contract/graph_tool_result_v1_corpus_test.go"},
+		{functionName: "validateJSONUnicodeEscapes", sourcePath: "agent/tests/contract/graph_tool_result_v1_corpus_test.go"},
+	}
+	found := make(map[string]string, len(wantOwners))
+	required := make(map[string]struct{}, len(wantOwners))
+	for _, owner := range wantOwners {
+		required[owner.functionName] = struct{}{}
+	}
+	for _, source := range sources {
+		fullPath, err := corpusManifestSourceFullPathV1(repositoryRoot, source.Path)
+		if err != nil {
+			return err
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), fullPath, nil, 0)
+		if err != nil {
+			return fmt.Errorf("解析 validator source %s: %w", source.Path, err)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Recv != nil {
+				continue
+			}
+			if _, isRequired := required[function.Name.Name]; isRequired {
+				found[function.Name.Name] = source.Path
+			}
+		}
+	}
+	for _, owner := range wantOwners {
+		if found[owner.functionName] != owner.sourcePath {
+			return fmt.Errorf("%s owner=%s want=%s", owner.functionName, found[owner.functionName], owner.sourcePath)
+		}
+	}
+	return nil
+}
+
+func assertCorpusManifestSourceClosureRejectsV1(t *testing.T, repositoryRoot string, designSources []corpusManifestSourceV1, wantDesignPaths []string, validatorSources []corpusManifestSourceV1, wantValidatorPaths []string) {
+	t.Helper()
+	clone := func(sources []corpusManifestSourceV1) []corpusManifestSourceV1 {
+		return append([]corpusManifestSourceV1(nil), sources...)
+	}
+	t.Run("source_closure_rejects_missing_unknown_and_digest_drift", func(t *testing.T) {
+		missing := clone(designSources[:len(designSources)-1])
+		if err := validateCorpusManifestSourceClosureV1(repositoryRoot, "design", missing, wantDesignPaths); err == nil {
+			t.Fatal("缺失 design source 必须失败关闭")
+		}
+		unknown := clone(designSources)
+		unknown[len(unknown)-1].Path = "docs/design/unknown-r01-source.md"
+		if err := validateCorpusManifestSourceClosureV1(repositoryRoot, "design", unknown, wantDesignPaths); err == nil {
+			t.Fatal("未知 design source 必须失败关闭")
+		}
+		drifted := clone(validatorSources)
+		drifted[0].SHA256 = "sha256:" + strings.Repeat("0", 64)
+		if err := validateCorpusManifestSourceClosureV1(repositoryRoot, "validator", drifted, wantValidatorPaths); err == nil {
+			t.Fatal("validator source 摘要漂移必须失败关闭")
+		}
+		unsafe := clone(validatorSources)
+		unsafe[0].Path = "agent/tests/contract/../contract/graph_tool_result_v1_corpus_test.go"
+		if err := validateCorpusManifestSourceClosureV1(repositoryRoot, "validator", unsafe, wantValidatorPaths); err == nil {
+			t.Fatal("非规范化 validator source 路径必须失败关闭")
+		}
+		duplicate := clone(validatorSources)
+		duplicate[1] = duplicate[0]
+		if err := validateCorpusManifestSourceClosureV1(repositoryRoot, "validator", duplicate, wantValidatorPaths); err == nil {
+			t.Fatal("重复 validator source 必须失败关闭")
+		}
+		unsorted := clone(designSources)
+		unsorted[0], unsorted[1] = unsorted[1], unsorted[0]
+		if err := validateCorpusManifestSourceClosureV1(repositoryRoot, "design", unsorted, wantDesignPaths); err == nil {
+			t.Fatal("未排序 design sources 必须失败关闭")
+		}
+	})
 }
 
 func contractManifestTargetTestNamesV1(t *testing.T, files []string) []string {

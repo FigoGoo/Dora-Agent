@@ -8,8 +8,32 @@
     },
     {
       "file": "tool_receipt_v1.json",
-      "sha256": "sha256:045cd4ebcc39cba1d669f1eb477210fd699b56feb03e1652b6ed0d0ecc5c3ab9",
-      "vector_count": 37
+      "sha256": "sha256:abe0ebd3c99e11bf3d7d0e9d59a68ceca0db0f087893a76eb177099b22ff0d89",
+      "vector_count": 39
+    }
+  ],
+  "design_sources": [
+    {
+      "path": "docs/design/agent/graph-tool-result-receipt-contract-v1.md",
+      "sha256": "sha256:8c47b7ea10c822a628d5fe42d75f73f9925b07f7de726eff23e2468492790ff7"
+    },
+    {
+      "path": "docs/design/agent/runner-session-lane-review-v1.md",
+      "sha256": "sha256:dbc1a01a3054ca6e963981ba231ebaee81eb60ac16887c3e5aeeaea078e5bccb"
+    },
+    {
+      "path": "docs/design/cross-module/aigc-contract-catalog.md",
+      "sha256": "sha256:d7a92ad2c7d6ebb4173a880f2d86a8f6270be7a61c52e47e50502f41c6b07151"
+    }
+  ],
+  "validator_sources": [
+    {
+      "path": "agent/tests/contract/graph_tool_result_v1_corpus_test.go",
+      "sha256": "sha256:95b3113edfc179aa6f6d645b98fd6b3f2be7eb627d86b800fb3d13ea5f361bbd"
+    },
+    {
+      "path": "agent/tests/contract/tool_receipt_v1_corpus_test.go",
+      "sha256": "sha256:60d2ddca0a855fcca789d77778498e114a4109b51817d86cb79f2f92350cb201"
     }
   ],
   "fixture_ids": [
@@ -88,6 +112,8 @@
     "TR-N11-forged-higher-fence",
     "TR-N12-stale-freeze-version",
     "TR-N13-unpinned-slot",
+    "TR-N14-replay-reserve-piggyback",
+    "TR-N15-replay-resolve-piggyback",
     "TR-E01-waiting-user",
     "TR-E02-waiting-user-missing-approval",
     "TR-E03-completed",
@@ -102,7 +128,7 @@
     "TR-E12-cancelled-after-policy-side-effect",
     "TR-E13-cancelled-after-missing-policy-side-effect"
   ],
-  "total_vector_count": 85,
+  "total_vector_count": 87,
   "target_tests": [
     "TestW2R01CorpusManifest",
     "TestGraphToolResultV1Corpus",

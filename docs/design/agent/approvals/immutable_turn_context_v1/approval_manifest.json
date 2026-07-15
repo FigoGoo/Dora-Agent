@@ -281,7 +281,7 @@
       "artifact_refs": [
         {
           "path": "agent/tests/contract/testdata/w2_r01/manifest.json",
-          "sha256": "sha256:d08c20bafb9f4119b13e07a419cbfa72224d3e85a9af8447c5f88313d38217cd",
+          "sha256": "sha256:4fb54f2852e9db99db0d21df64e800d01f0d99523d61af447cb1e96f079229b1",
           "kind": "corpus_manifest"
         },
         {
@@ -397,7 +397,7 @@
       "artifact_refs": [
         {
           "path": "agent/tests/contract/testdata/w2_r01/manifest.json",
-          "sha256": "sha256:d08c20bafb9f4119b13e07a419cbfa72224d3e85a9af8447c5f88313d38217cd",
+          "sha256": "sha256:4fb54f2852e9db99db0d21df64e800d01f0d99523d61af447cb1e96f079229b1",
           "kind": "corpus_manifest"
         },
         {
@@ -422,7 +422,7 @@
         },
         {
           "path": "agent/tests/contract/testdata/w2_r04_approval_consumption/manifest.json",
-          "sha256": "sha256:dd546a612257a0c7f6682696427b675ab9b34fdd35027617912815baf89c8ab7",
+          "sha256": "sha256:e442cbb99a726ed93a764b1c9914fe5bf7eff089f621eb2d475e3e2bcd5be77c",
           "kind": "corpus_manifest"
         },
         {
