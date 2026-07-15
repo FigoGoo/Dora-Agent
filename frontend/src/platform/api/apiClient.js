@@ -15,6 +15,12 @@ export class ApiError extends Error {
 
 // requestJSON 通过统一的 Cookie 会话调用 JSON API，并将失败响应转换为 ApiError。
 export async function requestJSON(path, options = {}) {
+  const result = await requestJSONWithResponse(path, options);
+  return result.payload;
+}
+
+// requestJSONWithResponse 在保留统一错误处理的同时暴露成功响应元数据，供严格核对 ETag 等 HTTP 契约。
+export async function requestJSONWithResponse(path, options = {}) {
   const { suppressAuthExpiryNotification = false, ...fetchOptions } = options;
   const headers = normalizeHeaders(options.headers);
   const body = options.body;
@@ -40,12 +46,12 @@ export async function requestJSON(path, options = {}) {
     throw error;
   }
   if (response.status === 204) {
-    return null;
+    return { payload: null, response };
   }
 
   const payload = await readResponsePayload(response);
   if (payload.empty) {
-    return null;
+    return { payload: null, response };
   }
   if (!payload.isJSON) {
     throw new ApiError({
@@ -55,7 +61,7 @@ export async function requestJSON(path, options = {}) {
       requestID: response.headers?.get?.('x-request-id') || ''
     });
   }
-  return payload.value;
+  return { payload: payload.value, response };
 }
 
 // requestOptionalJSON 调用可选 JSON 资源，只有 404 会转换为 null。

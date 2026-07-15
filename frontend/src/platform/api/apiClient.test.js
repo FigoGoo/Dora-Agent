@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AUTH_SESSION_EXPIRED_EVENT } from '../auth/authSession.js';
-import { ApiError, requestJSON, requestOptionalJSON } from './apiClient.js';
+import { ApiError, requestJSON, requestJSONWithResponse, requestOptionalJSON } from './apiClient.js';
 
 describe('API Client', () => {
   it('uses same-origin Cookie credentials and preserves caller headers', async () => {
@@ -106,6 +106,19 @@ describe('API Client', () => {
       status: 200,
       code: 'INVALID_JSON_RESPONSE'
     });
+  });
+
+  it('exposes successful response metadata without changing requestJSON payload semantics', async () => {
+    const originalResponse = response({ ok: true }, 200, { ETag: '"opaque-etag"' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(originalResponse));
+
+    await expect(requestJSONWithResponse('/api/with-metadata')).resolves.toEqual({
+      payload: { ok: true },
+      response: originalResponse
+    });
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(null)));
+    await expect(requestJSON('/api/empty-success')).resolves.toBeNull();
   });
 });
 
