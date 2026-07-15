@@ -206,6 +206,8 @@ type reviewFreezeCorpusManifestV1 struct {
 	ValidatorSources []reviewFreezeValidatorSourceV1 `json:"validator_sources"`
 	// ValidatorBuildSources 必填绑定 Validator 所属 Go Module 的 go.mod/go.sum 原始字节摘要。
 	ValidatorBuildSources []reviewFreezeValidatorSourceV1 `json:"validator_build_sources"`
+	// ValidatorBuildClosure 可选承载独立 Validator entrypoint 的完整构建闭包候选；旧 v1 manifest 缺失时保持兼容，但不获得 formal Freeze 效力。
+	ValidatorBuildClosure *reviewFreezeValidatorBuildClosureV1 `json:"validator_build_closure,omitempty"`
 	// DesignSources 可选绑定产生该 Corpus 的设计源文件及原始字节摘要。
 	DesignSources []reviewFreezeDesignSourceV1 `json:"design_sources,omitempty"`
 	// VectorIDs 是现有 manifest 声明的向量集合。
@@ -649,6 +651,9 @@ func reviewFreezeValidateGateV1(manifest reviewFreezeManifestV1, gate reviewFree
 			return fmt.Errorf("candidate %s: %w", candidate.Scope, err)
 		}
 	}
+	if err := reviewFreezeValidateGateBuildClosurePolicyV1(gate, loader); err != nil {
+		return err
+	}
 
 	switch gate.Status {
 	case "expansion_frozen":
@@ -749,6 +754,9 @@ func reviewFreezeValidateContractRefV1(path, expectedSHA string, vectorIDs, targ
 	if err != nil {
 		return fmt.Errorf("读取 contract manifest %s: %w", path, err)
 	}
+	if err := reviewFreezeValidateValidatorBuildClosureJSONV1(raw); err != nil {
+		return fmt.Errorf("contract manifest %s: %w", path, err)
+	}
 	if err := reviewFreezeCheckSHA256V1(raw, expectedSHA); err != nil {
 		return fmt.Errorf("contract manifest %s: %w", path, err)
 	}
@@ -766,6 +774,9 @@ func reviewFreezeValidateContractRefV1(path, expectedSHA string, vectorIDs, targ
 		return err
 	}
 	if err := reviewFreezeValidateValidatorBuildSourcesV1(source.ValidatorSources, source.ValidatorBuildSources, loader); err != nil {
+		return err
+	}
+	if err := reviewFreezeValidateValidatorBuildClosureV1(source, loader, nil); err != nil {
 		return err
 	}
 	if err := reviewFreezeValidateOptionalDesignSourcesV1(source.DesignSources, loader); err != nil {

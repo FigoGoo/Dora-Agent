@@ -148,8 +148,8 @@ func reviewFreezeValidatorSourcePathsV1(sources []reviewFreezeValidatorSourceV1)
 	return paths
 }
 
-// reviewFreezeValidateHeadValidatorClosuresV1 对 HEAD 中每个候选或正式 Corpus 执行直接 Go package source 与 Module metadata 闭包。
-// 它不声称覆盖 embed、同 Module 传递依赖、vendor、第三方源码或 toolchain；这些仍由 formal Freeze blocker 追踪。
+// reviewFreezeValidateHeadValidatorClosuresV1 对 HEAD 中每个候选或正式 Corpus 执行直接 Go package source、Module metadata 与可选 entrypoint candidate 扩展校验。
+// 可选扩展只补充 embed 禁止、import/外部 Module/selected-source 声明、辅助构建输入和预期环境等静态候选；真实 resolver、实际 runner/toolchain/action 与 trust-root 尚未闭合，因此不构成 formal build closure。
 func reviewFreezeValidateHeadValidatorClosuresV1(repository reviewFreezeGitRepositoryV1, headSHA string, manifest reviewFreezeManifestV1) error {
 	manifestPaths := make(map[string]struct{})
 	for _, gate := range manifest.Gates {
@@ -179,6 +179,9 @@ func reviewFreezeValidateGitValidatorContractV1(repository reviewFreezeGitReposi
 	if err != nil {
 		return err
 	}
+	if err := reviewFreezeValidateValidatorBuildClosureJSONV1(raw); err != nil {
+		return err
+	}
 	var manifest reviewFreezeCorpusManifestV1
 	if err := messageSetStrictDecodeV1(raw, &manifest); err != nil {
 		return err
@@ -190,7 +193,13 @@ func reviewFreezeValidateGitValidatorContractV1(repository reviewFreezeGitReposi
 	if err := reviewFreezeValidateValidatorBuildSourcesV1(manifest.ValidatorSources, manifest.ValidatorBuildSources, loader); err != nil {
 		return err
 	}
-	return reviewFreezeValidateGitValidatorPackageExactSetV1(repository, commitSHA, manifest.ValidatorSources)
+	if err := reviewFreezeValidateValidatorBuildClosureV1(manifest, loader, nil); err != nil {
+		return err
+	}
+	if err := reviewFreezeValidateGitValidatorPackageExactSetV1(repository, commitSHA, manifest.ValidatorSources); err != nil {
+		return err
+	}
+	return reviewFreezeValidateGitValidatorAuxiliaryBuildInputsV1(repository, commitSHA, manifest)
 }
 
 // reviewFreezeValidateGitValidatorPackageExactSetV1 要求声明源等于各 Validator package 直接目录下全部 .go Git blob 的并集。
