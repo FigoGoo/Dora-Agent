@@ -1,14 +1,18 @@
 # Dora 全功能冒烟开发推进计划
 
-> 文档状态：执行基线；M1 基础纵切已完成，W2 架构决策收敛中
+> 文档状态：详细里程碑、SMK-P0 与长期 backlog；不再承担当前批次调度
 >
-> 版本：v0.23
+> 当前唯一执行口径：[Dora 项目开发计划（Canonical）](project-development-plan.md)
+>
+> 版本：v0.24
 >
 > 更新日期：2026-07-15
 >
 > 关联文档：[2026-07-15 全功能冒烟架构与推进审计](../design/cross-module/full-function-smoke-architecture-audit-2026-07-15.md)、[用户端需求总览](user-requirements-overview.md)、[管理端需求总览](admin-requirements-overview.md)、[服务端需求总览](server-requirements-overview.md)、[Graph Tool 功能需求总览](graph-tool-requirements-overview.md)、[支付与积分充值需求总览](payment-requirements-overview.md)、[共通业务规则与验收基线](common-requirements-baseline.md)、[Graph Tool 详细设计索引](../design/agent/graphtool/README.md)、[AIGC 跨 Module 契约目录](../design/cross-module/aigc-contract-catalog.md)、[Agent Runner 与 PostgreSQL Session Lane v1 设计评审](../design/agent/runner-session-lane-review-v1.md)、[PostgreSQL Session Lane 与 Runner Runtime 可执行契约 v1](../design/agent/session-lane-runtime-contract-v1.md)、[Session Lane Ingress 与 Command Receipt 可执行契约 v1](../design/agent/session-lane-ingress-command-contract-v1.md)、[Session Lane PostgreSQL 物理设计与升级方案 v1](../design/agent/session-lane-postgresql-design-v1.md)、[GraphToolResultV1 与 ToolReceipt 可执行契约 v1](../design/agent/graph-tool-result-receipt-contract-v1.md)、[W0 身份与工作台契约 v1](../design/cross-module/w0-identity-workspace-contract-v1.md)、[W0.5 Workspace Transport 契约 v1](../design/cross-module/w05-workspace-transport-contract-v1.md)、[Business 鉴权/Project 评审包](../design/business/auth-project-foundation-review.md)、[Agent Session/Event 评审包](../design/agent/session-event-foundation-review.md)、[SMK-001～004 垂直切片评审包](../design/testing/smk-001-004-vertical-slice-review.md)
 
 > W2 当前新增评审输入：[Graph Execution Billing v1](../design/cross-module/graph-execution-billing-contract-v1.md)、[全功能冒烟工程设计 v1alpha2](../design/testing/full-function-smoke-engineering-design.md)、[W2-R01 Owner 决策矩阵 v1](../design/agent/w2-r01-owner-decision-matrix-v1.md) 与 [W2 Review Freeze 机器治理清单](../design/agent/approvals/w2-review-freeze-manifest.json)。它们均不得被解释为生产实现或 Owner Approved。
+
+> 调度规则：本文保留完整需求覆盖、历史交付台账和长期阶段依赖。文中任何旧“下一批”、Batch 编号或并行建议若与 Canonical 计划冲突，以 Canonical 计划为准；领域实现仍必须服从对应 Design / ADR / Owner 审批门禁。
 
 ## 1. 目标与完成定义
 

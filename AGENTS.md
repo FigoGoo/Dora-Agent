@@ -7,6 +7,14 @@
 - `agent/`：Agent Service 独立 Go Module，生产 Runtime 为 `agent/cmd/agent-service`，Migration 位于 `agent/migrations`。
 - 仓库根目录仅负责多 Module 协作、文档和共享工程配置，不作为任一生产 Runtime 的 Go Module；根 `go.work` 只能用于本地联调。
 
+## 开发计划与状态口径
+
+- [Dora 项目开发计划（Canonical）](docs/requirements/project-development-plan.md) 是当前状态、执行顺序、暂停项和上下文交接的唯一调度入口；收到“继续推进”时先读取该文件。
+- [全功能冒烟开发推进计划](docs/requirements/full-function-smoke-development-plan.md) 只维护详细里程碑、SMK-P0 和长期 backlog；其中旧“下一批”或 Batch 编号不得覆盖 Canonical 计划。
+- [全功能冒烟架构与推进审计](docs/design/cross-module/full-function-smoke-architecture-audit-2026-07-15.md) 只提供目标架构、阶段依赖和风险依据，不表示推荐项已 Approved 或已实现。
+- 当前事实只由代码、Migration 和可重复 Evidence 证明；实现授权仍由对应 Design / ADR / Owner 审批决定。Canonical 计划只能安排顺序，不能解除门禁。
+- 每次真实交付、Owner 审批、门禁解锁或主纵切变化后同步更新 Canonical 计划；不得预写完成状态。
+
 ## 服务端开发规范 Skill
 
 下列任务必须使用项目级 `$dora-server-development` Skill：

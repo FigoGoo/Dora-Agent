@@ -53,6 +53,7 @@ Dora-Agent/
 
 ## 开发入口
 
+- [项目开发计划（Canonical，当前状态与唯一执行顺序）](docs/requirements/project-development-plan.md)
 - [项目协作指引](AGENTS.md)
 - [服务端开发规范 Skill](.agents/skills/dora-server-development/SKILL.md)
 - [用户端需求总览](docs/requirements/user-requirements-overview.md)
@@ -61,7 +62,7 @@ Dora-Agent/
 - [Graph Tool 功能需求总览](docs/requirements/graph-tool-requirements-overview.md)
 - [支付与积分充值需求总览](docs/requirements/payment-requirements-overview.md)
 - [共通业务规则与验收基线](docs/requirements/common-requirements-baseline.md)
-- [全功能冒烟开发推进计划](docs/requirements/full-function-smoke-development-plan.md)
+- [全功能冒烟开发推进计划（详细里程碑、SMK-P0 与长期 backlog）](docs/requirements/full-function-smoke-development-plan.md)
 - [Graph Tool 详细设计索引](docs/design/agent/graphtool/README.md)
 - [AIGC 跨 Module 契约目录](docs/design/cross-module/aigc-contract-catalog.md)
 - [Foundation RPC v1 契约](docs/design/cross-module/foundation-rpc-v1.md)

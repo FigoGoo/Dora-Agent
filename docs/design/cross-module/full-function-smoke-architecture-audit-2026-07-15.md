@@ -1,5 +1,9 @@
 # 全功能冒烟架构与推进审计（2026-07-15）
 
+> 文档职责：目标架构、风险审计、阶段依赖与推荐方案；不承担当前批次调度，也不表示候选方案已经 Approved。
+>
+> 当前状态与唯一执行顺序：[Dora 项目开发计划（Canonical）](../../requirements/project-development-plan.md)
+
 > 状态：Architecture Audit / Recommended Baseline，尚未替代任何已有 Approved 契约
 >
 > 事实基线：`cc4414b0`（2026-07-15）
