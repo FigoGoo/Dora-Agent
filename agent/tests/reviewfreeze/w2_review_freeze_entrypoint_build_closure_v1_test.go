@@ -117,8 +117,8 @@ type reviewFreezeValidatorExternalSourceV1 struct {
 }
 
 // reviewFreezeExternalPackageResolverV1 在固定环境下返回外部 package 实际被 Go build 选中的全部 source。
-// 批次一只建立接口和失败关闭语义；R01 迁移批次必须把它接到受信 module cache/go list 解析器。
-type reviewFreezeExternalPackageResolverV1 func(modulePath, version, importPath string, environment reviewFreezeValidatorBuildEnvironmentV1) (map[string][]byte, error)
+// Module lock 与 go.sum 必须同时传入，防止 resolver 只根据 path/version 信任本机 cache 或网络结果。
+type reviewFreezeExternalPackageResolverV1 func(module reviewFreezeValidatorExternalModuleV1, importPath string, environment reviewFreezeValidatorBuildEnvironmentV1, goSumRaw []byte) (map[string][]byte, error)
 
 // reviewFreezeGoModShapeV1 提取独立 Module 构建闭包所需的最小 go.mod 事实。
 type reviewFreezeGoModShapeV1 struct {
@@ -630,7 +630,7 @@ func reviewFreezeValidateExternalModulesV1(modules []reviewFreezeValidatorExtern
 			if _, exists := packageOwners[selectedPackage.ImportPath]; exists {
 				return fmt.Errorf("external package 被重复声明=%q", selectedPackage.ImportPath)
 			}
-			imports, err := reviewFreezeValidateExternalPackageV1(module, selectedPackage, environment, resolver)
+			imports, err := reviewFreezeValidateExternalPackageV1(module, selectedPackage, environment, goSumRaw, resolver)
 			if err != nil {
 				return err
 			}
@@ -671,14 +671,14 @@ func reviewFreezeValidateExternalModulesV1(modules []reviewFreezeValidatorExtern
 }
 
 // reviewFreezeValidateExternalPackageV1 对 resolver 的实际 selected source 做 exact-set、摘要、embed 和 import 校验。
-func reviewFreezeValidateExternalPackageV1(module reviewFreezeValidatorExternalModuleV1, selectedPackage reviewFreezeValidatorExternalPackageV1, environment reviewFreezeValidatorBuildEnvironmentV1, resolver reviewFreezeExternalPackageResolverV1) ([]string, error) {
+func reviewFreezeValidateExternalPackageV1(module reviewFreezeValidatorExternalModuleV1, selectedPackage reviewFreezeValidatorExternalPackageV1, environment reviewFreezeValidatorBuildEnvironmentV1, goSumRaw []byte, resolver reviewFreezeExternalPackageResolverV1) ([]string, error) {
 	if len(selectedPackage.Sources) == 0 {
 		return nil, fmt.Errorf("external package %s sources exact-set 不能为空", selectedPackage.ImportPath)
 	}
 	if err := reviewFreezeValidateSortedStringSliceV1(selectedPackage.AllowedImports, "external package allowed_imports", true); err != nil {
 		return nil, err
 	}
-	actual, err := resolver(module.ModulePath, module.Version, selectedPackage.ImportPath, environment)
+	actual, err := resolver(module, selectedPackage.ImportPath, environment, goSumRaw)
 	if err != nil {
 		return nil, fmt.Errorf("解析 external package %s selected sources: %w", selectedPackage.ImportPath, err)
 	}
@@ -1251,7 +1251,7 @@ type reviewFreezeSyntheticExternalResolverV1 struct {
 }
 
 // resolve 返回隔离副本，模拟受信 go list/module cache resolver 的 exact-set 输出。
-func (resolver *reviewFreezeSyntheticExternalResolverV1) resolve(_ string, _ string, importPath string, _ reviewFreezeValidatorBuildEnvironmentV1) (map[string][]byte, error) {
+func (resolver *reviewFreezeSyntheticExternalResolverV1) resolve(_ reviewFreezeValidatorExternalModuleV1, importPath string, _ reviewFreezeValidatorBuildEnvironmentV1, _ []byte) (map[string][]byte, error) {
 	sources, ok := resolver.sources[importPath]
 	if !ok {
 		return nil, fmt.Errorf("missing selected package %s", importPath)
