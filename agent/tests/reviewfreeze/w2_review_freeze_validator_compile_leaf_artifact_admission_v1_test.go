@@ -52,6 +52,49 @@ type reviewFreezeCompileLeafArtifactAdmissionV1 struct {
 	formalFreezeEligible              bool
 }
 
+// reviewFreezeCompileLeafArtifactComponentsV1 冻结一次 leaf/artifact admission
+// 调用已经验证的可复用组件。raw bytes 使用 string 保存，repository/admission 只通过
+// 深复制 accessor 暴露，后续组合层可以复用同一次 loader 结果而不能修改本对象。
+type reviewFreezeCompileLeafArtifactComponentsV1 struct {
+	admission        *reviewFreezeCompileLeafArtifactAdmissionV1
+	statementRaw     string
+	snapshotRaw      string
+	repositoryLeaves *reviewFreezeVerifiedCompileRepositoryLeafBundleV1
+}
+
+// Admission 返回本次组件调用形成的 admission 深副本；该方法不会重新访问 loader。
+func (components *reviewFreezeCompileLeafArtifactComponentsV1) Admission() *reviewFreezeCompileLeafArtifactAdmissionV1 {
+	if components == nil {
+		return nil
+	}
+	return reviewFreezeCompileLeafArtifactResultCloneV1(components.admission)
+}
+
+// StatementRaw 返回已经过 strict decode 且参与组合 admission 的 statement raw 副本。
+func (components *reviewFreezeCompileLeafArtifactComponentsV1) StatementRaw() []byte {
+	if components == nil {
+		return nil
+	}
+	return []byte(components.statementRaw)
+}
+
+// SnapshotRaw 返回已经与 statement before/after ref 绑定的 snapshot raw 副本。
+func (components *reviewFreezeCompileLeafArtifactComponentsV1) SnapshotRaw() []byte {
+	if components == nil {
+		return nil
+	}
+	return []byte(components.snapshotRaw)
+}
+
+// RepositoryLeaves 返回同一次 admission 已验证的 repository leaf bundle 深副本；
+// 读取或修改该副本不会再次打开 loader，也不会污染 components 内部结果。
+func (components *reviewFreezeCompileLeafArtifactComponentsV1) RepositoryLeaves() *reviewFreezeVerifiedCompileRepositoryLeafBundleV1 {
+	if components == nil {
+		return nil
+	}
+	return reviewFreezeCompileLeafArtifactRepositoryBundleCloneV1(components.repositoryLeaves)
+}
+
 // RepositoryPaths 返回已验证 repository leaf path 的有序副本；调用方修改结果不会
 // 改变 admission 内部 exact-set。
 func (result *reviewFreezeCompileLeafArtifactAdmissionV1) RepositoryPaths() []string {
@@ -130,16 +173,31 @@ func reviewFreezeCompileLeafArtifactOpenGapsV1() []string {
 	}
 }
 
-// reviewFreezeAdmitCompileLeafArtifactV1 按固定顺序消费同一个 verified bundle：先做
-// direct material semantic admission，再从其冻结的 strict statement/snapshot raw
-// 驱动 repository、module-cache 与 artifact BuildInfo verifier。任一步失败都不返回
-// 部分结论。
+// reviewFreezeAdmitCompileLeafArtifactV1 保持原 admission 入口兼容；内部只执行一次
+// components helper，再返回不可变 admission 副本，不重复访问 repository/module loader。
 func reviewFreezeAdmitCompileLeafArtifactV1(
 	ctx context.Context,
 	verified *reviewFreezeVerifiedAttestationMaterialBundleV1,
 	repositoryLoader reviewFreezeCompileRepositoryLeafLoaderV1,
 	moduleLoader reviewFreezeCompileModuleLeafLoaderV1,
 ) (*reviewFreezeCompileLeafArtifactAdmissionV1, error) {
+	components, err := reviewFreezeAdmitCompileLeafArtifactComponentsV1(ctx, verified, repositoryLoader, moduleLoader)
+	if err != nil {
+		return nil, err
+	}
+	return components.Admission(), nil
+}
+
+// reviewFreezeAdmitCompileLeafArtifactComponentsV1 按固定顺序消费同一个 verified
+// bundle：先做 direct material semantic admission，再从其冻结的 strict
+// statement/snapshot raw 驱动 repository、module-cache 与 artifact BuildInfo verifier。
+// 任一步失败都不返回部分组件；成功时每个 loader 仍只 List 一次、每个 leaf 只 Open 一次。
+func reviewFreezeAdmitCompileLeafArtifactComponentsV1(
+	ctx context.Context,
+	verified *reviewFreezeVerifiedAttestationMaterialBundleV1,
+	repositoryLoader reviewFreezeCompileRepositoryLeafLoaderV1,
+	moduleLoader reviewFreezeCompileModuleLeafLoaderV1,
+) (*reviewFreezeCompileLeafArtifactComponentsV1, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("compile leaf/artifact admission context 不能为空")
 	}
@@ -191,7 +249,7 @@ func reviewFreezeAdmitCompileLeafArtifactV1(
 		return nil, fmt.Errorf("compile leaf/artifact binary BuildInfo: %w", err)
 	}
 
-	return reviewFreezeAssembleCompileLeafArtifactAdmissionV1(
+	admission, err := reviewFreezeAssembleCompileLeafArtifactAdmissionV1(
 		statementRaw,
 		snapshotRaw,
 		direct,
@@ -199,37 +257,67 @@ func reviewFreezeAdmitCompileLeafArtifactV1(
 		modules,
 		artifact,
 	)
+	if err != nil {
+		return nil, err
+	}
+	components := &reviewFreezeCompileLeafArtifactComponentsV1{
+		admission:        reviewFreezeCompileLeafArtifactResultCloneV1(admission),
+		statementRaw:     string(statementRaw),
+		snapshotRaw:      string(snapshotRaw),
+		repositoryLeaves: reviewFreezeCompileLeafArtifactRepositoryBundleCloneV1(repository),
+	}
+	if err := reviewFreezeValidateCompileLeafArtifactComponentsBoundaryV1(components); err != nil {
+		return nil, fmt.Errorf("compile leaf/artifact components boundary: %w", err)
+	}
+	return components, nil
 }
 
-// reviewFreezeAssembleCompileLeafArtifactAdmissionV1 只组合已验证子结果，并再次执行
-// cross-result exact-set 校验。该步骤拒绝 loader 结果属于不同 snapshot、子结果计数漂移
-// 或 artifact validator 将语义结果升级为 builder/signature authority。
-func reviewFreezeAssembleCompileLeafArtifactAdmissionV1(
-	statementRaw []byte,
-	snapshotRaw []byte,
-	direct reviewFreezeCompileDirectMaterialAdmissionV1,
-	repository *reviewFreezeVerifiedCompileRepositoryLeafBundleV1,
-	modules *reviewFreezeCompileModuleLeafBundleV1,
-	artifact reviewFreezeCompileAttestationArtifactBuildInfoResultV1,
-) (*reviewFreezeCompileLeafArtifactAdmissionV1, error) {
-	if err := reviewFreezeValidateCompileDirectMaterialAdmissionBoundaryV1(direct); err != nil {
-		return nil, fmt.Errorf("compile leaf/artifact assemble direct result: %w", err)
+// reviewFreezeValidateCompileLeafArtifactComponentsBoundaryV1 校验 components 只包含
+// 同一 statement/snapshot 形成的非空 admission 与 repository bundle。它不访问 loader，
+// 也不关闭任何新增 claim。
+func reviewFreezeValidateCompileLeafArtifactComponentsBoundaryV1(components *reviewFreezeCompileLeafArtifactComponentsV1) error {
+	if components == nil {
+		return fmt.Errorf("compile leaf/artifact components 不能为空")
 	}
-	if repository == nil || modules == nil {
-		return nil, fmt.Errorf("compile leaf/artifact assemble leaf bundle 不能为空")
+	if components.admission == nil || components.repositoryLeaves == nil || components.statementRaw == "" || components.snapshotRaw == "" {
+		return fmt.Errorf("compile leaf/artifact components admission/raw/repository 不能为空")
+	}
+	statementRaw := []byte(components.statementRaw)
+	snapshotRaw := []byte(components.snapshotRaw)
+	if err := reviewFreezeValidateCompileLeafArtifactAdmissionBoundaryV1(components.admission, statementRaw, snapshotRaw); err != nil {
+		return fmt.Errorf("compile leaf/artifact components admission: %w", err)
 	}
 	statement, err := reviewFreezeDecodeCompileAttestationStatementJSONV1(statementRaw)
 	if err != nil {
-		return nil, fmt.Errorf("compile leaf/artifact assemble statement: %w", err)
+		return fmt.Errorf("compile leaf/artifact components statement: %w", err)
 	}
 	if err := reviewFreezeValidateCompileInputSnapshotJSONV1(snapshotRaw, statement); err != nil {
-		return nil, fmt.Errorf("compile leaf/artifact assemble snapshot: %w", err)
+		return fmt.Errorf("compile leaf/artifact components snapshot: %w", err)
 	}
 	var snapshot reviewFreezeCompileInputSnapshotV1
 	if err := json.Unmarshal(snapshotRaw, &snapshot); err != nil {
-		return nil, fmt.Errorf("compile leaf/artifact decode verified snapshot: %w", err)
+		return fmt.Errorf("compile leaf/artifact components decode snapshot: %w", err)
 	}
+	repositoryPaths, err := reviewFreezeValidateCompileLeafArtifactRepositoryResultV1(snapshot, components.repositoryLeaves)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(repositoryPaths, components.admission.repositoryPaths) {
+		return fmt.Errorf("compile leaf/artifact components repository/admission paths 错配=%v/%v", repositoryPaths, components.admission.repositoryPaths)
+	}
+	return nil
+}
 
+// reviewFreezeValidateCompileLeafArtifactRepositoryResultV1 把已验证 repository 子结果
+// 重新绑定到同一 strict snapshot。该纯内存边界由 assemble 与 components 共同复用，
+// 不会重新 List/Open repository loader。
+func reviewFreezeValidateCompileLeafArtifactRepositoryResultV1(
+	snapshot reviewFreezeCompileInputSnapshotV1,
+	repository *reviewFreezeVerifiedCompileRepositoryLeafBundleV1,
+) ([]string, error) {
+	if repository == nil {
+		return nil, fmt.Errorf("compile leaf/artifact repository result 不能为空")
+	}
 	repositoryPaths := repository.Paths()
 	if !reflect.DeepEqual(repositoryPaths, reviewFreezeCompileInputSnapshotRepositoryPathsV1()) {
 		return nil, fmt.Errorf("compile leaf/artifact repository result paths=%v", repositoryPaths)
@@ -267,6 +355,42 @@ func reviewFreezeAssembleCompileLeafArtifactAdmissionV1(
 	}
 	if repository.TotalBytes() != repositoryTotal {
 		return nil, fmt.Errorf("compile leaf/artifact repository total bytes=%d want=%d", repository.TotalBytes(), repositoryTotal)
+	}
+	return repositoryPaths, nil
+}
+
+// reviewFreezeAssembleCompileLeafArtifactAdmissionV1 只组合已验证子结果，并再次执行
+// cross-result exact-set 校验。该步骤拒绝 loader 结果属于不同 snapshot、子结果计数漂移
+// 或 artifact validator 将语义结果升级为 builder/signature authority。
+func reviewFreezeAssembleCompileLeafArtifactAdmissionV1(
+	statementRaw []byte,
+	snapshotRaw []byte,
+	direct reviewFreezeCompileDirectMaterialAdmissionV1,
+	repository *reviewFreezeVerifiedCompileRepositoryLeafBundleV1,
+	modules *reviewFreezeCompileModuleLeafBundleV1,
+	artifact reviewFreezeCompileAttestationArtifactBuildInfoResultV1,
+) (*reviewFreezeCompileLeafArtifactAdmissionV1, error) {
+	if err := reviewFreezeValidateCompileDirectMaterialAdmissionBoundaryV1(direct); err != nil {
+		return nil, fmt.Errorf("compile leaf/artifact assemble direct result: %w", err)
+	}
+	if repository == nil || modules == nil {
+		return nil, fmt.Errorf("compile leaf/artifact assemble leaf bundle 不能为空")
+	}
+	statement, err := reviewFreezeDecodeCompileAttestationStatementJSONV1(statementRaw)
+	if err != nil {
+		return nil, fmt.Errorf("compile leaf/artifact assemble statement: %w", err)
+	}
+	if err := reviewFreezeValidateCompileInputSnapshotJSONV1(snapshotRaw, statement); err != nil {
+		return nil, fmt.Errorf("compile leaf/artifact assemble snapshot: %w", err)
+	}
+	var snapshot reviewFreezeCompileInputSnapshotV1
+	if err := json.Unmarshal(snapshotRaw, &snapshot); err != nil {
+		return nil, fmt.Errorf("compile leaf/artifact decode verified snapshot: %w", err)
+	}
+
+	repositoryPaths, err := reviewFreezeValidateCompileLeafArtifactRepositoryResultV1(snapshot, repository)
+	if err != nil {
+		return nil, err
 	}
 	modulePaths := modules.Paths()
 	if !reflect.DeepEqual(modulePaths, reviewFreezeCompileInputSnapshotModulePathsV1()) {
@@ -508,11 +632,41 @@ func TestW2ReviewFreezeCompileLeafArtifactAdmissionV1(t *testing.T) {
 	newModuleLoader := func() *reviewFreezeCompileModuleLeafFixtureLoaderV1 {
 		return reviewFreezeNewCompileModuleLeafFixtureLoaderV1(t, fixture.module.files, "combined-real-x-text-v0.34.0")
 	}
+	assertLoaderOnePass := func(
+		t *testing.T,
+		repositoryLoader *reviewFreezeCompileRepositoryLeafLoaderFixtureV1,
+		moduleLoader *reviewFreezeCompileModuleLeafFixtureLoaderV1,
+	) {
+		t.Helper()
+		if repositoryLoader.listCalls != 1 || reviewFreezeCompileRepositoryLeafLoaderOpenCountV1(repositoryLoader) != reviewFreezeCompileRepositoryLeafCountV1 {
+			t.Fatalf("repository loader calls list/open=%d/%d", repositoryLoader.listCalls, reviewFreezeCompileRepositoryLeafLoaderOpenCountV1(repositoryLoader))
+		}
+		for _, path := range reviewFreezeCompileInputSnapshotRepositoryPathsV1() {
+			if repositoryLoader.openCalls[path] != 1 {
+				t.Fatalf("repository loader path=%q open calls=%d", path, repositoryLoader.openCalls[path])
+			}
+		}
+		moduleOpenCalls := 0
+		for _, calls := range moduleLoader.openCalls {
+			moduleOpenCalls += calls
+		}
+		if moduleLoader.listCalls != 1 || moduleOpenCalls != len(reviewFreezeCompileInputSnapshotModulePathsV1()) {
+			t.Fatalf("module loader calls list/open=%d/%d", moduleLoader.listCalls, moduleOpenCalls)
+		}
+		for _, path := range reviewFreezeCompileInputSnapshotModulePathsV1() {
+			if moduleLoader.openCalls[path] != 1 {
+				t.Fatalf("module loader path=%q open calls=%d", path, moduleLoader.openCalls[path])
+			}
+		}
+	}
 
-	result, err := reviewFreezeAdmitCompileLeafArtifactV1(context.Background(), fixture.verified, newRepositoryLoader(), newModuleLoader())
+	wrapperRepositoryLoader := newRepositoryLoader()
+	wrapperModuleLoader := newModuleLoader()
+	result, err := reviewFreezeAdmitCompileLeafArtifactV1(context.Background(), fixture.verified, wrapperRepositoryLoader, wrapperModuleLoader)
 	if err != nil {
 		t.Fatalf("valid compile leaf/artifact admission rejected: %v", err)
 	}
+	assertLoaderOnePass(t, wrapperRepositoryLoader, wrapperModuleLoader)
 	if err := reviewFreezeValidateCompileLeafArtifactAdmissionBoundaryV1(result, fixture.statement, fixture.snapshot); err != nil {
 		t.Fatalf("valid compile leaf/artifact boundary rejected: %v", err)
 	}
@@ -529,6 +683,60 @@ func TestW2ReviewFreezeCompileLeafArtifactAdmissionV1(t *testing.T) {
 	if result.RepositoryPaths()[0] == "forged" || result.ModulePaths()[0] == "forged" || result.ClosedSemanticGaps()[0] == "forged" || result.OpenGaps()[0] == "forged" {
 		t.Fatal("compile leaf/artifact result accessor 未提供 immutable copy")
 	}
+
+	t.Run("components_match_wrapper_without_reopening_loaders", func(t *testing.T) {
+		repositoryLoader := newRepositoryLoader()
+		moduleLoader := newModuleLoader()
+		components, err := reviewFreezeAdmitCompileLeafArtifactComponentsV1(context.Background(), fixture.verified, repositoryLoader, moduleLoader)
+		if err != nil {
+			t.Fatalf("valid compile leaf/artifact components rejected: %v", err)
+		}
+		assertLoaderOnePass(t, repositoryLoader, moduleLoader)
+		if err := reviewFreezeValidateCompileLeafArtifactComponentsBoundaryV1(components); err != nil {
+			t.Fatalf("valid compile leaf/artifact components boundary rejected: %v", err)
+		}
+		componentAdmission := components.Admission()
+		if componentAdmission == nil || !reflect.DeepEqual(componentAdmission, result) {
+			t.Fatalf("components/wrapper admission mismatch components=%+v wrapper=%+v", componentAdmission, result)
+		}
+		statementRaw := components.StatementRaw()
+		snapshotRaw := components.SnapshotRaw()
+		repository := components.RepositoryLeaves()
+		if len(statementRaw) == 0 || len(snapshotRaw) == 0 || repository == nil {
+			t.Fatal("components accessor 返回 nil/empty verified component")
+		}
+
+		// 修改所有 accessor 返回值不能污染冻结 components，也不能触发第二次 List/Open。
+		componentAdmission.repositoryPaths[0] = "forged"
+		statementRaw[0] ^= 0xff
+		snapshotRaw[0] ^= 0xff
+		firstPath := repository.paths[0]
+		forgedLeaf := repository.leaves[firstPath]
+		forgedLeaf.raw = "forged"
+		repository.leaves[firstPath] = forgedLeaf
+		if components.Admission().repositoryPaths[0] == "forged" ||
+			bytes.Equal(components.StatementRaw(), statementRaw) ||
+			bytes.Equal(components.SnapshotRaw(), snapshotRaw) {
+			t.Fatal("components accessor 修改污染内部冻结值")
+		}
+		_, currentRaw, exists := components.RepositoryLeaves().Leaf(firstPath)
+		if !exists || string(currentRaw) == "forged" {
+			t.Fatal("components repository accessor 修改污染内部 leaf")
+		}
+		assertLoaderOnePass(t, repositoryLoader, moduleLoader)
+		if err := reviewFreezeValidateCompileLeafArtifactComponentsBoundaryV1(components); err != nil {
+			t.Fatalf("accessor mutation polluted components boundary: %v", err)
+		}
+
+		if err := reviewFreezeValidateCompileLeafArtifactComponentsBoundaryV1(nil); err == nil {
+			t.Fatal("nil components boundary accepted")
+		}
+		forgedComponents := *components
+		forgedComponents.repositoryLeaves = nil
+		if err := reviewFreezeValidateCompileLeafArtifactComponentsBoundaryV1(&forgedComponents); err == nil {
+			t.Fatal("components nil repository boundary accepted")
+		}
+	})
 
 	t.Run("loader_result_mismatch", func(t *testing.T) {
 		t.Run("repository_loader_bytes_from_other_result", func(t *testing.T) {
