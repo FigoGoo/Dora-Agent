@@ -899,7 +899,8 @@ func reviewFreezeExternalModulePathsV1(modules []reviewFreezeValidatorExternalMo
 	return paths
 }
 
-// TestW2ReviewFreezeValidatorBuildClosureV1LegacyCompatible 证明缺少可选扩展的旧 v1 manifest 仍按原 blocker 继续通过 shape 校验。
+// TestW2ReviewFreezeValidatorBuildClosureV1LegacyCompatible 证明旧 v1 manifest 可继续缺少扩展，
+// 同时要求已迁移的 R04 manifest 携带唯一未激活候选闭包。
 func TestW2ReviewFreezeValidatorBuildClosureV1LegacyCompatible(t *testing.T) {
 	manifest, _ := reviewFreezeLoadCurrentV1(t)
 	loader := reviewFreezeRepositoryLoaderV1(reviewFreezeRepoRootV1(t))
@@ -913,7 +914,12 @@ func TestW2ReviewFreezeValidatorBuildClosureV1LegacyCompatible(t *testing.T) {
 			if err := messageSetStrictDecodeV1(raw, &corpus); err != nil {
 				t.Fatal(err)
 			}
-			if corpus.ValidatorBuildClosure != nil {
+			if gate.Gate == "W2-R04" {
+				if corpus.ValidatorBuildClosure == nil || corpus.ValidatorBuildClosure.ActivationStatus != "candidate_unactivated" ||
+					len(corpus.ValidatorBuildClosure.Entrypoints) != 1 || corpus.ValidatorBuildClosure.Entrypoints[0].EntrypointID != "W2-R04.approval_consumption" {
+					t.Fatalf("R04 candidate 缺少唯一未激活 validator_build_closure: %+v", corpus.ValidatorBuildClosure)
+				}
+			} else if corpus.ValidatorBuildClosure != nil {
 				t.Fatalf("legacy candidate unexpectedly has validator_build_closure: %s", candidate.ContractManifestPath)
 			}
 			if err := reviewFreezeValidateValidatorBuildClosureV1(corpus, loader, nil); err != nil {
@@ -923,7 +929,8 @@ func TestW2ReviewFreezeValidatorBuildClosureV1LegacyCompatible(t *testing.T) {
 	}
 }
 
-// TestW2ReviewFreezeValidatorBuildClosureV1MissingExtensionCannotBecomeFormal 证明 nil 扩展只兼容带 blocker 的 pre-formal R01/R04。
+// TestW2ReviewFreezeValidatorBuildClosureV1MissingExtensionCannotBecomeFormal 证明缺失或 candidate_unactivated
+// 闭包只兼容带 blocker 的 pre-formal R01/R04。
 func TestW2ReviewFreezeValidatorBuildClosureV1MissingExtensionCannotBecomeFormal(t *testing.T) {
 	manifest, _ := reviewFreezeLoadCurrentV1(t)
 	loader := reviewFreezeRepositoryLoaderV1(reviewFreezeRepoRootV1(t))

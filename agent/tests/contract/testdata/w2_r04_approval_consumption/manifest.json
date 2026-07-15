@@ -9,48 +9,12 @@
   ],
   "validator_sources": [
     {
-      "path": "agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
-      "sha256": "sha256:802e810cf9ac1b4af9435f6e0d0113a123a5bf1a654323bdc0d83d41aa59e0c1"
+      "path": "agent/tests/contract/w2r04approvalconsumption/approval_consumption_receipt_v1_corpus_test.go",
+      "sha256": "sha256:ae3dbeaf4c89674a3dc14b35d35c8c533bef45689b39855cbf61a985a284c61b"
     },
     {
-      "path": "agent/tests/contract/approval_continuation_cross_object_evidence_v1_corpus_test.go",
-      "sha256": "sha256:c43fc9d53d7caf698cbd1229ab720aef0ba2f8e156415876c7d70b3614d695ae"
-    },
-    {
-      "path": "agent/tests/contract/graph_tool_result_v1_corpus_test.go",
-      "sha256": "sha256:4ee5aca3407dc0fd0f97979462faf5981fc295139528cd36c4dac56395cf5867"
-    },
-    {
-      "path": "agent/tests/contract/immutable_turn_context_approval_manifest_v1_test.go",
-      "sha256": "sha256:746455f948f17dcd68489cca8d82139fd1ae61c242a431f66a82f5dc1a728978"
-    },
-    {
-      "path": "agent/tests/contract/session_event_marker_v1_corpus_test.go",
-      "sha256": "sha256:5d08e11dfd62d14875af9e8958d52417733f37a97acb8e54f7ed674e1c4523e0"
-    },
-    {
-      "path": "agent/tests/contract/session_lane_ingress_v1_corpus_test.go",
-      "sha256": "sha256:3cd20c70ebb5bb986907ad430211a53ac148c1684925cc26d50b491685bd9314"
-    },
-    {
-      "path": "agent/tests/contract/session_lane_legacy_upgrade_v1_corpus_test.go",
-      "sha256": "sha256:76ba044c7212a75d5b8f461b909a3b98d82db80c12d001d267e6510782a7cfc7"
-    },
-    {
-      "path": "agent/tests/contract/session_lane_v1_corpus_test.go",
-      "sha256": "sha256:6a2be2221c43b2de9fc767f186673f93e4f9fe892bbb063b25d5a67e5bdedebf"
-    },
-    {
-      "path": "agent/tests/contract/session_message_set_v1_corpus_test.go",
-      "sha256": "sha256:ab0e9b8e4a5ffcd8bc0c3668be69ad2c0422d39982c6b0f340f42b36a6ab729e"
-    },
-    {
-      "path": "agent/tests/contract/session_turn_context_v1_corpus_test.go",
-      "sha256": "sha256:46b9d71964def7dcac38455f2b8f741c2519875366d9ddb50f896c460596f085"
-    },
-    {
-      "path": "agent/tests/contract/tool_receipt_v1_corpus_test.go",
-      "sha256": "sha256:60d2ddca0a855fcca789d77778498e114a4109b51817d86cb79f2f92350cb201"
+      "path": "agent/tests/contract/w2r04approvalconsumption/validator_support_v1_test.go",
+      "sha256": "sha256:757e4e0e1ea994258389a5c4749fe543a4f00cc473a519c24892b3d9b396b44d"
     }
   ],
   "validator_build_sources": [
@@ -63,6 +27,75 @@
       "sha256": "sha256:fcd462279ba6e0207c5e6de66443c40c6069815b3c3bd08b491a23b2d10d9c73"
     }
   ],
+  "validator_build_closure": {
+    "schema_version": "w2_validator_build_closure.v1",
+    "activation_status": "candidate_unactivated",
+    "environment": {
+      "go_version": "1.26",
+      "toolchain": "go1.26.3",
+      "goos": "linux",
+      "goarch": "amd64",
+      "cgo_enabled": "0",
+      "gowork": "off",
+      "gotoolchain": "local",
+      "goflags": "-mod=readonly -trimpath",
+      "goenv": "off"
+    },
+    "entrypoints": [
+      {
+        "entrypoint_id": "W2-R04.approval_consumption",
+        "package_name": "w2r04approvalconsumption_test",
+        "package_path": "agent/tests/contract/w2r04approvalconsumption",
+        "package_pattern": "./tests/contract/w2r04approvalconsumption",
+        "dependency_policy": "stdlib_only",
+        "test_entrypoints": [
+          "TestApprovalConsumptionReceiptCoreV1Corpus",
+          "TestApprovalConsumptionReceiptCoreV1EligibilityAndRevalidation",
+          "TestApprovalConsumptionReceiptCoreV1ExactSets",
+          "TestApprovalConsumptionReceiptCoreV1FirstWrite",
+          "TestApprovalConsumptionReceiptCoreV1GoldenDigests",
+          "TestApprovalConsumptionReceiptCoreV1OperationalMetadataExcluded",
+          "TestApprovalConsumptionReceiptCoreV1ReasonPriority",
+          "TestApprovalConsumptionReceiptCoreV1ReplayAndQuery",
+          "TestApprovalConsumptionReceiptCoreV1SingleUseConflicts",
+          "TestApprovalConsumptionReceiptCoreV1StrictJSON",
+          "TestW2R04ApprovalConsumptionManifest"
+        ],
+        "direct_sources": [
+          {
+            "path": "agent/tests/contract/w2r04approvalconsumption/approval_consumption_receipt_v1_corpus_test.go",
+            "sha256": "sha256:ae3dbeaf4c89674a3dc14b35d35c8c533bef45689b39855cbf61a985a284c61b"
+          },
+          {
+            "path": "agent/tests/contract/w2r04approvalconsumption/validator_support_v1_test.go",
+            "sha256": "sha256:757e4e0e1ea994258389a5c4749fe543a4f00cc473a519c24892b3d9b396b44d"
+          }
+        ],
+        "allowed_imports": [
+          "bytes",
+          "crypto/sha256",
+          "encoding/hex",
+          "encoding/json",
+          "errors",
+          "fmt",
+          "go/ast",
+          "go/parser",
+          "go/token",
+          "io",
+          "os",
+          "path/filepath",
+          "reflect",
+          "regexp",
+          "sort",
+          "strings",
+          "testing",
+          "time",
+          "unicode/utf8"
+        ],
+        "external_modules": []
+      }
+    ]
+  },
   "fixture_ids": [
     "acr.creation_spec_activation.approved_recorded",
     "acr.creation_spec_activation.approved_recorded_current_drift",

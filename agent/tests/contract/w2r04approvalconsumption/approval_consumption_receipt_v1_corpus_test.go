@@ -1,6 +1,6 @@
-// Package contract_test 只承载未 Approved 的 Approval Consumption Receipt Core 候选语料，
+// Package w2r04approvalconsumption_test 只承载未 Approved 的 Approval Consumption Receipt Core 候选语料，
 // 不提供生产 Approval Store、Migration、Repository、Runner、child Receipt 或 Business RPC。
-package contract_test
+package w2r04approvalconsumption_test
 
 import (
 	"crypto/sha256"
@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	approvalConsumptionCorpusPathV1   = "testdata/w2_r04_approval_consumption/approval_consumption_receipt_core_v1.json"
-	approvalConsumptionManifestPathV1 = "testdata/w2_r04_approval_consumption/manifest.json"
+	approvalConsumptionCorpusPathV1   = "../testdata/w2_r04_approval_consumption/approval_consumption_receipt_core_v1.json"
+	approvalConsumptionManifestPathV1 = "../testdata/w2_r04_approval_consumption/manifest.json"
 	approvalConsumptionVectorCountV1  = 111
 	consumptionIntentDigestDomainV1   = "dora.approval_consumption_intent_binding.v1"
 	consumptionCoreDigestDomainV1     = "dora.approval_consumption_receipt_core.v1"
@@ -31,6 +31,7 @@ type approvalConsumptionManifestV1 struct {
 	Files                 []corpusManifestFileV1   `json:"files"`
 	ValidatorSources      []corpusManifestSourceV1 `json:"validator_sources"`
 	ValidatorBuildSources []corpusManifestSourceV1 `json:"validator_build_sources"`
+	ValidatorBuildClosure json.RawMessage          `json:"validator_build_closure"`
 	FixtureIDs            []string                 `json:"fixture_ids"`
 	VectorIDs             []string                 `json:"vector_ids"`
 	TotalVectorCount      int                      `json:"total_vector_count"`
@@ -289,6 +290,18 @@ type approvalConsumptionEvaluationV1 struct {
 
 func TestW2R04ApprovalConsumptionManifest(t *testing.T) {
 	manifest := loadApprovalConsumptionManifestV1(t)
+	var buildClosureHeader struct {
+		SchemaVersion    string            `json:"schema_version"`
+		ActivationStatus string            `json:"activation_status"`
+		Environment      json.RawMessage   `json:"environment"`
+		Entrypoints      []json.RawMessage `json:"entrypoints"`
+	}
+	if err := strictDecode(manifest.ValidatorBuildClosure, &buildClosureHeader); err != nil ||
+		buildClosureHeader.SchemaVersion != "w2_validator_build_closure.v1" ||
+		buildClosureHeader.ActivationStatus != "candidate_unactivated" ||
+		len(buildClosureHeader.Environment) == 0 || len(buildClosureHeader.Entrypoints) != 1 {
+		t.Fatalf("R04 manifest validator_build_closure 候选头非法: header=%+v err=%v", buildClosureHeader, err)
+	}
 	wantValidatorSources := contractPackageValidatorSourcePathsV1()
 	wantValidatorBuildSources := []string{
 		"agent/go.mod",
@@ -340,7 +353,7 @@ func TestW2R04ApprovalConsumptionManifest(t *testing.T) {
 	if len(manifest.Files) != 1 || manifest.Files[0].File != "approval_consumption_receipt_core_v1.json" || manifest.Files[0].VectorCount != approvalConsumptionVectorCountV1 {
 		t.Fatalf("R04 manifest files=%+v", manifest.Files)
 	}
-	raw, err := os.ReadFile(filepath.Join("testdata/w2_r04_approval_consumption", manifest.Files[0].File))
+	raw, err := os.ReadFile(filepath.Join("..", "testdata", "w2_r04_approval_consumption", manifest.Files[0].File))
 	if err != nil {
 		t.Fatal(err)
 	}

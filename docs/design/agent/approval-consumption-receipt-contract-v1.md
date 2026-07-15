@@ -159,6 +159,8 @@ Consumption 不是 child claim 前置；时序必须是：
 
 上述 1～6 将在后续独立跨对象 Corpus 中冻结。本批 Consumption Corpus 不冒充 child Receipt、Business RPC 或 unknown-outcome 生产证据。
 
+本契约的 111 条向量已迁入独立 `agent/tests/contract/w2r04approvalconsumption` package，两个直接源码仅导入标准库，不使用 embed、同 Module内部包或外部 Module。Corpus 仍从原 `tests/contract/testdata/w2_r04_approval_consumption` 读取；manifest 同时冻结两个直接源码、11个顶层Test、direct import exact-set、`agent/go.mod/go.sum`及Go 1.26.3 linux/amd64候选环境，并以 `validator_build_closure.activation_status=candidate_unactivated` 明确尚未激活。锁定toolchain的真实typecheck/compile attestation、base-owned workflow/action trust root和正式迁移仍未完成，因此 `W2_R04_VALIDATOR_BUILD_CLOSURE_PENDING` 必须保留，不能据此进入 formal Freeze。
+
 ## 8. 解锁条件
 
 生产实现仍需：

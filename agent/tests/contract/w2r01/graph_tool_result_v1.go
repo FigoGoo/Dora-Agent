@@ -1,10 +1,9 @@
-// Package contract_test 只承载尚在评审期的跨语言契约语料校验，不提供生产 Runtime。
-package contract_test
+// Package w2r01_test 承载尚在评审期的 W2-R01 跨语言契约校验器，不提供生产 Runtime。
+package w2r01_test
 
 import (
 	"bytes"
 	"crypto/sha256"
-	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,20 +23,17 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/google/uuid"
 	"golang.org/x/text/unicode/norm"
 )
 
 const (
 	graphToolResultSchemaVersionV1       = "graph_tool_result.v1"
 	graphToolResultDigestDomainV1        = "dora.graph_tool_result.v1"
-	corpusManifestPath                   = "testdata/w2_r01/manifest.json"
-	resultCorpusPath                     = "testdata/w2_r01/graph_tool_result_v1.json"
+	corpusDataDirectoryV1                = "../testdata/w2_r01"
+	corpusManifestPath                   = "../testdata/w2_r01/manifest.json"
+	resultCorpusPath                     = "../testdata/w2_r01/graph_tool_result_v1.json"
 	maxSafeIntegerV1               int64 = 9_007_199_254_740_991
 )
-
-//go:embed testdata/w2_r01/*.json
-var w2R01CorpusFS embed.FS
 
 var (
 	upperCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{2,63}$`)
@@ -211,15 +207,15 @@ type resultPolicySetV1 struct {
 	resourceTypes map[string]struct{}
 }
 
-func TestW2R01CorpusManifest(t *testing.T) {
-	entries, err := w2R01CorpusFS.ReadDir("testdata/w2_r01")
+func runW2R01CorpusManifestV1(t *testing.T) {
+	entries, err := os.ReadDir(corpusDataDirectoryV1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 3 || entries[0].Name() != "graph_tool_result_v1.json" || entries[1].Name() != "manifest.json" || entries[2].Name() != "tool_receipt_v1.json" {
 		t.Fatalf("Corpus 出现未登记文件或文件缺失: %v", entries)
 	}
-	raw, err := w2R01CorpusFS.ReadFile(corpusManifestPath)
+	raw, err := os.ReadFile(corpusManifestPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,8 +255,8 @@ func TestW2R01CorpusManifest(t *testing.T) {
 		防止未登记 TestMain/init/共享全局改变进程行为。
 	*/
 	targetValidatorSources := []string{
-		"agent/tests/contract/graph_tool_result_v1_corpus_test.go",
-		"agent/tests/contract/tool_receipt_v1_corpus_test.go",
+		"agent/tests/contract/w2r01/graph_tool_result_v1_corpus_test.go",
+		"agent/tests/contract/w2r01/tool_receipt_v1_corpus_test.go",
 	}
 	if err := validateCorpusManifestSourceClosureV1(repositoryRoot, "design", manifest.DesignSources, wantDesignSources); err != nil {
 		t.Fatalf("manifest design_sources 未闭合: %v", err)
@@ -283,7 +279,7 @@ func TestW2R01CorpusManifest(t *testing.T) {
 		if item.File != wantFiles[index].File || item.VectorCount != wantFiles[index].VectorCount || !digestPattern.MatchString(item.SHA256) {
 			t.Fatalf("manifest 文件顺序或摘要格式错误: %+v", item)
 		}
-		content, readErr := w2R01CorpusFS.ReadFile("testdata/w2_r01/" + item.File)
+		content, readErr := os.ReadFile(filepath.Join(corpusDataDirectoryV1, item.File))
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
@@ -330,17 +326,12 @@ func TestW2R01CorpusManifest(t *testing.T) {
 
 func contractPackageValidatorSourcePathsV1() []string {
 	return []string{
-		"agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
-		"agent/tests/contract/approval_continuation_cross_object_evidence_v1_corpus_test.go",
-		"agent/tests/contract/graph_tool_result_v1_corpus_test.go",
-		"agent/tests/contract/immutable_turn_context_approval_manifest_v1_test.go",
-		"agent/tests/contract/session_event_marker_v1_corpus_test.go",
-		"agent/tests/contract/session_lane_ingress_v1_corpus_test.go",
-		"agent/tests/contract/session_lane_legacy_upgrade_v1_corpus_test.go",
-		"agent/tests/contract/session_lane_v1_corpus_test.go",
-		"agent/tests/contract/session_message_set_v1_corpus_test.go",
-		"agent/tests/contract/session_turn_context_v1_corpus_test.go",
-		"agent/tests/contract/tool_receipt_v1_corpus_test.go",
+		"agent/tests/contract/w2r01/approval_continuation_parent_receipt_v1.go",
+		"agent/tests/contract/w2r01/graph_tool_result_v1.go",
+		"agent/tests/contract/w2r01/graph_tool_result_v1_corpus_test.go",
+		"agent/tests/contract/w2r01/tool_receipt_v1.go",
+		"agent/tests/contract/w2r01/tool_receipt_v1_corpus_test.go",
+		"agent/tests/contract/w2r01/validator_support_v1.go",
 	}
 }
 
@@ -350,7 +341,7 @@ func contractManifestRepositoryRootV1(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repositoryRoot := filepath.Clean(filepath.Join(directory, "..", "..", ".."))
+	repositoryRoot := filepath.Clean(filepath.Join(directory, "..", "..", "..", ".."))
 	if _, err := os.Stat(filepath.Join(repositoryRoot, "agent", "go.mod")); err != nil {
 		t.Fatalf("定位仓库根目录: %v", err)
 	}
@@ -548,9 +539,9 @@ func validateCorpusManifestDecoderSourcesV1(repositoryRoot string, sources []cor
 		functionName string
 		sourcePath   string
 	}{
-		{functionName: "inspectJSON", sourcePath: "agent/tests/contract/graph_tool_result_v1_corpus_test.go"},
-		{functionName: "strictDecode", sourcePath: "agent/tests/contract/graph_tool_result_v1_corpus_test.go"},
-		{functionName: "validateJSONUnicodeEscapes", sourcePath: "agent/tests/contract/graph_tool_result_v1_corpus_test.go"},
+		{functionName: "inspectJSON", sourcePath: "agent/tests/contract/w2r01/validator_support_v1.go"},
+		{functionName: "strictDecode", sourcePath: "agent/tests/contract/w2r01/validator_support_v1.go"},
+		{functionName: "validateJSONUnicodeEscapes", sourcePath: "agent/tests/contract/w2r01/validator_support_v1.go"},
 	}
 	found := make(map[string]string, len(wantOwners))
 	required := make(map[string]struct{}, len(wantOwners))
@@ -646,7 +637,7 @@ func contractManifestTargetTestNamesV1(t *testing.T, files []string) []string {
 	return result
 }
 
-func TestGraphToolResultV1Corpus(t *testing.T) {
+func runGraphToolResultV1Corpus(t *testing.T) {
 	corpus := loadResultCorpus(t)
 	policies := buildResultPolicies(t, corpus)
 	seenIDs := make(map[string]struct{}, len(corpus.Cases))
@@ -719,7 +710,7 @@ func TestGraphToolResultV1Corpus(t *testing.T) {
 	}
 }
 
-func TestWarningIntegerPolicySafeBoundaryV1(t *testing.T) {
+func runWarningIntegerPolicySafeBoundaryV1(t *testing.T) {
 	minimum := int64(1)
 	unsafeMaximum := maxSafeIntegerV1 + 1
 	policy := warningParamPolicyV1{Key: "count", Type: "integer", Required: true, MinInteger: &minimum, MaxInteger: &unsafeMaximum}
@@ -730,7 +721,7 @@ func TestWarningIntegerPolicySafeBoundaryV1(t *testing.T) {
 
 func loadResultCorpus(t *testing.T) resultCorpusV1 {
 	t.Helper()
-	raw, err := w2R01CorpusFS.ReadFile(resultCorpusPath)
+	raw, err := os.ReadFile(resultCorpusPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1165,11 +1156,6 @@ func validateDisplayText(value string, maxRunes int) error {
 	return nil
 }
 
-func canonicalUUIDv7(value string) bool {
-	parsed, err := uuid.Parse(value)
-	return err == nil && parsed.Version() == 7 && parsed.Variant() == uuid.RFC4122 && parsed.String() == value
-}
-
 func safePositiveIntegerV1(value int64) bool {
 	return value >= 1 && value <= maxSafeIntegerV1
 }
@@ -1192,7 +1178,7 @@ func canonicalJSON(value any) ([]byte, error) {
 	return bytes.TrimSuffix(buffer.Bytes(), []byte{'\n'}), nil
 }
 
-func strictDecode(raw []byte, target any) error {
+func strictDecodeV1(raw []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
@@ -1205,11 +1191,11 @@ func strictDecode(raw []byte, target any) error {
 	return nil
 }
 
-func inspectJSON(raw []byte) error {
+func inspectJSONV1(raw []byte) error {
 	if !utf8.Valid(raw) {
 		return reject("INVALID_JSON", "utf-8")
 	}
-	if err := validateJSONUnicodeEscapes(raw); err != nil {
+	if err := validateJSONUnicodeEscapesV1(raw); err != nil {
 		return err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -1223,7 +1209,7 @@ func inspectJSON(raw []byte) error {
 	return nil
 }
 
-func validateJSONUnicodeEscapes(raw []byte) error {
+func validateJSONUnicodeEscapesV1(raw []byte) error {
 	inString := false
 	for index := 0; index < len(raw); index++ {
 		switch raw[index] {

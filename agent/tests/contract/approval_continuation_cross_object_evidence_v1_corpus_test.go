@@ -5,6 +5,8 @@ package contract_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -53,20 +55,20 @@ type crossObjectExactSetsV1 struct {
 }
 
 type crossObjectFixtureV1 struct {
-	FixtureID                string                           `json:"fixture_id"`
-	BaseTurnContextFixtureID string                           `json:"base_turn_context_fixture_id"`
-	ParentReceipt            receiptEvidenceCaseV1            `json:"parent_receipt"`
-	ParentReceiptOwnerRecord crossObjectReceiptOwnerRecordV1  `json:"parent_receipt_owner_record"`
-	StoredReceiptOwnerDigest string                           `json:"stored_receipt_owner_digest"`
-	Approval                 crossObjectApprovalBindingV1     `json:"approval"`
-	StoredApprovalDigest     string                           `json:"stored_approval_digest"`
-	Decision                 crossObjectDecisionReceiptV1     `json:"decision_receipt"`
-	StoredDecisionDigest     string                           `json:"stored_decision_digest"`
-	ToolPin                  crossObjectToolPinV1             `json:"tool_pin"`
-	StoredToolPinDigest      string                           `json:"stored_tool_pin_digest"`
-	TurnContext              turnContextFixtureV1             `json:"turn_context"`
-	StoredEvidenceDigest     string                           `json:"stored_evidence_digest"`
-	OperationalMetadata      crossObjectOperationalMetadataV1 `json:"operational_metadata"`
+	FixtureID                string                                     `json:"fixture_id"`
+	BaseTurnContextFixtureID string                                     `json:"base_turn_context_fixture_id"`
+	ParentReceipt            approvalContinuationParentReceiptFixtureV1 `json:"parent_receipt"`
+	ParentReceiptOwnerRecord crossObjectReceiptOwnerRecordV1            `json:"parent_receipt_owner_record"`
+	StoredReceiptOwnerDigest string                                     `json:"stored_receipt_owner_digest"`
+	Approval                 crossObjectApprovalBindingV1               `json:"approval"`
+	StoredApprovalDigest     string                                     `json:"stored_approval_digest"`
+	Decision                 crossObjectDecisionReceiptV1               `json:"decision_receipt"`
+	StoredDecisionDigest     string                                     `json:"stored_decision_digest"`
+	ToolPin                  crossObjectToolPinV1                       `json:"tool_pin"`
+	StoredToolPinDigest      string                                     `json:"stored_tool_pin_digest"`
+	TurnContext              turnContextFixtureV1                       `json:"turn_context"`
+	StoredEvidenceDigest     string                                     `json:"stored_evidence_digest"`
+	OperationalMetadata      crossObjectOperationalMetadataV1           `json:"operational_metadata"`
 }
 
 type crossObjectReceiptOwnerRecordV1 struct {
@@ -292,6 +294,12 @@ func TestApprovalContinuationCrossObjectEvidenceV1ReceiptBinding(t *testing.T) {
 		approvalRef.ApprovalDigest != fixture.StoredApprovalDigest || approvalRef.CardID != fixture.Approval.CardID {
 		t.Fatalf("Receipt→Approval binding 不符 snapshot=%+v approval=%+v", snapshot, fixture.Approval)
 	}
+	t.Run("valid_r01_non_approval_result_stays_in_approval_layer", func(t *testing.T) {
+		got := evaluateCrossObjectCaseV1(t, fixture, []string{"receipt.result.failed_without_approval"}, true)
+		if !reflect.DeepEqual(got.ReasonCodes, []string{"APPROVAL_BINDING_MISMATCH"}) {
+			t.Fatalf("R01 内在合法的非 Approval Result 不得降级为 Parent Receipt 错误: %+v", got)
+		}
+	})
 }
 
 func TestApprovalContinuationCrossObjectEvidenceV1ApprovalDecisionBinding(t *testing.T) {
@@ -440,7 +448,7 @@ func evaluateCrossObjectCaseV1(t *testing.T, fixture crossObjectFixtureV1, mutat
 	syncMutatedReceiptOwner := false
 	for _, mutation := range mutations {
 		applyCrossObjectMutationV1(&fixture, mutation)
-		if strings.HasPrefix(mutation, "receipt.approval_") {
+		if strings.HasPrefix(mutation, "receipt.approval_") || mutation == "receipt.result.failed_without_approval" {
 			syncMutatedReceiptOwner = true
 		}
 	}
@@ -569,32 +577,13 @@ func crossObjectToolPinRegistryValidV1(pin crossObjectToolPinV1) bool {
 		pin.ResultSchemaVersion == "graph_tool_result.v1" && pin.GraphKey == "plan_creation_spec_graph_v1"
 }
 
-func buildCrossObjectReceiptV1(t *testing.T, fixture crossObjectFixtureV1) (toolReceiptSnapshotV1, string, string) {
+func buildCrossObjectReceiptV1(t *testing.T, fixture crossObjectFixtureV1) (approvalContinuationParentReceiptProjectionV1, string, string) {
 	t.Helper()
-	policy := executionSlotPolicyV1{
-		ToolKey: "plan_creation_spec", DefinitionVersion: "plan_creation_spec.v1alpha1",
-		RefSlot: "approval.primary", SlotOrdinal: 1, RefType: "approval", RefSchemaVersion: "approval_ref.v1",
-		AuthorityOwner: "agent", QueryContract: "agent.approval.query.v1", EffectClass: "side_effect",
+	projection, reason := evaluateApprovalContinuationParentReceiptV1(t, fixture.ParentReceipt)
+	if reason != "" {
+		return approvalContinuationParentReceiptProjectionV1{}, "", reason
 	}
-	resultCorpus := loadResultCorpus(t)
-	policies := receiptPolicySetV1{Result: buildResultPolicies(t, resultCorpus), Slots: buildSlotPolicies(t, []executionSlotPolicyV1{policy})}
-	current, err := prepareEvidenceSnapshotV1(fixture.ParentReceipt.BaseSnapshot, fixture.ParentReceipt.SetupSlots, policies)
-	if err != nil {
-		return toolReceiptSnapshotV1{}, "", errorCode(err)
-	}
-	current, err = applyReceiptCommandV1(current, receiptCommandV1{
-		Kind: "freeze", PresentedRequestDigest: current.RequestSemanticDigest, ExpectedReceiptVersion: current.ReceiptVersion,
-		OwnerFence: current.OwnerFence, Result: fixture.ParentReceipt.Result, ResultRefSlots: fixture.ParentReceipt.ResultRefSlots,
-	}, policies)
-	if err != nil {
-		return toolReceiptSnapshotV1{}, "", errorCode(err)
-	}
-	raw, err := canonicalJSON(current)
-	if err != nil {
-		return toolReceiptSnapshotV1{}, "", "CANONICAL_JSON_INVALID"
-	}
-	digest := semanticDigest(toolReceiptSnapshotDigestDomainV1, raw)
-	return current, digest, ""
+	return projection, projection.SnapshotDigest, ""
 }
 
 func crossObjectResolvedRefsValidV1(fixture crossObjectFixtureV1, receiptOwnerDigest, approvalDigest, decisionDigest, toolPinDigest string) bool {
@@ -647,29 +636,37 @@ func applyCrossObjectMutationV1(fixture *crossObjectFixtureV1, mutation string) 
 		value := strings.Repeat("2", 64)
 		fixture.TurnContext.Canonical.ParentRequestSemanticDigest = &value
 	case "receipt.approval_id.mismatch":
-		var result graphToolResultV1
-		if err := strictDecode(fixture.ParentReceipt.Result, &result); err != nil {
-			panic(err)
-		}
-		result.ApprovalRef.ApprovalID = "019f4500-0000-7000-8000-000000000899"
-		fixture.ParentReceipt.Result, _ = canonicalJSON(result)
-		fixture.ParentReceipt.SetupSlots[0].AuthorityRef.AuthorityID = result.ApprovalRef.ApprovalID
+		approvalID := "019f4500-0000-7000-8000-000000000899"
+		mutateApprovalContinuationResultApprovalRefV1(&fixture.ParentReceipt.Result, func(approval *approvalContinuationApprovalRefV1) {
+			approval.ApprovalID = approvalID
+		})
+		fixture.ParentReceipt.SetupSlots[0].AuthorityRef.AuthorityID = approvalID
 	case "receipt.approval_version.mismatch":
-		var result graphToolResultV1
-		if err := strictDecode(fixture.ParentReceipt.Result, &result); err != nil {
-			panic(err)
-		}
-		result.ApprovalRef.ApprovalVersion++
-		fixture.ParentReceipt.Result, _ = canonicalJSON(result)
-		fixture.ParentReceipt.SetupSlots[0].AuthorityRef.AuthorityVersion = result.ApprovalRef.ApprovalVersion
+		var approvalVersion int64
+		mutateApprovalContinuationResultApprovalRefV1(&fixture.ParentReceipt.Result, func(approval *approvalContinuationApprovalRefV1) {
+			approval.ApprovalVersion++
+			approvalVersion = approval.ApprovalVersion
+		})
+		fixture.ParentReceipt.SetupSlots[0].AuthorityRef.AuthorityVersion = approvalVersion
 	case "receipt.approval_digest.mismatch":
-		var result graphToolResultV1
-		if err := strictDecode(fixture.ParentReceipt.Result, &result); err != nil {
-			panic(err)
-		}
-		result.ApprovalRef.ApprovalDigest = "sha256:" + strings.Repeat("3", 64)
-		fixture.ParentReceipt.Result, _ = canonicalJSON(result)
-		fixture.ParentReceipt.SetupSlots[0].AuthorityRef.AuthoritySemanticDigest = result.ApprovalRef.ApprovalDigest
+		approvalDigest := "sha256:" + strings.Repeat("3", 64)
+		mutateApprovalContinuationResultApprovalRefV1(&fixture.ParentReceipt.Result, func(approval *approvalContinuationApprovalRefV1) {
+			approval.ApprovalDigest = approvalDigest
+		})
+		fixture.ParentReceipt.SetupSlots[0].AuthorityRef.AuthoritySemanticDigest = approvalDigest
+	case "receipt.result.failed_without_approval":
+		fixture.ParentReceipt.SetupSlots = []approvalContinuationResolvedSlotV1{}
+		fixture.ParentReceipt.ResultRefSlots = []string{}
+		fixture.ParentReceipt.Result = json.RawMessage(fmt.Sprintf(`{
+			"schema_version":"graph_tool_result.v1",
+			"status":"failed",
+			"result_code":"DEPENDENCY_UNAVAILABLE",
+			"summary":"依赖暂时不可用，且尚未发生副作用。",
+			"resource_refs":[],
+			"receipt_ref":{"receipt_id":%q},
+			"warnings":[],
+			"retryable":true
+		}`, fixture.ParentReceipt.BaseSnapshot.ReceiptID))
 	case "approval.origin_turn_id.mismatch":
 		fixture.Approval.OriginalTurnID = "019f4500-0000-7000-8000-000000000798"
 	case "approval.creation_state.approved":

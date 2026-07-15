@@ -1,9 +1,10 @@
-package contract_test
+package w2r01_test
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"testing"
 )
@@ -13,7 +14,7 @@ const (
 	toolRequestCanonicalVersionV1      = "dora.tool_request.v1"
 	toolExecutionRefDigestDomainV1     = "dora.tool_execution_ref.v1"
 	toolReceiptSnapshotDigestDomainV1  = "dora.tool_receipt_snapshot.v1"
-	receiptCorpusPath                  = "testdata/w2_r01/tool_receipt_v1.json"
+	receiptCorpusPath                  = "../testdata/w2_r01/tool_receipt_v1.json"
 )
 
 var (
@@ -166,7 +167,7 @@ type receiptPolicySetV1 struct {
 	Slots  map[string]executionSlotPolicyV1
 }
 
-func TestToolReceiptV1Corpus(t *testing.T) {
+func runToolReceiptV1Corpus(t *testing.T) {
 	resultCorpus := loadResultCorpus(t)
 	corpus := loadReceiptCorpus(t)
 	policies := receiptPolicySetV1{Result: buildResultPolicies(t, resultCorpus), Slots: buildSlotPolicies(t, corpus.SlotPolicies)}
@@ -296,7 +297,7 @@ func prepareEvidenceSnapshotV1(base toolReceiptSnapshotV1, setup []resolvedSlotF
 
 func loadReceiptCorpus(t *testing.T) receiptCorpusV1 {
 	t.Helper()
-	raw, err := w2R01CorpusFS.ReadFile(receiptCorpusPath)
+	raw, err := os.ReadFile(receiptCorpusPath)
 	if err != nil {
 		t.Fatal(err)
 	}

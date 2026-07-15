@@ -40,14 +40,14 @@ W2-R01 已有测试专用候选语料，但当前仍存在跨 Module 语义、Ow
 | `GOV-D05` | 验证器源码如何防止被同一 PR 降级 | workflow 与 Review Freeze verifier 从默认分支 trust root 执行；候选 manifest 绑定设计源和 validator source 摘要；正式候选迁移期间禁止修改 trust root | 从 PR head checkout 后直接执行脚本，或只冻结测试名称不冻结源码 | base/head Git-object 对抗测试、symlink/mode/tree 拒绝、源码摘要闭包 |
 | `GOV-D06` | Go 测试包及构建输入能否影响冻结测试 | 优先把每个 Gate verifier 迁入独立、stdlib-only 且无未登记 embed 输入的包；否则冻结完整 transitive build-input closure，包括直接 package source、embed inputs、内部 Go 依赖源码、第三方模块、`go.mod/go.sum`、toolchain 与 workflow/action trust root，不得只绑定若干测试文件或 Module metadata | 允许未绑定的 `TestMain`、`init`、共享全局、新增测试文件、embed 文件、内部依赖源码、第三方依赖、toolchain/action 或 dependency replacement 参与正式 verifier 进程 | 独立 stdlib-only verifier，或完整 transitive build-input manifest；额外源码/embed/内部依赖、dependency replacement、toolchain/action 漂移均有失败测试 |
 
-`GOV-D06` 当前只完成 D0-04A：共享 `contract_test` 包 11 个直接 `.go` 文件与 `agent/go.mod/go.sum` 已形成 exact-set/SHA 绑定，modern/legacy build constraint、Go 忽略/GOOS/GOARCH 平台选择文件名、package-level `TestMain`、`replace`、直接源码增删及已登记文件 mode/symlink 漂移已有失败测试。D0-04B 仍未完成：包内 `//go:embed`、`agent/internal/**` 传递源码、第三方依赖，以及受信 toolchain/workflow action digest 尚未进入闭包。因此当前进展不能证明完整 build closure，`GOV-D06` 仍是 formal Freeze blocker。
+`GOV-D06` 已完成 D0-04B 批次二的 package 隔离：R01 六个直接源码迁入独立 `w2r01_test`，不再与根 `contract_test` 或 R04 共用编译单元；`//go:embed`、`agent/internal/**` 与 `github.com/google/uuid` 已拆除，modern/legacy build constraint、Go 忽略/平台选择文件名、`TestMain`、`replace`、源码增删及 mode/symlink 漂移仍有失败测试。R01 不是 stdlib-only：唯一外部 import `golang.org/x/text/unicode/norm` 尚缺真实 module zip+h1 provenance、固定环境 selected-source resolver、锁定 toolchain compile attestation 与 workflow/action trust root，因此 manifest 仍不声明 build-closure candidate，`GOV-D06` 继续是 formal Freeze blocker。
 
 ## 4. 状态迁移入口
 
 W2-R01 只有同时满足以下条件，才可从 `expansion_frozen` 进入 `awaiting_review`：
 
 1. 当前 corpus、manifest、设计文档和 Review Freeze candidate evidence 的文件摘要、向量数量及 exact-set 完全一致；
-2. `design_sources`、`validator_sources` 与 `validator_build_sources` 均为非空、排序、无重复的仓库相对路径，并绑定原始文件 SHA-256；`validator_sources` 必须等于 verifier package 的直接 `.go` 文件 exact-set，`validator_build_sources` 至少等于对应 Module 的 `go.mod/go.sum` exact-set，且 `go.mod` 不含 `replace`；这只是 D0-04A，不能替代 `GOV-D06` 要求的独立 stdlib-only verifier 或完整 transitive build-input closure；
+2. `design_sources`、`validator_sources` 与 `validator_build_sources` 均为非空、排序、无重复的仓库相对路径，并绑定原始文件 SHA-256；`validator_sources` 必须等于独立 verifier package 的六个直接 `.go` 文件 exact-set，`validator_build_sources` 等于 Agent Module 的 `go.mod/go.sum` exact-set，且 `go.mod` 不含 `replace`；R01 的 `x/text` resolver、toolchain compile 与 workflow/action 闭包未形成前，manifest 必须不带 `validator_build_closure` 且 blocker 必须保留；
 3. `R01-D01`～`R01-D06` 均有结构化结论，所有受影响文档不再互相矛盾；
 4. `GOV-D01`～`GOV-D06` 已实现为默认分支 trust root，且真实 PR 的批准、撤销、提交更新、源码/依赖注入和越权场景均失败关闭；
 5. `required_owner_roles` 由已裁决范围推导并形成 exact-set，不存在“以后再决定是否追加 Owner”的正式状态；
@@ -70,4 +70,4 @@ W2-R01 只有同时满足以下条件，才可从 `expansion_frozen` 进入 `awa
 
 ## 6. 当前结论
 
-截至本次更新时，R01 仍是 `expansion_frozen / partial_candidate`。Receipt replay 命令形状、Tool Key exact-set，以及 direct package source + Module metadata closure 已完成；完整 transitive build-input closure 仍未完成。`R01-D01`～`R01-D06` 与 `GOV-D01`～`GOV-D06` 未关闭、默认分支 trust root 和真实 PR/Ruleset 未激活前，仍不得进入 formal Review Freeze、生产 Graph Tool 或全功能冒烟纵切。D0-04B 优先迁入独立 stdlib-only verifier；若保留共享包，则必须补齐 embed、内部/第三方依赖、toolchain 与 workflow action 的完整闭包。
+截至本次更新时，R01 仍是 `expansion_frozen / partial_candidate`。Receipt replay、Tool Key exact-set、独立 package 与直接源码/Module metadata closure 已完成；R03 只经窄 facade 复用父 Receipt evaluator。`x/text` selected-source、toolchain compile 和 workflow/action trust root 未完成，故完整 transitive build-input closure 仍未形成。`R01-D01`～`R01-D06` 与 `GOV-D01`～`GOV-D06` 未关闭、默认分支 trust root 和真实 PR/Ruleset 未激活前，仍不得进入 formal Review Freeze、生产 Graph Tool 或全功能冒烟纵切。

@@ -281,7 +281,7 @@
       "artifact_refs": [
         {
           "path": "agent/tests/contract/testdata/w2_r01/manifest.json",
-          "sha256": "sha256:1f98573f2666dfb6c4e4fd494a6c2ddad85c37b9297380eace28816c7659ca5b",
+          "sha256": "sha256:41e554faaec0f023e7542eb5d5cbe4638ccbb871c1179906e69215b52538f497",
           "kind": "corpus_manifest"
         },
         {
@@ -293,7 +293,7 @@
       "required_tests": [
         {
           "module": "agent",
-          "source_path": "agent/tests/contract/tool_receipt_v1_corpus_test.go",
+          "source_path": "agent/tests/contract/w2r01/tool_receipt_v1_corpus_test.go",
           "test_name": "TestToolReceiptV1Corpus",
           "mode": "normal"
         },
@@ -397,7 +397,7 @@
       "artifact_refs": [
         {
           "path": "agent/tests/contract/testdata/w2_r01/manifest.json",
-          "sha256": "sha256:1f98573f2666dfb6c4e4fd494a6c2ddad85c37b9297380eace28816c7659ca5b",
+          "sha256": "sha256:41e554faaec0f023e7542eb5d5cbe4638ccbb871c1179906e69215b52538f497",
           "kind": "corpus_manifest"
         },
         {
@@ -407,7 +407,7 @@
         },
         {
           "path": "docs/design/agent/approval-continuation-cross-object-evidence-v1.md",
-          "sha256": "sha256:aef321d8e94f4fd5386193eaf0a8faf45d2beb5d8d244534ab8f6d7dab238325",
+          "sha256": "sha256:38dd40f2d0bf8d2c9c13d8b698de592f5ddca9b2712e584c2609ae9828fc2523",
           "kind": "design_doc"
         },
         {
@@ -417,12 +417,12 @@
         },
         {
           "path": "docs/design/agent/approval-consumption-receipt-contract-v1.md",
-          "sha256": "sha256:52e4c382b7ddaf8cdee7a007fc9189e3d1da968508c28ca39b6c179aee88300a",
+          "sha256": "sha256:f6cafd8e508a0c00875992673119c7c4cd055cb55e1b4d379cd361e34c68cbb1",
           "kind": "design_doc"
         },
         {
           "path": "agent/tests/contract/testdata/w2_r04_approval_consumption/manifest.json",
-          "sha256": "sha256:ecc2a919ea08dce90faacc39dc16130bb3c8ceb07bcf412d1cba688f26f6f887",
+          "sha256": "sha256:6ad8c58dbeeaf514994fc3db8c8beca0192de6b2e52121201060f37a7c900ba0",
           "kind": "corpus_manifest"
         },
         {
@@ -457,7 +457,7 @@
         },
         {
           "module": "agent",
-          "source_path": "agent/tests/contract/tool_receipt_v1_corpus_test.go",
+          "source_path": "agent/tests/contract/w2r01/tool_receipt_v1_corpus_test.go",
           "test_name": "TestToolReceiptV1Corpus",
           "mode": "normal"
         },
@@ -469,25 +469,25 @@
         },
         {
           "module": "agent",
-          "source_path": "agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
+          "source_path": "agent/tests/contract/w2r04approvalconsumption/approval_consumption_receipt_v1_corpus_test.go",
           "test_name": "TestW2R04ApprovalConsumptionManifest",
           "mode": "normal"
         },
         {
           "module": "agent",
-          "source_path": "agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
+          "source_path": "agent/tests/contract/w2r04approvalconsumption/approval_consumption_receipt_v1_corpus_test.go",
           "test_name": "TestApprovalConsumptionReceiptCoreV1Corpus",
           "mode": "normal"
         },
         {
           "module": "agent",
-          "source_path": "agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
+          "source_path": "agent/tests/contract/w2r04approvalconsumption/approval_consumption_receipt_v1_corpus_test.go",
           "test_name": "TestApprovalConsumptionReceiptCoreV1ReplayAndQuery",
           "mode": "normal"
         },
         {
           "module": "agent",
-          "source_path": "agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
+          "source_path": "agent/tests/contract/w2r04approvalconsumption/approval_consumption_receipt_v1_corpus_test.go",
           "test_name": "TestApprovalConsumptionReceiptCoreV1SingleUseConflicts",
           "mode": "normal"
         },

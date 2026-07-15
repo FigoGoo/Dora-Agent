@@ -100,8 +100,11 @@ SCHEMA
 - `agent/tests/contract/testdata/w2_r03_cross_object/manifest.json`
 - `agent/tests/contract/testdata/w2_r03_cross_object/approval_continuation_cross_object_evidence_v1.json`
 - `agent/tests/contract/approval_continuation_cross_object_evidence_v1_corpus_test.go`
+- `agent/tests/contract/approval_continuation_parent_receipt_facade_v1_test.go`
 
 Manifest 冻结 1 个 fixture、20 条向量和 13 个目标测试，并校验文件 SHA、向量 exact-set 及 AST Test 清单。向量包括 3 条合法路径与 17 条失败关闭路径，覆盖 Receipt ref/Owner-record/snapshot/request、Approval ID/version/digest、原身份、pending 创建状态、approve Decision/Source、受信 Registry Tool Pin 五字段 sensitivity、resolved refs、legacy 替换和多错误优先级。Trace、attempt、processor、read time 等运维元数据不得改变任一语义摘要。
+
+R03 根测试不再编译或调用 R01 的内部 DTO/状态函数。facade 只把完整 parent Receipt fixture 与原 Graph Result corpus raw bytes交给 `w2r01.EvaluateApprovalContinuationParentReceiptV1`，并消费 Receipt identity、Tool Pin tuple、Approval ref 与 R01 重算的 snapshot digest 最小投影；失败只返回稳定错误码。R03 manifest、Corpus raw bytes和13个目标测试保持字节不变，package 迁移不得被误解为 R03 候选语义变更。
 
 ## 7. 后续解锁条件
 
