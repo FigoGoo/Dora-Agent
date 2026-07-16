@@ -32,6 +32,7 @@ const (
 	graphToolResultDigestDomainV1        = "dora.graph_tool_result.v1"
 	corpusManifestPath                   = "testdata/w2_r01/manifest.json"
 	resultCorpusPath                     = "testdata/w2_r01/graph_tool_result_v1.json"
+	failedAfterReceiptCorpusPath         = "testdata/w2_r01/tool_receipt_failed_after_v1.json"
 	maxSafeIntegerV1               int64 = 9_007_199_254_740_991
 )
 
@@ -207,7 +208,7 @@ func TestW2R01CorpusManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 3 || entries[0].Name() != "graph_tool_result_v1.json" || entries[1].Name() != "manifest.json" || entries[2].Name() != "tool_receipt_v1.json" {
+	if len(entries) != 4 || entries[0].Name() != "graph_tool_result_v1.json" || entries[1].Name() != "manifest.json" || entries[2].Name() != "tool_receipt_failed_after_v1.json" || entries[3].Name() != "tool_receipt_v1.json" {
 		t.Fatalf("Corpus 出现未登记文件或文件缺失: %v", entries)
 	}
 	raw, err := w2R01CorpusFS.ReadFile(corpusManifestPath)
@@ -221,12 +222,13 @@ func TestW2R01CorpusManifest(t *testing.T) {
 	if err := strictDecode(raw, &manifest); err != nil {
 		t.Fatalf("解析 manifest: %v", err)
 	}
-	if manifest.SchemaVersion != "w2_r01_contract_corpus_manifest.v1" || len(manifest.Files) != 2 || manifest.TotalVectorCount != 85 {
+	if manifest.SchemaVersion != "w2_r01_contract_corpus_manifest.v1" || len(manifest.Files) != 3 || manifest.TotalVectorCount != 98 {
 		t.Fatalf("manifest 版本或文件数错误: %+v", manifest)
 	}
 	wantFiles := []corpusManifestFileV1{
-		{File: "graph_tool_result_v1.json", VectorCount: 48},
+		{File: "graph_tool_result_v1.json", VectorCount: 50},
 		{File: "tool_receipt_v1.json", VectorCount: 37},
+		{File: "tool_receipt_failed_after_v1.json", VectorCount: 11},
 	}
 	for index, item := range manifest.Files {
 		if item.File != wantFiles[index].File || item.VectorCount != wantFiles[index].VectorCount || !digestPattern.MatchString(item.SHA256) {
@@ -243,14 +245,18 @@ func TestW2R01CorpusManifest(t *testing.T) {
 	}
 	resultCorpus := loadResultCorpus(t)
 	receiptCorpus := loadReceiptCorpus(t)
+	failedAfterCorpus := loadFailedAfterReceiptCorpusV1(t)
 	if got := len(resultCorpus.Cases); got != manifest.Files[0].VectorCount {
 		t.Fatalf("%s vector_count=%d want=%d", manifest.Files[0].File, manifest.Files[0].VectorCount, got)
 	}
 	if got := len(receiptCorpus.TransitionCases) + len(receiptCorpus.EvidenceCases); got != manifest.Files[1].VectorCount {
 		t.Fatalf("%s vector_count=%d want=%d", manifest.Files[1].File, manifest.Files[1].VectorCount, got)
 	}
-	fixtureIDs := []string{receiptCorpus.InitialState.StateID}
-	vectorIDs := make([]string, 0, len(resultCorpus.Cases)+len(receiptCorpus.TransitionCases)+len(receiptCorpus.EvidenceCases))
+	if got := len(failedAfterCorpus.Cases); got != manifest.Files[2].VectorCount {
+		t.Fatalf("%s vector_count=%d want=%d", manifest.Files[2].File, manifest.Files[2].VectorCount, got)
+	}
+	fixtureIDs := []string{receiptCorpus.InitialState.StateID, failedAfterCorpus.FixtureID}
+	vectorIDs := make([]string, 0, len(resultCorpus.Cases)+len(receiptCorpus.TransitionCases)+len(receiptCorpus.EvidenceCases)+len(failedAfterCorpus.Cases))
 	for _, testCase := range resultCorpus.Cases {
 		vectorIDs = append(vectorIDs, testCase.ID)
 	}
@@ -260,18 +266,21 @@ func TestW2R01CorpusManifest(t *testing.T) {
 	for _, testCase := range receiptCorpus.EvidenceCases {
 		vectorIDs = append(vectorIDs, testCase.ID)
 	}
+	for _, testCase := range failedAfterCorpus.Cases {
+		vectorIDs = append(vectorIDs, testCase.ID)
+	}
 	if len(vectorIDs) != manifest.TotalVectorCount || !reflect.DeepEqual(manifest.FixtureIDs, fixtureIDs) || !reflect.DeepEqual(manifest.VectorIDs, vectorIDs) {
 		t.Fatalf("manifest 未绑定 Corpus exact-set fixtures=%v vectors=%v", manifest.FixtureIDs, manifest.VectorIDs)
 	}
 	wantTests := []string{
 		"TestW2R01CorpusManifest", "TestGraphToolResultV1Corpus", "TestWarningIntegerPolicySafeBoundaryV1",
-		"TestToolReceiptV1Corpus",
+		"TestToolReceiptV1Corpus", "TestToolReceiptFailedAfterV1Corpus",
 	}
 	if !reflect.DeepEqual(manifest.TargetTests, wantTests) {
 		t.Fatalf("manifest target tests=%v want=%v", manifest.TargetTests, wantTests)
 	}
 	actualTests := contractManifestTargetTestNamesV1(t, []string{
-		"graph_tool_result_v1_corpus_test.go", "tool_receipt_v1_corpus_test.go",
+		"graph_tool_result_v1_corpus_test.go", "tool_receipt_v1_corpus_test.go", "tool_receipt_failed_after_v1_corpus_test.go",
 	})
 	manifestTests := append([]string(nil), manifest.TargetTests...)
 	sort.Strings(manifestTests)
@@ -312,6 +321,7 @@ func TestGraphToolResultV1Corpus(t *testing.T) {
 	wantCaseIDs := []string{
 		"GTR-P01-completed", "GTR-P02-accepted", "GTR-P03-waiting-user", "GTR-P04-partial",
 		"GTR-P05-failed", "GTR-P06-cancelled", "GTR-P07-unicode-canonical", "GTR-P08-cancelled-after-side-effects",
+		"GTR-P09-failed-after-side-effects",
 		"GTR-N01-malformed", "GTR-N02-duplicate-top-level", "GTR-N03-duplicate-nested", "GTR-N04-trailing-value",
 		"GTR-N05-null", "GTR-N06-unknown-field", "GTR-N07-unknown-version", "GTR-N08-missing-summary",
 		"GTR-N09-unknown-status", "GTR-N10-unregistered-code", "GTR-N11-forbidden-internal-outcome",
@@ -325,6 +335,7 @@ func TestGraphToolResultV1Corpus(t *testing.T) {
 		"GTR-N33-forbidden-code-precedes-summary", "GTR-N34-warning-integer-overflow",
 		"GTR-N35-warning-js-safe-integer-overflow", "GTR-N36-null-precedes-duplicate", "GTR-N37-duplicate-precedes-null",
 		"GTR-N38-unknown-precedes-type", "GTR-N39-type-precedes-unknown", "GTR-N40-cancellation-code-stage-mismatch",
+		"GTR-N41-failed-after-retryable",
 	}
 	gotCaseIDs := make([]string, 0, len(corpus.Cases))
 
@@ -616,6 +627,7 @@ func validResultEffectPolicy(policy resultCodePolicyV1) bool {
 		return policy.EffectClass == "partial_success" && !policy.Retryable && policy.CancellationStage == ""
 	case "failed":
 		return policy.CancellationStage == "" && ((policy.EffectClass == "permanent_failure" && !policy.Retryable) ||
+			(policy.EffectClass == "permanent_failure_after_side_effects_resolved" && !policy.Retryable) ||
 			(policy.EffectClass == "safe_failure_before_side_effect" && policy.Retryable))
 	case "cancelled":
 		return !policy.Retryable && ((policy.EffectClass == "cancelled_before_side_effect" && policy.CancellationStage == "before_side_effect") ||

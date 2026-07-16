@@ -110,11 +110,12 @@ type executionSlotV1 struct {
 }
 
 type authorityRefV1 struct {
-	AuthorityID             string `json:"authority_id"`
-	AuthorityVersion        int64  `json:"authority_version"`
-	AuthoritySemanticDigest string `json:"authority_semantic_digest"`
-	ResourceType            string `json:"resource_type,omitempty"`
-	ProjectionID            string `json:"projection_id,omitempty"`
+	AuthorityID             string  `json:"authority_id"`
+	AuthorityVersion        int64   `json:"authority_version"`
+	AuthoritySemanticDigest string  `json:"authority_semantic_digest"`
+	AuthorityOutcome        *string `json:"authority_outcome,omitempty"`
+	ResourceType            string  `json:"resource_type,omitempty"`
+	ProjectionID            string  `json:"projection_id,omitempty"`
 }
 
 type resultRefV1 struct {
@@ -480,7 +481,7 @@ func freezeToolReceipt(before toolReceiptSnapshotV1, command receiptCommandV1, p
 	if err != nil {
 		return toolReceiptSnapshotV1{}, err
 	}
-	if err := validateResultEvidence(result, before, refs, policies.Slots); err != nil {
+	if err := validateResultEvidence(result, before, refs, policies); err != nil {
 		return toolReceiptSnapshotV1{}, err
 	}
 	after := cloneReceiptSnapshot(before)
@@ -527,7 +528,7 @@ func validateToolReceiptSnapshotV1(snapshot toolReceiptSnapshotV1, policies rece
 	if err := validateStoredResultRefs(snapshot.ExecutionSlots, snapshot.ResultRefs); err != nil {
 		return err
 	}
-	return validateResultEvidence(*snapshot.Result, snapshot, snapshot.ResultRefs, policies.Slots)
+	return validateResultEvidence(*snapshot.Result, snapshot, snapshot.ResultRefs, policies)
 }
 
 func validateToolReceiptSnapshotStructureV1(snapshot toolReceiptSnapshotV1, policies receiptPolicySetV1) error {
@@ -606,6 +607,15 @@ func validateAuthorityRefV1(ref authorityRefV1, slot executionSlotV1, resultPoli
 	if !canonicalUUIDv7(ref.AuthorityID) || !safePositiveIntegerV1(ref.AuthorityVersion) || !digestPattern.MatchString(ref.AuthoritySemanticDigest) {
 		return reject("INVALID_TOOL_RECEIPT", "authority_ref")
 	}
+	if slot.RefType == "business_decision_authority" {
+		if ref.AuthorityOutcome == nil || (*ref.AuthorityOutcome != "committed" && *ref.AuthorityOutcome != "not_committed") || ref.ResourceType != "" || ref.ProjectionID != "" {
+			return reject("INVALID_TOOL_RECEIPT", "business decision authority_ref")
+		}
+		return nil
+	}
+	if ref.AuthorityOutcome != nil {
+		return reject("INVALID_TOOL_RECEIPT", "authority_outcome not allowed")
+	}
 	switch slot.RefType {
 	case "resource":
 		if _, exists := resultPolicies.resourceTypes[ref.ResourceType]; !exists || ref.ProjectionID != "" {
@@ -678,7 +688,7 @@ func validateStoredResultRefs(slots []executionSlotV1, refs []resultRefV1) error
 	return nil
 }
 
-func validateResultEvidence(result graphToolResultV1, snapshot toolReceiptSnapshotV1, refs []resultRefV1, slotPolicies map[string]executionSlotPolicyV1) error {
+func validateResultEvidence(result graphToolResultV1, snapshot toolReceiptSnapshotV1, refs []resultRefV1, policies receiptPolicySetV1) error {
 	if result.ReceiptRef.ReceiptID != snapshot.ReceiptID {
 		return reject("INVALID_TOOL_RECEIPT", "self receipt_ref")
 	}
@@ -724,25 +734,37 @@ func validateResultEvidence(result graphToolResultV1, snapshot toolReceiptSnapsh
 			return reject("RESULT_REF_MISMATCH", "resource authority evidence")
 		}
 	case "failed":
-		if len(refs) != 0 || ledgerContainsSideEffect(snapshot, slotPolicies) {
-			return reject("RESULT_REF_MISMATCH", "failed side-effect evidence")
+		resultPolicy := policies.Result.resultCodes[result.ResultCode]
+		switch resultPolicy.EffectClass {
+		case "permanent_failure_after_side_effects_resolved":
+			if !exactSideEffectEvidence(snapshot, selected, policies.Slots, true) {
+				return reject("RESULT_REF_MISMATCH", "failed-after resolved side-effect evidence")
+			}
+		case "permanent_failure":
+			if !exactNegativeSideEffectEvidence(snapshot, selected, policies.Slots) {
+				return reject("RESULT_REF_MISMATCH", "permanent failure side-effect evidence")
+			}
+		default:
+			if len(refs) != 0 || ledgerContainsSideEffect(snapshot, policies.Slots) {
+				return reject("RESULT_REF_MISMATCH", "failed side-effect evidence")
+			}
 		}
 	case "cancelled":
 		if result.CancellationStage == nil {
 			return reject("RESULT_REF_MISMATCH", "cancelled stage evidence")
 		}
 		if *result.CancellationStage == "before_side_effect" {
-			if len(refs) != 0 || ledgerContainsSideEffect(snapshot, slotPolicies) {
+			if len(refs) != 0 || ledgerContainsSideEffect(snapshot, policies.Slots) {
 				return reject("RESULT_REF_MISMATCH", "cancelled-before side-effect evidence")
 			}
-		} else if !exactSideEffectEvidence(snapshot, selected, slotPolicies) {
+		} else if !exactSideEffectEvidence(snapshot, selected, policies.Slots, true) {
 			return reject("RESULT_REF_MISMATCH", "cancelled-after resolved evidence")
 		}
 	}
 	return nil
 }
 
-func exactSideEffectEvidence(snapshot toolReceiptSnapshotV1, selected []executionSlotV1, slotPolicies map[string]executionSlotPolicyV1) bool {
+func exactSideEffectEvidence(snapshot toolReceiptSnapshotV1, selected []executionSlotV1, slotPolicies map[string]executionSlotPolicyV1, requireCommitted bool) bool {
 	selectedBySlot := make(map[string]struct{}, len(selected))
 	for _, slot := range selected {
 		if !slotIsSideEffect(snapshot, slot, slotPolicies) {
@@ -751,16 +773,41 @@ func exactSideEffectEvidence(snapshot toolReceiptSnapshotV1, selected []executio
 		selectedBySlot[slot.RefSlot] = struct{}{}
 	}
 	count := 0
+	committed := 0
 	for _, slot := range snapshot.ExecutionSlots {
 		if !slotIsSideEffect(snapshot, slot, slotPolicies) {
 			continue
 		}
 		count++
+		if authorityRefRepresentsCommittedSideEffectV1(slot) {
+			committed++
+		}
 		if _, exists := selectedBySlot[slot.RefSlot]; !exists {
 			return false
 		}
 	}
-	return count > 0 && len(selected) == count
+	return count > 0 && len(selected) == count && (!requireCommitted || committed > 0)
+}
+
+// exactNegativeSideEffectEvidence 允许普通永久失败携带正式“未提交”权威引用，但禁止借该状态隐藏任何已提交副作用。
+func exactNegativeSideEffectEvidence(snapshot toolReceiptSnapshotV1, selected []executionSlotV1, slotPolicies map[string]executionSlotPolicyV1) bool {
+	if !ledgerContainsSideEffect(snapshot, slotPolicies) {
+		return len(selected) == 0
+	}
+	if !exactSideEffectEvidence(snapshot, selected, slotPolicies, false) {
+		return false
+	}
+	for _, slot := range selected {
+		if authorityRefRepresentsCommittedSideEffectV1(slot) {
+			return false
+		}
+	}
+	return true
+}
+
+// authorityRefRepresentsCommittedSideEffectV1 将 Business 的明确未提交权威与其他天然已提交回执分离，禁止把 negative authority 计作真实副作用。
+func authorityRefRepresentsCommittedSideEffectV1(slot executionSlotV1) bool {
+	return slot.AuthorityRef != nil && (slot.AuthorityRef.AuthorityOutcome == nil || *slot.AuthorityRef.AuthorityOutcome == "committed")
 }
 
 func ledgerContainsSideEffect(snapshot toolReceiptSnapshotV1, slotPolicies map[string]executionSlotPolicyV1) bool {

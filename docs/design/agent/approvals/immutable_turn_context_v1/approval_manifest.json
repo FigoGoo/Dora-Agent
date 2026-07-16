@@ -281,7 +281,7 @@
       "artifact_refs": [
         {
           "path": "agent/tests/contract/testdata/w2_r01/manifest.json",
-          "sha256": "sha256:d08c20bafb9f4119b13e07a419cbfa72224d3e85a9af8447c5f88313d38217cd",
+          "sha256": "sha256:90fa2da7d0807362f39e5eec25f7c1d4dfaa7b2377be4458b64ff57dcadd8a67",
           "kind": "corpus_manifest"
         },
         {
@@ -397,7 +397,7 @@
       "artifact_refs": [
         {
           "path": "agent/tests/contract/testdata/w2_r01/manifest.json",
-          "sha256": "sha256:d08c20bafb9f4119b13e07a419cbfa72224d3e85a9af8447c5f88313d38217cd",
+          "sha256": "sha256:90fa2da7d0807362f39e5eec25f7c1d4dfaa7b2377be4458b64ff57dcadd8a67",
           "kind": "corpus_manifest"
         },
         {
@@ -427,8 +427,13 @@
         },
         {
           "path": "docs/design/agent/continuation-child-tool-receipt-contract-v1.md",
-          "sha256": "sha256:12c9bb9756ac8f63287aa4c1ea40f58049297f76912cf667c3d22b2a2dfb7c92",
+          "sha256": "sha256:1456cbced900c94b9f173e3861c56c017d3cc88e04550ffeffc7b2c18b6c8f95",
           "kind": "design_doc"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r04_continuation_child/manifest.json",
+          "sha256": "sha256:cadb048443985b6347e9cafb3ec8381b478650201f7f0ca056ee45d827536eae",
+          "kind": "corpus_manifest"
         },
         {
           "path": "scripts/check-database-contracts.sh",
@@ -463,6 +468,12 @@
         },
         {
           "module": "agent",
+          "source_path": "agent/tests/contract/tool_receipt_failed_after_v1_corpus_test.go",
+          "test_name": "TestToolReceiptFailedAfterV1Corpus",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
           "source_path": "agent/tests/contract/approval_continuation_cross_object_evidence_v1_corpus_test.go",
           "test_name": "TestApprovalContinuationCrossObjectEvidenceV1TurnContextBinding",
           "mode": "normal"
@@ -489,6 +500,42 @@
           "module": "agent",
           "source_path": "agent/tests/contract/approval_consumption_receipt_v1_corpus_test.go",
           "test_name": "TestApprovalConsumptionReceiptCoreV1SingleUseConflicts",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/continuation_child_tool_receipt_v1_corpus_test.go",
+          "test_name": "TestW2R04ContinuationChildToolReceiptManifest",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/continuation_child_tool_receipt_v1_corpus_test.go",
+          "test_name": "TestContinuationChildToolReceiptV1Corpus",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/continuation_child_tool_receipt_v1_corpus_test.go",
+          "test_name": "TestContinuationChildToolReceiptV1CausalBindings",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/continuation_child_tool_receipt_v1_corpus_test.go",
+          "test_name": "TestContinuationChildToolReceiptV1ActionSlotExactSets",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/continuation_child_tool_receipt_v1_corpus_test.go",
+          "test_name": "TestContinuationChildToolReceiptV1ReplayAndRecovery",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/continuation_child_tool_receipt_v1_corpus_test.go",
+          "test_name": "TestContinuationChildToolReceiptV1R01R04Bridge",
           "mode": "normal"
         },
         {

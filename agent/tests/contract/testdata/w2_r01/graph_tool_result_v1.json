@@ -1,6 +1,9 @@
 {
   "schema_version": "graph_tool_result_v1_corpus.v1",
   "result_code_policies": [
+    {"result_code": "APPROVAL_APPROVE_BUSINESS_NOT_COMMITTED", "status": "failed", "retryable": false, "effect_class": "permanent_failure_after_side_effects_resolved"},
+    {"result_code": "APPROVAL_POST_CONSUMPTION_NOT_ELIGIBLE", "status": "failed", "retryable": false, "effect_class": "permanent_failure_after_side_effects_resolved"},
+    {"result_code": "APPROVAL_REJECT_BUSINESS_NOT_COMMITTED", "status": "failed", "retryable": false, "effect_class": "permanent_failure"},
     {"result_code": "APPROVAL_REQUIRED", "status": "waiting_user", "retryable": false, "effect_class": "approval_wait"},
     {"result_code": "DEPENDENCY_UNAVAILABLE", "status": "failed", "retryable": true, "effect_class": "safe_failure_before_side_effect"},
     {"result_code": "GENERATION_DISPATCHED", "status": "accepted", "retryable": false, "effect_class": "async_dispatch"},
@@ -141,6 +144,22 @@
         "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000754"},
         "warnings": [],
         "cancellation_stage": "after_side_effects_resolved",
+        "retryable": false
+      }
+    },
+    {
+      "id": "GTR-P09-failed-after-side-effects",
+      "expect": "accept",
+      "error_code": "",
+      "expected_result_digest": "sha256:6be2853dd5df449cfaa88754073113051479c84224c7247968af232b6c05b3e1",
+      "payload": {
+        "schema_version": "graph_tool_result.v1",
+        "status": "failed",
+        "result_code": "APPROVAL_POST_CONSUMPTION_NOT_ELIGIBLE",
+        "summary": "批准消费已登记，但业务写入前复核未通过。",
+        "resource_refs": [],
+        "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000761"},
+        "warnings": [],
         "retryable": false
       }
     },
@@ -288,6 +307,10 @@
     {
       "id": "GTR-N40-cancellation-code-stage-mismatch", "expect": "reject", "error_code": "RESULT_CODE_POLICY_MISMATCH", "expected_result_digest": "",
       "payload": {"schema_version": "graph_tool_result.v1", "status": "cancelled", "result_code": "RUN_CANCELLED_BEFORE_SIDE_EFFECT", "summary": "取消阶段与结果码冲突。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000760"}, "warnings": [], "cancellation_stage": "after_side_effects_resolved", "retryable": false}
+    },
+    {
+      "id": "GTR-N41-failed-after-retryable", "expect": "reject", "error_code": "RESULT_CODE_POLICY_MISMATCH", "expected_result_digest": "",
+      "payload": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "APPROVAL_POST_CONSUMPTION_NOT_ELIGIBLE", "summary": "副作用后失败不得标记可重试。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000762"}, "warnings": [], "retryable": true}
     }
   ]
 }
