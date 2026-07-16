@@ -1,0 +1,65 @@
+name: dora-local
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_USER: dora_admin
+      POSTGRES_PASSWORD: ${DORA_POSTGRES_ADMIN_PASSWORD:-dora_local_admin_password}
+      POSTGRES_DB: postgres
+      DORA_BUSINESS_DB_PASSWORD: ${DORA_BUSINESS_DB_PASSWORD:-dora_local_business_password}
+      DORA_AGENT_DB_PASSWORD: ${DORA_AGENT_DB_PASSWORD:-dora_local_agent_password}
+      DORA_WORKER_DB_PASSWORD: ${DORA_WORKER_DB_PASSWORD:-dora_local_worker_password}
+    ports:
+      - "127.0.0.1:${DORA_POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - dora-postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dora_admin -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.2-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${DORA_REDIS_PORT:-16379}:6379"
+    volumes:
+      - dora-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.6.2
+    command:
+      - /usr/local/bin/etcd
+      - --name=dora-local-etcd
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --initial-cluster=dora-local-etcd=http://etcd:2380
+      - --initial-cluster-state=new
+    ports:
+      - "127.0.0.1:${DORA_ETCD_PORT:-12379}:2379"
+    volumes:
+      - dora-etcd-data:/etcd-data
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  dora-postgres-data:
+  dora-redis-data:
+  dora-etcd-data:

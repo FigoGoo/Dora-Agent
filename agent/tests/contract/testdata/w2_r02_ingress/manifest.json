@@ -1,0 +1,64 @@
+{
+  "schema_version": "w2_r02_ingress_manifest.v1",
+  "files": [
+    {
+      "file": "session_lane_ingress_v1.json",
+      "sha256": "sha256:6effe6fb0866ed5f66c9bff5aa89810e493209e2371b1f73b13d698acc0cb84b",
+      "vector_count": 42
+    }
+  ],
+  "fixture_ids": [
+    "ingress.initial"
+  ],
+  "vector_ids": [
+    "ING-P01-enqueue-user-chat",
+    "ING-P02-command-replay",
+    "ING-P03-source-replay-alias",
+    "ING-P04-second-user-next-seq",
+    "ING-P05-enqueue-approval-turn",
+    "ING-P06-enqueue-approval-projection",
+    "ING-P07-enqueue-batch-explanation",
+    "ING-P08-enqueue-batch-projection",
+    "ING-P09-query-completed",
+    "ING-P10-query-not-found",
+    "ING-P11-query-conflict-no-leak",
+    "ING-P12-query-source-alias-completed",
+    "ING-P13-query-wrong-scope-no-leak",
+    "ING-P14-second-session-independent-seq",
+    "ING-N01-invalid-schema",
+    "ING-N02-invalid-command-id",
+    "ING-N03-invalid-digest-format",
+    "ING-N04-request-digest-mismatch",
+    "ING-N05-global-command-type-conflict",
+    "ING-N06-command-semantic-conflict",
+    "ING-N07-cross-session-command-conflict",
+    "ING-N08-source-digest-conflict",
+    "ING-N09-source-class-conflict",
+    "ING-N10-untrusted-source",
+    "ING-N11-source-classification-conflict",
+    "ING-N12-user-message-required",
+    "ING-N13-system-message-forbidden",
+    "ING-N14-caller-enqueue-seq-forbidden",
+    "ING-N15-caller-run-forbidden",
+    "ING-N16-invalid-allocated-id",
+    "ING-N17-transaction-failure-rolls-back",
+    "ING-N18-unknown-session",
+    "ING-N19-stale-session-version",
+    "ING-N20-transaction-failure-after-message",
+    "ING-N21-transaction-failure-after-input",
+    "ING-N22-transaction-failure-after-marker",
+    "ING-N23-transaction-failure-after-receipt",
+    "ING-N24-allocated-message-collision",
+    "ING-N25-allocated-input-collision",
+    "ING-N26-allocated-turn-collision",
+    "ING-N27-allocated-marker-collision",
+    "ING-N28-alias-receipt-failure-rolls-back"
+  ],
+  "total_vector_count": 42,
+  "target_tests": [
+    "TestW2R02IngressCorpusManifest",
+    "TestSessionLaneIngressV1Corpus",
+    "TestSessionLaneIngressV1RejectsCorruptReceiptSnapshot",
+    "TestSessionLaneIngressV1ReplayUsesFrozenResultAfterRuntimeProgress"
+  ]
+}

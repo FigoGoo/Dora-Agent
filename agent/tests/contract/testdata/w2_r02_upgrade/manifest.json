@@ -1,0 +1,32 @@
+{
+  "schema_version": "w2_r02_legacy_upgrade_manifest.v1",
+  "files": [
+    {
+      "file": "legacy_authority_attestation_v1.json",
+      "sha256": "sha256:6bd8b41db1828e538b48ad232cad5ddd8f48f3f7e048c188f42a3e30519dd6fd",
+      "vector_count": 17
+    },
+    {
+      "file": "session_lane_upgrade_blocker_v1.json",
+      "sha256": "sha256:7bf92f25b68f156466776541017a74acfc93b2e53bb6b68f93ac6287bd61bcba",
+      "vector_count": 90
+    }
+  ],
+  "total_vector_count": 107,
+  "target_tests": [
+    "TestW2R02LegacyUpgradeCorpusManifest",
+    "TestLegacyAuthorityAttestationV1Corpus",
+    "TestLegacyAuthorityAttestationV1GoldenDigests",
+    "TestLegacyAuthorityAttestationV1CanonicalFields",
+    "TestLegacyAuthorityAttestationV1RejectsInvalidCanonicalShape",
+    "TestSessionLaneUpgradeBlockerV1Corpus",
+    "TestSessionLaneUpgradeBlockerV1ExactSets",
+    "TestSessionLaneUpgradeBlockerV1ReasonOrder",
+    "TestSessionLaneUpgradeBlockerV1RootedAntiJoin",
+    "TestLegacyUpgradeClassificationRejectsUnknownDomain",
+    "TestLegacyEventRetentionV1FailsClosed",
+    "TestLegacyUpgradeLedgerV1CrashRecovery",
+    "TestLegacyLaneReadinessV1SeparatesFoundation",
+    "TestLegacyUpgradeDownGuardV1"
+  ]
+}

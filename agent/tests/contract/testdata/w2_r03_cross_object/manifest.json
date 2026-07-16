@@ -1,0 +1,49 @@
+{
+  "schema_version": "w2_r03_cross_object_manifest.v1",
+  "files": [
+    {
+      "file": "approval_continuation_cross_object_evidence_v1.json",
+      "sha256": "sha256:a069ef25cb4988592b10136cea853085cf6a4c93606063e7a98d2dca90261de6",
+      "vector_count": 20
+    }
+  ],
+  "fixture_ids": ["coe.approval_continuation.plan_creation_spec"],
+  "vector_ids": [
+    "COE-CAN-001-approval-continuation-golden",
+    "COE-CAN-002-replay-stable",
+    "COE-CAN-003-operational-metadata-excluded",
+    "COE-N01-parent-receipt-ref-mismatch",
+    "COE-N02-parent-receipt-digest-mismatch",
+    "COE-N03-parent-request-digest-mismatch",
+    "COE-N04-receipt-approval-id-mismatch",
+    "COE-N05-receipt-approval-version-mismatch",
+    "COE-N06-receipt-approval-digest-mismatch",
+    "COE-N07-approval-origin-identity-mismatch",
+    "COE-N08-approval-binding-state-not-pending",
+    "COE-N09-decision-authority-id-mismatch",
+    "COE-N10-decision-authority-digest-mismatch",
+    "COE-N11-continuation-source-mismatch",
+    "COE-N12-context-approval-ref-mismatch",
+    "COE-N13-tool-pin-ref-digest-mismatch",
+    "COE-N14-tool-pin-field-drift",
+    "COE-N15-resolved-ref-exact-set-mismatch",
+    "COE-N16-legacy-authority-substitution",
+    "COE-N17-multi-error-priority"
+  ],
+  "total_vector_count": 20,
+  "target_tests": [
+    "TestW2R03CrossObjectEvidenceManifest",
+    "TestApprovalContinuationCrossObjectEvidenceV1Corpus",
+    "TestApprovalContinuationCrossObjectEvidenceV1GoldenDigests",
+    "TestApprovalContinuationCrossObjectEvidenceV1ExactSets",
+    "TestApprovalContinuationCrossObjectEvidenceV1ReceiptBinding",
+    "TestApprovalContinuationCrossObjectEvidenceV1ApprovalDecisionBinding",
+    "TestApprovalContinuationCrossObjectEvidenceV1PinnedToolBinding",
+    "TestApprovalContinuationCrossObjectEvidenceV1TurnContextBinding",
+    "TestApprovalContinuationCrossObjectEvidenceV1ReasonPriority",
+    "TestApprovalContinuationCrossObjectEvidenceV1StrictJSON",
+    "TestApprovalContinuationCrossObjectEvidenceV1DigestEncoding",
+    "TestApprovalContinuationCrossObjectEvidenceV1LegacyAuthorityIsolation",
+    "TestApprovalContinuationCrossObjectEvidenceV1OperationalMetadataExcluded"
+  ]
+}

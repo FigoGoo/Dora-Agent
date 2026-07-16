@@ -1,7 +1,20 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { projectBootstrapFixture, WORKSPACE_IDS, workspaceSnapshotFixture } from '../test/workspaceFixtures.js';
+import { ownerSkillFixture, SKILL_IDS } from '../test/skillFixtures.js';
+import {
+  SKILL_MARKET_IDS,
+  skillMarketDetailFixture,
+  skillMarketListItemFixture
+} from '../test/skillMarketFixtures.js';
+import { skillReviewQueueResponseFixture } from '../test/skillReviewFixtures.js';
+import { AUTH_SESSION_EXPIRED_EVENT } from '../platform/auth/authSession.js';
 import { App } from './App.jsx';
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', mockAppFetch());
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -83,6 +96,81 @@ describe('DORAIGC landing page', () => {
     const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByText('做一个霓虹城市里的音乐短片')).toBeInTheDocument();
+  });
+
+  it('selects only a published active Owner Skill and submits explicit QuickCreate v2', async () => {
+    const ownerSkills = [
+      ownerSkillFixture({
+        content_status: 'published',
+        has_unpublished_changes: false,
+        allowed_actions: ['edit_draft']
+      }),
+      ownerSkillFixture({
+        skill_id: '019f0000-0000-7000-8000-000000000124',
+        definition: {
+          ...ownerSkillFixture().definition,
+          name: '尚未发布的 Skill'
+        }
+      })
+    ];
+    const fetchMock = mockAppFetch({ authenticatedBootstrap: true, ownerSkills });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole('button', { name: '用户菜单' });
+    await user.click(screen.getByRole('button', { name: 'Skill' }));
+    const picker = screen.getByRole('dialog', { name: '选择 QuickCreate Skill' });
+    const selectable = await within(picker).findByRole('checkbox', { name: '选择 剧情短片 Skill' });
+    expect(selectable).toBeEnabled();
+    expect(within(picker).getByRole('checkbox', { name: '选择 尚未发布的 Skill' })).toBeDisabled();
+    await user.click(selectable);
+    await user.type(screen.getByPlaceholderText('由一个想法或故事开始...'), '使用我的 Skill 创作');
+    await user.click(screen.getByRole('button', { name: '开始创作' }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => (
+      requestPath(input) === '/api/v1/projects:quick-create'
+    ))).toBe(true));
+    const quickCall = fetchMock.mock.calls.find(([input]) => requestPath(input) === '/api/v1/projects:quick-create');
+    expect(JSON.parse(quickCall[1].body)).toEqual({
+      schema_version: 'project_quick_create.v2',
+      initial_prompt: '使用我的 Skill 创作',
+      enabled_skill_ids: [SKILL_IDS.skill]
+    });
+  });
+
+  it('clears a selected QuickCreate Skill when a refreshed Owner projection reports session expiry', async () => {
+    const published = ownerSkillFixture({
+      content_status: 'published',
+      has_unpublished_changes: false,
+      allowed_actions: ['edit_draft']
+    });
+    const authenticatedFetch = mockAppFetch({ authenticatedBootstrap: true, ownerSkills: [published] });
+    let ownerListAttempts = 0;
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      if (requestPath(input) === '/api/v1/skills' && (options.method || 'GET') === 'GET') {
+        ownerListAttempts += 1;
+        if (ownerListAttempts === 2) {
+          return jsonResponse({
+            error: { code: 'UNAUTHENTICATED', message: '会话已过期', retryable: false }
+          }, 401);
+        }
+      }
+      return authenticatedFetch(input, options);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole('button', { name: '用户菜单' });
+    await user.click(screen.getByRole('button', { name: 'Skill' }));
+    await user.click(await screen.findByRole('checkbox', { name: '选择 剧情短片 Skill' }));
+    await user.click(screen.getByRole('button', { name: '关闭 Skill 选择' }));
+    await user.click(screen.getByRole('button', { name: 'Skill，已选择 1 个' }));
+
+    expect(await screen.findByRole('button', { name: '登录' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Skill' })).not.toHaveClass('is-active');
+    expect(screen.queryByRole('dialog', { name: '选择 QuickCreate Skill' })).not.toBeInTheDocument();
   });
 
   it('filters the public work feed by category', async () => {
@@ -190,30 +278,303 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByRole('button', { name: '148积分' })).toBeInTheDocument();
   });
 
-  it('renders the projects page from a direct route', () => {
+  it('does not render the projects page before a direct-route auth bootstrap succeeds', async () => {
     window.history.pushState({}, '', '/projects');
+    vi.stubGlobal('fetch', mockAppFetch({ authenticatedBootstrap: true }));
 
     render(<App />);
 
-    const navigation = screen.getByRole('complementary', { name: 'DORAIGC 导航' });
-    expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '正在确认登录状态' })).toBeInTheDocument();
+    const navigation = await screen.findByRole('complementary', { name: 'DORAIGC 导航' });
+    expect(await screen.findByRole('heading', { name: '项目' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建项目' })).toBeInTheDocument();
     expect(within(navigation).getByRole('button', { name: '项目' })).toHaveClass('is-active');
     expect(screen.queryByRole('heading', { name: 'Dora Agent - 人人都是艺术大师' })).not.toBeInTheDocument();
   });
 
-  it('renders the Skill page from the direct route', () => {
+  it('protects the direct Owner Skill create route before rendering Builder', async () => {
+    window.history.pushState({}, '', '/my/skills/new');
+    render(<App />);
+
+    expect(screen.getByRole('heading', { name: '正在确认登录状态' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '请先登录' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '创建 Skill' })).not.toBeInTheDocument();
+  });
+
+  it('loads the direct protected Owner Skill list after auth bootstrap', async () => {
+    window.history.pushState({}, '', '/my/skills');
+    vi.stubGlobal('fetch', mockAppFetch({ authenticatedBootstrap: true }));
+    render(<App />);
+
+    expect(await screen.findByText('剧情短片 Skill')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '草稿' })).toBeInTheDocument();
+    expect(within(screen.getByRole('complementary', { name: 'DORAIGC 导航' }))
+      .getByRole('button', { name: '我的 Skill' })).toHaveClass('is-active');
+  });
+
+  it('loads a valid direct protected Owner Skill edit route', async () => {
+    window.history.pushState({}, '', `/my/skills/${SKILL_IDS.skill}/edit`);
+    vi.stubGlobal('fetch', mockAppFetch({ authenticatedBootstrap: true }));
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '编辑 Skill 草稿' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Skill 名称/)).toHaveValue('剧情短片 Skill');
+    expect(screen.getByRole('button', { name: '保存草稿' })).toBeEnabled();
+  });
+
+  it.each([
+    [['user'], ['project.read']],
+    [['admin'], ['project.read']]
+  ])('denies direct Reviewer routes without skill.review and sends zero Reviewer API calls', async (roles, capabilities) => {
+    window.history.pushState({}, '', '/admin/skills/reviews');
+    const fetchMock = mockReviewerAppFetch({ roles, capabilities });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '无 Skill 审核权限' })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('不能使用 skill.review');
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input).startsWith('/api/v1/admin/skill-reviews')))
+      .toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Skill 审核' })).not.toBeInTheDocument();
+  });
+
+  it('shows Reviewer navigation and loads the exact queue for skill.review', async () => {
+    window.history.pushState({}, '', '/admin/skills/reviews');
+    const fetchMock = mockReviewerAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '待审核 Skill' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '剧情短片 Skill' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Skill 审核' })).toHaveClass('is-active');
+    const queueCalls = fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/admin/skill-reviews');
+    expect(queueCalls).toHaveLength(1);
+    expect(new URL(queueCalls[0][0], 'http://localhost').search).toBe('?status=reviewing');
+  });
+
+  it.each([
+    [200, '无 Skill 审核权限'],
+    [503, '认证服务暂不可用']
+  ])('re-parses a queue 403 once and converges without an automatic retry (bootstrap %s)', async (retryBootstrapStatus, heading) => {
+    window.history.pushState({}, '', '/admin/skills/reviews');
+    const fetchMock = mockReviewerAppFetch({ queueStatus: 403, retryBootstrapStatus });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+    const authCalls = fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/auth/session');
+    const queueCalls = fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/admin/skill-reviews');
+    expect(authCalls).toHaveLength(2);
+    expect(queueCalls).toHaveLength(1);
+  });
+
+  it.each([
+    ['/admin/skills/reviews/'],
+    ['/admin/skills/reviews/not-a-uuid'],
+    [`/admin/skills/reviews/${SKILL_IDS.review}/`]
+  ])('keeps invalid Reviewer admin path %s protected and performs no Reviewer API call', async (path) => {
+    window.history.pushState({}, '', path);
+    const fetchMock = mockReviewerAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Skill 审核路径无效' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input).startsWith('/api/v1/admin/skill-reviews')))
+      .toHaveLength(0);
+  });
+
+  it('returns to the protected login state when Owner Skill list reports 401', async () => {
+    window.history.pushState({}, '', '/my/skills');
+    vi.stubGlobal('fetch', mockAppFetch({ authenticatedBootstrap: true, ownerSkillsUnauthorized: true }));
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '请先登录' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '我的 Skill' })).not.toBeInTheDocument();
+  });
+
+  it('renders an explicit failure page for an invalid protected edit path', async () => {
+    window.history.pushState({}, '', '/my/skills/not-a-uuid/edit');
+    vi.stubGlobal('fetch', mockAppFetch({ authenticatedBootstrap: true }));
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Skill 编辑路径无效' })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('不是有效的 UUIDv7');
+  });
+
+  it('redirects the legacy Skill route to the real public market API', async () => {
     window.history.pushState({}, '', '/skill');
+    vi.stubGlobal('fetch', mockAppFetch({ authenticatedBootstrap: true }));
 
     render(<App />);
 
-    const navigation = screen.getByRole('complementary', { name: 'DORAIGC 导航' });
-    expect(screen.getByRole('heading', { name: 'Skill' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '我的', selected: true })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '新建Skill' })).toBeInTheDocument();
-    expect(screen.getAllByTestId('skill-card')).toHaveLength(10);
-    expect(screen.getByText('塔可夫斯基风格诗意短片')).toBeInTheDocument();
-    expect(within(navigation).getByRole('button', { name: 'Skill' })).toHaveClass('is-active');
+    const navigation = await screen.findByRole('complementary', { name: 'DORAIGC 导航' });
+    expect(await screen.findByRole('heading', { name: 'Skill 市场', level: 2 })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/skills');
+    expect(screen.getByRole('button', { name: '创建 Skill' })).toBeInTheDocument();
+    expect(await screen.findAllByTestId('skill-market-card')).toHaveLength(1);
+    expect(screen.queryByText('塔可夫斯基风格诗意短片')).not.toBeInTheDocument();
+    expect(within(navigation).getByRole('button', { name: 'Skill 市场' })).toHaveClass('is-active');
+  });
+
+  it('loads a canonical public Skill detail exactly once', async () => {
+    window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+    const fetchMock = mockAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '短片提示词助手' })).toBeInTheDocument();
+    expect(screen.getByText('公开市场详情。')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      requestPath(input) === `/api/v1/skill-market/${SKILL_MARKET_IDS.skill}`
+    ))).toHaveLength(1);
+    expect(screen.getByRole('button', { name: '登录后使用此 Skill' })).toBeInTheDocument();
+  });
+
+  it('recovers an anonymous Market preselection after login without creating until explicit submit', async () => {
+    window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+    const fetchMock = mockAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '登录后使用此 Skill' }));
+    const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
+    expect(within(dialog).getByText('短片提示词助手')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/projects:quick-create')).toHaveLength(0);
+
+    await submitLoginModal(user, dialog);
+    expect(await screen.findByLabelText('已预选市场 Skill')).toHaveTextContent('短片提示词助手');
+    expect(screen.getByRole('button', { name: '移除市场 Skill 短片提示词助手' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/projects:quick-create')).toHaveLength(0);
+
+    await user.type(screen.getByPlaceholderText('由一个想法或故事开始...'), '使用公开 Skill 创作');
+    await user.click(screen.getByRole('button', { name: '开始创作' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => (
+      requestPath(input) === '/api/v1/projects:quick-create'
+    ))).toHaveLength(1));
+    const quickCall = fetchMock.mock.calls.find(([input]) => requestPath(input) === '/api/v1/projects:quick-create');
+    expect(JSON.parse(quickCall[1].body)).toEqual({
+      schema_version: 'project_quick_create.v2',
+      initial_prompt: '使用公开 Skill 创作',
+      enabled_skill_ids: [SKILL_MARKET_IDS.skill]
+    });
+  });
+
+  it('deduplicates a Market selection and combines it with a refreshed Owner selection in sorted v2 form', async () => {
+    window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+    const ownerSkill = ownerSkillFixture({
+      content_status: 'published',
+      has_unpublished_changes: false,
+      governance_status: 'active'
+    });
+    const fetchMock = mockAppFetch({ authenticatedBootstrap: true, ownerSkills: [ownerSkill] });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '使用此 Skill 创作' }));
+    expect(await screen.findByLabelText('已预选市场 Skill')).toHaveTextContent('短片提示词助手');
+    expect(screen.getByRole('button', { name: 'Skill，已选择 1 个' })).toBeInTheDocument();
+
+    act(() => {
+      window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await user.click(await screen.findByRole('button', { name: '使用此 Skill 创作' }));
+    const deduplicatedMarketSelection = await screen.findByLabelText('已预选市场 Skill');
+    expect(within(deduplicatedMarketSelection).getAllByText('短片提示词助手')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Skill，已选择 1 个' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Skill，已选择 1 个' }));
+    const picker = screen.getByRole('dialog', { name: '选择 QuickCreate Skill' });
+    await user.click(await within(picker).findByRole('checkbox', { name: '选择 剧情短片 Skill' }));
+    expect(screen.getByRole('button', { name: 'Skill，已选择 2 个' })).toBeInTheDocument();
+    await user.click(within(picker).getByRole('button', { name: '刷新 Skill 列表' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/skills')).toHaveLength(2));
+    expect(screen.getByRole('button', { name: 'Skill，已选择 2 个' })).toBeInTheDocument();
+    expect(screen.getByLabelText('已预选市场 Skill')).toHaveTextContent('短片提示词助手');
+
+    await user.type(screen.getByPlaceholderText('由一个想法或故事开始...'), '混合 Skill 创作');
+    await user.click(screen.getByRole('button', { name: '开始创作' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/projects:quick-create')).toHaveLength(1));
+    const quickCall = fetchMock.mock.calls.find(([input]) => requestPath(input) === '/api/v1/projects:quick-create');
+    expect(JSON.parse(quickCall[1].body)).toEqual({
+      schema_version: 'project_quick_create.v2',
+      initial_prompt: '混合 Skill 创作',
+      enabled_skill_ids: [SKILL_MARKET_IDS.skill, SKILL_IDS.skill]
+    });
+  });
+
+  it('drops the Market preselection when its login is superseded by a newer authority epoch', async () => {
+    window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+    const baseFetch = mockAppFetch();
+    let resolveLogin;
+    const fetchMock = vi.fn((input, options = {}) => {
+      const path = requestPath(input);
+      const method = options.method || 'GET';
+      if (path === '/api/v1/auth/session' && method === 'POST') {
+        return new Promise((resolve) => {
+          resolveLogin = () => resolve(jsonResponse(mockAuthPayload()));
+        });
+      }
+      return baseFetch(input, options);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '登录后使用此 Skill' }));
+    const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
+    await submitLoginModal(user, dialog);
+    await waitFor(() => expect(resolveLogin).toBeTypeOf('function'));
+
+    act(() => window.dispatchEvent(new CustomEvent(AUTH_SESSION_EXPIRED_EVENT, { detail: { status: 401 } })));
+    resolveLogin();
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '登录后继续创作' })).not.toBeInTheDocument());
+    expect(window.location.pathname).toBe(`/skills/${SKILL_MARKET_IDS.skill}`);
+    expect(screen.queryByLabelText('已预选市场 Skill')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/projects:quick-create')).toHaveLength(0);
+  });
+
+  it('drops the pending Market login selection when browser navigation leaves its source flow', async () => {
+    window.history.pushState({}, '', `/skills/${SKILL_MARKET_IDS.skill}`);
+    const fetchMock = mockAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '登录后使用此 Skill' }));
+    expect(screen.getByRole('dialog', { name: '登录后继续创作' })).toBeInTheDocument();
+
+    act(() => {
+      window.history.pushState({}, '', '/skills');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '登录后继续创作' })).not.toBeInTheDocument());
+    expect(await screen.findByRole('heading', { name: 'Skill 市场', level: 2 })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/v1/projects:quick-create')).toHaveLength(0);
+  });
+
+  it.each([
+    '/skills/not-a-uuid',
+    `/skills/${SKILL_MARKET_IDS.skill.toUpperCase()}`,
+    `/skills/${SKILL_MARKET_IDS.skill.replace(/^0/, '%30')}`,
+    `/skills/${SKILL_MARKET_IDS.skill}/`,
+    `/skills/${SKILL_MARKET_IDS.skill}/extra`
+  ])('renders invalid public Skill path %s without any Market API request', async (path) => {
+    window.history.pushState({}, '', path);
+    const fetchMock = mockAppFetch();
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Skill 详情路径无效' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input).startsWith('/api/v1/skill-market')))
+      .toHaveLength(0);
   });
 
   it('redirects the legacy explore route to the home featured works section', async () => {
@@ -236,8 +597,7 @@ describe('DORAIGC static client pages', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+    await loginFromHeader(user);
 
     await user.click(screen.getByRole('button', { name: '项目' }));
     expect(window.location.pathname).toBe('/projects');
@@ -257,31 +617,25 @@ describe('DORAIGC static client pages', () => {
 
   it('continues to a private page after login from navigation', async () => {
     const user = userEvent.setup();
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '快速创作' }));
+    await user.click(await screen.findByRole('button', { name: '快速创作' }));
 
     const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
     expect(within(dialog).getByText('进入快速创作')).toBeInTheDocument();
 
-    await user.click(within(dialog).getByRole('button', { name: '登录并继续' }));
+    await submitLoginModal(user, dialog);
 
-    expect(openSpy).toHaveBeenCalledWith('/workspace', '_blank', 'noopener,noreferrer');
-    expect(screen.queryByRole('heading', { name: 'Seedance 2.0 创作工作台' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '用户菜单' })).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe(`/projects/${WORKSPACE_IDS.project}/workspace`));
+    expect(await screen.findByText('工作台已就绪')).toBeInTheDocument();
+    expect(screen.getByText(WORKSPACE_IDS.session)).toBeInTheDocument();
   });
 
-  it('navigates through workspace, projects, and assets mock pages after login', async () => {
+  it('navigates through projects and assets pages after login', async () => {
     const user = userEvent.setup();
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
-
-    await user.click(screen.getByRole('button', { name: '快速创作' }));
-    expect(openSpy).toHaveBeenCalledWith('/workspace', '_blank', 'noopener,noreferrer');
+    await loginFromHeader(user);
 
     await user.click(screen.getByRole('button', { name: '项目' }));
     expect(window.location.pathname).toBe('/projects');
@@ -498,15 +852,15 @@ describe('DORAIGC static client pages', () => {
     act(() => {
       DefaultMockEventSource.instances[1].onerror();
     });
-    expect(await screen.findByRole('alert')).toHaveTextContent('事件流已断开，刷新页面可重新连接。');
+    expect(await screen.findByRole('alert')).toHaveTextContent('事件流已断开，正在自动重连。');
 
     act(() => {
       staleOpen();
     });
-    expect(screen.getByRole('alert')).toHaveTextContent('事件流已断开，刷新页面可重新连接。');
+    expect(screen.getByRole('alert')).toHaveTextContent('事件流已断开，正在自动重连。');
   });
 
-  it('subscribes to the ready event and clears stale stream errors when reopened', async () => {
+  it('subscribes to the ready event and clears transport errors after automatic reconnection', async () => {
     window.history.pushState({}, '', '/workspace');
     const fetchMock = mockAigcFetch({ sessionIDs: ['s1'] });
     class MockEventSource {
@@ -534,16 +888,22 @@ describe('DORAIGC static client pages', () => {
     render(<App />);
 
     expect(await screen.findByText('Session s1')).toBeInTheDocument();
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
     const source = MockEventSource.instances[0];
     expect(source.listeners).toHaveProperty('a2ui.ready');
 
     await act(async () => {
       source.onerror();
     });
-    expect(await screen.findByRole('alert')).toHaveTextContent('事件流已断开，刷新页面可重新连接。');
+    expect(await screen.findByRole('alert')).toHaveTextContent('事件流已断开，正在自动重连。');
+    expect(source.close).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+    const reconnectedSource = MockEventSource.instances[1];
+    expect(reconnectedSource.listeners).toHaveProperty('a2ui.ready');
 
     await act(async () => {
-      source.onopen();
+      reconnectedSource.onopen();
     });
     await waitFor(() => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -571,7 +931,7 @@ describe('DORAIGC static client pages', () => {
     });
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Agent 输出协议错误');
-    expect(screen.queryByText('事件流已断开，刷新页面可重新连接。')).not.toBeInTheDocument();
+    expect(screen.queryByText('事件流已断开，正在自动重连。')).not.toBeInTheDocument();
   });
 
   it('resumes an agent interrupt through the unified message endpoint', async () => {
@@ -699,56 +1059,11 @@ describe('DORAIGC static client pages', () => {
     await user.click(screen.getByRole('button', { name: '发送' }));
 
     expect(await screen.findByText('竹林夜雨')).toBeInTheDocument();
-    expect(screen.getByText('shot-1')).toBeInTheDocument();
-    expect(screen.getAllByText('生成中').length).toBeGreaterThan(0);
+    expect(screen.getByText('1 项正在生成 · 0/1 项已完成')).toBeInTheDocument();
+    expect(screen.queryByText('shot-1')).not.toBeInTheDocument();
   });
 
-  it('renders session deliverables when a deliverables surface update arrives', async () => {
-    window.history.pushState({}, '', '/workspace');
-    const user = userEvent.setup();
-    const deliverableAsset = (url) => ({
-      id: 'asset-d1',
-      url,
-      kind: 'image',
-      mime_type: 'image/png',
-      target_id: 'deliverable:img-1',
-      availability: 'available',
-      metadata: { target_kind: 'session_deliverable' }
-    });
-    const fetchMock = mockAigcFetch({
-      messageEvents: [
-        updateCardEvent('deliverables', 'deliverables', { assets: [deliverableAsset('https://cdn/x.png')] })
-      ],
-      // 消息完成后的全量资产刷新与 DB 事实源一致（含 deliverable 资产）。
-      assetsAfterMessage: [deliverableAsset('https://cdn/x.png')]
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    render(<App />);
-
-    await screen.findByText('竹林归隐');
-    await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '来一张雨中柴犬');
-    await user.click(screen.getByRole('button', { name: '发送' }));
-
-    const panel = await screen.findByTestId('deliverables-panel');
-    await waitFor(() => {
-      expect(within(panel).getAllByRole('img')[0]).toHaveAttribute('src', 'https://cdn/x.png');
-    });
-
-    // 刷新完成后再来一条同 id 增量：必须按 id 合并去重，后到覆盖先到。
-    act(() => {
-      DefaultMockEventSource.instances.forEach((source) =>
-        source.emit(updateCardEvent('deliverables', 'deliverables', { assets: [deliverableAsset('https://cdn/y.png')] }))
-      );
-    });
-    await waitFor(() => {
-      const images = within(panel).getAllByRole('img');
-      expect(images).toHaveLength(1);
-      expect(images[0]).toHaveAttribute('src', 'https://cdn/y.png');
-    });
-  });
-
-  it('renders tool runs and storyboard patches from A2UI update actions', async () => {
+  it('renders one user-facing capability status and keeps internal nodes out of chat', async () => {
     window.history.pushState({}, '', '/workspace');
     const user = userEvent.setup();
     const fetchMock = mockAigcFetch({
@@ -793,13 +1108,14 @@ describe('DORAIGC static client pages', () => {
     await user.click(screen.getByRole('button', { name: '发送' }));
 
     expect(await screen.findByText('竹林夜雨')).toBeInTheDocument();
-    expect(screen.getByText('Media Assets')).toBeInTheDocument();
-    expect(screen.getByText('正在为 Shot 01 生成关键帧')).toBeInTheDocument();
-    expect(screen.getByText('注册所有元素资产')).toBeInTheDocument();
-    expect(screen.getByText('生成素材')).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: '素材生成进度' })).toBeInTheDocument();
+    expect(screen.getByText('素材生成正在进行，完成后会自动同步到左侧故事板。')).toBeInTheDocument();
+    expect(screen.queryByText('Media Assets')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在为 Shot 01 生成关键帧')).not.toBeInTheDocument();
+    expect(screen.queryByText('注册所有元素资产')).not.toBeInTheDocument();
   });
 
-  it('merges media provider progress into one Media Assets tool run', async () => {
+  it('collapses provider progress into one high-level media capability card', async () => {
     window.history.pushState({}, '', '/workspace');
     const user = userEvent.setup();
     const fetchMock = mockAigcFetch({
@@ -832,10 +1148,117 @@ describe('DORAIGC static client pages', () => {
     await user.type(screen.getByPlaceholderText('输入创作需求或修改意见...'), '生成素材');
     await user.click(screen.getByRole('button', { name: '发送' }));
 
-    expect(await screen.findByText('Image2 正在生成产品图')).toBeInTheDocument();
-    expect(screen.getAllByText('Media Assets')).toHaveLength(1);
-    expect(screen.getByText('Write The Prompt')).toBeInTheDocument();
-    expect(screen.getByText('Image2 生成图片')).toBeInTheDocument();
+    expect(await screen.findByRole('article', { name: '素材生成进度' })).toBeInTheDocument();
+    expect(screen.getAllByText('素材生成')).toHaveLength(1);
+    expect(screen.queryByText('Image2 正在生成产品图')).not.toBeInTheDocument();
+    expect(screen.queryByText('Write The Prompt')).not.toBeInTheDocument();
+    expect(screen.queryByText('Image2 生成图片')).not.toBeInTheDocument();
+  });
+
+  it('never renders one chat card per generated audio asset', async () => {
+    window.history.pushState({}, '', '/workspace');
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal('fetch', mockAigcFetch());
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    const source = DefaultMockEventSource.instances[0];
+    act(() => {
+      source.emit({
+        ...updateCardEvent('tool_runs', 'tool_run:generate_media', {
+          tool_run: { tool_key: 'generate_media', status: 'running' }
+        }),
+        seq: 1
+      });
+      ['bgm', 'voice', 'sfx'].forEach((slot, index) => {
+        source.emit({
+          ...updateCardEvent('tool_runs', `job:audio-${slot}`, {
+            tool_run: {
+              job_id: `job-audio-${slot}`,
+              tool_key: 'generate_media',
+              target_id: 'elem_audio_mix',
+              asset_slot: `asset_audio_${slot}`,
+              display_name: '音频素材生成',
+              status: 'succeeded',
+              result_asset_ids: [`asset-audio-${slot}`]
+            }
+          }),
+          seq: index + 2
+        });
+      });
+    });
+
+    expect(await screen.findByRole('article', { name: '素材生成进度' })).toBeInTheDocument();
+    expect(screen.getAllByRole('article', { name: /素材生成进度/ })).toHaveLength(1);
+    expect(screen.queryByText('音频素材生成')).not.toBeInTheDocument();
+    expect(screen.queryByText('elem_audio_mix')).not.toBeInTheDocument();
+    expect(screen.queryByText(/asset_audio_/)).not.toBeInTheDocument();
+  });
+
+  it('does not revive a stale planning waiting state after its Approval is gone', async () => {
+    window.history.pushState({}, '', '/workspace');
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal('fetch', mockAigcFetch());
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    act(() => {
+      DefaultMockEventSource.instances[0].emit({
+        ...updateCardEvent('tool_runs', 'tool_run:legacy-spec', {
+          tool_run: { tool_key: 'plan_creation_spec', status: 'waiting_user' }
+        }),
+        seq: 1
+      });
+      DefaultMockEventSource.instances[0].emit({
+        ...updateCardEvent('tool_runs', 'tool_run:generate_media', {
+          tool_run: { tool_key: 'generate_media', status: 'running' }
+        }),
+        seq: 2
+      });
+    });
+
+    expect(await screen.findByRole('article', { name: '素材生成进度' })).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '创作规范进度' })).not.toBeInTheDocument();
+  });
+
+  it('refreshes storyboard resources from a terminal capability hint without adding detail cards', async () => {
+    window.history.pushState({}, '', '/workspace');
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    const fetchMock = mockAigcFetch();
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    act(() => {
+      DefaultMockEventSource.instances[0].emit({
+        ...updateCardEvent('tool_runs', 'tool_run:generate_media', {
+          tool_run: { tool_key: 'generate_media', status: 'succeeded' },
+          refresh_resources: ['storyboard', 'assets', 'jobs']
+        }),
+        seq: 1
+      });
+    });
+
+    await waitFor(() => {
+      for (const resource of ['storyboard', 'assets', 'jobs']) {
+        const reads = fetchMock.mock.calls.filter(
+          ([path, options = {}]) =>
+            path === `/api/aigc/sessions/s1/${resource}` && (options.method || 'GET') === 'GET'
+        );
+        expect(reads.length).toBeGreaterThanOrEqual(2);
+      }
+    });
+    expect(screen.getAllByRole('article', { name: '素材生成进度' })).toHaveLength(1);
+    expect(screen.queryByText(/job-|asset-/)).not.toBeInTheDocument();
   });
 
   it('renders generated shot images after storyboard update hints and asset refresh', async () => {
@@ -1291,7 +1714,7 @@ describe('DORAIGC static client pages', () => {
     });
   });
 
-  it('keeps operation, job, and tool-run status projections monotonic by status_version', async () => {
+  it('keeps capability status monotonic without exposing operation, job, or node identifiers', async () => {
     window.history.pushState({}, '', '/workspace');
     DefaultMockEventSource.instances = [];
     vi.stubGlobal('EventSource', DefaultMockEventSource);
@@ -1308,8 +1731,8 @@ describe('DORAIGC static client pages', () => {
           status_version: 3,
           operation: {
             operation_id: 'op-monotonic',
-            job_id: 'job-monotonic',
             session_id: 's1',
+            tool_key: 'generate_media',
             target_id: 'target-monotonic',
             display_name: '单调状态任务',
             status: 'succeeded',
@@ -1323,8 +1746,8 @@ describe('DORAIGC static client pages', () => {
           status_version: 2,
           operation: {
             operation_id: 'op-monotonic',
-            job_id: 'job-monotonic',
             session_id: 's1',
+            tool_key: 'generate_media',
             target_id: 'target-monotonic',
             display_name: '单调状态任务',
             status: 'running',
@@ -1382,16 +1805,16 @@ describe('DORAIGC static client pages', () => {
       });
     });
 
-    const latestSummary = await screen.findByText('最新终态');
-    expect(within(latestSummary.closest('article')).getByText('完成')).toBeInTheDocument();
+    const capability = await screen.findByRole('article', { name: '素材生成进度' });
+    expect(within(capability).getByText('完成')).toBeInTheDocument();
     expect(screen.queryByText('过期运行状态')).not.toBeInTheDocument();
-    expect(within(screen.getByText('target-monotonic').closest('.aigc-job-chip')).getByText('完成')).toBeInTheDocument();
-    const latestNode = await screen.findByText('节点最新终态');
-    expect(latestNode.closest('li')).toHaveClass('aigc-a2ui-step--succeeded');
+    expect(screen.queryByText('最新终态')).not.toBeInTheDocument();
+    expect(screen.queryByText('target-monotonic')).not.toBeInTheDocument();
+    expect(screen.queryByText('节点最新终态')).not.toBeInTheDocument();
     expect(screen.queryByText('过期节点状态')).not.toBeInTheDocument();
   });
 
-  it('renders a completed local assembly manifest from the projected job result', async () => {
+  it('keeps a completed assembly job result out of chat asset cards', async () => {
     window.history.pushState({}, '', '/workspace');
     DefaultMockEventSource.instances = [];
     vi.stubGlobal('EventSource', DefaultMockEventSource);
@@ -1431,8 +1854,9 @@ describe('DORAIGC static client pages', () => {
       });
     });
 
-    const manifest = await screen.findByRole('link', { name: 'local-preview-manifest.json' });
-    expect(manifest).toHaveAttribute('href', '/api/aigc/local-assets/session/local-preview-manifest.json');
+    expect(await screen.findByText('后台生成任务已完成')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'local-preview-manifest.json' })).not.toBeInTheDocument();
+    expect(screen.queryByText('assembly-1')).not.toBeInTheDocument();
   });
 
   it('keeps a plain-text confirmation on the message API and leaves the pending Approval untouched', async () => {
@@ -1547,6 +1971,186 @@ describe('DORAIGC static client pages', () => {
         ([path, options]) => path === '/api/aigc/sessions/s1/messages' && options?.method === 'POST'
       )
     ).toHaveLength(0);
+  });
+
+  it('shows pending approvals as one sequential next step instead of simultaneous cards', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    const specApproval = appendCardEvent(
+      'approval-spec',
+      {
+        root: 'root',
+        title: '创作规范预览',
+        status: 'pending',
+        data: {
+          approval_id: 'approval-spec',
+          artifact_type: 'creation_spec_revision',
+          decision_version: 0
+        },
+        components: [
+          { id: 'root', component: { Card: { children: ['details'] } } },
+          { id: 'details', component: { Markdown: { value: '创作规范详情' } } }
+        ]
+      },
+      { card_id: 'approval:approval-spec' }
+    );
+    const storyboardApproval = appendCardEvent(
+      'approval-storyboard',
+      {
+        root: 'root',
+        title: '故事板预览',
+        status: 'pending',
+        data: {
+          approval_id: 'approval-storyboard',
+          artifact_type: 'storyboard_revision',
+          decision_version: 0
+        },
+        components: [
+          { id: 'root', component: { Card: { children: ['details'] } } },
+          { id: 'details', component: { Markdown: { value: '故事板详情' } } }
+        ]
+      },
+      { card_id: 'approval:approval-storyboard' }
+    );
+    vi.stubGlobal(
+      'fetch',
+      mockAigcFetch({
+        messages: [
+          { id: 'm-spec', role: 'assistant', content: JSON.stringify(specApproval.payload), seq: 1 },
+          { id: 'm-storyboard', role: 'assistant', content: JSON.stringify(storyboardApproval.payload), seq: 2 }
+        ]
+      })
+    );
+
+    render(<App />);
+
+    const specCard = await screen.findByRole('article', { name: '确认创作规范' });
+    expect(screen.queryByRole('article', { name: '确认故事板方案' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '提交' })).toHaveLength(1);
+    expect(within(specCard).getByText('查看完整审核内容')).toBeInTheDocument();
+    await user.click(within(specCard).getByRole('radio', { name: '确认' }));
+    await user.click(within(specCard).getByRole('button', { name: '提交' }));
+
+    expect(await screen.findByRole('article', { name: '确认故事板方案' })).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '确认创作规范' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '提交' })).toHaveLength(1);
+  });
+
+  it('drops a model spec preview that arrives after the authoritative Approval and keeps it dropped after Decision', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const user = userEvent.setup();
+    DefaultMockEventSource.instances = [];
+    vi.stubGlobal('EventSource', DefaultMockEventSource);
+    vi.stubGlobal('fetch', mockAigcFetch());
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    await waitFor(() => expect(DefaultMockEventSource.instances).toHaveLength(1));
+    const source = DefaultMockEventSource.instances[0];
+    act(() => {
+      source.emit({
+        ...appendCardEvent(
+          'approval-spec-live',
+          {
+            root: 'root',
+            title: '创作规范审核',
+            status: 'pending',
+            data: {
+              approval_id: 'approval-spec-live',
+              artifact_type: 'creation_spec_revision',
+              decision_version: 0
+            },
+            components: [
+              { id: 'root', component: { Card: { children: ['details'] } } },
+              { id: 'details', component: { Markdown: { value: '系统审核详情' } } }
+            ]
+          },
+          { card_id: 'approval:approval-spec-live' }
+        ),
+        seq: 1
+      });
+      source.emit({
+        ...appendCardEvent(
+          'spec-review',
+          {
+            root: 'root',
+            title: '规格预览',
+            components: [
+              { id: 'root', component: { Card: { children: ['details'] } } },
+              { id: 'details', component: { Markdown: { value: '模型重复规格预览' } } }
+            ]
+          },
+          { card_id: 'spec-review:duplicate-live' }
+        ),
+        seq: 2
+      });
+    });
+
+    const approvalCard = await screen.findByRole('article', { name: '确认创作规范' });
+    expect(screen.queryByRole('article', { name: '规格预览' })).not.toBeInTheDocument();
+    expect(screen.queryByText('模型重复规格预览')).not.toBeInTheDocument();
+    await user.click(within(approvalCard).getByRole('radio', { name: '确认' }));
+    await user.click(within(approvalCard).getByRole('button', { name: '提交' }));
+
+    await waitFor(() => expect(screen.queryByRole('article', { name: '确认创作规范' })).not.toBeInTheDocument());
+    expect(screen.queryByRole('article', { name: '规格预览' })).not.toBeInTheDocument();
+    expect(screen.queryByText('模型重复规格预览')).not.toBeInTheDocument();
+  });
+
+  it('replays Approval, model preview, and terminal Decision history without restoring the preview', async () => {
+    window.history.pushState({}, '', '/workspace');
+    const approvalCard = appendCardEvent(
+      'approval-storyboard-history',
+      {
+        root: 'root',
+        title: '故事板审核',
+        status: 'pending',
+        data: {
+          approval_id: 'approval-storyboard-history',
+          artifact_type: 'storyboard_revision',
+          decision_version: 0
+        },
+        components: [
+          { id: 'root', component: { Card: { children: ['details'] } } },
+          { id: 'details', component: { Markdown: { value: '系统故事板审核详情' } } }
+        ]
+      },
+      { card_id: 'approval:approval-storyboard-history' }
+    );
+    const modelPreview = appendCardEvent(
+      'storyboard-preview',
+      {
+        root: 'root',
+        title: '故事板预览',
+        components: [
+          { id: 'root', component: { Card: { children: ['details'] } } },
+          { id: 'details', component: { Markdown: { value: '历史中的重复故事板预览' } } }
+        ]
+      },
+      { card_id: 'storyboard-preview:duplicate-history' }
+    );
+    const terminalDecision = updateCardEvent('chat', 'approval:approval-storyboard-history', {
+      status: 'approved',
+      data: { approval_id: 'approval-storyboard-history' }
+    });
+    vi.stubGlobal(
+      'fetch',
+      mockAigcFetch({
+        messages: [
+          { id: 'm-approval-history', role: 'assistant', content: JSON.stringify(approvalCard.payload), seq: 1 },
+          { id: 'm-preview-history', role: 'assistant', content: JSON.stringify(modelPreview.payload), seq: 2 },
+          { id: 'm-decision-history', role: 'assistant', content: JSON.stringify(terminalDecision.payload), seq: 3 }
+        ]
+      })
+    );
+
+    render(<App />);
+
+    await screen.findByText('Session s1');
+    expect(screen.queryByRole('article', { name: '确认故事板方案' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '故事板预览' })).not.toBeInTheDocument();
+    expect(screen.queryByText('历史中的重复故事板预览')).not.toBeInTheDocument();
   });
 
   it('blocks an approval-like A2UI form that has no approval_id', async () => {
@@ -1892,7 +2496,8 @@ describe('DORAIGC static client pages', () => {
     });
     expect(await screen.findByText('实时镜头版本')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '实时审核卡' })).toBeInTheDocument();
-    expect(screen.getAllByText('实时任务目标').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('1 项正在生成 · 0/1 项已完成')).toBeInTheDocument();
+    expect(screen.queryByText('实时任务目标')).not.toBeInTheDocument();
     expect(screen.getAllByText('实时确认消息').length).toBeGreaterThanOrEqual(1);
     expect(container.querySelector('img[src="https://example.com/live.png"]')).not.toBeNull();
 
@@ -1910,7 +2515,8 @@ describe('DORAIGC static client pages', () => {
 
     expect(screen.getByText('实时镜头版本')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '实时审核卡' })).toBeInTheDocument();
-    expect(screen.getAllByText('实时任务目标').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('1 项正在生成 · 0/1 项已完成')).toBeInTheDocument();
+    expect(screen.queryByText('实时任务目标')).not.toBeInTheDocument();
     expect(screen.queryByText('过期任务目标')).not.toBeInTheDocument();
     expect(screen.getAllByText('实时确认消息').length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText('过期历史消息')).not.toBeInTheDocument();
@@ -1965,7 +2571,8 @@ describe('DORAIGC static client pages', () => {
     const refresh = screen.getByRole('button', { name: '刷新' });
     await user.click(refresh);
     await user.click(refresh);
-    expect(await screen.findByText('最新刷新任务')).toBeInTheDocument();
+    expect(await screen.findByText('1 项正在生成 · 0/1 项已完成')).toBeInTheDocument();
+    expect(screen.queryByText('最新刷新任务')).not.toBeInTheDocument();
 
     await act(async () => {
       resolveOlderJobs(
@@ -1974,7 +2581,8 @@ describe('DORAIGC static client pages', () => {
       await olderJobsResponse;
     });
 
-    expect(screen.getByText('最新刷新任务')).toBeInTheDocument();
+    expect(screen.getByText('1 项正在生成 · 0/1 项已完成')).toBeInTheDocument();
+    expect(screen.queryByText('最新刷新任务')).not.toBeInTheDocument();
     expect(screen.queryByText('过期刷新任务')).not.toBeInTheDocument();
   });
 
@@ -2708,6 +3316,7 @@ describe('DORAIGC static client pages', () => {
     const fetchMock = mockAigcFetch({
       messages: [
         { id: 'm1', role: 'user', content: '生成一个武侠短片' },
+        { id: 'm-tool-call', role: 'assistant', content: '内部规划后调用故事板工具。', tool_calls: 'W3siaWQiOiJjYWxsLTEifV0=' },
         { id: 'm2', role: 'assistant', content: '故事板已生成。' }
       ]
     });
@@ -2717,6 +3326,7 @@ describe('DORAIGC static client pages', () => {
 
     expect(await screen.findByText('生成一个武侠短片')).toBeInTheDocument();
     expect(screen.getByText('故事板已生成。')).toBeInTheDocument();
+    expect(screen.queryByText('内部规划后调用故事板工具。')).not.toBeInTheDocument();
   });
 
   it('imports a Skill.md file and binds it to the current workspace session', async () => {
@@ -2815,16 +3425,12 @@ describe('DORAIGC static client pages', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+    await loginFromHeader(user);
 
-    await user.click(screen.getByRole('button', { name: 'Skill' }));
-    expect(window.location.pathname).toBe('/skill');
-    expect(screen.getByRole('heading', { name: 'Skill' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '我的', selected: true })).toBeInTheDocument();
-    expect(screen.getAllByTestId('skill-card')).toHaveLength(10);
-    expect(screen.getAllByText('剧情短片（音色参考）')).toHaveLength(2);
-    expect(screen.getByText('审核中')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Skill 市场' }));
+    expect(window.location.pathname).toBe('/skills');
+    expect(screen.getByRole('heading', { name: 'Skill 市场', level: 2 })).toBeInTheDocument();
+    expect(await screen.findAllByTestId('skill-market-card')).toHaveLength(1);
 
     await user.click(screen.getByRole('button', { name: '精选作品' }));
     expect(window.location.pathname).toBe('/');
@@ -2833,7 +3439,7 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByText('MV 分镜生成')).toBeInTheDocument();
     expect(within(screen.getByRole('complementary', { name: 'DORAIGC 导航' })).getByRole('button', { name: '精选作品' })).toHaveClass('is-active');
 
-    await user.click(screen.getByRole('button', { name: '310积分' }));
+    await user.click(screen.getByRole('button', { name: '—积分' }));
     expect(screen.getByRole('heading', { name: '积分中心' })).toBeInTheDocument();
     expect(screen.getByText('148 积分')).toBeInTheDocument();
     expect(screen.getByText('DORA-2026-CREATOR')).toBeInTheDocument();
@@ -2843,8 +3449,7 @@ describe('DORAIGC static client pages', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+    await loginFromHeader(user);
 
     await user.click(screen.getByRole('button', { name: '项目' }));
     await user.click(screen.getByRole('button', { name: '继续创作 Seedance 2.0 视频制作' }));
@@ -2858,8 +3463,7 @@ describe('DORAIGC static client pages', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+    await loginFromHeader(user);
     await user.click(screen.getByRole('button', { name: '用户菜单' }));
 
     const menu = screen.getByRole('dialog', { name: '账户与积分' });
@@ -2867,7 +3471,7 @@ describe('DORAIGC static client pages', () => {
     expect(menu).toHaveClass('account-menu--slim');
     expect(within(menu).getByText('User')).toBeInTheDocument();
     expect(within(menu).getByText('zhuifei2099@gmail.com')).toBeInTheDocument();
-    expect(within(menu).getByText('Free')).toBeInTheDocument();
+    expect(within(menu).getByText('基础版')).toBeInTheDocument();
     expect(within(menu).getByRole('button', { name: '开通会员' })).toHaveClass('membership-button--theme');
     expect(within(menu).getByText('会员积分')).toBeInTheDocument();
     expect(within(menu).getByText('每周积分')).toBeInTheDocument();
@@ -2876,14 +3480,14 @@ describe('DORAIGC static client pages', () => {
     expect(within(menu).getByText('语言')).toBeInTheDocument();
     expect(within(menu).getByText('反馈')).toBeInTheDocument();
     expect(within(menu).getByText('管理账户')).toBeInTheDocument();
+    expect(within(menu).getByRole('button', { name: '退出登录' })).toBeInTheDocument();
   });
 
   it('uses user-facing copy and the same card system on private pages', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '登录' }));
-    await user.click(screen.getByRole('button', { name: '登录并继续' }));
+    await loginFromHeader(user);
 
     await user.click(screen.getByRole('button', { name: '项目' }));
     expect(screen.getAllByTestId('project-card')).toHaveLength(11);
@@ -2894,11 +3498,157 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByText('查看已经生成的图片、视频与音频，快速带回当前创作。')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '上传素材' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Skill' }));
-    expect(screen.getAllByTestId('skill-card')).toHaveLength(10);
-    expect(screen.queryByText(/静态|mock|系统|API|PRD/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Skill 市场' }));
+    expect(screen.getByRole('heading', { name: 'Skill 市场', level: 2 })).toBeInTheDocument();
+    expect(await screen.findAllByTestId('skill-market-card')).toHaveLength(1);
+    expect(screen.getByText(/公开预览与详情页创作预选/)).toBeInTheDocument();
   });
 });
+
+async function loginFromHeader(user) {
+  await user.click(await screen.findByRole('button', { name: '登录' }));
+  const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
+  await submitLoginModal(user, dialog);
+  await screen.findByRole('button', { name: '用户菜单' });
+}
+
+async function submitLoginModal(user, dialog = screen.getByRole('dialog', { name: '登录后继续创作' })) {
+  await user.type(within(dialog).getByRole('textbox', { name: '邮箱' }), 'user@example.com');
+  await user.type(within(dialog).getByLabelText('密码'), 'test-password');
+  await user.click(within(dialog).getByRole('button', { name: '登录并继续' }));
+}
+
+function mockAppFetch({
+  authenticatedBootstrap = false,
+  ownerSkillsUnauthorized = false,
+  ownerSkills = [ownerSkillFixture()],
+  marketItems = [skillMarketListItemFixture()]
+} = {}) {
+  let authenticated = authenticatedBootstrap;
+  return vi.fn(async (input, options = {}) => {
+    const path = new URL(typeof input === 'string' ? input : input.url, 'http://localhost').pathname;
+    const method = options.method || 'GET';
+    if (path === '/api/v1/auth/session' && method === 'GET') {
+      return authenticated
+        ? jsonResponse(mockAuthPayload())
+        : jsonResponse({ error: { code: 'UNAUTHENTICATED', message: '未登录', retryable: false } }, 401);
+    }
+    if (path === '/api/v1/auth/session' && method === 'POST') {
+      authenticated = true;
+      return jsonResponse(mockAuthPayload());
+    }
+    if (path === '/api/v1/auth/session' && method === 'DELETE') {
+      authenticated = false;
+      return new Response(null, { status: 204 });
+    }
+    if (path === '/api/v1/skill-market' && method === 'GET') {
+      return jsonResponse({
+        items: marketItems,
+        next_cursor: null,
+        request_id: SKILL_MARKET_IDS.request
+      });
+    }
+    if (path === `/api/v1/skill-market/${SKILL_MARKET_IDS.skill}` && method === 'GET') {
+      return jsonResponse({
+        skill: skillMarketDetailFixture(),
+        request_id: SKILL_MARKET_IDS.request
+      });
+    }
+    if (path === '/api/v1/skills' && method === 'GET') {
+      if (ownerSkillsUnauthorized) {
+        return jsonResponse({
+          error: { code: 'UNAUTHENTICATED', message: '会话已过期', retryable: false }
+        }, 401);
+      }
+      return jsonResponse({
+        items: ownerSkills,
+        next_cursor: null,
+        request_id: SKILL_IDS.request
+      });
+    }
+    if (path === `/api/v1/skills/${SKILL_IDS.skill}` && method === 'GET') {
+      return jsonResponse({
+        skill: ownerSkillFixture(),
+        request_id: SKILL_IDS.request
+      });
+    }
+    if (path === '/api/v1/projects:quick-create' && method === 'POST') {
+      return jsonResponse({
+        project_id: WORKSPACE_IDS.project,
+        session_id: null,
+        input_id: null,
+        creation_status: 'provisioning',
+        workspace_ref: `/projects/${WORKSPACE_IDS.project}/workspace`,
+        request_id: WORKSPACE_IDS.request
+      }, 201);
+    }
+    if (path === `/api/v1/projects/${WORKSPACE_IDS.project}/bootstrap` && method === 'GET') {
+      return jsonResponse(projectBootstrapFixture());
+    }
+    if (path === `/api/v1/agent/sessions/${WORKSPACE_IDS.session}/workspace` && method === 'GET') {
+      return jsonResponse(workspaceSnapshotFixture());
+    }
+    return jsonResponse({ error: { code: 'NOT_FOUND', message: 'not found', retryable: false } }, 404);
+  });
+}
+
+function mockAuthPayload() {
+  return {
+    status: 'authenticated',
+    principal: {
+      id: 'user-1',
+      display_name: 'User',
+      email: 'zhuifei2099@gmail.com',
+      account_status: 'active',
+      roles: ['user'],
+      capabilities: ['project.read']
+    },
+    csrf_token: 'csrf-1',
+    session_expires_at: '2026-07-15T08:00:00Z'
+  };
+}
+
+function mockReviewerAppFetch({
+  roles = ['skill_reviewer'],
+  capabilities = ['skill.review'],
+  queueStatus = 200,
+  retryBootstrapStatus = 200
+} = {}) {
+  let authReads = 0;
+  return vi.fn(async (input, options = {}) => {
+    const path = requestPath(input);
+    const method = options.method || 'GET';
+    if (path === '/api/v1/auth/session' && method === 'GET') {
+      authReads += 1;
+      if (authReads > 1 && retryBootstrapStatus !== 200) {
+        return jsonResponse({
+          error: { code: 'AUTH_UNAVAILABLE', message: '认证服务暂不可用', retryable: true }
+        }, retryBootstrapStatus);
+      }
+      return jsonResponse({
+        ...mockAuthPayload(),
+        principal: { ...mockAuthPayload().principal, roles, capabilities }
+      });
+    }
+    if (path === '/api/v1/admin/skill-reviews' && method === 'GET') {
+      if (queueStatus !== 200) {
+        return jsonResponse({
+          error: {
+            code: 'SKILL_REVIEW_CAPABILITY_REQUIRED',
+            message: 'Reviewer capability required',
+            retryable: false
+          }
+        }, queueStatus);
+      }
+      return jsonResponse(skillReviewQueueResponseFixture());
+    }
+    return jsonResponse({ error: { code: 'NOT_FOUND', message: 'not found', retryable: false } }, 404);
+  });
+}
+
+function requestPath(input) {
+  return new URL(typeof input === 'string' ? input : input.url, 'http://localhost').pathname;
+}
 
 function mockLocalStorage() {
   const items = new Map();

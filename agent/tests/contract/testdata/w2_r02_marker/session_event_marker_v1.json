@@ -1,0 +1,281 @@
+{
+  "schema_version": "session_event_marker_v1_corpus.v1",
+  "exact_sets": {
+    "decisions": ["valid", "invalid"],
+    "marker_types": ["session.created", "session.input.accepted"],
+    "source_kinds": ["ensure_project_session", "enqueue_input_v1"],
+    "aggregate_types": ["session", "session_input"],
+    "reason_codes": [
+      "MARKER_SCHEMA_INVALID",
+      "MARKER_ID_INVALID",
+      "MARKER_NUMERIC_INVALID",
+      "MARKER_TYPE_COMBINATION_INVALID",
+      "EVENT_MARKER_BINDING_MISMATCH",
+      "EVENT_PAYLOAD_INVALID",
+      "EVENT_PAYLOAD_BINDING_MISMATCH",
+      "PAYLOAD_DIGEST_MISMATCH",
+      "SEMANTIC_DIGEST_MISMATCH"
+    ]
+  },
+  "fixtures": [
+    {
+      "fixture_id": "marker.created.ensure",
+      "payload_json": "{ \"version\": 1, \"status\": \"active\", \"project_id\": \"019f1000-0000-7000-8000-000000000301\", \"session_id\": \"019f1000-0000-7000-8000-000000000101\" }",
+      "event": {
+        "event_id": "019f1000-0000-7000-8000-000000000001",
+        "session_id": "019f1000-0000-7000-8000-000000000101",
+        "event_type": "session.created",
+        "schema_version": "session.event.v1",
+        "source_kind": "ensure_project_session",
+        "source_id": "019f1000-0000-7000-8000-000000000201",
+        "projection_index": 0,
+        "aggregate_type": "session",
+        "aggregate_id": "019f1000-0000-7000-8000-000000000101",
+        "aggregate_version": 1,
+        "event_seq": 1,
+        "occurred_at_unix_us": 1784071200123456
+      },
+      "canonical": {
+        "schema_version": "session_event_marker.v1",
+        "marker_id": "019f1000-0000-7000-8000-000000000001",
+        "session_id": "019f1000-0000-7000-8000-000000000101",
+        "marker_type": "session.created",
+        "event_schema_version": "session.event.v1",
+        "source_kind": "ensure_project_session",
+        "source_id": "019f1000-0000-7000-8000-000000000201",
+        "projection_index": 0,
+        "aggregate_type": "session",
+        "aggregate_id": "019f1000-0000-7000-8000-000000000101",
+        "aggregate_version": 1,
+        "event_seq": 1,
+        "payload_digest": "56649b671027a7fcd2137d63c81aa356465dd10b413d756e89468ddd1bb18ab7",
+        "occurred_at_unix_us": 1784071200123456
+      },
+      "stored_semantic_digest": "e37579c2f83166798a5f24d0062655f2a420a57cf7e96bf6200d9790ec92692c",
+      "recorded_at": "2026-07-15T00:00:01Z",
+      "helper_metadata": {
+        "migration_run_id": "019f1000-0000-7000-8000-000000000601",
+        "attempt": 1,
+        "claim_owner": "helper-a"
+      }
+    },
+    {
+      "fixture_id": "marker.accepted.ensure",
+      "payload_json": "{\"session_id\":\"019f1000-0000-7000-8000-000000000101\",\"input_id\":\"019f1000-0000-7000-8000-000000000401\",\"message_id\":\"019f1000-0000-7000-8000-000000000501\",\"enqueue_seq\":1,\"status\":\"pending\"}",
+      "event": {
+        "event_id": "019f1000-0000-7000-8000-000000000002",
+        "session_id": "019f1000-0000-7000-8000-000000000101",
+        "event_type": "session.input.accepted",
+        "schema_version": "session.event.v1",
+        "source_kind": "ensure_project_session",
+        "source_id": "019f1000-0000-7000-8000-000000000201",
+        "projection_index": 1,
+        "aggregate_type": "session_input",
+        "aggregate_id": "019f1000-0000-7000-8000-000000000401",
+        "aggregate_version": 1,
+        "event_seq": 2,
+        "occurred_at_unix_us": 1784071200123456
+      },
+      "canonical": {
+        "schema_version": "session_event_marker.v1",
+        "marker_id": "019f1000-0000-7000-8000-000000000002",
+        "session_id": "019f1000-0000-7000-8000-000000000101",
+        "marker_type": "session.input.accepted",
+        "event_schema_version": "session.event.v1",
+        "source_kind": "ensure_project_session",
+        "source_id": "019f1000-0000-7000-8000-000000000201",
+        "projection_index": 1,
+        "aggregate_type": "session_input",
+        "aggregate_id": "019f1000-0000-7000-8000-000000000401",
+        "aggregate_version": 1,
+        "event_seq": 2,
+        "payload_digest": "551ad7de2b412b7304a54d5b9c5e1e60e57a4ef098e7e6cbf630ecf1f3b0cc11",
+        "occurred_at_unix_us": 1784071200123456
+      },
+      "stored_semantic_digest": "74540795954ccb4c4ef03e1971d0ec3ab4a6af01d184b44e9c9a1bc189b09f6e",
+      "recorded_at": "2026-07-15T00:00:01Z",
+      "helper_metadata": {
+        "migration_run_id": "019f1000-0000-7000-8000-000000000602",
+        "attempt": 1,
+        "claim_owner": "helper-a"
+      }
+    },
+    {
+      "fixture_id": "marker.accepted.enqueue",
+      "payload_json": "{\"session_id\":\"019f1000-0000-7000-8000-000000000102\",\"input_id\":\"019f1000-0000-7000-8000-000000000402\",\"message_id\":\"019f1000-0000-7000-8000-000000000502\",\"enqueue_seq\":2,\"status\":\"pending\"}",
+      "event": {
+        "event_id": "019f1000-0000-7000-8000-000000000003",
+        "session_id": "019f1000-0000-7000-8000-000000000102",
+        "event_type": "session.input.accepted",
+        "schema_version": "session.event.v1",
+        "source_kind": "enqueue_input_v1",
+        "source_id": "019f1000-0000-7000-8000-000000000202",
+        "projection_index": 0,
+        "aggregate_type": "session_input",
+        "aggregate_id": "019f1000-0000-7000-8000-000000000402",
+        "aggregate_version": 1,
+        "event_seq": 3,
+        "occurred_at_unix_us": 1784071201123456
+      },
+      "canonical": {
+        "schema_version": "session_event_marker.v1",
+        "marker_id": "019f1000-0000-7000-8000-000000000003",
+        "session_id": "019f1000-0000-7000-8000-000000000102",
+        "marker_type": "session.input.accepted",
+        "event_schema_version": "session.event.v1",
+        "source_kind": "enqueue_input_v1",
+        "source_id": "019f1000-0000-7000-8000-000000000202",
+        "projection_index": 0,
+        "aggregate_type": "session_input",
+        "aggregate_id": "019f1000-0000-7000-8000-000000000402",
+        "aggregate_version": 1,
+        "event_seq": 3,
+        "payload_digest": "eac9e7eb1666ac014a31eeefa98a6287003e50264444daff47af39dc41dd5a15",
+        "occurred_at_unix_us": 1784071201123456
+      },
+      "stored_semantic_digest": "fe544ae4fa5de71e5b073b6dbeb16dbe6b750d9c7873b29b9405b72491d720ab",
+      "recorded_at": "2026-07-15T00:00:02Z",
+      "helper_metadata": {
+        "migration_run_id": "019f1000-0000-7000-8000-000000000603",
+        "attempt": 2,
+        "claim_owner": "helper-b"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "EM-CAN-001-created-golden",
+      "from_fixture": "marker.created.ensure",
+      "mutations": [],
+      "expected": {
+        "decision": "valid",
+        "reason_codes": [],
+        "payload_digest": "56649b671027a7fcd2137d63c81aa356465dd10b413d756e89468ddd1bb18ab7",
+        "semantic_digest": "e37579c2f83166798a5f24d0062655f2a420a57cf7e96bf6200d9790ec92692c"
+      }
+    },
+    {
+      "id": "EM-CAN-002-ensure-accepted-golden",
+      "from_fixture": "marker.accepted.ensure",
+      "mutations": [],
+      "expected": {
+        "decision": "valid",
+        "reason_codes": [],
+        "payload_digest": "551ad7de2b412b7304a54d5b9c5e1e60e57a4ef098e7e6cbf630ecf1f3b0cc11",
+        "semantic_digest": "74540795954ccb4c4ef03e1971d0ec3ab4a6af01d184b44e9c9a1bc189b09f6e"
+      }
+    },
+    {
+      "id": "EM-CAN-003-enqueue-accepted-golden",
+      "from_fixture": "marker.accepted.enqueue",
+      "mutations": [],
+      "expected": {
+        "decision": "valid",
+        "reason_codes": [],
+        "payload_digest": "eac9e7eb1666ac014a31eeefa98a6287003e50264444daff47af39dc41dd5a15",
+        "semantic_digest": "fe544ae4fa5de71e5b073b6dbeb16dbe6b750d9c7873b29b9405b72491d720ab"
+      }
+    },
+    {
+      "id": "EM-CAN-004-operational-metadata-excluded",
+      "from_fixture": "marker.created.ensure",
+      "mutations": ["operational_metadata_changed"],
+      "expected": {
+        "decision": "valid",
+        "reason_codes": [],
+        "payload_digest": "56649b671027a7fcd2137d63c81aa356465dd10b413d756e89468ddd1bb18ab7",
+        "semantic_digest": "e37579c2f83166798a5f24d0062655f2a420a57cf7e96bf6200d9790ec92692c"
+      }
+    },
+    {
+      "id": "EM-CAN-005-schema-unknown",
+      "from_fixture": "marker.created.ensure",
+      "mutations": ["schema_unknown"],
+      "expected": {"decision": "invalid", "reason_codes": ["MARKER_SCHEMA_INVALID"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-006-marker-id-invalid",
+      "from_fixture": "marker.created.ensure",
+      "mutations": ["marker_id_not_uuidv7"],
+      "expected": {"decision": "invalid", "reason_codes": ["MARKER_ID_INVALID"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-007-event-seq-zero",
+      "from_fixture": "marker.created.ensure",
+      "mutations": ["event_seq_zero"],
+      "expected": {"decision": "invalid", "reason_codes": ["MARKER_NUMERIC_INVALID"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-008-source-projection-invalid",
+      "from_fixture": "marker.accepted.enqueue",
+      "mutations": ["source_projection_invalid"],
+      "expected": {"decision": "invalid", "reason_codes": ["MARKER_TYPE_COMBINATION_INVALID"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-009-payload-unknown-field",
+      "from_fixture": "marker.created.ensure",
+      "mutations": ["payload_unknown_field"],
+      "expected": {"decision": "invalid", "reason_codes": ["EVENT_PAYLOAD_INVALID"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-010-payload-trailing-json",
+      "from_fixture": "marker.accepted.ensure",
+      "mutations": ["payload_trailing_json"],
+      "expected": {"decision": "invalid", "reason_codes": ["EVENT_PAYLOAD_INVALID"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-011-payload-identity-mismatch",
+      "from_fixture": "marker.accepted.enqueue",
+      "mutations": ["payload_identity_mismatch"],
+      "expected": {"decision": "invalid", "reason_codes": ["EVENT_PAYLOAD_BINDING_MISMATCH"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-012-payload-digest-tamper",
+      "from_fixture": "marker.created.ensure",
+      "mutations": ["payload_digest_tamper"],
+      "expected": {"decision": "invalid", "reason_codes": ["PAYLOAD_DIGEST_MISMATCH"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-013-semantic-digest-tamper",
+      "from_fixture": "marker.accepted.ensure",
+      "mutations": ["semantic_digest_tamper"],
+      "expected": {"decision": "invalid", "reason_codes": ["SEMANTIC_DIGEST_MISMATCH"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-014-event-marker-binding-mismatch",
+      "from_fixture": "marker.accepted.enqueue",
+      "mutations": ["event_identity_mismatch"],
+      "expected": {"decision": "invalid", "reason_codes": ["EVENT_MARKER_BINDING_MISMATCH"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-015-payload-digest-uppercase",
+      "from_fixture": "marker.created.ensure",
+      "mutations": ["payload_digest_uppercase"],
+      "expected": {"decision": "invalid", "reason_codes": ["PAYLOAD_DIGEST_MISMATCH"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-016-semantic-digest-nonhex",
+      "from_fixture": "marker.accepted.ensure",
+      "mutations": ["semantic_digest_nonhex"],
+      "expected": {"decision": "invalid", "reason_codes": ["SEMANTIC_DIGEST_MISMATCH"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-017-semantic-digest-short",
+      "from_fixture": "marker.accepted.ensure",
+      "mutations": ["semantic_digest_short"],
+      "expected": {"decision": "invalid", "reason_codes": ["SEMANTIC_DIGEST_MISMATCH"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-018-occurred-at-zero",
+      "from_fixture": "marker.created.ensure",
+      "mutations": ["occurred_at_zero"],
+      "expected": {"decision": "invalid", "reason_codes": ["MARKER_NUMERIC_INVALID"], "payload_digest": "", "semantic_digest": ""}
+    },
+    {
+      "id": "EM-CAN-019-aggregate-version-zero",
+      "from_fixture": "marker.accepted.enqueue",
+      "mutations": ["aggregate_version_zero"],
+      "expected": {"decision": "invalid", "reason_codes": ["MARKER_NUMERIC_INVALID"], "payload_digest": "", "semantic_digest": ""}
+    }
+  ]
+}

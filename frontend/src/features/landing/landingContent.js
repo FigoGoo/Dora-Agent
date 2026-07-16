@@ -4,7 +4,9 @@ import {
   Home,
   Images,
   Play,
-  Sparkles
+  ShieldCheck,
+  Sparkles,
+  UserCircle
 } from 'lucide-react';
 
 export const HOME_FEATURED_SECTION_ID = 'featured-works';
@@ -14,7 +16,9 @@ export const navItems = [
   { label: '快速创作', page: 'workspace', icon: Sparkles },
   { label: '项目', page: 'projects', icon: FolderKanban },
   { label: '资产库', page: 'assets', icon: Images },
-  { label: 'Skill', page: 'skills', icon: Blocks },
+  { label: 'Skill 市场', page: 'skills', icon: Blocks },
+  { label: '我的 Skill', page: 'mySkills', icon: UserCircle },
+  { label: 'Skill 审核', page: 'skillReviews', icon: ShieldCheck, requiredCapability: 'skill.review' },
   { label: '精选作品', page: 'home', icon: Play, targetId: HOME_FEATURED_SECTION_ID }
 ];
 

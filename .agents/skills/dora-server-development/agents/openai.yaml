@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dora 服务端开发规范"
+  short_description: "统一执行 Dora business、worker、agent 三个独立 Go Module 的开发规范"
+  default_prompt: "使用 $dora-server-development，先识别受影响的 business、worker、agent Module 并读取对应规范；Agent 改动再使用匹配的 Eino Skill，Graph Tool 先核对独立设计文档。"

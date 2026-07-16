@@ -13,6 +13,8 @@ import {
   UserCircle
 } from 'lucide-react';
 import { BrandLogo } from '../../components/brand/BrandLogo.jsx';
+import { requestJSON, requestOptionalJSON } from '../../platform/api/apiClient.js';
+import { connectReconnectingSSE } from '../../platform/events/reconnectingSSE.js';
 import { StoryboardPanel } from './StoryboardPanel.jsx';
 import DeliverablesPanel from './DeliverablesPanel.jsx';
 import {
@@ -414,34 +416,27 @@ export function AigcWorkspacePage() {
       return undefined;
     }
     const isActiveStream = () => isCurrentSessionRequest(sessionID, request.generation);
-    const afterSeq = lastEventSeqRef.current;
-    const query = afterSeq > 0 ? `?after_seq=${afterSeq}` : '';
-    const source = new window.EventSource(`/api/aigc/sessions/${sessionID}/events/stream${query}`);
-    const listeners = A2UI_EVENT_NAMES.map((eventName) => {
-      const listener = (event) => {
+    const stream = connectReconnectingSSE({
+      url: `/api/aigc/sessions/${sessionID}/events/stream`,
+      eventNames: A2UI_EVENT_NAMES,
+      initialCursor: lastEventSeqRef.current,
+      onEvent: (event) => {
         if (isActiveStream()) {
-          handleA2UIEvent(parseSSEEvent(event), request.generation);
+          handleA2UIEvent(event, request.generation);
         }
-      };
-      source.addEventListener(eventName, listener);
-      return [eventName, listener];
+      },
+      onOpen: () => {
+        if (isActiveStream()) {
+          setError('');
+        }
+      },
+      onTransportError: () => {
+        if (isActiveStream()) {
+          setError('事件流已断开，正在自动重连。');
+        }
+      }
     });
-    source.onopen = () => {
-      if (isActiveStream()) {
-        setError('');
-      }
-    };
-    source.onerror = () => {
-      if (isActiveStream()) {
-        setError('事件流已断开，刷新页面可重新连接。');
-      }
-    };
-    return () => {
-      listeners.forEach(([eventName, listener]) => source.removeEventListener(eventName, listener));
-      source.onopen = null;
-      source.onerror = null;
-      source.close();
-    };
+    return () => stream.close();
   }, [currentSessionRequest, handleA2UIEvent, isCurrentSessionRequest, sessionID]);
 
   // sendMessage 发送普通用户消息；A2UI 输出只从 /events/stream 接收。
@@ -1008,13 +1003,7 @@ export function AigcWorkspacePage() {
             <span>{busy ? '生成中' : '待输入'}</span>
           </div>
 
-          <div className="aigc-job-strip" aria-label="生成任务">
-            {jobs.length === 0 ? (
-              <span>暂无后台任务</span>
-            ) : (
-              jobs.slice(0, 6).map((job) => <JobChip job={job} key={job.id || job.job_id} />)
-            )}
-          </div>
+          <JobStatusSummary jobs={jobs} candidateReviewReady={candidateApprovalReview.ready} />
 
           <div className="aigc-message-list">
             {chatTimeline.map((item) => {
@@ -1030,7 +1019,7 @@ export function AigcWorkspacePage() {
                 );
               }
               if (item.type === 'toolRun') {
-                return <ToolRunCard toolRun={item.toolRun} assetMap={assetMap} busy={busy} onControl={controlGenerationOperation} key={item.key} />;
+                return <ToolRunCard toolRun={item.toolRun} busy={busy} onControl={controlGenerationOperation} key={item.key} />;
               }
               return (
                 <A2UISurfaceCard
@@ -1092,12 +1081,14 @@ export function AigcWorkspacePage() {
   );
 }
 
-// chatTimelineItems 合并消息、工具进度和 A2UI 卡片，生成统一时间线。
+// chatTimelineItems 合并消息、当前高层能力进度和 A2UI 卡片，生成统一时间线。
 function chatTimelineItems(messages, toolRuns, surfaces) {
-  // 三类内容共用 timelineOrder，保证“用户消息 -> Agent 卡片 -> 后续用户消息”的顺序稳定。
-  const visibleSurfaces = surfaces.filter(
-    (surface) => isVisibleSurface(surface) && !isCandidateAssetApprovalSurface(surface)
-  );
+  // 同一时刻只展示一个待用户处理的 surface；候选素材始终在左侧故事板统一审核。
+  const visibleSurfaces = visibleChatSurfaces(surfaces);
+  const activeApproval = visibleSurfaces.find((surface) => Boolean(approvalIDFromSurface(surface)));
+  // Job/素材级投影属于工作区内部状态，聊天区只显示当前高层 Capability。
+  const currentCapabilityRun = selectCurrentCapabilityRun(toolRuns, activeApproval);
+  const visibleToolRuns = currentCapabilityRun ? [currentCapabilityRun] : [];
   return [
     ...messages.map((message, index) => ({
       type: 'message',
@@ -1106,7 +1097,7 @@ function chatTimelineItems(messages, toolRuns, surfaces) {
       fallbackOrder: index,
       message
     })),
-    ...toolRuns.map((toolRun, index) => ({
+    ...visibleToolRuns.map((toolRun, index) => ({
       type: 'toolRun',
       key: `tool:${toolRunKey(toolRun)}`,
       timelineOrder: timelineOrder(toolRun, messages.length + index),
@@ -1116,11 +1107,197 @@ function chatTimelineItems(messages, toolRuns, surfaces) {
     ...visibleSurfaces.map((surface, index) => ({
       type: 'surface',
       key: `surface:${surface.id}`,
-      timelineOrder: timelineOrder(surface, messages.length + toolRuns.length + index),
-      fallbackOrder: messages.length + toolRuns.length + index,
+      timelineOrder: timelineOrder(surface, messages.length + visibleToolRuns.length + index),
+      fallbackOrder: messages.length + visibleToolRuns.length + index,
       surface
     }))
   ].sort((left, right) => left.timelineOrder - right.timelineOrder || left.fallbackOrder - right.fallbackOrder);
+}
+
+const publicCapabilityOrder = [
+  'analyze_materials',
+  'plan_creation_spec',
+  'plan_storyboard',
+  'generate_media',
+  'assemble_output'
+];
+
+const publicCapabilityLabels = {
+  analyze_materials: '素材分析',
+  plan_creation_spec: '创作规范',
+  plan_storyboard: '故事板规划',
+  generate_media: '素材生成',
+  assemble_output: '成片合成'
+};
+
+// visibleChatSurfaces 保留说明卡，但同一时刻最多暴露一个需要用户提交的下一步。
+function visibleChatSurfaces(surfaces) {
+  const candidates = (surfaces || []).filter(
+    (surface) => isVisibleSurface(surface) && !isCandidateAssetApprovalSurface(surface)
+  );
+  const actionable = candidates.filter(isActionableSurface);
+  if (actionable.length <= 1) {
+    return candidates;
+  }
+  const pendingApprovals = actionable.filter(
+    (surface) => approvalIDFromSurface(surface) && !isTerminalApprovalStatus(surface?.payload?.status)
+  );
+  const selected = (pendingApprovals.length ? pendingApprovals : actionable)
+    .slice()
+    .sort(compareActionableSurfaces)[0];
+  return candidates.filter((surface) => !isActionableSurface(surface) || surface === selected);
+}
+
+function isActionableSurface(surface) {
+  return Boolean(approvalIDFromSurface(surface)) || isApprovalLikeSurface(surface) || surfaceFields(surface).some(isInputField);
+}
+
+function compareActionableSurfaces(left, right) {
+  const leftApprovalRank = approvalArtifactRank(left);
+  const rightApprovalRank = approvalArtifactRank(right);
+  if (leftApprovalRank !== rightApprovalRank) {
+    return leftApprovalRank - rightApprovalRank;
+  }
+  return timelineOrder(left, Number.MAX_SAFE_INTEGER) - timelineOrder(right, Number.MAX_SAFE_INTEGER);
+}
+
+function approvalArtifactRank(surface) {
+  const artifactType = String(surface?.payload?.data?.artifact_type || surface?.payload?.artifact_type || '').toLowerCase();
+  if (artifactType === 'creation_spec_revision') return 0;
+  if (artifactType === 'storyboard_revision') return 1;
+  return 2;
+}
+
+// selectCurrentCapabilityRun 把同一能力的 stage/operation 投影收敛成一张当前状态卡。
+function selectCurrentCapabilityRun(toolRuns, activeApproval) {
+  const byCapability = new Map();
+  (toolRuns || []).forEach((toolRun) => {
+    if (toolRun?.job_id) {
+      return;
+    }
+    const key = canonicalCapabilityKey(toolRun?.tool_key);
+    if (!key) {
+      return;
+    }
+    const previous = byCapability.get(key);
+    byCapability.set(key, preferredCapabilityProjection(previous, { ...toolRun, tool_key: key }));
+  });
+  const approvalCapability = approvalCapabilityKey(activeApproval);
+  if (approvalCapability && byCapability.has(approvalCapability)) {
+    return byCapability.get(approvalCapability);
+  }
+  const candidates = [...byCapability.values()].filter((toolRun) => {
+    const status = String(toolRun?.status || '').toLowerCase();
+    const planning = ['plan_creation_spec', 'plan_storyboard'].includes(toolRun?.tool_key);
+    // A planning waiting_user state is actionable only while its authoritative
+    // Approval is present. This also cleans up legacy histories that predate
+    // the correlated Decision -> ToolRun terminal update.
+    return status !== 'waiting_user' || !planning;
+  });
+  if (!candidates.length) {
+    return null;
+  }
+  return candidates.sort(compareCapabilityRuns)[0];
+}
+
+function canonicalCapabilityKey(value) {
+  const key = String(value || '').trim().toLowerCase();
+  if (publicCapabilityOrder.includes(key)) {
+    return key;
+  }
+  if (key === 'media_generator') {
+    return 'generate_media';
+  }
+  if (key === 'video_assembler') {
+    return 'assemble_output';
+  }
+  return '';
+}
+
+function approvalCapabilityKey(surface) {
+  const artifactType = String(surface?.payload?.data?.artifact_type || surface?.payload?.artifact_type || '').toLowerCase();
+  if (artifactType === 'creation_spec_revision') return 'plan_creation_spec';
+  if (artifactType === 'storyboard_revision') return 'plan_storyboard';
+  return canonicalCapabilityKey(surface?.payload?.data?.tool_key || surface?.payload?.tool_key);
+}
+
+function preferredCapabilityProjection(previous, incoming) {
+  if (!previous) {
+    return incoming;
+  }
+  const previousVersion = statusProjectionVersion(previous.status_version) ?? -1;
+  const incomingVersion = statusProjectionVersion(incoming.status_version) ?? -1;
+  if (previousVersion !== incomingVersion) {
+    return incomingVersion > previousVersion ? incoming : previous;
+  }
+  const previousOperation = String(previous.data_model_key || '').startsWith('operation:') ? 1 : 0;
+  const incomingOperation = String(incoming.data_model_key || '').startsWith('operation:') ? 1 : 0;
+  if (previousOperation !== incomingOperation) {
+    return incomingOperation > previousOperation ? incoming : previous;
+  }
+  return timelineOrder(incoming, -1) >= timelineOrder(previous, -1) ? incoming : previous;
+}
+
+function compareCapabilityRuns(left, right) {
+  const statusDifference = capabilityStatusPriority(right.status) - capabilityStatusPriority(left.status);
+  if (statusDifference) {
+    return statusDifference;
+  }
+  const stageDifference = publicCapabilityOrder.indexOf(right.tool_key) - publicCapabilityOrder.indexOf(left.tool_key);
+  if (stageDifference) {
+    return stageDifference;
+  }
+  return timelineOrder(right, -1) - timelineOrder(left, -1);
+}
+
+function capabilityStatusPriority(status) {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'waiting_user') return 4;
+  if (isInProgressStatus(normalized)) return 3;
+  if (['failed', 'partial_failed'].includes(normalized)) return 2;
+  return 1;
+}
+
+function capabilityDisplayName(key) {
+  return publicCapabilityLabels[canonicalCapabilityKey(key)] || '创作进度';
+}
+
+function capabilityStatusMessage(key, status) {
+  const normalized = String(status || '').toLowerCase();
+  const label = capabilityDisplayName(key);
+  if (normalized === 'waiting_user') {
+    return `${label}已准备好，请完成下方唯一的审核后继续。`;
+  }
+  if (isInProgressStatus(normalized)) {
+    return `${label}正在进行，完成后会自动同步到左侧故事板。`;
+  }
+  if (['failed', 'partial_failed', 'cancelled'].includes(normalized)) {
+    return `${label}未完整完成，可以重试或在对话中调整需求。`;
+  }
+  if (canonicalCapabilityKey(key) === 'generate_media') {
+    return '素材已生成，请在左侧故事板查看并统一确认。';
+  }
+  return `${label}已完成，结果已同步到工作区。`;
+}
+
+function generationJobSummary(jobs, candidateReviewReady = false) {
+  const items = Array.isArray(jobs) ? jobs : [];
+  if (!items.length) {
+    return { tone: 'idle', label: '暂无后台生成任务' };
+  }
+  const statuses = items.map((job) => String(job?.status || job?.Status || '').toLowerCase());
+  const running = statuses.filter((status) => isInProgressStatus(status)).length;
+  const failed = statuses.filter((status) => ['failed', 'partial_failed', 'cancelled'].includes(status)).length;
+  const completed = statuses.filter((status) => isTerminalGenerationJob(status) && !['failed', 'partial_failed', 'cancelled'].includes(status)).length;
+  if (running) {
+    return { tone: 'running', label: `${running} 项正在生成 · ${completed}/${items.length} 项已完成` };
+  }
+  if (failed) {
+    return { tone: 'failed', label: `${completed}/${items.length} 项已完成 · ${failed} 项需要处理` };
+  }
+  return candidateReviewReady
+    ? { tone: 'complete', label: '素材已生成，可在左侧故事板查看与统一确认' }
+    : { tone: 'complete', label: '后台生成任务已完成' };
 }
 
 // timelineOrder 读取对象上的时间线顺序，缺失时使用传入 fallback。
@@ -1152,58 +1329,49 @@ function MessageAttachmentList({ attachments }) {
   );
 }
 
-// JobChip 渲染顶部后台任务的紧凑状态块。
-function JobChip({ job }) {
-  const status = job.status || job.Status;
-  const inProgress = isInProgressStatus(status);
-  const failed = ['failed', 'partial_failed', 'cancelled'].includes(String(status || '').toLowerCase());
+// JobStatusSummary 只显示聚合生成状态，不向用户暴露 Job/target/asset 内部标识。
+function JobStatusSummary({ jobs, candidateReviewReady }) {
+  const summary = generationJobSummary(jobs, candidateReviewReady);
   return (
-    <span className={`aigc-job-chip aigc-job-chip--${status}`}>
-      {inProgress ? <LoaderCircle aria-hidden="true" size={13} /> : failed ? <AlertCircle aria-hidden="true" size={13} /> : <CheckCircle2 aria-hidden="true" size={13} />}
-      <span>{job.target_id || job.TargetID || job.job_id || job.id}</span>
-      <strong>{statusLabel(status) || status}</strong>
-    </span>
+    <div
+      className={`aigc-job-strip aigc-job-summary aigc-job-summary--${summary.tone}`}
+      aria-label="生成任务"
+      aria-live="polite"
+      role="status"
+    >
+      {summary.tone === 'running' ? (
+        <LoaderCircle aria-hidden="true" size={14} />
+      ) : summary.tone === 'failed' ? (
+        <AlertCircle aria-hidden="true" size={14} />
+      ) : (
+        <CheckCircle2 aria-hidden="true" size={14} />
+      )}
+      <span>{summary.label}</span>
+    </div>
   );
 }
 
 // ToolRunCard 渲染工具运行进度卡，通常由 update_card/tool_runs 更新。
-function ToolRunCard({ toolRun, assetMap, busy, onControl }) {
+function ToolRunCard({ toolRun, busy, onControl }) {
   const status = toolRun.status || 'running';
   const inProgress = isInProgressStatus(status);
   const failed = ['failed', 'partial_failed', 'cancelled'].includes(String(status || '').toLowerCase());
-  const nodes = Array.isArray(toolRun.nodes) ? toolRun.nodes : [];
-  const resultAssets = (toolRun.result_asset_ids || []).map((id) => assetMap?.get(id)).filter(Boolean);
   const operationID = toolRun.operation_id;
   const canCancel = operationID && !toolRun.job_id && ['accepted', 'queued', 'waiting_jobs', 'waiting_provider', 'running', 'finalizing', 'retry_wait'].includes(status);
   const canRetry = operationID && !toolRun.job_id && ['failed', 'partial_failed'].includes(status);
+  const capabilityKey = canonicalCapabilityKey(toolRun.tool_key);
+  const displayName = capabilityDisplayName(capabilityKey);
   return (
-    <article className={`aigc-tool-run aigc-tool-run--${status}`}>
+    <article className={`aigc-tool-run aigc-tool-run--${status}`} aria-label={`${displayName}进度`}>
       <header>
         <div>
           {inProgress ? <LoaderCircle aria-hidden="true" size={15} /> : failed ? <AlertCircle aria-hidden="true" size={15} /> : <CheckCircle2 aria-hidden="true" size={15} />}
-          <strong>{toolRun.display_name || toolRun.tool_key || 'Tool'}</strong>
+          <strong>{displayName}</strong>
         </div>
         <span>{statusLabel(status) || status}</span>
       </header>
-      {toolRun.summary ? <p>{toolRun.summary}</p> : null}
-      {nodes.length ? (
-        <A2UIVerticalSteps
-          steps={nodes.map((node) => ({
-            key: node.node_key || node.key,
-            title: node.display_name || node.title || node.node_key,
-            status: node.status,
-            description: node.description || node.message
-          }))}
-        />
-      ) : null}
-      {resultAssets.length ? (
-        <div className="aigc-a2ui-upload-list aigc-tool-run__assets" aria-label="任务产物">
-          {resultAssets.map((asset) => (
-            <A2UIFilePreview asset={asset} key={fileAssetID(asset) || asset.url || asset.filename} />
-          ))}
-        </div>
-      ) : null}
-      {toolRun.error_message ? <p className="aigc-tool-run__error">{toolRun.error_message}</p> : null}
+      <p>{capabilityStatusMessage(capabilityKey, status)}</p>
+      {failed && toolRun.error_message ? <p className="aigc-tool-run__error">生成未完成，请重试或调整需求。</p> : null}
       {canCancel || canRetry ? (
         <div className="aigc-tool-run__actions">
           {canCancel ? <button type="button" disabled={busy} onClick={() => void onControl?.(operationID, 'cancel')}>取消任务</button> : null}
@@ -1228,7 +1396,7 @@ function A2UISurfaceCard({ surface, busy, sessionID, onAssetUploaded, onSubmit }
   // Approval 的决定控件由前端固定生成，不能把模型输出的普通字段当成审批入口。
   const fields = approvalID ? [approvalDecisionField()] : invalidApprovalSurface ? [] : surfaceFields(surface);
   const [values, setValues] = useState(() => initialSurfaceValues(fields));
-  const title = payload.title || payload.label || '补充信息';
+  const title = approvalID ? approvalSurfaceTitle(surface) : payload.title || payload.label || '补充信息';
   const hasComponentTree = Array.isArray(payload.components);
   const hasInteractiveFields = fields.some((field) => isInputField(field));
   const fieldSignature = fields.map(fieldKey).join('|');
@@ -1241,12 +1409,25 @@ function A2UISurfaceCard({ surface, busy, sessionID, onAssetUploaded, onSubmit }
     <article className="aigc-a2ui-card" aria-label={title}>
       {payload.title || payload.status ? (
         <header>
-          {payload.title ? <h2>{title}</h2> : <span>{surface.id}</span>}
-          {payload.status ? <span>{statusLabel(payload.status)}</span> : null}
+          <h2>{title}</h2>
+          {payload.status ? <span>{approvalID ? '需要确认' : statusLabel(payload.status)}</span> : null}
         </header>
       ) : null}
       {payload.message ? <p>{payload.message}</p> : null}
-      {hasComponentTree ? (
+      {hasComponentTree && approvalID ? (
+        <details className="aigc-a2ui-card__details">
+          <summary>查看完整审核内容</summary>
+          <A2UIComponentTree
+            surface={surface}
+            data={data}
+            values={values}
+            approvalMode
+            sessionID={sessionID}
+            onAssetUploaded={onAssetUploaded}
+            onValueChange={(key, value) => setValues((current) => ({ ...current, [key]: value }))}
+          />
+        </details>
+      ) : hasComponentTree ? (
         <A2UIComponentTree
           surface={surface}
           data={data}
@@ -1261,6 +1442,12 @@ function A2UISurfaceCard({ surface, busy, sessionID, onAssetUploaded, onSubmit }
         <p className="aigc-a2ui-card__protocol-error" role="alert">
           审批卡缺少 approval_id，无法提交。请刷新页面或重新发起审核。
         </p>
+      ) : null}
+      {approvalID && !approvalTerminal ? (
+        <div className="aigc-a2ui-card__next-step">
+          <strong>下一步</strong>
+          <span>确认后进入下一阶段；如需调整，请选择拒绝后在对话中说明。</span>
+        </div>
       ) : null}
       <form
         className="aigc-a2ui-form"
@@ -1920,7 +2107,6 @@ async function createSession() {
   const session = await requestJSON('/api/aigc/sessions', {
     method: 'POST',
     body: JSON.stringify({
-      user_id: 'demo-user',
       title: 'AIGC Demo'
     })
   });
@@ -1974,44 +2160,6 @@ function clearLocalSessionID() {
     }
   } catch {
     // Session recovery still continues when browser storage is unavailable.
-  }
-}
-
-// requestOptionalJSON 调用 JSON API，404 时返回 null 方便可选资源读取。
-async function requestOptionalJSON(path, options) {
-  try {
-    return await requestJSON(path, options);
-  } catch (err) {
-    if (err.status === 404) {
-      return null;
-    }
-    throw err;
-  }
-}
-
-// requestJSON 封装 fetch JSON 请求，并把非 2xx 响应转成带 status 的 Error。
-async function requestJSON(path, options = {}) {
-  const body = options.body;
-  const headers = body instanceof FormData ? options.headers || {} : { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  const response = await fetch(path, { ...options, headers });
-  if (!response.ok) {
-    const text = await response.text();
-    const err = new Error(text || response.statusText);
-    err.status = response.status;
-    throw err;
-  }
-  if (response.status === 204) {
-    return null;
-  }
-  return response.json();
-}
-
-// parseSSEEvent 解析 EventSource 事件，JSON 失败时转成 error-like payload。
-function parseSSEEvent(event) {
-  try {
-    return JSON.parse(event.data);
-  } catch {
-    return { event: event.type, payload: { message: event.data } };
   }
 }
 
@@ -2190,10 +2338,20 @@ function upsertToolRun(items, toolRun) {
   // Job lifecycle patches only carry versioned nodes. Their version belongs to
   // each Job, not to the enclosing Operation/Stage, so the top-level gate must
   // not discard the whole patch after operation.accepted established a version.
-  if (previous && !isNodeOnlyToolRunPatch(toolRun) && isOlderStatusProjection(previous, toolRun)) {
+  if (
+    previous &&
+    !isStableCapabilityToolRun(toolRun) &&
+    !isNodeOnlyToolRunPatch(toolRun) &&
+    isOlderStatusProjection(previous, toolRun)
+  ) {
     return items;
   }
   return [mergeToolRun(previous, toolRun), ...next];
+}
+
+// 稳定 Capability 卡会跨 Operation 复用，顺序由 session SSE seq 保证，不能沿用上一批次的 status_version。
+function isStableCapabilityToolRun(toolRun) {
+  return ['tool_run:generate_media', 'tool_run:assemble_output'].includes(String(toolRun?.data_model_key || ''));
 }
 
 function isNodeOnlyToolRunPatch(toolRun) {
@@ -2224,12 +2382,16 @@ function mergeToolRun(previous, incoming) {
   if (!previous) {
     return incoming;
   }
-  return {
+  const merged = {
     ...previous,
     ...incoming,
     timelineOrder: previous.timelineOrder ?? incoming.timelineOrder,
     nodes: mergeToolRunNodes(previous.nodes, incoming.nodes)
   };
+  if (isStableCapabilityToolRun(incoming) && statusProjectionVersion(incoming.status_version) == null) {
+    delete merged.status_version;
+  }
+  return merged;
 }
 
 // mergeToolRunNodes 按节点 key 合并工具步骤状态。
@@ -2408,6 +2570,60 @@ function approvalIDFromSurface(surface) {
   return String(surface?.payload?.data?.approval_id || surface?.payload?.approval_id || '').trim();
 }
 
+function approvalSurfaceTitle(surface) {
+  const artifactType = String(surface?.payload?.data?.artifact_type || surface?.payload?.artifact_type || '').toLowerCase();
+  if (artifactType === 'creation_spec_revision') return '确认创作规范';
+  if (artifactType === 'storyboard_revision') return '确认故事板方案';
+  return surface?.payload?.title || surface?.payload?.label || '确认当前方案';
+}
+
+// pendingPrimaryApprovalArtifactType 只识别系统主流程中待处理的 Spec/Storyboard Approval。
+function pendingPrimaryApprovalArtifactType(surface) {
+  if (!approvalIDFromSurface(surface) || isTerminalApprovalStatus(surface?.payload?.status)) {
+    return '';
+  }
+  const artifactType = String(
+    surface?.payload?.data?.artifact_type || surface?.payload?.artifact_type || ''
+  ).trim().toLowerCase();
+  return ['creation_spec_revision', 'storyboard_revision'].includes(artifactType) ? artifactType : '';
+}
+
+// reviewPreviewArtifactType 识别模型常见的 spec-review/storyboard-preview 说明卡。
+function reviewPreviewArtifactType(surface) {
+  const payload = surface?.payload || {};
+  const explicitType = String(payload?.data?.artifact_type || payload?.artifact_type || '').trim().toLowerCase();
+  if (['creation_spec_revision', 'storyboard_revision'].includes(explicitType)) {
+    return explicitType;
+  }
+  const semanticText = [
+    surface?.id,
+    surface?.card_id,
+    surface?.ref,
+    payload?.title,
+    payload?.label,
+    payload?.data?.tool_key,
+    payload?.tool_key
+  ]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(' ');
+  if (/storyboard|story[-_ ]?board|故事板/.test(semanticText)) {
+    return 'storyboard_revision';
+  }
+  if (/creation[_ -]?spec|final[_ -]?video[_ -]?spec|spec[-_ ]?(review|preview)|创作规范|规格预览|规范预览/.test(semanticText)) {
+    return 'creation_spec_revision';
+  }
+  return '';
+}
+
+function isNonInteractiveReviewPreviewSurface(surface) {
+  return (
+    !approvalIDFromSurface(surface) &&
+    Boolean(reviewPreviewArtifactType(surface)) &&
+    !surfaceFields(surface).some(isInputField)
+  );
+}
+
 // isApprovalLikeSurface 识别缺少 approval_id 的伪审批表单，禁止降级成普通聊天消息提交。
 function isApprovalLikeSurface(surface) {
   return surfaceFields(surface).some((field) => String(fieldKey(field)).trim().toLowerCase() === 'decision');
@@ -2542,11 +2758,18 @@ function applyA2UIAction(action, context) {
   const type = String(action?.type || '').trim();
   if (type === 'append_card') {
     appendA2UICard(action, context);
-    return;
-  }
-  if (type === 'update_card') {
+  } else if (type === 'update_card') {
     updateA2UICard(action, context);
   }
+  if (shouldRefreshWorkspaceResources(action)) {
+    void context.refreshSessionData?.(context.sessionID, { includeMessages: false });
+  }
+}
+
+// shouldRefreshWorkspaceResources 响应后端终态资源提示；提示本身不创建任何聊天卡片。
+function shouldRefreshWorkspaceResources(action) {
+  const resources = action?.payload?.refresh_resources;
+  return Array.isArray(resources) && resources.some((resource) => ['storyboard', 'assets', 'jobs'].includes(resource));
 }
 
 // appendA2UICard 新增 A2UI 卡片；后端下发的 card_id 已经是实例级唯一值。
@@ -2658,6 +2881,27 @@ function reduceChatSurfaceAction(items, action, options = {}) {
       return items.filter((item) => !isSameApprovalSurface(item, surface, approvalIDFromSurface(surface)));
     }
     if (isTerminalApprovalSurface(surface, terminalApprovalSurfaceIDs)) {
+      return items;
+    }
+    const primaryApprovalType = pendingPrimaryApprovalArtifactType(surface);
+    if (primaryApprovalType) {
+      // 系统 Approval 已经承载完整审核详情；清掉同阶段先到的模型预览卡，避免双入口。
+      return upsertSurface(
+        items.filter(
+          (item) =>
+            !isNonInteractiveReviewPreviewSurface(item) ||
+            reviewPreviewArtifactType(item) !== primaryApprovalType
+        ),
+        surface
+      );
+    }
+    const previewType = reviewPreviewArtifactType(surface);
+    if (
+      previewType &&
+      isNonInteractiveReviewPreviewSurface(surface) &&
+      items.some((item) => pendingPrimaryApprovalArtifactType(item) === previewType)
+    ) {
+      // Approval 之后到达的 model preview 不进入 state；Decision 移除 Approval 时也不会重新显现。
       return items;
     }
     return upsertSurface(items, surface);
@@ -3132,6 +3376,12 @@ function activeRevisionFromBoard(board) {
 function messageRecordToChatMessage(record) {
   const role = String(record?.role || '').toLowerCase();
   if (role !== 'user' && role !== 'assistant') {
+    return null;
+  }
+  // Assistant rows carrying ToolCalls are durable ReAct history, not a
+  // user-facing chat reply. Live rendering already skips them; hydration must
+  // do the same or an internal transition sentence appears only after reload.
+  if (role === 'assistant' && record?.tool_calls) {
     return null;
   }
   let content = String(record?.content || '').trim();

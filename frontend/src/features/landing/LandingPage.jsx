@@ -21,10 +21,32 @@ import { PageHeader } from '../../components/common/PageHeader.jsx';
 import { WorkPreviewModal } from '../../components/common/WorkPreviewModal.jsx';
 import { ContextHeader } from '../../components/layout/ContextHeader.jsx';
 import { SideNav } from '../../components/layout/SideNav.jsx';
-import { getPageFromPath, getPathForPage, normalizePath, WORKSPACE_ROUTE } from '../../app/routes.js';
-import { currentUser } from '../account/accountMock.js';
+import {
+  getPageFromPath,
+  getPathForPage,
+  getProjectWorkspacePath,
+  matchOwnerSkillBuilderPath,
+  matchPublicSkillDetailPath,
+  matchSkillReviewDetailPath,
+  normalizePath
+} from '../../app/routes.js';
+import { AUTH_SESSION_STATUS, useAuthSession } from '../../platform/auth/authSession.js';
 import { ProjectsPage } from '../projects/ProjectsPage.jsx';
+import { PROJECT_QUICK_CREATE_MAX_SKILL_COUNT, quickCreateProject } from '../projects/projectQuickCreate.js';
+import { QuickCreateSkillPicker } from '../projects/QuickCreateSkillPicker.jsx';
+import {
+  createQuickCreateIntent,
+  QUICK_CREATE_STATUS,
+  rejectQuickCreateIntent,
+  resolveQuickCreateIntent,
+  submitQuickCreateIntent
+} from '../projects/quickCreateIntent.js';
 import { SkillsPage } from '../skills/SkillsPage.jsx';
+import { SkillMarketDetailPage } from '../skills/SkillMarketDetailPage.jsx';
+import { MySkillsPage } from '../skills/MySkillsPage.jsx';
+import { SkillBuilderPage } from '../skills/SkillBuilderPage.jsx';
+import { SkillReviewDetailPage } from '../skillReviews/SkillReviewDetailPage.jsx';
+import { SkillReviewQueuePage } from '../skillReviews/SkillReviewQueuePage.jsx';
 import {
   agentWorkspaceMock,
   assetMocks,
@@ -39,9 +61,6 @@ import {
   workCategories,
   workspaceMock
 } from './landingContent.js';
-
-// 首页发送时暂存 brief，工作区挂载后自动发出这条首条消息（触发 Skill Router）。
-const PENDING_BRIEF_KEY = 'dora:aigc:pending_brief';
 
 const themeStyle = {
   '--dora-lime': '#cfff24',
@@ -62,10 +81,9 @@ function openLoginIntent(setLoginIntent, title, prompt, targetPage) {
   setLoginIntent({ title, prompt: prompt || '登录后会继续刚才的创作动作。', targetPage });
 }
 
-function openWorkspaceInNewTab() {
-  if (typeof window !== 'undefined') {
-    window.open(WORKSPACE_ROUTE, '_blank', 'noopener,noreferrer');
-  }
+function navigateToProjectWorkspace(projectID) {
+  window.history.pushState({}, '', getProjectWorkspacePath(projectID));
+  window.dispatchEvent(new Event('dora:navigate'));
 }
 
 function scrollToHomeSection(targetId) {
@@ -110,7 +128,23 @@ function createMasonryColumns(items, columnCount, cardWidth) {
   return columns.map((column) => column.works);
 }
 
-function PromptComposer({ prompt, onPromptChange, onLogin, onStart }) {
+function PromptComposer({
+  prompt,
+  onPromptChange,
+  onLogin,
+  onCreate,
+  quickCreateIntent,
+  isAuthenticated,
+  selectedSkillIDs,
+  onSkillSelectionChange,
+  marketSkillSelections,
+  onRemoveMarketSkill
+}) {
+  const isSubmitting = quickCreateIntent?.status === QUICK_CREATE_STATUS.SUBMITTING;
+  const retainedMarketSkillIDs = useMemo(
+    () => marketSkillSelections.map((skill) => skill.skillID),
+    [marketSkillSelections]
+  );
   return (
     <section className="prompt-composer" aria-label="快速创作">
       <textarea
@@ -121,24 +155,76 @@ function PromptComposer({ prompt, onPromptChange, onLogin, onStart }) {
         placeholder="由一个想法或故事开始..."
       />
       <div className="prompt-composer__tools" aria-label="创作工具">
-        {promptTools.map((tool) => (
+        {promptTools.map((tool) => tool.label === 'Skill' ? (
+          <QuickCreateSkillPicker
+            key={tool.label}
+            isAuthenticated={isAuthenticated}
+            isDisabled={isSubmitting}
+            selectedSkillIDs={selectedSkillIDs}
+            retainedSkillIDs={retainedMarketSkillIDs}
+            onChange={onSkillSelectionChange}
+            onLogin={onLogin}
+          />
+        ) : (
           <button className="prompt-tool" key={tool.label} type="button" aria-label={`打开${tool.label}`} onClick={() => onLogin(tool.label)}>
             {tool.label === '模型' ? <SlidersHorizontal aria-hidden="true" size={15} /> : null}
-            {tool.label === 'Skill' ? <Sparkles aria-hidden="true" size={15} /> : null}
             {tool.label === '资产库' ? <Images aria-hidden="true" size={15} /> : null}
             <span>{tool.label}</span>
             {tool.badge ? <em>{tool.badge}</em> : null}
           </button>
         ))}
       </div>
-      <button className="prompt-composer__submit" type="button" aria-label="开始创作" onClick={() => onStart(prompt)}>
+      <button className="prompt-composer__submit" type="button" aria-label="开始创作" onClick={() => onCreate(prompt)} disabled={isSubmitting}>
         <ArrowUp aria-hidden="true" size={19} />
       </button>
       <div className="prompt-composer__count" aria-hidden="true">
         {prompt.length}/2000
       </div>
+      {marketSkillSelections.length ? (
+        <div className="market-skill-selections" aria-label="已预选市场 Skill">
+          {marketSkillSelections.map((skill) => (
+            <span className="market-skill-selection" key={skill.skillID}>
+              <span>
+                <strong>{skill.name}</strong>
+                <small>市场 Skill · {skill.publisherDisplayName}</small>
+              </span>
+              <button type="button" aria-label={`移除市场 Skill ${skill.name}`} disabled={isSubmitting} onClick={() => onRemoveMarketSkill(skill.skillID)}>
+                <X aria-hidden="true" size={14} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <QuickCreateFeedback intent={quickCreateIntent} onRetry={() => onCreate(prompt, { retry: true })} />
     </section>
   );
+}
+
+function QuickCreateFeedback({ intent, onRetry }) {
+  if (!intent || intent.status === QUICK_CREATE_STATUS.EDITING) {
+    return null;
+  }
+  if (intent.status === QUICK_CREATE_STATUS.SUBMITTING) {
+    return <p className="quick-create-feedback" role="status">正在创建项目…</p>;
+  }
+  if (intent.status === QUICK_CREATE_STATUS.AWAITING_AUTH) {
+    return <p className="quick-create-feedback" role="status">登录后将继续这次创建。</p>;
+  }
+  if (intent.status === QUICK_CREATE_STATUS.RETRYABLE_ERROR) {
+    return (
+      <p className="quick-create-feedback" role="alert">
+        {intent.error?.message || '创建请求暂时失败'}
+        <button type="button" onClick={onRetry}>使用原请求重试</button>
+      </p>
+    );
+  }
+  if (intent.status === QUICK_CREATE_STATUS.CONFLICT) {
+    return <p className="quick-create-feedback" role="alert">创建意图发生冲突，请修改内容后重新提交。</p>;
+  }
+  if (intent.status === QUICK_CREATE_STATUS.FAILED) {
+    return <p className="quick-create-feedback" role="alert">{intent.error?.message || '创建失败，请重新发起一次创作。'}</p>;
+  }
+  return null;
 }
 
 function HotSkills({ onUse }) {
@@ -685,15 +771,33 @@ function CreditsPage({ onIntent }) {
 }
 
 export function LandingPage() {
+  const auth = useAuthSession();
+  const {
+    csrfToken,
+    isAuthenticated: isLoggedIn,
+    login,
+    logout,
+    hasCapability,
+    retryBootstrap,
+    status: authStatus,
+    user: authenticatedUser
+  } = auth;
   const [prompt, setPrompt] = useState('');
   const [activePage, setActivePage] = useState(() => (typeof window === 'undefined' ? 'home' : getPageFromPath(window.location.pathname)));
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [loginIntent, setLoginIntent] = useState(null);
   const [previewWork, setPreviewWork] = useState(null);
   const [likedWorks, setLikedWorks] = useState([]);
   const [mutedWorks, setMutedWorks] = useState([]);
   const [activeCategory, setActiveCategory] = useState('全部');
+  const [quickCreateIntent, setQuickCreateIntent] = useState(null);
+  const [selectedQuickCreateSkillIDs, setSelectedQuickCreateSkillIDs] = useState([]);
+  const [selectedMarketSkills, setSelectedMarketSkills] = useState([]);
+  const [pendingMarketSkill, setPendingMarketSkill] = useState(null);
+  const quickCreateIntentRef = useRef(null);
+  const quickCreateRequestRef = useRef(null);
+  const quickCreateOperationRef = useRef(0);
+  const previousAuthStatusRef = useRef(authStatus);
   const [pendingScrollTarget, setPendingScrollTarget] = useState(() => (
     typeof window !== 'undefined' && normalizePath(window.location.pathname) === '/explore'
       ? HOME_FEATURED_SECTION_ID
@@ -710,35 +814,119 @@ export function LandingPage() {
     setIsAccountMenuOpen(false);
   }
 
-  // 首页「开始创作」：建一个新会话、把 brief 暂存，打开工作区（带 session_id）后由工作区自动发出首条消息 → 触发 Skill Router 自动选 Skill。
-  async function startCreationInWorkspace(promptValue) {
-    const brief = String(promptValue || '').trim();
-    if (!brief) {
-      // 空想法时维持原有的登录引导行为（不静默吞掉点击）。
-      requestLogin('开始创作', promptValue);
+  function activateMarketSkill(skill) {
+    if (!selectedQuickCreateSkillIDs.includes(skill.skillID)
+      && selectedQuickCreateSkillIDs.length >= PROJECT_QUICK_CREATE_MAX_SKILL_COUNT) {
+      return false;
+    }
+    setSelectedQuickCreateSkillIDs((current) => (
+      current.includes(skill.skillID) ? current : [...current, skill.skillID].sort()
+    ));
+    setSelectedMarketSkills((current) => (
+      current.some((item) => item.skillID === skill.skillID)
+        ? current
+        : [...current, skill].sort((left, right) => left.skillID.localeCompare(right.skillID))
+    ));
+    return true;
+  }
+
+  function handleUseMarketSkill(skill) {
+    const selection = marketSkillSelection(skill);
+    if (isLoggedIn) {
+      if (activateMarketSkill(selection)) navigateToPage('home');
       return;
     }
-    try {
-      const response = await fetch('/api/aigc/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 'demo-user', title: brief.slice(0, 40) })
-      });
-      if (!response.ok) {
-        throw new Error('create session failed');
-      }
-      const session = await response.json();
-      try {
-        window.localStorage?.setItem(PENDING_BRIEF_KEY, JSON.stringify({ sessionId: session.id, brief }));
-      } catch {
-        // localStorage 不可用时降级：工作区仍会打开，只是不自动发首条。
-      }
-      window.open(`${WORKSPACE_ROUTE}?session_id=${encodeURIComponent(session.id)}`, '_blank', 'noopener,noreferrer');
-      setPrompt('');
-    } catch {
-      // 建会话失败不阻塞营销页：回退到原登录引导。
-      requestLogin('开始创作', brief, 'workspace');
+    setPendingMarketSkill(selection);
+    openLoginIntent(setLoginIntent, '登录后使用此 Skill', selection.name, 'market_skill');
+  }
+
+  function handleQuickCreateSkillSelectionChange(skillIDs) {
+    setSelectedQuickCreateSkillIDs(skillIDs);
+    setSelectedMarketSkills((current) => current.filter((skill) => skillIDs.includes(skill.skillID)));
+  }
+
+  function removeMarketSkill(skillID) {
+    setSelectedMarketSkills((current) => current.filter((skill) => skill.skillID !== skillID));
+    setSelectedQuickCreateSkillIDs((current) => current.filter((id) => id !== skillID));
+  }
+
+  function closeLoginIntent() {
+    if (loginIntent?.targetPage === 'market_skill') setPendingMarketSkill(null);
+    setLoginIntent(null);
+  }
+
+  function commitQuickCreateIntent(intent) {
+    quickCreateIntentRef.current = intent;
+    setQuickCreateIntent(intent);
+  }
+
+  function cancelQuickCreateRequest() {
+    quickCreateOperationRef.current += 1;
+    quickCreateRequestRef.current?.controller.abort();
+    quickCreateRequestRef.current = null;
+  }
+
+  function submitStableQuickCreate(intent, activeCSRFToken = csrfToken) {
+    if (quickCreateRequestRef.current) {
+      return quickCreateRequestRef.current.promise;
     }
+    const submitted = submitQuickCreateIntent(intent);
+    commitQuickCreateIntent(submitted);
+    const controller = new AbortController();
+    const operation = ++quickCreateOperationRef.current;
+    const promise = (async () => {
+      try {
+        const payload = await quickCreateProject({
+          prompt: submitted.prompt,
+          enabledSkillIDs: submitted.enabledSkillIDs,
+          idempotencyKey: submitted.idempotencyKey,
+          csrfToken: activeCSRFToken,
+          signal: controller.signal
+        });
+        if (operation !== quickCreateOperationRef.current || controller.signal.aborted) {
+          return null;
+        }
+        const resolved = resolveQuickCreateIntent(submitted, payload);
+        commitQuickCreateIntent(resolved);
+        navigateToProjectWorkspace(resolved.projectID);
+        return resolved;
+      } catch (error) {
+        if (operation !== quickCreateOperationRef.current || controller.signal.aborted) {
+          return null;
+        }
+        const rejected = rejectQuickCreateIntent(submitted, error);
+        commitQuickCreateIntent(rejected);
+        throw error;
+      } finally {
+        if (operation === quickCreateOperationRef.current) {
+          quickCreateRequestRef.current = null;
+        }
+      }
+    })();
+    quickCreateRequestRef.current = { controller, operation, promise };
+    return promise;
+  }
+
+  function requestQuickCreate(promptValue, { retry = false } = {}) {
+    let intent = quickCreateIntentRef.current;
+    if (!retry || !intent) {
+      if (intent && (
+        intent.status === QUICK_CREATE_STATUS.AWAITING_AUTH
+        || intent.status === QUICK_CREATE_STATUS.SUBMITTING
+        || intent.status === QUICK_CREATE_STATUS.PROVISIONING
+      )) {
+        return;
+      }
+      intent = createQuickCreateIntent(promptValue, { enabledSkillIDs: selectedQuickCreateSkillIDs });
+      commitQuickCreateIntent(intent);
+    }
+    if (!isLoggedIn) {
+      intent = { ...intent, status: QUICK_CREATE_STATUS.AWAITING_AUTH };
+      commitQuickCreateIntent(intent);
+      openLoginIntent(setLoginIntent, '开始创作', intent.prompt || '创建空工作台', 'quick_create');
+      return;
+    }
+    submitStableQuickCreate(intent).catch(() => {});
   }
 
   function navigateToPage(page, options = {}) {
@@ -752,26 +940,49 @@ export function LandingPage() {
 
       if (window.location.pathname !== path) {
         window.history.pushState({}, '', path);
+        window.dispatchEvent(new CustomEvent('dora:navigate', {
+          detail: { targetId: options.targetId || null }
+        }));
       }
     }
   }
 
-  function handleLoginComplete() {
-    setIsLoggedIn(true);
-
-    if (loginIntent?.targetPage === 'workspace') {
-      openWorkspaceInNewTab();
-    } else if (loginIntent?.targetPage) {
-      navigateToPage(loginIntent.targetPage);
-    }
-
+  async function handleLoginComplete(credentials) {
+    const nextSession = await login(credentials);
+    const targetPage = loginIntent?.targetPage;
     setLoginIntent(null);
     setIsAccountMenuOpen(false);
+
+    if (!nextSession || nextSession.status !== AUTH_SESSION_STATUS.AUTHENTICATED) {
+      cancelQuickCreateRequest();
+      commitQuickCreateIntent(null);
+      setSelectedQuickCreateSkillIDs([]);
+      setSelectedMarketSkills([]);
+      setPendingMarketSkill(null);
+      return;
+    }
+
+    if (targetPage === 'quick_create') {
+      const intent = quickCreateIntentRef.current;
+      if (intent) {
+        submitStableQuickCreate(intent, nextSession?.csrfToken).catch(() => {});
+      }
+    } else if (targetPage === 'workspace') {
+      const intent = createQuickCreateIntent(prompt, { enabledSkillIDs: selectedQuickCreateSkillIDs });
+      commitQuickCreateIntent(intent);
+      submitStableQuickCreate(intent, nextSession?.csrfToken).catch(() => {});
+    } else if (targetPage === 'market_skill') {
+      const selection = pendingMarketSkill;
+      setPendingMarketSkill(null);
+      if (selection && activateMarketSkill(selection)) navigateToPage('home');
+    } else if (targetPage) {
+      navigateToPage(targetPage);
+    }
   }
 
   function handleNavigate(page, targetId) {
     if (page === 'workspace') {
-      openWorkspaceInNewTab();
+      requestQuickCreate(prompt);
       setIsAccountMenuOpen(false);
       return;
     }
@@ -781,6 +992,21 @@ export function LandingPage() {
 
   function openCreditsPage() {
     navigateToPage('credits');
+  }
+
+  async function handleLogout() {
+    setIsAccountMenuOpen(false);
+    try {
+      await logout();
+    } catch {
+      // Provider 已将基础设施错误映射为 unavailable；页面只负责避免事件回调产生未处理拒绝。
+    } finally {
+      cancelQuickCreateRequest();
+      commitQuickCreateIntent(null);
+      setSelectedQuickCreateSkillIDs([]);
+      setSelectedMarketSkills([]);
+      setPendingMarketSkill(null);
+    }
   }
 
   function handleWorkLike(work) {
@@ -800,13 +1026,21 @@ export function LandingPage() {
   }
 
   useEffect(() => {
-    function syncPageFromPath() {
+    function syncPageFromPath(event) {
       const normalizedPath = normalizePath(window.location.pathname);
+      const targetId = normalizedPath === '/explore'
+        ? HOME_FEATURED_SECTION_ID
+        : event?.type === 'dora:navigate' ? event.detail?.targetId || null : null;
 
       setActivePage(getPageFromPath(window.location.pathname));
-      setPendingScrollTarget(normalizedPath === '/explore' ? HOME_FEATURED_SECTION_ID : null);
-      setActiveNavTarget(normalizedPath === '/explore' ? HOME_FEATURED_SECTION_ID : null);
+      setPendingScrollTarget(targetId);
+      setActiveNavTarget(targetId);
       setIsAccountMenuOpen(false);
+      setLoginIntent((current) => {
+        if (current?.targetPage !== 'market_skill') return current;
+        setPendingMarketSkill(null);
+        return null;
+      });
 
       if (normalizedPath === '/explore') {
         window.history.replaceState({}, '', getPathForPage('home'));
@@ -814,11 +1048,28 @@ export function LandingPage() {
     }
 
     window.addEventListener('popstate', syncPageFromPath);
+    window.addEventListener('dora:navigate', syncPageFromPath);
 
     return () => {
       window.removeEventListener('popstate', syncPageFromPath);
+      window.removeEventListener('dora:navigate', syncPageFromPath);
     };
   }, []);
+
+  useEffect(() => {
+    const previous = previousAuthStatusRef.current;
+    previousAuthStatusRef.current = authStatus;
+    if (previous === AUTH_SESSION_STATUS.AUTHENTICATED && authStatus !== AUTH_SESSION_STATUS.AUTHENTICATED) {
+      cancelQuickCreateRequest();
+      commitQuickCreateIntent(null);
+      setSelectedQuickCreateSkillIDs([]);
+      setSelectedMarketSkills([]);
+      setPendingMarketSkill(null);
+      setIsAccountMenuOpen(false);
+    }
+  }, [authStatus]);
+
+  useEffect(() => () => cancelQuickCreateRequest(), []);
 
   useEffect(() => {
     if (typeof window === 'undefined' || normalizePath(window.location.pathname) !== '/explore') {
@@ -842,6 +1093,7 @@ export function LandingPage() {
     function closeOverlay(event) {
       if (event.key === 'Escape') {
         setLoginIntent(null);
+        setPendingMarketSkill(null);
         setPreviewWork(null);
         setIsAccountMenuOpen(false);
       }
@@ -857,9 +1109,21 @@ export function LandingPage() {
   const mainClassName =
     activePage === 'projects'
       ? 'landing-main landing-main--projects'
-      : activePage === 'skills'
+      : ['skills', 'skillDetail', 'mySkills', 'skillBuilder', 'skillReviews', 'skillReviewDetail'].includes(activePage)
         ? 'landing-main landing-main--skills'
         : 'landing-main';
+  const skillBuilderRoute = activePage === 'skillBuilder'
+    ? matchOwnerSkillBuilderPath(window.location.pathname)
+    : null;
+  const skillReviewRoute = activePage === 'skillReviewDetail'
+    ? matchSkillReviewDetailPath(window.location.pathname)
+    : null;
+  const publicSkillRoute = activePage === 'skillDetail'
+    ? matchPublicSkillDetailPath(window.location.pathname)
+    : null;
+  const visibleNavItems = navItems.filter((item) => (
+    !item.requiredCapability || hasCapability(item.requiredCapability)
+  ));
 
   return (
     <div className="doraigc-shell" style={themeStyle} data-testid="doraigc-shell">
@@ -867,20 +1131,28 @@ export function LandingPage() {
         activePage={activePage}
         activeNavTarget={activeNavTarget}
         isLoggedIn={isLoggedIn}
-        navItems={navItems}
+        navItems={visibleNavItems}
         onNavigate={handleNavigate}
         onLogin={requestLogin}
         onToggleAccountMenu={() => setIsAccountMenuOpen((value) => !value)}
       />
       <main className={mainClassName}>
+        {authStatus === AUTH_SESSION_STATUS.UNAVAILABLE ? (
+          <section className="auth-service-banner" role="alert">
+            <span>认证服务暂不可用，当前不能登录或访问受保护内容。</span>
+            <button type="button" onClick={retryBootstrap}>重试</button>
+          </section>
+        ) : null}
         <ContextHeader
           activePage={activePage}
           isLoggedIn={isLoggedIn}
-          user={currentUser}
+          user={authenticatedUser || {}}
           isAccountMenuOpen={isAccountMenuOpen}
           onLogin={requestLogin}
           onToggleAccountMenu={() => setIsAccountMenuOpen((value) => !value)}
           onOpenCredits={openCreditsPage}
+          onLogout={handleLogout}
+          authStatus={authStatus}
         />
         {activePage === 'home' ? (
           <>
@@ -893,7 +1165,13 @@ export function LandingPage() {
                     prompt={prompt}
                     onPromptChange={setPrompt}
                     onLogin={requestLogin}
-                    onStart={startCreationInWorkspace}
+                    onCreate={requestQuickCreate}
+                    quickCreateIntent={quickCreateIntent}
+                    isAuthenticated={isLoggedIn}
+                    selectedSkillIDs={selectedQuickCreateSkillIDs}
+                    onSkillSelectionChange={handleQuickCreateSkillSelectionChange}
+                    marketSkillSelections={selectedMarketSkills}
+                    onRemoveMarketSkill={removeMarketSkill}
                   />
                 </div>
                 <HotSkills onUse={(skill) => requestLogin(skill.title, skill.title)} />
@@ -914,12 +1192,66 @@ export function LandingPage() {
         {activePage === 'workspace' ? <WorkspacePage onIntent={requestLogin} /> : null}
         {activePage === 'projects' ? <ProjectsPage onIntent={requestLogin} /> : null}
         {activePage === 'assets' ? <AssetsPage onIntent={requestLogin} /> : null}
-        {activePage === 'skills' ? <SkillsPage onIntent={requestLogin} /> : null}
+        {activePage === 'skills' ? (
+          <SkillsPage isLoggedIn={isLoggedIn} onLogin={requestLogin} />
+        ) : null}
+        {activePage === 'skillDetail' && publicSkillRoute ? (
+          <SkillMarketDetailPage
+            skillID={publicSkillRoute.skillID}
+            isAuthenticated={isLoggedIn}
+            isUseDisabled={!selectedQuickCreateSkillIDs.includes(publicSkillRoute.skillID)
+              && selectedQuickCreateSkillIDs.length >= PROJECT_QUICK_CREATE_MAX_SKILL_COUNT}
+            onUseSkill={handleUseMarketSkill}
+          />
+        ) : null}
+        {activePage === 'skillDetail' && !publicSkillRoute ? (
+          <section className="route-state" aria-labelledby="invalid-public-skill-route-title">
+            <h2 id="invalid-public-skill-route-title">Skill 详情路径无效</h2>
+            <p role="alert">链接中的 skill_id 不是有效的规范小写 UUIDv7，未发起公开详情请求。</p>
+            <button type="button" className="secondary-button" onClick={() => navigateToPage('skills')}>
+              返回 Skill 市场
+            </button>
+          </section>
+        ) : null}
+        {activePage === 'mySkills' ? <MySkillsPage /> : null}
+        {activePage === 'skillBuilder' && skillBuilderRoute ? (
+          <SkillBuilderPage skillID={skillBuilderRoute.skillID} csrfToken={csrfToken} />
+        ) : null}
+        {activePage === 'skillBuilder' && !skillBuilderRoute ? (
+          <section className="route-state" aria-labelledby="invalid-skill-route-title">
+            <h2 id="invalid-skill-route-title">Skill 编辑路径无效</h2>
+            <p role="alert">链接中的 skill_id 不是有效的 UUIDv7，未发起草稿请求。</p>
+            <button type="button" className="secondary-button" onClick={() => navigateToPage('mySkills')}>
+              返回我的 Skill
+            </button>
+          </section>
+        ) : null}
+        {activePage === 'skillReviews' ? <SkillReviewQueuePage /> : null}
+        {activePage === 'skillReviewDetail' && skillReviewRoute ? (
+          <SkillReviewDetailPage reviewID={skillReviewRoute.reviewID} csrfToken={csrfToken} />
+        ) : null}
+        {activePage === 'skillReviewDetail' && !skillReviewRoute ? (
+          <section className="route-state" aria-labelledby="invalid-skill-review-route-title">
+            <h2 id="invalid-skill-review-route-title">Skill 审核路径无效</h2>
+            <p role="alert">链接中的 review_id 不是有效的规范 UUIDv7，未发起审核请求。</p>
+            <button type="button" className="secondary-button" onClick={() => navigateToPage('skillReviews')}>
+              返回审核队列
+            </button>
+          </section>
+        ) : null}
         {activePage === 'works' ? <WorksPage onIntent={requestLogin} /> : null}
         {activePage === 'credits' ? <CreditsPage onIntent={requestLogin} /> : null}
       </main>
-      <LoginModal intent={loginIntent} onClose={() => setLoginIntent(null)} onComplete={handleLoginComplete} />
+      <LoginModal intent={loginIntent} onClose={closeLoginIntent} onSubmit={handleLoginComplete} />
       <WorkPreviewModal work={previewWork} onClose={() => setPreviewWork(null)} onCreate={handleWorkCreate} />
     </div>
   );
+}
+
+function marketSkillSelection(skill) {
+  return Object.freeze({
+    skillID: String(skill.skillID),
+    name: String(skill.name),
+    publisherDisplayName: String(skill.publisher.displayName)
+  });
 }

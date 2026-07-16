@@ -10,11 +10,36 @@ const PAGE_TITLE_CONFIG = {
   skills: {
     icon: Blocks,
     id: 'skills-title',
-    label: 'Skill'
+    label: 'Skill 市场'
+  },
+  skillDetail: {
+    icon: Blocks,
+    id: 'skills-title',
+    label: 'Skill 市场'
+  },
+  mySkills: {
+    icon: Blocks,
+    id: 'my-skills-title',
+    label: '我的 Skill'
+  },
+  skillBuilder: {
+    icon: Blocks,
+    id: 'skill-builder-context-title',
+    label: 'Skill Builder'
+  },
+  skillReviews: {
+    icon: Blocks,
+    id: 'skill-reviews-title',
+    label: 'Skill 审核'
+  },
+  skillReviewDetail: {
+    icon: Blocks,
+    id: 'skill-review-detail-title',
+    label: 'Skill 审核'
   }
 };
 
-export function ContextHeader({ activePage, isLoggedIn, user, isAccountMenuOpen, onLogin, onToggleAccountMenu, onOpenCredits }) {
+export function ContextHeader({ activePage, isLoggedIn, user, isAccountMenuOpen, onLogin, onToggleAccountMenu, onOpenCredits, onLogout, authStatus }) {
   const pageTitle = PAGE_TITLE_CONFIG[activePage];
   const PageIcon = pageTitle?.icon;
   const headerClassName = pageTitle ? `context-header context-header--${activePage}` : 'context-header';
@@ -35,7 +60,7 @@ export function ContextHeader({ activePage, isLoggedIn, user, isAccountMenuOpen,
       <div className="context-header__actions">
         <button className="credit-pill" type="button" onClick={isLoggedIn ? onOpenCredits : () => onLogin('查看积分')}>
           <Ticket aria-hidden="true" size={16} />
-          <span>{isLoggedIn ? user.credits : 148}</span>
+          <span>{isLoggedIn ? (user.credits ?? '—') : 148}</span>
           <span>积分</span>
         </button>
         <button className="icon-button" type="button" aria-label="通知" title="通知" onClick={() => onLogin('查看通知')}>
@@ -43,7 +68,7 @@ export function ContextHeader({ activePage, isLoggedIn, user, isAccountMenuOpen,
         </button>
         {isLoggedIn ? (
           <div className="account-menu-shell">
-            <span className="plan-pill">{user.plan}</span>
+            <span className="plan-pill">{user.plan || '基础版'}</span>
             <button
               className="avatar-button"
               type="button"
@@ -53,8 +78,12 @@ export function ContextHeader({ activePage, isLoggedIn, user, isAccountMenuOpen,
             >
               <UserCircle aria-hidden="true" size={22} />
             </button>
-            {isAccountMenuOpen ? <AccountMenu user={user} onOpenCredits={onOpenCredits} /> : null}
+            {isAccountMenuOpen ? <AccountMenu user={user} onOpenCredits={onOpenCredits} onLogout={onLogout} /> : null}
           </div>
+        ) : authStatus === 'bootstrapping' ? (
+          <span className="status-pill" role="status">正在确认登录状态…</span>
+        ) : authStatus === 'unavailable' ? (
+          <span className="status-pill" role="status">认证服务暂不可用</span>
         ) : (
           <button className="login-button" type="button" onClick={() => onLogin('登录')}>
             登录
