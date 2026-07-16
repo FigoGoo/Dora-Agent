@@ -1,6 +1,8 @@
 # Dora AIGC GraphTool 细化：node 词汇详定义 + 场景模板详图
 
+> **⚖️ 当前定位（2026-07-16）：W2 Graph Tool 评审对案的配套详设**（对案主文档见上游链接，对案说明见其头部；对 `docs/design/agent/graphtool/` 六 Tool 方案的竞争关系同）。
 > 日期：2026-07-13　状态：细化定稿（随主文档演进）
+> 注意：下方「对齐已建实现」所指 `internal/aigc/*` 在 2026-07-16 三模块重构后已成历史参考（无模块归属），其契约语义仍是本文流程图的事实校准来源。
 > 上游：`2026-07-11-aigc-system-design-final.md`（§1 三层词汇 / §2 场景模板与暴露面 / §6.8 大纲重排裁决）——本文是 §6.8 待细化清单第 1 项（五场景详图 + node 详定义）的交付。
 > 对齐已建实现：`internal/aigc/vocabulary`（Descriptor/Call/Result/Failure/Suspension 契约）、`internal/aigc/orchestration`（`$stepID.outputKey` 引用、SuccessPolicy、ExceedsJobBudget）。冲突时以主文档 §1/§2 为准。
 
