@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "agent/tests/contract/**"
+      - "agent/tests/reviewfreeze/**"
       - "business/tests/contract/**"
       - "docs/design/agent/**"
       - "docs/design/cross-module/**"
@@ -14,10 +15,12 @@ on:
       - "smoke/contracts/**"
       - "worker/tests/contract/**"
       - ".github/workflows/w2-contract-governance.yml"
+      - ".github/workflows/w2-review-freeze-transition.yml"
   push:
     branches: [main, master]
     paths:
       - "agent/tests/contract/**"
+      - "agent/tests/reviewfreeze/**"
       - "business/tests/contract/**"
       - "docs/design/agent/**"
       - "docs/design/cross-module/**"
@@ -28,6 +31,7 @@ on:
       - "smoke/contracts/**"
       - "worker/tests/contract/**"
       - ".github/workflows/w2-contract-governance.yml"
+      - ".github/workflows/w2-review-freeze-transition.yml"
 
 permissions:
   contents: read

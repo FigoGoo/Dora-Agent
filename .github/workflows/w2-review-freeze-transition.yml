@@ -1,0 +1,42 @@
+name: W2 Review Freeze transition
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  historical-transition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # pull_request_target 只运行 base 分支版本的 checker；不得 checkout 或执行 PR head 代码。
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+          cache-dependency-path: agent/go.sum
+      - name: Fetch PR head as an untrusted Git object
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          [[ "$EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/origin/w2-review-freeze-head"
+          actual_head_sha="$(git rev-parse refs/remotes/origin/w2-review-freeze-head)"
+          test "$actual_head_sha" = "$EXPECTED_HEAD_SHA"
+      - name: Validate transition with the base-owned checker
+        working-directory: agent
+        env:
+          W2_REVIEW_FREEZE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          W2_REVIEW_FREEZE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          GOWORK=off GOTOOLCHAIN=local go test ./tests/reviewfreeze
+          -run '^TestW2ReviewFreezeTransitionGitV1FromObjects$' -count=1
