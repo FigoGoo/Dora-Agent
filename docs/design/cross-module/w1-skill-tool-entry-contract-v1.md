@@ -264,7 +264,7 @@ Production Producer 已由 [Project Skill Binding 与 Session Snapshot Producer 
 3. 同一评审中的 Agent 前向/回滚 Migration 及新旧 Snapshot 兼容读取；
 4. 同一 Project 第二 Session、未满足 W1-F public-market eligibility 的跨 Owner/RBAC、system Skill、非空 Public Tool、计费、历史 Session Kill Switch、在线 epoch 回查和主动撤销协议仍保持不可用。
 
-既有 Project Binding v2 capability/Feature Flag 继续作为 Producer 总门禁；W1-F 不新增 public-market 专用 Feature Flag。009 Down 的并发锁/历史 guard 与 Foundation + Governance + Market + Binding 四份 exact-set Evidence 以 [Public Market Binding v1](../business/w1-public-market-binding-v1.md) 为唯一说明，本文不再定义第二套集合。
+既有 Project Binding v2 capability/Feature Flag 继续作为 Producer 总门禁；W1-F 不新增 public-market 专用 Feature Flag。009 Down 的并发锁/历史 guard 与 Foundation + Governance + Market + Binding + Republish Session Isolation 五份 exact-set Evidence 以 [Public Market Binding v1](../business/w1-public-market-binding-v1.md) 为唯一说明，本文不再定义第二套集合。Republish sidecar 只证明同一 Skill A→B 后旧/新 Session 的不可变冻结，不批准 Graph Tool、Runner 或版本管理 UI。
 
 ## 9. 六 Tool 目录准备
 

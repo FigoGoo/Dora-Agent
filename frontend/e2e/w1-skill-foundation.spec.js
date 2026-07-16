@@ -22,6 +22,24 @@ const QUICK_CREATE_DATABASE_COUNT_KEYS = [
   'resolutions',
   'session_bindings'
 ];
+const OWNER_SKILL_SAFE_KEYS = [
+  'allowed_actions',
+  'content_status',
+  'definition',
+  'draft_etag',
+  'governance_status',
+  'has_unpublished_changes',
+  'review_reason_code',
+  'review_status',
+  'review_updated_at',
+  'skill_id'
+];
+const OWNER_SKILL_FORBIDDEN_KEYS = [
+  'content_digest',
+  'publication_revision',
+  'published_snapshot_id',
+  'runtime_content_digest'
+];
 
 const capabilityLabels = [
   '流程规划',
@@ -125,6 +143,26 @@ async function findSkillReviewCardAcrossPages(page, skillName) {
   return reviewCard;
 }
 
+async function findOwnerSkillCardAcrossPages(page, skillName) {
+  const ownerCard = page.getByTestId('owner-skill-card').filter({ hasText: skillName });
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    if (await ownerCard.count() === 1) return ownerCard;
+    const loadMore = page.getByRole('button', { name: '加载更多' });
+    if (await loadMore.count() === 0) break;
+    const responsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET'
+        && url.pathname === '/api/v1/skills'
+        && url.searchParams.get('scope') === 'mine'
+        && Boolean(url.searchParams.get('cursor'));
+    });
+    await loadMore.click();
+    expect((await responsePromise).status()).toBe(200);
+    await expect(page.getByRole('button', { name: '正在加载…' })).toHaveCount(0);
+  }
+  return ownerCard;
+}
+
 async function ownerResponseObservation(response) {
   const responseText = await response.text();
   let payload = null;
@@ -141,6 +179,74 @@ async function ownerResponseObservation(response) {
     responseText,
     payload
   };
+}
+
+async function replayBrowserCommand(page, { path, headers, body }) {
+  return page.evaluate(async ({ requestPath, requestHeaders, requestBody }) => {
+    const init = {
+      method: 'POST',
+      credentials: 'include',
+      headers: requestHeaders
+    };
+    if (requestBody !== null) init.body = JSON.stringify(requestBody);
+    const response = await fetch(requestPath, init);
+    const responseText = await response.text();
+    let payload = null;
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      // The caller compares the strict response shape and fails closed for malformed JSON.
+    }
+    return {
+      status: response.status,
+      contentType: response.headers.get('content-type') || '',
+      cacheControl: response.headers.get('cache-control') || '',
+      etag: response.headers.get('etag') || '',
+      responseURL: response.url,
+      responseText,
+      payload
+    };
+  }, { requestPath: path, requestHeaders: headers, requestBody: body });
+}
+
+function isOwnerSafeSkillProjection(skill) {
+  return skill !== null
+    && typeof skill === 'object'
+    && !Array.isArray(skill)
+    && Object.keys(skill).sort().join(',') === OWNER_SKILL_SAFE_KEYS.join(',')
+    && OWNER_SKILL_FORBIDDEN_KEYS.every((key) => !Object.hasOwn(skill, key));
+}
+
+async function hasNoOwnerVersionHistoryControls(page) {
+  const forbiddenName = /版本|历史|差异|切换|回滚/;
+  return await page.getByRole('button', { name: forbiddenName }).count() === 0
+    && await page.getByRole('link', { name: forbiddenName }).count() === 0
+    && await page.getByRole('combobox', { name: forbiddenName }).count() === 0
+    && await page.getByRole('tab', { name: forbiddenName }).count() === 0
+    && await page.locator([
+      '[data-version]',
+      '[data-version-id]',
+      '[data-revision-id]',
+      '[data-snapshot-id]',
+      '[data-publication-revision]',
+      '[data-content-digest]',
+      '[data-runtime-content-digest]',
+      '[data-diff]',
+      '[data-history]',
+      '[data-switch]',
+      '[data-rollback]',
+      '[aria-label*="版本"]',
+      '[aria-label*="历史"]',
+      '[aria-label*="差异"]',
+      '[aria-label*="切换"]',
+      '[aria-label*="回滚"]',
+      '[name*="version" i]',
+      '[name*="revision" i]',
+      '[name*="history" i]',
+      '[name*="diff" i]',
+      '[name*="switch" i]',
+      '[name*="rollback" i]'
+    ].join(', ')).count() === 0;
 }
 
 test.describe('W1 QuickCreate Skill binding browser contract', () => {
@@ -341,8 +447,8 @@ test.describe('W1 real Skill Foundation browser smoke', () => {
 });
 
 test.describe('W1 mandatory real Reviewer publish chain', () => {
-  test('@w1-real-review creator -> reviewer -> creator publishes and binds the frozen submission', async ({ page }) => {
-    test.setTimeout(180_000);
+  test('@w1-real-review creator republishes A to B while old and new sessions stay isolated', async ({ page }) => {
+    test.setTimeout(300_000);
 
     expect(email, 'DORA_E2E_USER_EMAIL must be preflighted').toBeTruthy();
     expect(password, 'DORA_E2E_USER_PASSWORD must be preflighted').toBeTruthy();
@@ -353,7 +459,9 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     const skillName = `W1 Reviewer Skill ${runSuffix}`;
     const sentinelA = `W1-REVIEW-SENTINEL-A-${runSuffix}`;
     const sentinelB = `W1-REVIEW-SENTINEL-B-${runSuffix}`;
+    const runtimeRuleB = `仅在用户明确选择本 Skill 时调用；运行时冻结边界 ${sentinelB}`;
     const quickCreatePrompt = `W1 Reviewer QuickCreate ${runSuffix}`;
+    const secondQuickCreatePrompt = `W1 Reviewer QuickCreate Published B ${runSuffix}`;
     const publicMarketQuickCreatePrompt = `W1 Public Market QuickCreate ${runSuffix}`;
     const businessRequests = [];
     page.on('request', (request) => {
@@ -478,6 +586,7 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     expect(submitPayload.skill?.review_status).toBe('reviewing');
 
     await page.getByLabel('简介').fill(sentinelB);
+    await page.getByLabel('Skill 调用规则').fill(runtimeRuleB);
     const postSubmitDraftPromise = page.waitForResponse((response) => (
       isSkillResponse(response, 'PUT', `/api/v1/skills/${skillID}/draft`)
     ));
@@ -486,6 +595,7 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     expect(postSubmitDraftResponse.status()).toBe(200);
     const postSubmitDraftPayload = await postSubmitDraftResponse.json();
     expect(postSubmitDraftPayload.skill?.definition?.summary).toBe(sentinelB);
+    expect(postSubmitDraftPayload.skill?.definition?.invocation_rules).toBe(runtimeRuleB);
     expect(postSubmitDraftPayload.skill?.review_status).toBe('reviewing');
     const currentDraftDefinition = postSubmitDraftPayload.skill?.definition;
     const currentDraftETag = String(postSubmitDraftPayload.skill?.draft_etag || '');
@@ -800,6 +910,8 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     const creatorRelogin = await loginAs(page, email, password);
     expect(exactPrincipalID(creatorRelogin)).toBe(creatorID);
     expect(creatorRelogin.principal?.capabilities || []).not.toContain('skill.review');
+    const creatorCSRFToken = String(creatorRelogin.csrf_token || '');
+    expect(creatorCSRFToken).toBeTruthy();
 
     const creatorPostProbeOwnerResponse = await page.evaluate(async (path) => {
       const response = await fetch(path, {
@@ -862,9 +974,11 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     await page.getByRole('button', { name: '开始创作' }).click();
     const quickCreateResponse = await quickCreateResponsePromise;
     expect(quickCreateResponse.status()).toBe(201);
-    expect(quickCreateResponse.request().headers()['idempotency-key']).toBeTruthy();
-    expect(quickCreateResponse.request().headers()['x-csrf-token']).toBeTruthy();
-    expect(quickCreateResponse.request().postDataJSON()).toEqual({
+    const oldQuickCreateHeaders = quickCreateResponse.request().headers();
+    expect(oldQuickCreateHeaders['idempotency-key']).toBeTruthy();
+    expect(oldQuickCreateHeaders['x-csrf-token']).toBeTruthy();
+    const oldQuickCreateRequestBody = quickCreateResponse.request().postDataJSON();
+    expect(oldQuickCreateRequestBody).toEqual({
       schema_version: 'project_quick_create.v2',
       initial_prompt: quickCreatePrompt,
       enabled_skill_ids: [skillID]
@@ -911,6 +1025,308 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
     }
     await expect(toolCatalog.getByRole('button')).toHaveCount(0);
 
+    const secondDraftResponsePromise = page.waitForResponse((response) => (
+      isSkillResponse(response, 'GET', `/api/v1/skills/${skillID}`)
+    ));
+    await page.goto(editPath);
+    const secondDraftResponse = await secondDraftResponsePromise;
+    expect(secondDraftResponse.status()).toBe(200);
+    const secondDraftPayload = await secondDraftResponse.json();
+    expect(secondDraftPayload.skill).toMatchObject({
+      skill_id: skillID,
+      content_status: 'published',
+      has_unpublished_changes: true,
+      review_status: 'approved'
+    });
+    expect(secondDraftPayload.skill?.definition?.summary).toBe(sentinelB);
+    expect(secondDraftPayload.skill?.definition?.invocation_rules).toBe(runtimeRuleB);
+    expect(secondDraftPayload.skill?.allowed_actions || []).toContain('submit_review');
+    const secondOwnerDetailSafeProjection = isOwnerSafeSkillProjection(secondDraftPayload.skill);
+    expect(
+      secondOwnerDetailSafeProjection,
+      'Second Owner detail must expose exactly the 10 Owner-safe Skill fields'
+    ).toBe(true);
+    await expect(page.getByRole('heading', { name: '编辑 Skill 草稿' })).toBeVisible();
+    await expect(page.getByLabel('简介')).toHaveValue(sentinelB);
+    await expect(page.getByLabel('Skill 调用规则')).toHaveValue(runtimeRuleB);
+    await expect(page.getByLabel('Skill 当前状态')).toContainText('已发布');
+    await expect(page.getByLabel('Skill 当前状态')).toContainText('有未发布修改');
+    const secondEditPageNoVersionHistoryUI = await hasNoOwnerVersionHistoryControls(page);
+    expect(
+      secondEditPageNoVersionHistoryUI,
+      'Owner edit page must not expose version, history, diff, switch, or rollback controls and data attributes'
+    ).toBe(true);
+
+    const secondSubmitResponsePromise = page.waitForResponse((response) => (
+      isSkillResponse(response, 'POST', `/api/v1/skills/${skillID}/reviews`)
+    ));
+    await page.getByRole('button', { name: '提交审核' }).click();
+    const secondSubmitResponse = await secondSubmitResponsePromise;
+    expect(secondSubmitResponse.status()).toBe(201);
+    const secondSubmitHeaders = secondSubmitResponse.request().headers();
+    expect(secondSubmitHeaders['idempotency-key']).toBeTruthy();
+    expect(secondSubmitHeaders['x-csrf-token']).toBe(creatorCSRFToken);
+    expect(secondSubmitHeaders['if-match'] || '').toMatch(/^"[^"\r\n]+"$/);
+    const secondSubmitPayload = await secondSubmitResponse.json();
+    const secondReviewID = String(secondSubmitPayload.review_id || '');
+    expect(secondReviewID).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(secondReviewID).not.toBe(reviewID);
+    expect(secondSubmitPayload.skill?.definition?.summary).toBe(sentinelB);
+    expect(secondSubmitPayload.skill?.review_status).toBe('reviewing');
+
+    const secondReviewReplay = await replayBrowserCommand(page, {
+      path: `/api/v1/skills/${skillID}/reviews`,
+      headers: {
+        Accept: 'application/json',
+        'Idempotency-Key': secondSubmitHeaders['idempotency-key'],
+        'If-Match': secondSubmitHeaders['if-match'],
+        'X-CSRF-Token': secondSubmitHeaders['x-csrf-token']
+      },
+      body: null
+    });
+    const secondReviewReplayURL = new URL(secondReviewReplay.responseURL);
+    const secondReviewReplayMatches = secondReviewReplay.status === 200
+      && secondReviewReplay.contentType === 'application/json; charset=utf-8'
+      && secondReviewReplay.cacheControl === 'no-store'
+      && secondReviewReplay.etag === secondSubmitResponse.headers().etag
+      && secondReviewReplayURL.pathname === `/api/v1/skills/${skillID}/reviews`
+      && secondReviewReplayURL.search === ''
+      && secondReviewReplay.payload?.review_id === secondReviewID
+      && JSON.stringify(secondReviewReplay.payload?.skill || null) === JSON.stringify(secondSubmitPayload.skill || null);
+    expect(secondReviewReplayMatches, 'Second review submission must replay the frozen B review without creating another review').toBe(true);
+
+    await logoutFromCurrentContext(page);
+    await page.goto('/');
+    const secondReviewerLogin = await loginAs(page, reviewerEmail, reviewerPassword);
+    expect(exactPrincipalID(secondReviewerLogin)).toBe(reviewerID);
+    expect(secondReviewerLogin.principal?.capabilities).toEqual(['skill.review']);
+    const secondReviewerCSRFToken = String(secondReviewerLogin.csrf_token || '');
+    expect(secondReviewerCSRFToken).toBeTruthy();
+
+    const secondQueueResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET'
+        && url.pathname === '/api/v1/admin/skill-reviews'
+        && url.searchParams.get('status') === 'reviewing';
+    });
+    await page.getByRole('button', { name: 'Skill 审核' }).click();
+    expect((await secondQueueResponsePromise).status()).toBe(200);
+    const secondReviewCard = await findSkillReviewCardAcrossPages(page, skillName);
+    await expect(secondReviewCard).toHaveCount(1);
+
+    const secondDetailResponsePromise = page.waitForResponse((response) => (
+      isSkillResponse(response, 'GET', `/api/v1/admin/skill-reviews/${secondReviewID}`)
+    ));
+    await secondReviewCard.getByRole('button', { name: '查看冻结详情' }).click();
+    const secondDetailResponse = await secondDetailResponsePromise;
+    expect(secondDetailResponse.status()).toBe(200);
+    const secondDetailHeaderETag = String(secondDetailResponse.headers().etag || '');
+    expect(secondDetailHeaderETag).toMatch(/^"[\x21\x23-\x7e\x80-\xff]+"$/);
+    const secondDetailPayload = await secondDetailResponse.json();
+    expect(secondDetailPayload.review).toMatchObject({
+      review_id: secondReviewID,
+      skill_id: skillID,
+      status: 'reviewing'
+    });
+    expect(secondDetailPayload.review?.review_etag).toBe(secondDetailHeaderETag);
+    expect(secondDetailPayload.review?.definition?.summary).toBe(sentinelB);
+    expect(secondDetailPayload.review?.definition?.invocation_rules).toBe(runtimeRuleB);
+    expect(JSON.stringify(secondDetailPayload.review?.definition || {})).not.toContain(sentinelA);
+    await expect(page.getByRole('region', { name: '本次冻结提交', exact: true })).toContainText(sentinelB);
+    await expect(page.getByRole('region', { name: '本次冻结提交', exact: true })).not.toContainText(sentinelA);
+
+    const secondDecisionResponsePromise = page.waitForResponse((response) => (
+      isSkillResponse(response, 'POST', `/api/v1/admin/skill-reviews/${secondReviewID}/decisions`)
+    ));
+    await page.getByRole('button', { name: '批准并发布' }).click();
+    const secondDecisionResponse = await secondDecisionResponsePromise;
+    expect(secondDecisionResponse.status()).toBe(200);
+    const secondDecisionHeaders = secondDecisionResponse.request().headers();
+    expect(secondDecisionHeaders['idempotency-key']).toBeTruthy();
+    expect(secondDecisionHeaders['x-csrf-token']).toBe(secondReviewerCSRFToken);
+    expect(secondDecisionHeaders['if-match']).toBe(secondDetailHeaderETag);
+    expect(secondDecisionResponse.request().postDataJSON()).toEqual({ decision: 'approved' });
+    const secondDecisionPayload = await secondDecisionResponse.json();
+    expect(secondDecisionPayload.review).toMatchObject({
+      review_id: secondReviewID,
+      skill_id: skillID,
+      status: 'approved',
+      allowed_actions: []
+    });
+    const secondPublishedSnapshotID = String(secondDecisionPayload.review?.published_snapshot_id || '');
+    expect(secondPublishedSnapshotID).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(secondPublishedSnapshotID).not.toBe(publishedSnapshotID);
+
+    const secondDecisionReplay = await replayBrowserCommand(page, {
+      path: `/api/v1/admin/skill-reviews/${secondReviewID}/decisions`,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'Idempotency-Key': secondDecisionHeaders['idempotency-key'],
+        'If-Match': secondDecisionHeaders['if-match'],
+        'X-CSRF-Token': secondDecisionHeaders['x-csrf-token']
+      },
+      body: secondDecisionResponse.request().postDataJSON()
+    });
+    const secondDecisionReplayURL = new URL(secondDecisionReplay.responseURL);
+    const secondDecisionReplayMatches = secondDecisionReplay.status === 200
+      && secondDecisionReplay.contentType === 'application/json; charset=utf-8'
+      && secondDecisionReplay.cacheControl === 'no-store'
+      && secondDecisionReplayURL.pathname === `/api/v1/admin/skill-reviews/${secondReviewID}/decisions`
+      && secondDecisionReplayURL.search === ''
+      && JSON.stringify(secondDecisionReplay.payload?.review || null) === JSON.stringify(secondDecisionPayload.review || null);
+    expect(secondDecisionReplayMatches, 'Second Reviewer decision must replay the same published snapshot').toBe(true);
+
+    await logoutFromCurrentContext(page);
+    await page.goto('/');
+    const finalCreatorLogin = await loginAs(page, email, password);
+    expect(exactPrincipalID(finalCreatorLogin)).toBe(creatorID);
+    const finalCreatorCSRFToken = String(finalCreatorLogin.csrf_token || '');
+    expect(finalCreatorCSRFToken).toBeTruthy();
+
+    const ownerListResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET'
+        && url.pathname === '/api/v1/skills'
+        && url.searchParams.get('scope') === 'mine';
+    });
+    await page.goto('/my/skills');
+    const ownerListResponse = await ownerListResponsePromise;
+    expect(ownerListResponse.status()).toBe(200);
+    const finalOwnerListPayload = await ownerListResponse.json();
+    const finalOwnerListSkill = (finalOwnerListPayload.items || []).find((item) => item.skill_id === skillID);
+    expect(finalOwnerListSkill, 'Final Owner list must contain the republished Skill').toBeTruthy();
+    const finalOwnerListSafeProjection = isOwnerSafeSkillProjection(finalOwnerListSkill);
+    expect(
+      finalOwnerListSafeProjection,
+      'Final Owner list item must expose exactly the 10 Owner-safe Skill fields'
+    ).toBe(true);
+    await expect(page.getByRole('heading', { name: '我的 Skill', level: 2 })).toBeVisible();
+    const finalOwnerCard = await findOwnerSkillCardAcrossPages(page, skillName);
+    await expect(finalOwnerCard).toHaveCount(1);
+    const publishedOwnerGroup = page.locator('section.owner-skill-group').filter({
+      has: page.getByRole('heading', { name: '已发布', exact: true })
+    });
+    const publishedOwnerCard = publishedOwnerGroup.getByTestId('owner-skill-card').filter({ hasText: skillName });
+    await expect(publishedOwnerCard).toHaveCount(1);
+    await expect(publishedOwnerCard).toContainText(sentinelB);
+    await expect(publishedOwnerCard).toContainText('已发布');
+    await expect(publishedOwnerCard).not.toContainText('有未发布修改');
+    const finalOwnerCardText = await finalOwnerCard.innerText();
+    const mySkillsNoVersionHistoryUI = await hasNoOwnerVersionHistoryControls(page);
+    const ownerPublishedProjectionNoVersionUI = secondOwnerDetailSafeProjection
+      && finalOwnerListSafeProjection
+      && secondEditPageNoVersionHistoryUI
+      && mySkillsNoVersionHistoryUI
+      && await publishedOwnerCard.count() === 1
+      && !/\bv\d+(?:\.\d+)*\b|版本号\s*[:：]?\s*\d/i.test(finalOwnerCardText)
+      && finalOwnerListSkill?.content_status === 'published'
+      && finalOwnerListSkill?.has_unpublished_changes === false
+      && finalOwnerListSkill?.definition?.summary === sentinelB
+      && finalOwnerListSkill?.definition?.invocation_rules === runtimeRuleB;
+    expect(
+      ownerPublishedProjectionNoVersionUI,
+      'Creator My Skills must keep the republished Skill in 已发布 without version selection or history UI'
+    ).toBe(true);
+
+    const oldQuickCreateReplay = await replayBrowserCommand(page, {
+      path: '/api/v1/projects:quick-create',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'Idempotency-Key': oldQuickCreateHeaders['idempotency-key'],
+        'X-CSRF-Token': finalCreatorCSRFToken
+      },
+      body: oldQuickCreateRequestBody
+    });
+    const oldQuickCreateReplayURL = new URL(oldQuickCreateReplay.responseURL);
+    const oldQuickCreateReplayMatches = oldQuickCreateReplay.status === 200
+      && oldQuickCreateReplay.contentType === 'application/json; charset=utf-8'
+      && oldQuickCreateReplay.cacheControl === 'no-store'
+      && oldQuickCreateReplayURL.pathname === '/api/v1/projects:quick-create'
+      && oldQuickCreateReplayURL.search === ''
+      && oldQuickCreateReplay.payload?.project_id === projectID
+      && oldQuickCreateReplay.payload?.session_id === workspaceSessionID
+      && oldQuickCreateReplay.payload?.creation_status === 'ready'
+      && oldQuickCreateReplay.payload?.workspace_ref === `/projects/${projectID}/workspace`;
+    expect(
+      oldQuickCreateReplayMatches,
+      'Published A QuickCreate replay must keep returning the original ready Project and Session after B is published'
+    ).toBe(true);
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Skill', exact: true }).click();
+    const secondPicker = page.getByRole('dialog', { name: '选择 QuickCreate Skill' });
+    const secondPublishedSkill = secondPicker.getByRole('checkbox', { name: `选择 ${skillName}` });
+    await expect(secondPublishedSkill).toBeEnabled();
+    await secondPublishedSkill.check();
+    await page.getByPlaceholder('由一个想法或故事开始...').fill(secondQuickCreatePrompt);
+    const newQuickCreateBaseline = quickCreateRequestCount();
+    const newQuickCreateResponsePromise = page.waitForResponse((response) => (
+      isSkillResponse(response, 'POST', '/api/v1/projects:quick-create')
+    ));
+    await page.getByRole('button', { name: '开始创作' }).click();
+    const newQuickCreateResponse = await newQuickCreateResponsePromise;
+    expect(newQuickCreateResponse.status()).toBe(201);
+    const newQuickCreateHeaders = newQuickCreateResponse.request().headers();
+    expect(newQuickCreateHeaders['idempotency-key']).toBeTruthy();
+    expect(newQuickCreateHeaders['x-csrf-token']).toBe(finalCreatorCSRFToken);
+    const newQuickCreateRequestBody = newQuickCreateResponse.request().postDataJSON();
+    expect(newQuickCreateRequestBody).toEqual({
+      schema_version: 'project_quick_create.v2',
+      initial_prompt: secondQuickCreatePrompt,
+      enabled_skill_ids: [skillID]
+    });
+    const newQuickCreatePayload = await newQuickCreateResponse.json();
+    const newProjectID = String(newQuickCreatePayload.project_id || '');
+    expect(newProjectID).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(newProjectID).not.toBe(projectID);
+    await expect(page).toHaveURL((url) => url.pathname === `/projects/${newProjectID}/workspace`);
+    const newWorkspace = page.locator('main[data-workspace-state]');
+    await expect(newWorkspace).toHaveAttribute('data-workspace-state', 'ready', { timeout: 30_000 });
+    await expect(newWorkspace).toHaveAttribute('data-project-id', newProjectID);
+    const newSessionID = String(await newWorkspace.getAttribute('data-session-id') || '');
+    expect(newSessionID).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(newSessionID).not.toBe(workspaceSessionID);
+
+    const newQuickCreateReplay = await replayBrowserCommand(page, {
+      path: '/api/v1/projects:quick-create',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'Idempotency-Key': newQuickCreateHeaders['idempotency-key'],
+        'X-CSRF-Token': newQuickCreateHeaders['x-csrf-token']
+      },
+      body: newQuickCreateRequestBody
+    });
+    const newQuickCreateReplayURL = new URL(newQuickCreateReplay.responseURL);
+    const newQuickcreateReplayMatches = newQuickCreateReplay.status === 200
+      && newQuickCreateReplay.contentType === 'application/json; charset=utf-8'
+      && newQuickCreateReplay.cacheControl === 'no-store'
+      && newQuickCreateReplayURL.pathname === '/api/v1/projects:quick-create'
+      && newQuickCreateReplayURL.search === ''
+      && newQuickCreateReplay.payload?.project_id === newProjectID
+      && newQuickCreateReplay.payload?.session_id === newSessionID
+      && newQuickCreateReplay.payload?.creation_status === 'ready'
+      && newQuickCreateReplay.payload?.workspace_ref === `/projects/${newProjectID}/workspace`
+      && quickCreateRequestCount() - newQuickCreateBaseline === 2;
+    expect(
+      newQuickcreateReplayMatches,
+      'Published B QuickCreate replay must return the same Project and Session without duplicate creation'
+    ).toBe(true);
+
+    await page.goto(`/projects/${projectID}/workspace`);
+    const revisitedOldWorkspace = page.locator('main[data-workspace-state]');
+    await expect(revisitedOldWorkspace).toHaveAttribute('data-workspace-state', 'ready', { timeout: 30_000 });
+    await expect(revisitedOldWorkspace).toHaveAttribute('data-project-id', projectID);
+    await expect(revisitedOldWorkspace).toHaveAttribute('data-session-id', workspaceSessionID);
+    const revisitedOldSnapshot = page.getByRole('region', { name: '工作台快照' });
+    await expect(revisitedOldSnapshot.getByText(projectID, { exact: true })).toBeVisible();
+    await expect(revisitedOldSnapshot.getByText(workspaceSessionID, { exact: true })).toBeVisible();
+    const oldWorkspaceRevisited = await revisitedOldWorkspace.getAttribute('data-project-id') === projectID
+      && await revisitedOldWorkspace.getAttribute('data-session-id') === workspaceSessionID;
+    expect(oldWorkspaceRevisited, 'Old Project and Session created from published A must remain accessible after publishing B').toBe(true);
+
     expect(businessRequests.every((request) => request.origin === appOrigin)).toBe(true);
     expect(businessRequests.some((request) => request.pathname.startsWith('/api/aigc/'))).toBe(false);
     expect(businessRequests).toEqual(expect.arrayContaining([
@@ -920,6 +1336,7 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
       expect.objectContaining({ method: 'PUT', pathname: `/api/v1/skills/${skillID}/draft` }),
       expect.objectContaining({ method: 'GET', pathname: '/api/v1/admin/skill-reviews' }),
       expect.objectContaining({ method: 'POST', pathname: `/api/v1/admin/skill-reviews/${reviewID}/decisions` }),
+      expect.objectContaining({ method: 'POST', pathname: `/api/v1/admin/skill-reviews/${secondReviewID}/decisions` }),
       expect.objectContaining({ method: 'GET', pathname: '/api/v1/skill-market' }),
       expect.objectContaining({ method: 'GET', pathname: `/api/v1/skill-market/${skillID}` }),
       expect.objectContaining({ method: 'POST', pathname: '/api/v1/projects:quick-create' }),
@@ -928,7 +1345,7 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
 
     if (w1ResultPath) {
       await writeFile(w1ResultPath, JSON.stringify({
-        schema_version: 'w1.real-review-result.v5',
+        schema_version: 'w1.real-review-result.v6',
         creator_id: creatorID,
         creator_admin_route_blocked: creatorAdminRouteBlocked,
         creator_admin_implicit_api_blocked: creatorAdminImplicitAPIBlocked,
@@ -942,6 +1359,10 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
         skill_id: skillID,
         review_id: reviewID,
         published_snapshot_id: publishedSnapshotID,
+        second_review_id: secondReviewID,
+        second_published_snapshot_id: secondPublishedSnapshotID,
+        second_review_replay_matches: secondReviewReplayMatches,
+        second_decision_replay_matches: secondDecisionReplayMatches,
         market_public_list: marketPublicList,
         market_public_detail: marketPublicDetail,
         market_published_projection_safe: marketPublishedProjectionSafe,
@@ -956,6 +1377,12 @@ test.describe('W1 mandatory real Reviewer publish chain', () => {
         tool_catalog_session_id: workspaceSessionID,
         tool_catalog_request_id: toolCatalogPayload.request_id,
         tool_catalog_exact_unavailable: true,
+        new_project_id: newProjectID,
+        new_session_id: newSessionID,
+        new_quickcreate_replay_matches: newQuickcreateReplayMatches,
+        old_quickcreate_replay_matches: oldQuickCreateReplayMatches,
+        owner_published_projection_no_version_ui: ownerPublishedProjectionNoVersionUI,
+        old_workspace_revisited: oldWorkspaceRevisited,
         submitted_summary: sentinelA,
         current_draft_summary: sentinelB
       }), { encoding: 'utf8', mode: 0o600 });

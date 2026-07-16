@@ -4,7 +4,7 @@
 >
 > 版本：`smoke.engineering.v1alpha1`
 >
-> 更新日期：2026-07-14
+> 更新日期：2026-07-16
 >
 > 适用范围：`SMK-001`～`SMK-035`
 >
@@ -373,9 +373,13 @@ Retention 实现进入开发前必须冻结“至少保留最后一个 Event（`
 - Smoke 脚本从当前 worktree 强制重建 Business/Agent Runtime 后再计算二进制摘要和启动，不能接受旧预构建产物；
 - Evidence 不包含 Cookie、CSRF、密码、完整 Prompt、完整 Skill Definition、密文/Nonce、密钥材料或内部身份断言。
 
-本地 Seeder 只允许 `DORA_ENV=local`、loopback、专用本地库/角色和 Creator/Reviewer/Governor/Provisioner 四身份分离，不注册 HTTP、RPC 或生产 Runtime 路由，也不得直接发布 Skill。生产 Runtime 的权限解析、审核/治理事务、内容摘要重算、CAS、不可变快照和原子审计均走正式路径；生产角色写入只由部署控制的窄权限离线 CLI 承担，不在本阶段暴露角色管理 HTTP。Browser Result 固定为 `w1.real-review-result.v3`：`creator_admin_denial_request_id` 必须是 UUIDv7，`creator_admin_route_blocked`、`creator_admin_implicit_api_blocked`、`creator_admin_api_forbidden`、`reviewer_owner_route_not_found`、`reviewer_owner_read_not_found`、`reviewer_owner_write_not_found`、`reviewer_owner_resource_facts_not_disclosed` 必须逐项为 `true`。Canonical Evidence Schema 继续固定为 `w1.skill-foundation.smoke.evidence.v3`，其中 `reviewer_rbac`、`reviewer_revocation`、`tool_catalog_cross_owner_not_found`、`browser_formal_api_frozen_revision`、`browser_business_frozen_revision`、`browser_agent_snapshot_matches_published`、`browser_tool_catalog_static_unavailable` 与 `browser_review_publish_quickcreate_v2` 必须从脱敏响应、结构化拒绝审计、数据库、验证器、目录 API 和浏览器结果派生为 `true`，不得硬编码。
+本地 Seeder 只允许 `DORA_ENV=local`、loopback、专用本地库/角色和 Creator/Reviewer/Governor/Provisioner 四身份分离，不注册 HTTP、RPC 或生产 Runtime 路由，也不得直接发布 Skill。生产 Runtime 的权限解析、审核/治理事务、内容摘要重算、CAS、不可变快照和原子审计均走正式路径；生产角色写入只由部署控制的窄权限离线 CLI 承担，不在本阶段暴露角色管理 HTTP。Browser Result 固定为 `w1.real-review-result.v6`：除原 Creator/Reviewer/Market/Tool Catalog 安全事实外，还必须包含第二次 Review/Published Snapshot、新 Project/Session，以及第二次提交、第二次批准、旧/新 QuickCreate replay、Owner 无版本 UI 和旧 Workspace 回访的闭集布尔结论。A 发布后创建的旧命令必须在 B 发布后仍重放到原 Project/Session；B 必须改变 Runtime Content，而不只是修改不进入 Runtime 的市场简介。Canonical Evidence Schema 继续固定为 `w1.skill-foundation.smoke.evidence.v3`，其中 `reviewer_rbac`、`reviewer_revocation`、`tool_catalog_cross_owner_not_found`、`browser_formal_api_frozen_revision`、`browser_business_frozen_revision`、`browser_agent_snapshot_matches_published`、`browser_tool_catalog_static_unavailable` 与 `browser_review_publish_quickcreate_v2` 必须从脱敏响应、结构化拒绝审计、数据库、验证器、目录 API 和浏览器结果派生为 `true`，不得硬编码。
 
-同一次成功 W1 运行还必须原子发布独立的 `.local/smoke/w1-skill-governance-evidence.json`，Schema 固定为 `w1.skill-governance.smoke.evidence.v1`，其 assertion exact-set 只能是 `skill_governor_rbac`、`skill_governor_revocation`、`skill_governance_idempotency`、`skill_governance_quickcreate_gate`、`skill_governance_offline_terminal`，且五项均为 `true`。它通过 Governor 真实 Login、治理 HTTP、正式撤权、QuickCreate 门禁和数据库事实证明 `active -> suspended -> active -> offline`、同义重放单事实、既有 Session 不伪取消、暂停/下架无部分 Project 写入、offline 终态及发布指针不变；不得把这五项塞入或扩容 canonical v3。本证据不等于治理 UI、在线角色管理或完整 ADM-RBAC 已完成。
+同一次成功 W1 运行还必须在同一 release 目录发布独立的 `w1-skill-governance-evidence.json`，Schema 固定为 `w1.skill-governance.smoke.evidence.v1`，其 assertion exact-set 只能是 `skill_governor_rbac`、`skill_governor_revocation`、`skill_governance_idempotency`、`skill_governance_quickcreate_gate`、`skill_governance_offline_terminal`，且五项均为 `true`。它通过 Governor 真实 Login、治理 HTTP、正式撤权、QuickCreate 门禁和数据库事实证明 `active -> suspended -> active -> offline`、同义重放单事实、既有 Session 不伪取消、暂停/下架无部分 Project 写入、offline 终态及发布指针不变；不得把这五项塞入或扩容 canonical v3。本证据不等于治理 UI、在线角色管理或完整 ADM-RBAC 已完成。
+
+同一次成功运行还必须发布 `w1.skill-republish-session-isolation.smoke.evidence.v1`。其 33 项闭集断言证明同一 Skill 从 A 重发布为 Runtime Content 不同的 B 后：两次 Review→Content Revision→Published Snapshot 的 ID 与 content digest 血缘逐值一致且 A/B Revision 不同；两次发布及其回执、审计唯一；旧/新 Project 各只有一套九类 Business 创建事实；旧/新 Agent Session 各只有一套 Header/Item/Receipt/Message/Input/Counter/Lease 和固定两条事件；Business Receipt/Binding/Outbox/Resolution 与 Agent Header/Receipt 的 set digest 逐值一致；两侧 Item 与正式 Load verifier 的 content/runtime digest 逐值一致；A/B 的 content/runtime/set digest 互不相同。该 sidecar 只能保存安全 ID、摘要、计数和布尔结论，不保存 Prompt、Definition、Runtime Content、密文、Nonce、Key Version 或原始幂等键；它不表示 Graph Tool/Runner 已执行，也不把完整 `SMK-006` 标为通过。
+
+五份 W1 Evidence 必须先写入 `.local/smoke/w1-evidence-releases/.<run_id>.staging/`，完成脱敏、exact-set、同批 run/source digest 与文件 SHA-256 校验后，将目录 rename 为 `<run_id>/`，最后以 `current.json` 的一次原子 rename 作为唯一提交点。任何文件生成或 release 目录切换故障都必须保持 `current.json` 不存在；故障注入测试必须逐一覆盖 Foundation、Governance、Market、Binding、Republish 和 release 目录切换。消费者只认可 `current.json` 绑定的五份文件，不能把单个历史 `passed` 文件当作本轮成功。
 
 ## 12. 通过、重试与清理规则
 

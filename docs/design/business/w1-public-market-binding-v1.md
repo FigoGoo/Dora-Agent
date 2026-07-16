@@ -6,7 +6,7 @@
 >
 > 冻结日期：2026-07-14
 >
-> 验证日期：2026-07-14；`make GO=/Users/figo/sdk/go1.26.3/bin/go W0_ENV_FILE=.env.example w1-smoke` 通过
+> 验证日期：2026-07-16；`make GO=/Users/figo/sdk/go1.26.3/bin/go W0_ENV_FILE=.env.example w1-smoke` 通过
 >
 > 覆盖范围：公开 Skill 跨发布者 QuickCreate v2、权限证明、发布者身份冻结、治理 TOCTOU、前端市场预选与登录恢复
 >
@@ -301,7 +301,7 @@ skill_market_stale_selection_fail_closed
 
 前五项保持 v1 语义；第六项证明 active 详情读取后发生 suspend/offline 时，陈旧选择不能形成九类创建事实。历史 v1 artifact 保留但新运行不再产出 `v1 passed`；不得继续使用语义已经失真的 `skill_market_cross_owner_use_blocked`，也不得通过替换成 suspended fixture 伪装原 active 拒绝语义仍成立。
 
-四份 Evidence 发布门禁固定为：
+五份 Evidence 发布门禁固定为：
 
 | Evidence | Schema | assertions exact-set |
 | --- | --- | --- |
@@ -309,14 +309,15 @@ skill_market_stale_selection_fail_closed
 | Governance | `w1.skill-governance.smoke.evidence.v1` | 5 项布尔 true |
 | Market | `w1.skill-market.smoke.evidence.v2` | 6 项布尔 true |
 | Public Market Binding | `w1.skill-market-binding.smoke.evidence.v1` | 7 项布尔 true |
+| Skill Republish Session Isolation | `w1.skill-republish-session-isolation.smoke.evidence.v1` | 33 项布尔 true |
 
-四份都必须校验顶层字段和 assertions 完整闭集，共用相同 `run_id/source_digest_sha256`，全部通过后才原子发布 `passed`；三个 sidecar 不得扩容 Foundation canonical。
+五份都必须校验顶层字段和 assertions 完整闭集，共用相同 `run_id/source_digest_sha256`，全部通过后才发布 `passed`；四个 sidecar 不得扩容 Foundation canonical。发布协议固定为 `.local/smoke/w1-evidence-releases/<run_id>/` 不可变目录与 `.local/smoke/w1-evidence-releases/current.json` 单一原子提交点；消费者不得直接信任历史目录或已废止的顶层固定文件，必须从 manifest 校验五个文件的 Schema、SHA-256 和同批 run/source digest。Republish sidecar 只加强同一 Skill A→B 的两次 Review→Content Revision→Published Snapshot 血缘、旧/新 Session 冻结、幂等重放、摘要链和无版本 UI，不改变 Public Market Binding 的七项 exact-set。
 
 `public_market_governance_toctou_closed` 必须由真实数据库锁竞争直接证明：未提交的治理写持有排他行锁时，QuickCreate 的共享锁必须等待；治理提交后请求观察新状态、返回稳定 409 且九类事实零增量。顺序型“active 详情读取 → suspend 已提交 → 陈旧选择提交”继续由 Market v2 的 `skill_market_stale_selection_fail_closed` 证明，二者不得相互冒充。
 
 `public_market_mixed_binding_atomicity` 必须使用同一 Consumer 的真实 Published+Active owner-private Skill 和另一 Publisher 的真实 public-market Skill：有效集合成功冻结 v1/v2 两种 Permission；public-market 项治理失效后，同两个真实 ID 的新意图整体失败且九类事实零增量。
 
-真实 `@w1-real-review` 与首个 shell checkpoint coordinator 共用 180 秒预算；coordinator 不得施加更短的 30 秒截止，并且只在 Playwright PID 退出、checkpoint 契约错误或预算耗尽时失败。`before_login`、`before_submit` 各精确出现一次，checkpoint/ACK 原子写入且权限为 `0600`。
+真实 `@w1-real-review` 从启动到 `before_submit` 与首个 shell checkpoint coordinator 共用 180 秒预算；coordinator 不得施加更短的 30 秒截止，并且只在 Playwright PID 提前退出、checkpoint 契约错误或该阶段预算耗尽时失败。A→B 重发布和第二个 Session 位于两个 checkpoint 完成之后，Playwright 单用例总预算为 300 秒，不延长 Public Market 预选阶段的 180 秒上限。`before_login`、`before_submit` 各精确出现一次，checkpoint/ACK 原子写入且权限为 `0600`。
 
 真实链路至少执行：
 

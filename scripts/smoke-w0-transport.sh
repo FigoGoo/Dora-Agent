@@ -8,6 +8,8 @@ disable_shell_xtrace
 umask 077
 # shellcheck source=lib/w1-smoke-mode.sh
 . "$repo_root/scripts/lib/w1-smoke-mode.sh"
+# shellcheck source=lib/w1-evidence-release.sh
+. "$repo_root/scripts/lib/w1-evidence-release.sh"
 env_file="${ENV_FILE:-$repo_root/.env.example}"
 go_bin="${GO_BIN:-/Users/figo/sdk/go1.26.3/bin/go}"
 migrate_bin="${MIGRATE_BIN:-$repo_root/.local/tools/migrate}"
@@ -19,10 +21,14 @@ w1_browser_smoke_enabled="${W1_RUN_BROWSER_SMOKE:-0}"
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   evidence_dir="$repo_root/.local/smoke/w1-skill-foundation/runs/$run_id"
   evidence_scan_root="$repo_root/.local/smoke/w1-skill-foundation/runs"
-  evidence_file="$repo_root/.local/smoke/w1-skill-foundation-evidence.json"
-  governance_evidence_file="$repo_root/.local/smoke/w1-skill-governance-evidence.json"
-  skill_market_evidence_file="$repo_root/.local/smoke/w1-skill-market-evidence.json"
-  skill_market_binding_evidence_file="$repo_root/.local/smoke/w1-skill-market-binding-evidence.json"
+  w1_evidence_release_root="$repo_root/.local/smoke/w1-evidence-releases"
+  w1_evidence_release_dir="$w1_evidence_release_root/$run_id"
+  w1_evidence_current_manifest="$w1_evidence_release_root/current.json"
+  evidence_file="$w1_evidence_release_dir/w1-skill-foundation-evidence.json"
+  governance_evidence_file="$w1_evidence_release_dir/w1-skill-governance-evidence.json"
+  skill_market_evidence_file="$w1_evidence_release_dir/w1-skill-market-evidence.json"
+  skill_market_binding_evidence_file="$w1_evidence_release_dir/w1-skill-market-binding-evidence.json"
+  skill_republish_evidence_file="$w1_evidence_release_dir/w1-skill-republish-session-isolation-evidence.json"
   legacy_evidence_file=""
 else
   evidence_dir="$repo_root/.local/smoke/w0-transport/runs/$run_id"
@@ -31,12 +37,17 @@ else
   governance_evidence_file=""
   skill_market_evidence_file=""
   skill_market_binding_evidence_file=""
+  skill_republish_evidence_file=""
+  w1_evidence_release_root=""
+  w1_evidence_release_dir=""
+  w1_evidence_current_manifest=""
   legacy_evidence_file="$repo_root/.local/smoke/w0-transport-evidence.json"
 fi
 pending_evidence_file="$evidence_dir/evidence-summary.pending.json"
 governance_pending_evidence_file=""
 skill_market_pending_evidence_file=""
 skill_market_binding_pending_evidence_file=""
+skill_republish_pending_evidence_file=""
 cookie_jar=""
 user_curl_config=""
 login_response_temp=""
@@ -89,6 +100,7 @@ w1_reviewer_revocation_smoke_ran=false
 w1_skill_governance_smoke_ran=false
 w1_skill_market_smoke_ran=false
 w1_skill_market_binding_smoke_ran=false
+w1_skill_republish_smoke_ran=false
 w1_skill_market_fixtures_present=false
 w1_skill_market_public_read=false
 w1_skill_market_safe_projection=false
@@ -262,7 +274,7 @@ cleanup_on_exit() {
   fi
   stop_processes
   if [[ "$exit_code" -ne 0 ]]; then
-    # 本次运行已经在启动时撤销旧 summary；发布任一步失败时必须同时撤销全部新 summary，避免独立 sidecar 假绿。
+    # 本次运行已在启动时撤销 current manifest；失败时清除未提交 release，避免部分 sidecar 假绿。
     rm -f "$evidence_file" "${evidence_file}.tmp"
     if [[ -n "$governance_evidence_file" ]]; then
       rm -f "$governance_evidence_file" "${governance_evidence_file}.tmp"
@@ -272,6 +284,15 @@ cleanup_on_exit() {
     fi
     if [[ -n "$skill_market_binding_evidence_file" ]]; then
       rm -f "$skill_market_binding_evidence_file" "${skill_market_binding_evidence_file}.tmp"
+    fi
+    if [[ -n "$skill_republish_evidence_file" ]]; then
+      rm -f "$skill_republish_evidence_file" "${skill_republish_evidence_file}.tmp"
+    fi
+    if [[ -n "$w1_evidence_current_manifest" ]]; then
+      rm -f "$w1_evidence_current_manifest" "$w1_evidence_release_root/.current-${run_id}.tmp"
+    fi
+    if [[ -n "$w1_evidence_release_dir" ]]; then
+      rm -rf "$w1_evidence_release_dir" "$w1_evidence_release_root/.${run_id}.staging"
     fi
     if [[ -n "$evidence_dir" && "$evidence_dir" == "$repo_root/.local/smoke/"* ]]; then
       rm -rf "$evidence_dir"
@@ -3006,8 +3027,10 @@ run_w1_browser_frozen_smoke() {
   local browser_result_file="$2"
   local owner_api_raw="$w1_temp_dir/browser-owner-detail.json"
   local review_api_raw="$w1_temp_dir/browser-review-detail.json"
+  local second_review_api_raw="$w1_temp_dir/browser-second-review-detail.json"
   local bootstrap_file="$evidence_dir/responses/w1-browser-bootstrap.json"
-  local verifier_file="$evidence_dir/responses/w1-browser-frozen-agent-verified.json"
+  local old_verifier_file="$evidence_dir/responses/w1-browser-republish-old-agent-verified.json"
+  local new_verifier_file="$evidence_dir/responses/w1-browser-republish-new-agent-verified.json"
   local preselection_database_file="$evidence_dir/responses/w1-browser-public-market-preselection-database.json"
   local browser_creator_id=""
   local browser_reviewer_id=""
@@ -3015,6 +3038,10 @@ run_w1_browser_frozen_smoke() {
   local browser_review_id=""
   local browser_snapshot_id=""
   local browser_project_id=""
+  local second_review_id=""
+  local second_snapshot_id=""
+  local new_project_id=""
+  local new_session_id=""
   local public_market_consumer_id=""
   local public_market_project_id=""
   local public_market_session_id=""
@@ -3032,16 +3059,19 @@ run_w1_browser_frozen_smoke() {
   local current_draft_summary_b64=""
   local owner_api_status=""
   local review_api_status=""
+  local second_review_api_status=""
   local browser_session_id=""
   local browser_input_id=""
   local business_fact=""
   local agent_fact=""
+  local republish_business_fact=""
+  local republish_agent_fact=""
   local public_market_browser_fact=""
 
   [[ -s "$browser_result_file" ]] || fail "W1 浏览器未产出结构化真实结果"
   jq -e --arg creator "$user_id" --arg reviewer "$owner_b_seed_user_id" '
-    keys == ["creator_admin_api_forbidden","creator_admin_denial_request_id","creator_admin_implicit_api_blocked","creator_admin_route_blocked","creator_id","current_draft_summary","market_public_detail","market_public_list","market_published_projection_safe","project_id","public_market_consumer_id","public_market_login_preselection_recovered","public_market_pre_submit_quickcreate_count","public_market_project_id","public_market_selected_skill_id","public_market_session_id","public_market_submit_quickcreate_count","published_snapshot_id","review_id","reviewer_id","reviewer_owner_read_not_found","reviewer_owner_resource_facts_not_disclosed","reviewer_owner_route_not_found","reviewer_owner_write_not_found","schema_version","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
-    and .schema_version == "w1.real-review-result.v5"
+    keys == ["creator_admin_api_forbidden","creator_admin_denial_request_id","creator_admin_implicit_api_blocked","creator_admin_route_blocked","creator_id","current_draft_summary","market_public_detail","market_public_list","market_published_projection_safe","new_project_id","new_quickcreate_replay_matches","new_session_id","old_quickcreate_replay_matches","old_workspace_revisited","owner_published_projection_no_version_ui","project_id","public_market_consumer_id","public_market_login_preselection_recovered","public_market_pre_submit_quickcreate_count","public_market_project_id","public_market_selected_skill_id","public_market_session_id","public_market_submit_quickcreate_count","published_snapshot_id","review_id","reviewer_id","reviewer_owner_read_not_found","reviewer_owner_resource_facts_not_disclosed","reviewer_owner_route_not_found","reviewer_owner_write_not_found","schema_version","second_decision_replay_matches","second_published_snapshot_id","second_review_id","second_review_replay_matches","skill_id","submitted_summary","tool_catalog_exact_unavailable","tool_catalog_request_id","tool_catalog_session_id"]
+    and .schema_version == "w1.real-review-result.v6"
     and .creator_admin_route_blocked == true
     and .creator_admin_implicit_api_blocked == true
     and .creator_admin_api_forbidden == true
@@ -3058,7 +3088,17 @@ run_w1_browser_frozen_smoke() {
     and .public_market_login_preselection_recovered == true
     and .public_market_pre_submit_quickcreate_count == 0
     and .public_market_submit_quickcreate_count == 1
-    and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id,.public_market_project_id,.public_market_session_id,.tool_catalog_session_id,.tool_catalog_request_id,.creator_admin_denial_request_id]
+    and .second_review_replay_matches == true
+    and .second_decision_replay_matches == true
+    and .old_quickcreate_replay_matches == true
+    and .new_quickcreate_replay_matches == true
+    and .owner_published_projection_no_version_ui == true
+    and .old_workspace_revisited == true
+    and .review_id != .second_review_id
+    and .published_snapshot_id != .second_published_snapshot_id
+    and .project_id != .new_project_id
+    and .tool_catalog_session_id != .new_session_id
+    and ([.creator_id,.reviewer_id,.skill_id,.review_id,.published_snapshot_id,.project_id,.second_review_id,.second_published_snapshot_id,.new_project_id,.new_session_id,.public_market_project_id,.public_market_session_id,.tool_catalog_session_id,.tool_catalog_request_id,.creator_admin_denial_request_id]
       | all(.[]; test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
     and .tool_catalog_exact_unavailable == true
     and (.submitted_summary | type) == "string" and (.submitted_summary | length) > 0
@@ -3072,6 +3112,10 @@ run_w1_browser_frozen_smoke() {
   browser_review_id="$(jq -er '.review_id' "$browser_result_file")"
   browser_snapshot_id="$(jq -er '.published_snapshot_id' "$browser_result_file")"
   browser_project_id="$(jq -er '.project_id' "$browser_result_file")"
+  second_review_id="$(jq -er '.second_review_id' "$browser_result_file")"
+  second_snapshot_id="$(jq -er '.second_published_snapshot_id' "$browser_result_file")"
+  new_project_id="$(jq -er '.new_project_id' "$browser_result_file")"
+  new_session_id="$(jq -er '.new_session_id' "$browser_result_file")"
   public_market_consumer_id="$(jq -er '.public_market_consumer_id' "$browser_result_file")"
   public_market_project_id="$(jq -er '.public_market_project_id' "$browser_result_file")"
   public_market_session_id="$(jq -er '.public_market_session_id' "$browser_result_file")"
@@ -3143,20 +3187,28 @@ run_w1_browser_frozen_smoke() {
   review_api_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
     -o "$review_api_raw" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${browser_review_id}")"
   [[ "$review_api_status" == "200" ]] || fail "W1 Browser Review 正式 Reviewer API 状态为 $review_api_status"
+  second_review_api_status="$(curl --silent --show-error --max-time 10 -b "$owner_b_cookie_jar" \
+    -o "$second_review_api_raw" -w '%{http_code}' "http://127.0.0.1:18081/api/v1/admin/skill-reviews/${second_review_id}")"
+  [[ "$second_review_api_status" == "200" ]] || fail "W1 Browser 第二次 Review 正式 Reviewer API 状态为 $second_review_api_status"
 
   jq -n --argjson owner_status "$owner_api_status" --argjson review_status "$review_api_status" \
+    --argjson second_review_status "$second_review_api_status" \
     --argjson tool_catalog_exact_unavailable "$browser_catalog_exact_unavailable" \
     --arg creator "$browser_creator_id" --arg skill "$browser_skill_id" --arg review "$browser_review_id" \
-    --arg snapshot "$browser_snapshot_id" --arg submitted "$submitted_summary" --arg current "$current_draft_summary" \
+    --arg snapshot "$browser_snapshot_id" --arg second_review "$second_review_id" \
+    --arg second_snapshot "$second_snapshot_id" --arg submitted "$submitted_summary" --arg current "$current_draft_summary" \
     --arg tool_catalog_session_id "$browser_catalog_session_id" --arg tool_catalog_request_id "$browser_catalog_request_id" \
-    --slurpfile owner "$owner_api_raw" --slurpfile detail "$review_api_raw" '
-    {owner_status:$owner_status,review_status:$review_status,skill_id:$skill,review_id:$review,published_snapshot_id:$snapshot,
+    --slurpfile owner "$owner_api_raw" --slurpfile detail "$review_api_raw" \
+    --slurpfile second_detail "$second_review_api_raw" '
+    {owner_status:$owner_status,review_status:$review_status,second_review_status:$second_review_status,
+      skill_id:$skill,review_id:$review,published_snapshot_id:$snapshot,
+      second_review_id:$second_review,second_published_snapshot_id:$second_snapshot,
       tool_catalog_session_id:$tool_catalog_session_id,tool_catalog_request_id:$tool_catalog_request_id,
       tool_catalog_exact_unavailable:$tool_catalog_exact_unavailable,
-      owner_current_draft_is_b:($owner[0].skill.skill_id == $skill
+      owner_current_published_is_b:($owner[0].skill.skill_id == $skill
         and $owner[0].skill.definition.summary == $current
         and $owner[0].skill.content_status == "published"
-        and $owner[0].skill.has_unpublished_changes == true
+        and $owner[0].skill.has_unpublished_changes == false
         and $owner[0].skill.review_status == "approved"),
       review_frozen_submission_is_a:($detail[0].review.review_id == $review
         and $detail[0].review.skill_id == $skill
@@ -3164,16 +3216,26 @@ run_w1_browser_frozen_smoke() {
         and $detail[0].review.status == "approved"
         and $detail[0].review.definition.summary == $submitted
         and $detail[0].review.definition.summary != $current),
-      review_current_published_is_a:($detail[0].review.current_published.published_snapshot_id == $snapshot
-        and $detail[0].review.current_published.definition.summary == $submitted
-        and $detail[0].review.current_published.definition.summary != $current
-        and $detail[0].review.comparison == {has_current_published:true,same_content:true}
-        and $detail[0].review.allowed_actions == [])}' \
+      first_review_observes_current_b:($detail[0].review.current_published.published_snapshot_id == $second_snapshot
+        and $detail[0].review.current_published.definition.summary == $current
+        and $detail[0].review.current_published.definition.summary != $submitted
+        and $detail[0].review.comparison == {has_current_published:true,same_content:false}
+        and $detail[0].review.allowed_actions == []),
+      second_review_frozen_and_current_is_b:($second_detail[0].review.review_id == $second_review
+        and $second_detail[0].review.skill_id == $skill
+        and $second_detail[0].review.owner_user_id == $creator
+        and $second_detail[0].review.status == "approved"
+        and $second_detail[0].review.definition.summary == $current
+        and $second_detail[0].review.current_published.published_snapshot_id == $second_snapshot
+        and $second_detail[0].review.current_published.definition.summary == $current
+        and $second_detail[0].review.comparison == {has_current_published:true,same_content:true}
+        and $second_detail[0].review.allowed_actions == [])}' \
     >"$evidence_dir/responses/w1-browser-frozen-api.json"
-  jq -e '.owner_status == 200 and .review_status == 200 and .owner_current_draft_is_b
-    and .review_frozen_submission_is_a and .review_current_published_is_a' \
+  jq -e '.owner_status == 200 and .review_status == 200 and .second_review_status == 200
+    and .owner_current_published_is_b and .review_frozen_submission_is_a
+    and .first_review_observes_current_b and .second_review_frozen_and_current_is_b' \
     "$evidence_dir/responses/w1-browser-frozen-api.json" >/dev/null || \
-    fail "W1 Browser 正式 API 未证明提交 A、当前草稿 B、发布 A"
+    fail "W1 Browser 正式 API 未证明 A/B 两次审核冻结与当前发布 B"
 
   poll_bootstrap_ready "$browser_project_id" "$bootstrap_file" || fail "W1 Browser QuickCreate Project 未进入 ready"
   browser_session_id="$(jq -er '.session_id | strings | select(test("^[0-9a-f-]{36}$"))' "$bootstrap_file")"
@@ -3193,11 +3255,15 @@ run_w1_browser_frozen_smoke() {
       'frozen_publication_matches', EXISTS (SELECT 1
         FROM business.skill AS skill_record
         JOIN business.skill_review_submission AS review ON review.id = '$browser_review_id'::uuid AND review.skill_id = skill_record.id
-        JOIN business.skill_published_snapshot AS published ON published.id = skill_record.current_published_snapshot_id
-        WHERE skill_record.id = '$browser_skill_id'::uuid AND published.id = '$browser_snapshot_id'::uuid
+        JOIN business.skill_published_snapshot AS published ON published.id = '$browser_snapshot_id'::uuid
+          AND published.skill_id = skill_record.id
+        WHERE skill_record.id = '$browser_skill_id'::uuid
           AND published.source_content_revision_id = review.content_revision_id
           AND published.content_digest = review.content_digest
-          AND skill_record.current_draft_revision_id <> review.content_revision_id),
+          AND skill_record.current_published_snapshot_id = '$second_snapshot_id'::uuid
+          AND skill_record.current_draft_revision_id = (SELECT second_review.content_revision_id
+            FROM business.skill_review_submission AS second_review
+            WHERE second_review.id = '$second_review_id'::uuid)),
       'submitted_summary_is_a', EXISTS (SELECT 1 FROM business.skill_review_submission AS review
         JOIN business.skill_content_revision AS revision ON revision.id = review.content_revision_id
         WHERE review.id = '$browser_review_id'::uuid
@@ -3234,6 +3300,245 @@ run_w1_browser_frozen_smoke() {
     "$evidence_dir/responses/w1-browser-frozen-business.json" >/dev/null || \
     fail "W1 Browser Business DB 未证明冻结 A/草稿 B 或 Project Snapshot"
 
+  republish_business_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_business -Atc "
+    SELECT jsonb_build_object(
+      'skill_count', (SELECT COUNT(*) FROM business.skill
+        WHERE id = '$browser_skill_id'::uuid AND owner_user_id = '$browser_creator_id'::uuid),
+      'publication_revision', (SELECT publication_revision FROM business.skill
+        WHERE id = '$browser_skill_id'::uuid),
+      'current_pointer_is_b', EXISTS (SELECT 1 FROM business.skill
+        WHERE id = '$browser_skill_id'::uuid AND current_published_snapshot_id = '$second_snapshot_id'::uuid),
+      'review_count', (SELECT COUNT(*) FROM business.skill_review_submission
+        WHERE skill_id = '$browser_skill_id'::uuid),
+      'content_revision_count', (SELECT COUNT(*) FROM business.skill_content_revision
+        WHERE skill_id = '$browser_skill_id'::uuid),
+      'first_review_count', (SELECT COUNT(*) FROM business.skill_review_submission
+        WHERE id = '$browser_review_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND status = 'approved' AND submitted_by_user_id = '$browser_creator_id'::uuid
+          AND decided_by_user_id = '$browser_reviewer_id'::uuid),
+      'second_review_count', (SELECT COUNT(*) FROM business.skill_review_submission
+        WHERE id = '$second_review_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND status = 'approved' AND submitted_by_user_id = '$browser_creator_id'::uuid
+          AND decided_by_user_id = '$browser_reviewer_id'::uuid),
+      'snapshot_count', (SELECT COUNT(*) FROM business.skill_published_snapshot
+        WHERE skill_id = '$browser_skill_id'::uuid),
+      'first_snapshot_count', (SELECT COUNT(*) FROM business.skill_published_snapshot
+        WHERE id = '$browser_snapshot_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND review_submission_id = '$browser_review_id'::uuid AND publication_revision = 1),
+      'second_snapshot_count', (SELECT COUNT(*) FROM business.skill_published_snapshot
+        WHERE id = '$second_snapshot_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND review_submission_id = '$second_review_id'::uuid AND publication_revision = 2),
+      'revision_lineage_consistent', EXISTS (
+        SELECT 1
+        FROM business.skill_review_submission AS first_review
+        JOIN business.skill_content_revision AS first_revision
+          ON first_revision.id = first_review.content_revision_id
+          AND first_revision.skill_id = first_review.skill_id
+        JOIN business.skill_published_snapshot AS first_snapshot
+          ON first_snapshot.id = '$browser_snapshot_id'::uuid
+          AND first_snapshot.skill_id = first_review.skill_id
+          AND first_snapshot.review_submission_id = first_review.id
+          AND first_snapshot.source_content_revision_id = first_revision.id
+        JOIN business.skill_review_submission AS second_review
+          ON second_review.id = '$second_review_id'::uuid
+          AND second_review.skill_id = first_review.skill_id
+        JOIN business.skill_content_revision AS second_revision
+          ON second_revision.id = second_review.content_revision_id
+          AND second_revision.skill_id = second_review.skill_id
+        JOIN business.skill_published_snapshot AS second_snapshot
+          ON second_snapshot.id = '$second_snapshot_id'::uuid
+          AND second_snapshot.skill_id = second_review.skill_id
+          AND second_snapshot.review_submission_id = second_review.id
+          AND second_snapshot.source_content_revision_id = second_revision.id
+        WHERE first_review.id = '$browser_review_id'::uuid
+          AND first_review.skill_id = '$browser_skill_id'::uuid
+          AND first_revision.id <> second_revision.id
+          AND first_revision.content_digest = first_review.content_digest
+          AND first_review.content_digest = first_snapshot.content_digest
+          AND second_revision.content_digest = second_review.content_digest
+          AND second_review.content_digest = second_snapshot.content_digest
+          AND first_revision.content_digest <> second_revision.content_digest),
+      'skill_create_receipt_count', (SELECT COUNT(*) FROM business.skill_command_receipt
+        WHERE result_skill_id = '$browser_skill_id'::uuid AND command_type = 'create'),
+      'skill_submit_receipt_count', (SELECT COUNT(*) FROM business.skill_command_receipt
+        WHERE result_skill_id = '$browser_skill_id'::uuid AND command_type = 'submit_review'),
+      'skill_submit_result_count', (SELECT COUNT(DISTINCT result_review_submission_id)
+        FROM business.skill_command_receipt
+        WHERE result_skill_id = '$browser_skill_id'::uuid AND command_type = 'submit_review'
+          AND result_review_submission_id IN ('$browser_review_id'::uuid, '$second_review_id'::uuid)),
+      'skill_approve_receipt_count', (SELECT COUNT(*) FROM business.skill_command_receipt
+        WHERE result_skill_id = '$browser_skill_id'::uuid AND command_type = 'approve_and_publish'),
+      'skill_approve_result_count', (SELECT COUNT(DISTINCT result_published_snapshot_id)
+        FROM business.skill_command_receipt
+        WHERE result_skill_id = '$browser_skill_id'::uuid AND command_type = 'approve_and_publish'
+          AND result_published_snapshot_id IN ('$browser_snapshot_id'::uuid, '$second_snapshot_id'::uuid)),
+      'skill_publish_audit_count', (SELECT COUNT(*) FROM business.skill_governance_audit
+        WHERE skill_id = '$browser_skill_id'::uuid AND action = 'review_approved_and_published'
+          AND actor_user_id = '$browser_reviewer_id'::uuid
+          AND review_submission_id IN ('$browser_review_id'::uuid, '$second_review_id'::uuid)),
+      'skill_publish_audit_review_count', (SELECT COUNT(DISTINCT review_submission_id)
+        FROM business.skill_governance_audit
+        WHERE skill_id = '$browser_skill_id'::uuid AND action = 'review_approved_and_published'
+          AND actor_user_id = '$browser_reviewer_id'::uuid
+          AND review_submission_id IN ('$browser_review_id'::uuid, '$second_review_id'::uuid)),
+      'old_project_creation_receipt_count', (SELECT COUNT(*) FROM business.project_creation_receipt
+        WHERE project_id = '$browser_project_id'::uuid AND owner_user_id = '$browser_creator_id'::uuid
+          AND command_type = 'quick_create' AND request_schema_version = 'project_quick_create.v2'
+          AND skill_count = 1),
+      'new_project_creation_receipt_count', (SELECT COUNT(*) FROM business.project_creation_receipt
+        WHERE project_id = '$new_project_id'::uuid AND owner_user_id = '$browser_creator_id'::uuid
+          AND command_type = 'quick_create' AND request_schema_version = 'project_quick_create.v2'
+          AND skill_count = 1),
+      'old_project_count', (SELECT COUNT(*) FROM business.project
+        WHERE id = '$browser_project_id'::uuid AND owner_user_id = '$browser_creator_id'::uuid),
+      'new_project_count', (SELECT COUNT(*) FROM business.project
+        WHERE id = '$new_project_id'::uuid AND owner_user_id = '$browser_creator_id'::uuid),
+      'old_project_binding_set_count', (SELECT COUNT(*) FROM business.project_skill_binding_set
+        WHERE project_id = '$browser_project_id'::uuid AND owner_user_id = '$browser_creator_id'::uuid
+          AND enabled_count = 1),
+      'new_project_binding_set_count', (SELECT COUNT(*) FROM business.project_skill_binding_set
+        WHERE project_id = '$new_project_id'::uuid AND owner_user_id = '$browser_creator_id'::uuid
+          AND enabled_count = 1),
+      'old_project_skill_binding_count', (SELECT COUNT(*) FROM business.project_skill_binding
+        WHERE project_id = '$browser_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND status = 'enabled' AND source = 'quick_create'),
+      'new_project_skill_binding_count', (SELECT COUNT(*) FROM business.project_skill_binding
+        WHERE project_id = '$new_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND status = 'enabled' AND source = 'quick_create'),
+      'old_project_binding_audit_count', (SELECT COUNT(*) FROM business.project_skill_binding_audit
+        WHERE project_id = '$browser_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND source = 'quick_create' AND actor_user_id = '$browser_creator_id'::uuid
+          AND action = 'enabled' AND to_status = 'enabled'),
+      'new_project_binding_audit_count', (SELECT COUNT(*) FROM business.project_skill_binding_audit
+        WHERE project_id = '$new_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND source = 'quick_create' AND actor_user_id = '$browser_creator_id'::uuid
+          AND action = 'enabled' AND to_status = 'enabled'),
+      'old_project_session_binding_count', (SELECT COUNT(*) FROM business.project_session_binding
+        WHERE project_id = '$browser_project_id'::uuid AND agent_session_id = '$browser_session_id'::uuid
+          AND provisioning_status = 'ready' AND request_schema_version = 'ensure_project_session.v2'
+          AND skill_count = 1),
+      'new_project_session_binding_count', (SELECT COUNT(*) FROM business.project_session_binding
+        WHERE project_id = '$new_project_id'::uuid AND agent_session_id = '$new_session_id'::uuid
+          AND provisioning_status = 'ready' AND request_schema_version = 'ensure_project_session.v2'
+          AND skill_count = 1),
+      'old_project_outbox_count', (SELECT COUNT(*) FROM business.project_session_outbox
+        WHERE aggregate_id = '$browser_project_id'::uuid AND owner_user_id = '$browser_creator_id'::uuid
+          AND event_type = 'agent.session.ensure' AND schema_version = 'session_bootstrap_outbox_payload.v2'
+          AND status = 'delivered' AND skill_count = 1 AND payload_encryption_algorithm IS NULL
+          AND payload_key_version IS NULL AND payload_nonce IS NULL AND payload_ciphertext IS NULL
+          AND payload_cleared_at IS NOT NULL),
+      'new_project_outbox_count', (SELECT COUNT(*) FROM business.project_session_outbox
+        WHERE aggregate_id = '$new_project_id'::uuid AND owner_user_id = '$browser_creator_id'::uuid
+          AND event_type = 'agent.session.ensure' AND schema_version = 'session_bootstrap_outbox_payload.v2'
+          AND status = 'delivered' AND skill_count = 1 AND payload_encryption_algorithm IS NULL
+          AND payload_key_version IS NULL AND payload_nonce IS NULL AND payload_ciphertext IS NULL
+          AND payload_cleared_at IS NOT NULL),
+      'old_resolution_header_count', (SELECT COUNT(*)
+        FROM business.project_session_skill_resolution AS resolution
+        JOIN business.project_session_binding AS binding
+          ON binding.project_id = resolution.project_id AND binding.command_id = resolution.command_id
+        WHERE resolution.project_id = '$browser_project_id'::uuid
+          AND resolution.owner_user_id = '$browser_creator_id'::uuid
+          AND resolution.snapshot_kind = 'published_refs' AND resolution.skill_count = 1
+          AND binding.agent_session_id = '$browser_session_id'::uuid AND binding.provisioning_status = 'ready'),
+      'old_resolution_item_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$browser_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND published_snapshot_id = '$browser_snapshot_id'::uuid AND publication_revision = 1),
+      'old_resolution_other_snapshot_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$browser_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND published_snapshot_id <> '$browser_snapshot_id'::uuid),
+      'new_resolution_header_count', (SELECT COUNT(*)
+        FROM business.project_session_skill_resolution AS resolution
+        JOIN business.project_session_binding AS binding
+          ON binding.project_id = resolution.project_id AND binding.command_id = resolution.command_id
+        WHERE resolution.project_id = '$new_project_id'::uuid
+          AND resolution.owner_user_id = '$browser_creator_id'::uuid
+          AND resolution.snapshot_kind = 'published_refs' AND resolution.skill_count = 1
+          AND binding.agent_session_id = '$new_session_id'::uuid AND binding.provisioning_status = 'ready'),
+      'new_resolution_item_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$new_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND published_snapshot_id = '$second_snapshot_id'::uuid AND publication_revision = 2),
+      'new_resolution_other_snapshot_count', (SELECT COUNT(*) FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$new_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND published_snapshot_id <> '$second_snapshot_id'::uuid)
+    ) || jsonb_build_object(
+      'old_creation_snapshot_digest', (SELECT encode(skill_snapshot_digest, 'hex')
+        FROM business.project_creation_receipt WHERE project_id = '$browser_project_id'::uuid),
+      'old_binding_snapshot_digest', (SELECT encode(skill_snapshot_digest, 'hex')
+        FROM business.project_session_binding WHERE project_id = '$browser_project_id'::uuid),
+      'old_outbox_snapshot_digest', (SELECT encode(skill_snapshot_digest, 'hex')
+        FROM business.project_session_outbox WHERE aggregate_id = '$browser_project_id'::uuid),
+      'old_resolution_snapshot_digest', (SELECT encode(snapshot_set_digest, 'hex')
+        FROM business.project_session_skill_resolution WHERE project_id = '$browser_project_id'::uuid),
+      'new_creation_snapshot_digest', (SELECT encode(skill_snapshot_digest, 'hex')
+        FROM business.project_creation_receipt WHERE project_id = '$new_project_id'::uuid),
+      'new_binding_snapshot_digest', (SELECT encode(skill_snapshot_digest, 'hex')
+        FROM business.project_session_binding WHERE project_id = '$new_project_id'::uuid),
+      'new_outbox_snapshot_digest', (SELECT encode(skill_snapshot_digest, 'hex')
+        FROM business.project_session_outbox WHERE aggregate_id = '$new_project_id'::uuid),
+      'new_resolution_snapshot_digest', (SELECT encode(snapshot_set_digest, 'hex')
+        FROM business.project_session_skill_resolution WHERE project_id = '$new_project_id'::uuid),
+      'first_snapshot_content_digest', (SELECT encode(content_digest, 'hex') FROM business.skill_published_snapshot
+        WHERE id = '$browser_snapshot_id'::uuid),
+      'second_snapshot_content_digest', (SELECT encode(content_digest, 'hex') FROM business.skill_published_snapshot
+        WHERE id = '$second_snapshot_id'::uuid),
+      'old_resolution_content_digest', (SELECT encode(content_digest, 'hex')
+        FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$browser_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid),
+      'new_resolution_content_digest', (SELECT encode(content_digest, 'hex')
+        FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$new_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid),
+      'old_resolution_runtime_digest', (SELECT encode(runtime_content_digest, 'hex')
+        FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$browser_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid),
+      'new_resolution_runtime_digest', (SELECT encode(runtime_content_digest, 'hex')
+        FROM business.project_session_skill_resolution_item
+        WHERE project_id = '$new_project_id'::uuid AND skill_id = '$browser_skill_id'::uuid)
+    );")" || fail "W1 Browser Business A/B 重发布事实读取失败"
+  printf '%s\n' "$republish_business_fact" >"$evidence_dir/responses/w1-browser-republish-business.json"
+  jq -e '
+    .skill_count == 1 and .publication_revision == 2 and .current_pointer_is_b
+    and .content_revision_count == 2
+    and .review_count == 2 and .first_review_count == 1 and .second_review_count == 1
+    and .snapshot_count == 2 and .first_snapshot_count == 1 and .second_snapshot_count == 1
+    and .revision_lineage_consistent
+    and .skill_create_receipt_count == 1 and .skill_submit_receipt_count == 2
+    and .skill_submit_result_count == 2 and .skill_approve_receipt_count == 2
+    and .skill_approve_result_count == 2 and .skill_publish_audit_count == 2
+    and .skill_publish_audit_review_count == 2
+    and .old_project_creation_receipt_count == 1 and .new_project_creation_receipt_count == 1
+    and .old_project_binding_audit_count == 1 and .new_project_binding_audit_count == 1
+    and .old_project_count == 1 and .new_project_count == 1
+    and .old_project_binding_set_count == 1 and .new_project_binding_set_count == 1
+    and .old_project_skill_binding_count == 1 and .new_project_skill_binding_count == 1
+    and .old_project_session_binding_count == 1 and .new_project_session_binding_count == 1
+    and .old_project_outbox_count == 1 and .new_project_outbox_count == 1
+    and .old_resolution_header_count == 1 and .old_resolution_item_count == 1
+    and .old_resolution_other_snapshot_count == 0
+    and .new_resolution_header_count == 1 and .new_resolution_item_count == 1
+    and .new_resolution_other_snapshot_count == 0
+    and all([.first_snapshot_content_digest,.second_snapshot_content_digest,
+      .old_resolution_content_digest,.new_resolution_content_digest,
+      .old_resolution_runtime_digest,.new_resolution_runtime_digest,
+      .old_creation_snapshot_digest,.old_binding_snapshot_digest,
+      .old_outbox_snapshot_digest,.old_resolution_snapshot_digest,
+      .new_creation_snapshot_digest,.new_binding_snapshot_digest,
+      .new_outbox_snapshot_digest,.new_resolution_snapshot_digest][];
+      test("^[0-9a-f]{64}$"))
+    and .first_snapshot_content_digest == .old_resolution_content_digest
+    and .second_snapshot_content_digest == .new_resolution_content_digest
+    and .first_snapshot_content_digest != .second_snapshot_content_digest
+    and .old_resolution_runtime_digest != .new_resolution_runtime_digest
+    and .old_creation_snapshot_digest == .old_binding_snapshot_digest
+    and .old_binding_snapshot_digest == .old_outbox_snapshot_digest
+    and .old_outbox_snapshot_digest == .old_resolution_snapshot_digest
+    and .new_creation_snapshot_digest == .new_binding_snapshot_digest
+    and .new_binding_snapshot_digest == .new_outbox_snapshot_digest
+    and .new_outbox_snapshot_digest == .new_resolution_snapshot_digest
+    and .old_resolution_snapshot_digest != .new_resolution_snapshot_digest' \
+    "$evidence_dir/responses/w1-browser-republish-business.json" >/dev/null || \
+    fail "W1 Browser Business 未证明 publication_revision=2、当前 B 或 Project A/B 隔离"
+
   agent_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_agent -Atc "
     SELECT json_build_object(
       'session_count', (SELECT COUNT(*) FROM agent.session WHERE id = '$browser_session_id'::uuid
@@ -3257,23 +3562,346 @@ run_w1_browser_frozen_smoke() {
     "$evidence_dir/responses/w1-browser-frozen-agent.json" >/dev/null || \
     fail "W1 Browser Agent DB Snapshot 事实漂移"
 
+  republish_agent_fact="$(docker exec "$postgres_container" psql -U dora_admin -d dora_agent -Atc "
+    SELECT json_build_object(
+      'old_session_count', (SELECT COUNT(*) FROM agent.session
+        WHERE id = '$browser_session_id'::uuid AND project_id = '$browser_project_id'::uuid
+          AND user_id = '$browser_creator_id'::uuid),
+      'old_header_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot
+        WHERE session_id = '$browser_session_id'::uuid AND snapshot_kind = 'published_refs' AND skill_count = 1),
+      'old_item_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$browser_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND published_snapshot_id = '$browser_snapshot_id'::uuid AND publication_revision = 1),
+      'old_other_snapshot_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$browser_session_id'::uuid
+          AND published_snapshot_id <> '$browser_snapshot_id'::uuid),
+      'old_receipt_count', (SELECT COUNT(*) FROM agent.session_command_receipt AS receipt
+        JOIN agent.session_skill_snapshot AS header ON header.session_id = receipt.session_id
+        WHERE receipt.session_id = '$browser_session_id'::uuid
+          AND receipt.command_type = 'ensure_project_session_v2' AND receipt.skill_count = 1
+          AND receipt.skill_snapshot_digest = header.snapshot_digest),
+      'old_input_count', (SELECT COUNT(*) FROM agent.session_input AS input_record
+        JOIN agent.session_command_receipt AS receipt
+          ON receipt.session_id = input_record.session_id AND receipt.input_id = input_record.id
+        WHERE input_record.session_id = '$browser_session_id'::uuid),
+      'old_message_count', (SELECT COUNT(*) FROM agent.session_message
+        WHERE session_id = '$browser_session_id'::uuid),
+      'old_sequence_counter_count', (SELECT COUNT(*) FROM agent.session_sequence_counter
+        WHERE session_id = '$browser_session_id'::uuid
+          AND last_message_seq = 1 AND last_input_enqueue_seq = 1),
+      'old_runtime_lease_count', (SELECT COUNT(*) FROM agent.session_runtime_lease
+        WHERE session_id = '$browser_session_id'::uuid),
+      'old_event_counter_count', (SELECT COUNT(*) FROM agent.session_event_counter
+        WHERE session_id = '$browser_session_id'::uuid AND last_seq = 2 AND min_available_seq = 1),
+      'old_event_log_count', (SELECT COUNT(*) FROM agent.session_event_log
+        WHERE session_id = '$browser_session_id'::uuid),
+      'old_event_log_shape_count', (SELECT COUNT(*) FROM agent.session_event_log
+        WHERE session_id = '$browser_session_id'::uuid
+          AND ((seq = 1 AND event_type = 'session.created')
+            OR (seq = 2 AND event_type = 'session.input.accepted'))),
+      'old_snapshot_digest', (SELECT snapshot_digest FROM agent.session_skill_snapshot
+        WHERE session_id = '$browser_session_id'::uuid),
+      'old_receipt_snapshot_digest', (SELECT skill_snapshot_digest FROM agent.session_command_receipt
+        WHERE session_id = '$browser_session_id'::uuid AND command_type = 'ensure_project_session_v2'),
+      'old_content_digest', (SELECT content_digest FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$browser_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid),
+      'old_runtime_digest', (SELECT runtime_content_digest FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$browser_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid),
+      'new_session_count', (SELECT COUNT(*) FROM agent.session
+        WHERE id = '$new_session_id'::uuid AND project_id = '$new_project_id'::uuid
+          AND user_id = '$browser_creator_id'::uuid),
+      'new_header_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot
+        WHERE session_id = '$new_session_id'::uuid AND snapshot_kind = 'published_refs' AND skill_count = 1),
+      'new_item_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$new_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid
+          AND published_snapshot_id = '$second_snapshot_id'::uuid AND publication_revision = 2),
+      'new_other_snapshot_count', (SELECT COUNT(*) FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$new_session_id'::uuid
+          AND published_snapshot_id <> '$second_snapshot_id'::uuid),
+      'new_receipt_count', (SELECT COUNT(*) FROM agent.session_command_receipt AS receipt
+        JOIN agent.session_skill_snapshot AS header ON header.session_id = receipt.session_id
+        WHERE receipt.session_id = '$new_session_id'::uuid
+          AND receipt.command_type = 'ensure_project_session_v2' AND receipt.skill_count = 1
+          AND receipt.skill_snapshot_digest = header.snapshot_digest),
+      'new_input_count', (SELECT COUNT(*) FROM agent.session_input AS input_record
+        JOIN agent.session_command_receipt AS receipt
+          ON receipt.session_id = input_record.session_id AND receipt.input_id = input_record.id
+        WHERE input_record.session_id = '$new_session_id'::uuid),
+      'new_message_count', (SELECT COUNT(*) FROM agent.session_message
+        WHERE session_id = '$new_session_id'::uuid),
+      'new_sequence_counter_count', (SELECT COUNT(*) FROM agent.session_sequence_counter
+        WHERE session_id = '$new_session_id'::uuid
+          AND last_message_seq = 1 AND last_input_enqueue_seq = 1),
+      'new_runtime_lease_count', (SELECT COUNT(*) FROM agent.session_runtime_lease
+        WHERE session_id = '$new_session_id'::uuid),
+      'new_event_counter_count', (SELECT COUNT(*) FROM agent.session_event_counter
+        WHERE session_id = '$new_session_id'::uuid AND last_seq = 2 AND min_available_seq = 1),
+      'new_event_log_count', (SELECT COUNT(*) FROM agent.session_event_log
+        WHERE session_id = '$new_session_id'::uuid),
+      'new_event_log_shape_count', (SELECT COUNT(*) FROM agent.session_event_log
+        WHERE session_id = '$new_session_id'::uuid
+          AND ((seq = 1 AND event_type = 'session.created')
+            OR (seq = 2 AND event_type = 'session.input.accepted'))),
+      'new_snapshot_digest', (SELECT snapshot_digest FROM agent.session_skill_snapshot
+        WHERE session_id = '$new_session_id'::uuid),
+      'new_receipt_snapshot_digest', (SELECT skill_snapshot_digest FROM agent.session_command_receipt
+        WHERE session_id = '$new_session_id'::uuid AND command_type = 'ensure_project_session_v2'),
+      'new_content_digest', (SELECT content_digest FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$new_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid),
+      'new_runtime_digest', (SELECT runtime_content_digest FROM agent.session_skill_snapshot_item
+        WHERE session_id = '$new_session_id'::uuid AND skill_id = '$browser_skill_id'::uuid)
+    );")" || fail "W1 Browser Agent A/B Session 事实读取失败"
+  printf '%s\n' "$republish_agent_fact" >"$evidence_dir/responses/w1-browser-republish-agent.json"
+  jq -e '
+    .old_session_count == 1 and .old_header_count == 1 and .old_item_count == 1
+    and .old_other_snapshot_count == 0 and .old_receipt_count == 1
+    and .old_message_count == 1 and .old_input_count == 1
+    and .old_sequence_counter_count == 1 and .old_runtime_lease_count == 1
+    and .old_event_counter_count == 1 and .old_event_log_count == 2 and .old_event_log_shape_count == 2
+    and .new_session_count == 1 and .new_header_count == 1 and .new_item_count == 1
+    and .new_other_snapshot_count == 0 and .new_receipt_count == 1
+    and .new_message_count == 1 and .new_input_count == 1
+    and .new_sequence_counter_count == 1 and .new_runtime_lease_count == 1
+    and .new_event_counter_count == 1 and .new_event_log_count == 2 and .new_event_log_shape_count == 2
+    and all([.old_snapshot_digest,.old_content_digest,.old_runtime_digest,
+      .old_receipt_snapshot_digest,.new_snapshot_digest,.new_content_digest,.new_runtime_digest,
+      .new_receipt_snapshot_digest][];
+      test("^[0-9a-f]{64}$"))
+    and .old_snapshot_digest == .old_receipt_snapshot_digest
+    and .new_snapshot_digest == .new_receipt_snapshot_digest
+    and .old_snapshot_digest != .new_snapshot_digest
+    and .old_content_digest != .new_content_digest
+    and .old_runtime_digest != .new_runtime_digest' \
+    "$evidence_dir/responses/w1-browser-republish-agent.json" >/dev/null || \
+    fail "W1 Browser Agent 未证明旧 Session=A、新 Session=B 或 receipt/header/item/input 唯一"
+
   if ! (
     cd "$repo_root/agent"
     DORA_SMOKE_AGENT_SESSION_ID="$browser_session_id" GOWORK=off "$go_bin" run -tags localsmoke ./cmd/local-smoke-snapshot-verifier
-  ) >"$verifier_file"; then
-    fail "W1 Browser Agent Snapshot 正式 Load 路径校验失败"
+  ) >"$old_verifier_file"; then
+    fail "W1 Browser Agent 旧 Session Snapshot 正式 Load 路径校验失败"
   fi
   jq -e --arg session "$browser_session_id" --arg skill "$browser_skill_id" --arg snapshot "$browser_snapshot_id" '
     .status == "verified" and .session_id == $session and .skill_count == 1 and (.skills | length) == 1
     and .skills[0].skill_id == $skill and .skills[0].published_snapshot_id == $snapshot' \
-    "$verifier_file" >/dev/null || fail "W1 Browser Agent Snapshot 解密验证结果漂移"
+    "$old_verifier_file" >/dev/null || fail "W1 Browser Agent 旧 Session Snapshot 解密验证结果漂移"
+  if ! (
+    cd "$repo_root/agent"
+    DORA_SMOKE_AGENT_SESSION_ID="$new_session_id" GOWORK=off "$go_bin" run -tags localsmoke ./cmd/local-smoke-snapshot-verifier
+  ) >"$new_verifier_file"; then
+    fail "W1 Browser Agent 新 Session Snapshot 正式 Load 路径校验失败"
+  fi
+  jq -e --arg session "$new_session_id" --arg skill "$browser_skill_id" --arg snapshot "$second_snapshot_id" '
+    .status == "verified" and .session_id == $session and .skill_count == 1 and (.skills | length) == 1
+    and .skills[0].skill_id == $skill and .skills[0].published_snapshot_id == $snapshot' \
+    "$new_verifier_file" >/dev/null || fail "W1 Browser Agent 新 Session Snapshot 解密验证结果漂移"
+
+  jq -n \
+    --arg schema_version "w1.skill-republish-session-isolation.smoke.evidence.v1" \
+    --arg run_id "$run_id" --arg produced_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg source_digest_sha256 "$source_digest_sha256" \
+    --arg business_binary_sha256 "$business_binary_sha256" --arg agent_binary_sha256 "$agent_binary_sha256" \
+    --arg skill_id "$browser_skill_id" --arg first_review_id "$browser_review_id" \
+    --arg second_review_id "$second_review_id" \
+    --arg first_published_snapshot_id "$browser_snapshot_id" \
+    --arg second_published_snapshot_id "$second_snapshot_id" \
+    --arg old_project_id "$browser_project_id" --arg old_session_id "$browser_session_id" \
+    --arg new_project_id "$new_project_id" --arg new_session_id "$new_session_id" \
+    --slurpfile browser "$browser_result_file" \
+    --slurpfile business "$evidence_dir/responses/w1-browser-republish-business.json" \
+    --slurpfile agent "$evidence_dir/responses/w1-browser-republish-agent.json" \
+    --slurpfile old_verifier "$old_verifier_file" --slurpfile new_verifier "$new_verifier_file" '
+    {schema_version:$schema_version,status:"pending",run_id:$run_id,produced_at:$produced_at,
+      source_digest_sha256:$source_digest_sha256,business_binary_sha256:$business_binary_sha256,
+      agent_binary_sha256:$agent_binary_sha256,skill_id:$skill_id,
+      first_review_id:$first_review_id,second_review_id:$second_review_id,
+      first_published_snapshot_id:$first_published_snapshot_id,
+      second_published_snapshot_id:$second_published_snapshot_id,
+      old_project_id:$old_project_id,old_session_id:$old_session_id,
+      new_project_id:$new_project_id,new_session_id:$new_session_id,
+      facts:{
+        business:{publication_revision:$business[0].publication_revision,
+          content_revision_count:$business[0].content_revision_count,
+          review_count:$business[0].review_count,snapshot_count:$business[0].snapshot_count,
+          revision_lineage_consistent:$business[0].revision_lineage_consistent,
+          skill_create_receipt_count:$business[0].skill_create_receipt_count,
+          skill_submit_receipt_count:$business[0].skill_submit_receipt_count,
+          skill_submit_result_count:$business[0].skill_submit_result_count,
+          skill_approve_receipt_count:$business[0].skill_approve_receipt_count,
+          skill_approve_result_count:$business[0].skill_approve_result_count,
+          skill_publish_audit_count:$business[0].skill_publish_audit_count,
+          skill_publish_audit_review_count:$business[0].skill_publish_audit_review_count,
+          old_project_creation_receipt_count:$business[0].old_project_creation_receipt_count,
+          new_project_creation_receipt_count:$business[0].new_project_creation_receipt_count,
+          old_project_count:$business[0].old_project_count,new_project_count:$business[0].new_project_count,
+          old_project_binding_set_count:$business[0].old_project_binding_set_count,
+          new_project_binding_set_count:$business[0].new_project_binding_set_count,
+          old_project_skill_binding_count:$business[0].old_project_skill_binding_count,
+          new_project_skill_binding_count:$business[0].new_project_skill_binding_count,
+          old_project_binding_audit_count:$business[0].old_project_binding_audit_count,
+          new_project_binding_audit_count:$business[0].new_project_binding_audit_count,
+          old_project_session_binding_count:$business[0].old_project_session_binding_count,
+          new_project_session_binding_count:$business[0].new_project_session_binding_count,
+          old_project_outbox_count:$business[0].old_project_outbox_count,
+          new_project_outbox_count:$business[0].new_project_outbox_count,
+          old_resolution_header_count:$business[0].old_resolution_header_count,
+          old_resolution_item_count:$business[0].old_resolution_item_count,
+          new_resolution_header_count:$business[0].new_resolution_header_count,
+          new_resolution_item_count:$business[0].new_resolution_item_count},
+        agent:{old_session_count:$agent[0].old_session_count,old_header_count:$agent[0].old_header_count,
+          old_item_count:$agent[0].old_item_count,old_receipt_count:$agent[0].old_receipt_count,
+          old_message_count:$agent[0].old_message_count,old_input_count:$agent[0].old_input_count,
+          old_sequence_counter_count:$agent[0].old_sequence_counter_count,
+          old_runtime_lease_count:$agent[0].old_runtime_lease_count,
+          old_event_counter_count:$agent[0].old_event_counter_count,
+          old_event_log_count:$agent[0].old_event_log_count,
+          old_event_log_shape_count:$agent[0].old_event_log_shape_count,
+          new_session_count:$agent[0].new_session_count,
+          new_header_count:$agent[0].new_header_count,new_item_count:$agent[0].new_item_count,
+          new_receipt_count:$agent[0].new_receipt_count,new_message_count:$agent[0].new_message_count,
+          new_input_count:$agent[0].new_input_count,
+          new_sequence_counter_count:$agent[0].new_sequence_counter_count,
+          new_runtime_lease_count:$agent[0].new_runtime_lease_count,
+          new_event_counter_count:$agent[0].new_event_counter_count,
+          new_event_log_count:$agent[0].new_event_log_count,
+          new_event_log_shape_count:$agent[0].new_event_log_shape_count},
+        snapshot_digests:{old:$agent[0].old_snapshot_digest,new:$agent[0].new_snapshot_digest}},
+      assertions:{
+        browser_second_review_replay:$browser[0].second_review_replay_matches,
+        browser_second_decision_replay:$browser[0].second_decision_replay_matches,
+        browser_new_quickcreate_replay:$browser[0].new_quickcreate_replay_matches,
+        browser_old_quickcreate_replay:$browser[0].old_quickcreate_replay_matches,
+        old_command_replay_preserves_a:($browser[0].old_quickcreate_replay_matches
+          and $business[0].old_project_count == 1 and $business[0].old_project_creation_receipt_count == 1
+          and $business[0].old_project_binding_set_count == 1
+          and $business[0].old_project_skill_binding_count == 1
+          and $business[0].old_project_binding_audit_count == 1
+          and $business[0].old_resolution_header_count == 1 and $business[0].old_resolution_item_count == 1
+          and $business[0].old_resolution_other_snapshot_count == 0
+          and $business[0].old_project_session_binding_count == 1
+          and $business[0].old_project_outbox_count == 1
+          and $agent[0].old_session_count == 1 and $agent[0].old_header_count == 1
+          and $agent[0].old_item_count == 1 and $agent[0].old_other_snapshot_count == 0
+          and $agent[0].old_receipt_count == 1
+          and $agent[0].old_message_count == 1 and $agent[0].old_input_count == 1
+          and $agent[0].old_sequence_counter_count == 1 and $agent[0].old_runtime_lease_count == 1
+          and $agent[0].old_event_counter_count == 1 and $agent[0].old_event_log_count == 2
+          and $agent[0].old_event_log_shape_count == 2
+          and $old_verifier[0].skills[0].published_snapshot_id == $first_published_snapshot_id),
+        browser_owner_published_projection_no_version_ui:$browser[0].owner_published_projection_no_version_ui,
+        browser_old_workspace_revisited:$browser[0].old_workspace_revisited,
+        business_publication_revision_two:($business[0].skill_count == 1
+          and $business[0].publication_revision == 2),
+        business_current_pointer_is_second:$business[0].current_pointer_is_b,
+        business_content_revisions_unique:($business[0].content_revision_count == 2),
+        business_revision_lineage_consistent:$business[0].revision_lineage_consistent,
+        business_two_reviews_unique:($first_review_id != $second_review_id
+          and $business[0].review_count == 2 and $business[0].first_review_count == 1
+          and $business[0].second_review_count == 1),
+        business_two_snapshots_unique:($first_published_snapshot_id != $second_published_snapshot_id
+          and $business[0].snapshot_count == 2 and $business[0].first_snapshot_count == 1
+          and $business[0].second_snapshot_count == 1),
+        business_skill_replay_receipts_unique:($business[0].skill_create_receipt_count == 1
+          and $business[0].skill_submit_receipt_count == 2 and $business[0].skill_submit_result_count == 2
+          and $business[0].skill_approve_receipt_count == 2 and $business[0].skill_approve_result_count == 2),
+        business_publish_audits_unique:($business[0].skill_publish_audit_count == 2
+          and $business[0].skill_publish_audit_review_count == 2),
+        business_creator_quickcreates_unique:($business[0].old_project_creation_receipt_count == 1
+          and $business[0].new_project_creation_receipt_count == 1
+          and $business[0].old_project_count == 1 and $business[0].new_project_count == 1
+          and $business[0].old_project_binding_set_count == 1 and $business[0].new_project_binding_set_count == 1
+          and $business[0].old_project_skill_binding_count == 1 and $business[0].new_project_skill_binding_count == 1
+          and $business[0].old_project_binding_audit_count == 1
+          and $business[0].new_project_binding_audit_count == 1
+          and $business[0].old_resolution_header_count == 1 and $business[0].new_resolution_header_count == 1
+          and $business[0].old_resolution_item_count == 1 and $business[0].new_resolution_item_count == 1
+          and $business[0].old_project_session_binding_count == 1
+          and $business[0].new_project_session_binding_count == 1
+          and $business[0].old_project_outbox_count == 1 and $business[0].new_project_outbox_count == 1),
+        business_outboxes_v2_cleared:($business[0].old_project_outbox_count == 1
+          and $business[0].new_project_outbox_count == 1),
+        business_old_project_resolves_first:($business[0].old_resolution_header_count == 1
+          and $business[0].old_resolution_item_count == 1
+          and $business[0].old_resolution_other_snapshot_count == 0),
+        business_new_project_resolves_second:($business[0].new_resolution_header_count == 1
+          and $business[0].new_resolution_item_count == 1
+          and $business[0].new_resolution_other_snapshot_count == 0),
+        agent_old_session_snapshot_first:($old_session_id != $new_session_id
+          and $agent[0].old_session_count == 1 and $agent[0].old_item_count == 1
+          and $agent[0].old_other_snapshot_count == 0
+          and $old_verifier[0].skills[0].published_snapshot_id == $first_published_snapshot_id),
+        agent_new_session_snapshot_second:($agent[0].new_session_count == 1
+          and $agent[0].new_item_count == 1 and $agent[0].new_other_snapshot_count == 0
+          and $new_verifier[0].skills[0].published_snapshot_id == $second_published_snapshot_id),
+        agent_old_facts_unique:($agent[0].old_header_count == 1 and $agent[0].old_item_count == 1
+          and $agent[0].old_receipt_count == 1 and $agent[0].old_message_count == 1
+          and $agent[0].old_input_count == 1 and $agent[0].old_sequence_counter_count == 1
+          and $agent[0].old_runtime_lease_count == 1 and $agent[0].old_event_counter_count == 1
+          and $agent[0].old_event_log_count == 2 and $agent[0].old_event_log_shape_count == 2),
+        agent_new_facts_unique:($agent[0].new_header_count == 1 and $agent[0].new_item_count == 1
+          and $agent[0].new_receipt_count == 1 and $agent[0].new_message_count == 1
+          and $agent[0].new_input_count == 1 and $agent[0].new_sequence_counter_count == 1
+          and $agent[0].new_runtime_lease_count == 1 and $agent[0].new_event_counter_count == 1
+          and $agent[0].new_event_log_count == 2 and $agent[0].new_event_log_shape_count == 2),
+        agent_old_verifier_passed:($old_verifier[0].status == "verified"
+          and $old_verifier[0].session_id == $old_session_id),
+        agent_new_verifier_passed:($new_verifier[0].status == "verified"
+          and $new_verifier[0].session_id == $new_session_id),
+        old_session_cross_module_consistent:($business[0].first_snapshot_content_digest
+          == $business[0].old_resolution_content_digest
+          and $business[0].old_resolution_content_digest == $agent[0].old_content_digest
+          and $agent[0].old_content_digest == $old_verifier[0].skills[0].content_digest
+          and $business[0].old_resolution_runtime_digest == $agent[0].old_runtime_digest
+          and $agent[0].old_runtime_digest == $old_verifier[0].skills[0].runtime_content_digest
+          and $agent[0].old_snapshot_digest == $old_verifier[0].snapshot_digest
+          and $agent[0].old_receipt_snapshot_digest == $agent[0].old_snapshot_digest
+          and $old_verifier[0].skill_count == $agent[0].old_item_count),
+        new_session_cross_module_consistent:($business[0].second_snapshot_content_digest
+          == $business[0].new_resolution_content_digest
+          and $business[0].new_resolution_content_digest == $agent[0].new_content_digest
+          and $agent[0].new_content_digest == $new_verifier[0].skills[0].content_digest
+          and $business[0].new_resolution_runtime_digest == $agent[0].new_runtime_digest
+          and $agent[0].new_runtime_digest == $new_verifier[0].skills[0].runtime_content_digest
+          and $agent[0].new_snapshot_digest == $new_verifier[0].snapshot_digest
+          and $agent[0].new_receipt_snapshot_digest == $agent[0].new_snapshot_digest
+          and $new_verifier[0].skill_count == $agent[0].new_item_count),
+        old_snapshot_digest_chain_consistent:($business[0].old_creation_snapshot_digest
+          == $business[0].old_binding_snapshot_digest
+          and $business[0].old_binding_snapshot_digest == $business[0].old_outbox_snapshot_digest
+          and $business[0].old_outbox_snapshot_digest == $business[0].old_resolution_snapshot_digest
+          and $business[0].old_resolution_snapshot_digest == $agent[0].old_snapshot_digest
+          and $agent[0].old_snapshot_digest == $agent[0].old_receipt_snapshot_digest
+          and $agent[0].old_receipt_snapshot_digest == $old_verifier[0].snapshot_digest),
+        new_snapshot_digest_chain_consistent:($business[0].new_creation_snapshot_digest
+          == $business[0].new_binding_snapshot_digest
+          and $business[0].new_binding_snapshot_digest == $business[0].new_outbox_snapshot_digest
+          and $business[0].new_outbox_snapshot_digest == $business[0].new_resolution_snapshot_digest
+          and $business[0].new_resolution_snapshot_digest == $agent[0].new_snapshot_digest
+          and $agent[0].new_snapshot_digest == $agent[0].new_receipt_snapshot_digest
+          and $agent[0].new_receipt_snapshot_digest == $new_verifier[0].snapshot_digest),
+        snapshot_set_digests_distinct:($business[0].old_resolution_snapshot_digest
+          != $business[0].new_resolution_snapshot_digest),
+        publication_content_digests_distinct:($business[0].first_snapshot_content_digest
+          != $business[0].second_snapshot_content_digest),
+        resolution_runtime_digests_distinct:($business[0].old_resolution_runtime_digest
+          != $business[0].new_resolution_runtime_digest),
+        agent_header_snapshot_digests_distinct:($agent[0].old_snapshot_digest
+          != $agent[0].new_snapshot_digest)}}' \
+    >"$skill_republish_pending_evidence_file"
+  jq -e '
+    .schema_version == "w1.skill-republish-session-isolation.smoke.evidence.v1"
+    and .status == "pending" and (.assertions | length) == 33
+    and all(.assertions[]; ((. | type) == "boolean" and . == true))' \
+    "$skill_republish_pending_evidence_file" >/dev/null || \
+    fail "W1 Skill A/B 重发布 Session 隔离 Evidence 含未通过断言"
+  w1_skill_republish_smoke_ran=true
 
   jq -n --slurpfile api "$evidence_dir/responses/w1-browser-frozen-api.json" \
     --slurpfile browser "$browser_result_file" \
     --slurpfile preselection "$preselection_database_file" \
     --slurpfile business "$evidence_dir/responses/w1-browser-frozen-business.json" \
     --slurpfile agent "$evidence_dir/responses/w1-browser-frozen-agent.json" \
-    --slurpfile verifier "$verifier_file" \
+    --slurpfile verifier "$old_verifier_file" \
     --argjson creator_admin_denial_audited "$creator_admin_denial_audited" '
     {skill_id:$api[0].skill_id,review_id:$api[0].review_id,published_snapshot_id:$api[0].published_snapshot_id,
       creator_admin_denial_audited:$creator_admin_denial_audited,
@@ -3281,7 +3909,7 @@ run_w1_browser_frozen_smoke() {
       reviewer_owner_read_not_found:$browser[0].reviewer_owner_read_not_found,
       reviewer_owner_write_not_found:$browser[0].reviewer_owner_write_not_found,
       reviewer_owner_resource_facts_not_disclosed:$browser[0].reviewer_owner_resource_facts_not_disclosed,
-      browser_result_contract:($browser[0].schema_version == "w1.real-review-result.v5"
+      browser_result_contract:($browser[0].schema_version == "w1.real-review-result.v6"
         and $browser[0].creator_admin_route_blocked == true
         and $browser[0].creator_admin_implicit_api_blocked == true
         and $browser[0].creator_admin_api_forbidden == true
@@ -3299,19 +3927,27 @@ run_w1_browser_frozen_smoke() {
         and $browser[0].public_market_login_preselection_recovered == true
         and $browser[0].public_market_pre_submit_quickcreate_count == 0
         and $browser[0].public_market_submit_quickcreate_count == 1
+        and $browser[0].second_review_replay_matches == true
+        and $browser[0].second_decision_replay_matches == true
+        and $browser[0].old_quickcreate_replay_matches == true
+        and $browser[0].new_quickcreate_replay_matches == true
+        and $browser[0].owner_published_projection_no_version_ui == true
+        and $browser[0].old_workspace_revisited == true
         and $preselection[0].consumer_id == $browser[0].public_market_consumer_id
         and $preselection[0].skill_id == $browser[0].public_market_selected_skill_id
         and $preselection[0].database_counts_unchanged == true
         and $preselection[0].before_login == $preselection[0].before_submit
-        and $api[0].owner_status == 200 and $api[0].review_status == 200),
+        and $api[0].owner_status == 200 and $api[0].review_status == 200
+        and $api[0].second_review_status == 200),
       browser_public_market_preselection_database_zero_delta:
         ($preselection[0].schema_version == "w1.public-market-preselection.database-fact.v1"
           and $preselection[0].consumer_id == $browser[0].reviewer_id
           and $preselection[0].skill_id == $browser[0].skill_id
           and $preselection[0].database_counts_unchanged == true
           and $preselection[0].before_login == $preselection[0].before_submit),
-      formal_api_frozen_revision:($api[0].owner_current_draft_is_b
-        and $api[0].review_frozen_submission_is_a and $api[0].review_current_published_is_a),
+      formal_api_frozen_revision:($api[0].owner_current_published_is_b
+        and $api[0].review_frozen_submission_is_a and $api[0].first_review_observes_current_b
+        and $api[0].second_review_frozen_and_current_is_b),
       business_frozen_revision:($business[0].review_fact_count == 1 and $business[0].published_fact_count == 1
         and $business[0].frozen_publication_matches and $business[0].submitted_summary_is_a
         and $business[0].current_draft_summary_is_b and $business[0].published_summary_is_a),
@@ -3364,6 +4000,18 @@ if [[ "$w1_skill_smoke_enabled" == "1" && "${W0_RUN_BROWSER_SMOKE:-0}" == "1" ]]
 fi
 # 新运行开始即撤销旧的 canonical summary；失败运行不得让消费者继续读取上一次 passed。
 rm -f "$evidence_file"
+if [[ -n "$w1_evidence_current_manifest" ]]; then
+  mkdir -p "$w1_evidence_release_root"
+  chmod 700 "$w1_evidence_release_root"
+  rm -f "$w1_evidence_current_manifest" "$w1_evidence_release_root/.current-${run_id}.tmp"
+  rm -rf "$w1_evidence_release_dir" "$w1_evidence_release_root/.${run_id}.staging"
+  # 固定顶层文件是旧的非组原子发布接口；新消费者只能从 current manifest 发现同批五份 Evidence。
+  rm -f "$repo_root/.local/smoke/w1-skill-foundation-evidence.json" \
+    "$repo_root/.local/smoke/w1-skill-governance-evidence.json" \
+    "$repo_root/.local/smoke/w1-skill-market-evidence.json" \
+    "$repo_root/.local/smoke/w1-skill-market-binding-evidence.json" \
+    "$repo_root/.local/smoke/w1-skill-republish-session-isolation-evidence.json"
+fi
 if [[ -n "$governance_evidence_file" ]]; then
   rm -f "$governance_evidence_file" "${governance_evidence_file}.tmp"
 fi
@@ -3372,6 +4020,9 @@ if [[ -n "$skill_market_evidence_file" ]]; then
 fi
 if [[ -n "$skill_market_binding_evidence_file" ]]; then
   rm -f "$skill_market_binding_evidence_file" "${skill_market_binding_evidence_file}.tmp"
+fi
+if [[ -n "$skill_republish_evidence_file" ]]; then
+  rm -f "$skill_republish_evidence_file" "${skill_republish_evidence_file}.tmp"
 fi
 if [[ -n "$legacy_evidence_file" ]]; then
   rm -f "$legacy_evidence_file"
@@ -3395,6 +4046,7 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   governance_pending_evidence_file="$evidence_dir/governance-evidence.pending.json"
   skill_market_pending_evidence_file="$evidence_dir/skill-market-evidence.pending.json"
   skill_market_binding_pending_evidence_file="$evidence_dir/skill-market-binding-evidence.pending.json"
+  skill_republish_pending_evidence_file="$evidence_dir/skill-republish-session-isolation-evidence.pending.json"
   governor_cookie_jar="$w1_temp_dir/governor-cookie.jar"
   governor_curl_config="$w1_temp_dir/governor-csrf.curl"
   governor_login_response_temp="$w1_temp_dir/governor-login.json"
@@ -4355,12 +5007,61 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
     and all(.assertions[]; ((. | type) == "boolean" and . == true))' \
     "$skill_market_binding_pending_evidence_file" >/dev/null || \
     fail "W1 Public Market Binding Evidence 含未通过断言，禁止发布 passed summary"
+  [[ "$w1_skill_republish_smoke_ran" == "true" && -s "$skill_republish_pending_evidence_file" ]] || \
+    fail "W1 Skill A/B 重发布 Session 隔离 Smoke 未产生独立 pending Evidence"
+  jq -e '
+    keys == ["agent_binary_sha256","assertions","business_binary_sha256","facts","first_published_snapshot_id","first_review_id","new_project_id","new_session_id","old_project_id","old_session_id","produced_at","run_id","schema_version","second_published_snapshot_id","second_review_id","skill_id","source_digest_sha256","status"]
+    and .schema_version == "w1.skill-republish-session-isolation.smoke.evidence.v1"
+    and .status == "pending"
+    and (.run_id | type) == "string" and (.run_id | length) > 0
+    and (.produced_at | type) == "string"
+    and (.source_digest_sha256 | test("^[0-9a-f]{64}$"))
+    and (.business_binary_sha256 | test("^[0-9a-f]{64}$"))
+    and (.agent_binary_sha256 | test("^[0-9a-f]{64}$"))
+    and all([.skill_id,.first_review_id,.second_review_id,
+      .first_published_snapshot_id,.second_published_snapshot_id,
+      .old_project_id,.old_session_id,.new_project_id,.new_session_id][];
+      ((. | type) == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")))
+    and .first_review_id != .second_review_id
+    and .first_published_snapshot_id != .second_published_snapshot_id
+    and .old_project_id != .new_project_id and .old_session_id != .new_session_id
+    and (.facts | keys) == ["agent","business","snapshot_digests"]
+    and (.facts.business | keys) == ["content_revision_count","new_project_binding_audit_count","new_project_binding_set_count","new_project_count","new_project_creation_receipt_count","new_project_outbox_count","new_project_session_binding_count","new_project_skill_binding_count","new_resolution_header_count","new_resolution_item_count","old_project_binding_audit_count","old_project_binding_set_count","old_project_count","old_project_creation_receipt_count","old_project_outbox_count","old_project_session_binding_count","old_project_skill_binding_count","old_resolution_header_count","old_resolution_item_count","publication_revision","review_count","revision_lineage_consistent","skill_approve_receipt_count","skill_approve_result_count","skill_create_receipt_count","skill_publish_audit_count","skill_publish_audit_review_count","skill_submit_receipt_count","skill_submit_result_count","snapshot_count"]
+    and .facts.business == {publication_revision:2,content_revision_count:2,review_count:2,snapshot_count:2,
+      revision_lineage_consistent:true,
+      skill_create_receipt_count:1,skill_submit_receipt_count:2,skill_submit_result_count:2,
+      skill_approve_receipt_count:2,skill_approve_result_count:2,
+      skill_publish_audit_count:2,skill_publish_audit_review_count:2,
+      old_project_creation_receipt_count:1,
+      new_project_creation_receipt_count:1,old_project_count:1,new_project_count:1,
+      old_project_binding_set_count:1,new_project_binding_set_count:1,
+      old_project_skill_binding_count:1,new_project_skill_binding_count:1,
+      old_project_binding_audit_count:1,new_project_binding_audit_count:1,
+      old_project_session_binding_count:1,new_project_session_binding_count:1,
+      old_project_outbox_count:1,new_project_outbox_count:1,
+      old_resolution_header_count:1,old_resolution_item_count:1,
+      new_resolution_header_count:1,new_resolution_item_count:1}
+    and (.facts.agent | keys) == ["new_event_counter_count","new_event_log_count","new_event_log_shape_count","new_header_count","new_input_count","new_item_count","new_message_count","new_receipt_count","new_runtime_lease_count","new_sequence_counter_count","new_session_count","old_event_counter_count","old_event_log_count","old_event_log_shape_count","old_header_count","old_input_count","old_item_count","old_message_count","old_receipt_count","old_runtime_lease_count","old_sequence_counter_count","old_session_count"]
+    and .facts.agent == {old_session_count:1,old_header_count:1,old_item_count:1,
+      old_receipt_count:1,old_message_count:1,old_input_count:1,old_sequence_counter_count:1,
+      old_runtime_lease_count:1,old_event_counter_count:1,old_event_log_count:2,old_event_log_shape_count:2,
+      new_session_count:1,new_header_count:1,new_item_count:1,new_receipt_count:1,
+      new_message_count:1,new_input_count:1,new_sequence_counter_count:1,new_runtime_lease_count:1,
+      new_event_counter_count:1,new_event_log_count:2,new_event_log_shape_count:2}
+    and (.facts.snapshot_digests | keys) == ["new","old"]
+    and all(.facts.snapshot_digests[]; ((. | type) == "string" and test("^[0-9a-f]{64}$")))
+    and .facts.snapshot_digests.old != .facts.snapshot_digests.new
+    and (.assertions | keys) == ["agent_header_snapshot_digests_distinct","agent_new_facts_unique","agent_new_session_snapshot_second","agent_new_verifier_passed","agent_old_facts_unique","agent_old_session_snapshot_first","agent_old_verifier_passed","browser_new_quickcreate_replay","browser_old_quickcreate_replay","browser_old_workspace_revisited","browser_owner_published_projection_no_version_ui","browser_second_decision_replay","browser_second_review_replay","business_content_revisions_unique","business_creator_quickcreates_unique","business_current_pointer_is_second","business_new_project_resolves_second","business_old_project_resolves_first","business_outboxes_v2_cleared","business_publication_revision_two","business_publish_audits_unique","business_revision_lineage_consistent","business_skill_replay_receipts_unique","business_two_reviews_unique","business_two_snapshots_unique","new_session_cross_module_consistent","new_snapshot_digest_chain_consistent","old_command_replay_preserves_a","old_session_cross_module_consistent","old_snapshot_digest_chain_consistent","publication_content_digests_distinct","resolution_runtime_digests_distinct","snapshot_set_digests_distinct"]
+    and all(.assertions[]; ((. | type) == "boolean" and . == true))' \
+    "$skill_republish_pending_evidence_file" >/dev/null || \
+    fail "W1 Skill A/B 重发布 Session 隔离 Evidence 含未通过或非闭集断言"
   jq -ne --slurpfile foundation "$pending_evidence_file" --slurpfile governance "$governance_pending_evidence_file" \
-    --slurpfile market "$skill_market_pending_evidence_file" --slurpfile binding "$skill_market_binding_pending_evidence_file" '
-    [$foundation[0],$governance[0],$market[0],$binding[0]] as $evidence
+    --slurpfile market "$skill_market_pending_evidence_file" --slurpfile binding "$skill_market_binding_pending_evidence_file" \
+    --slurpfile republish "$skill_republish_pending_evidence_file" '
+    [$foundation[0],$governance[0],$market[0],$binding[0],$republish[0]] as $evidence
     | all($evidence[]; .run_id == $evidence[0].run_id
         and .source_digest_sha256 == $evidence[0].source_digest_sha256)' >/dev/null || \
-    fail "W1 四份 Evidence 的 run_id/source digest 不一致"
+    fail "W1 五份 Evidence 的 run_id/source digest 不一致"
 elif [[ "$browser_smoke_ran" == "true" ]]; then
   jq -e '
     .schema_version == "w05.workspace-transport.smoke.evidence.v3"
@@ -4411,11 +5112,13 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   assert_evidence_excludes_literal "$w1_owner_private_skill_name" "W1 Mixed Owner-private Skill 原始名称"
   assert_evidence_excludes_literal "$w1_binding_prompt" "W1 Binding 完整 Prompt"
   assert_evidence_excludes_regex '"definition"[[:space:]]*:' "W1 Skill 完整定义正文"
-  assert_evidence_excludes_regex '(?i)"(payload_nonce|payload_ciphertext|runtime_content_ciphertext)"[[:space:]]*:' "W1 密文或 Nonce 字段"
+  assert_evidence_excludes_regex "$W1_EVIDENCE_ENCRYPTED_FIELD_REGEX" "W1 密文、Nonce 或 Key Version 字段"
   assert_evidence_excludes_regex '"governance_etag"[[:space:]]*:|"sg1-' "Skill Governance ETag"
   assert_evidence_excludes_regex 'incident_containment|incident_resolved|repeated_violation|risk_cleared|SMOKE-(SUSPEND|RESUME|OFFLINE)' "Skill Governance 原因或审批引用"
   assert_evidence_excludes_regex 'governance-(suspend|resume|offline|suspended-project|resumed-project|offline-project)' "Skill Governance 原始幂等键"
   assert_evidence_excludes_regex '(public-market-(binding|stale)|public-market-mixed-(success|suspended)|mixed-owner-private-(create|review|approve))-[0-9]' "Public Market Binding 原始幂等键"
+  assert_evidence_excludes_regex "$W1_EVIDENCE_IDEMPOTENCY_KEY_REGEX" "W1 浏览器原始幂等键"
+  assert_evidence_excludes_regex 'W1-REVIEW-SENTINEL-[AB]-[0-9]+|W1 Reviewer QuickCreate( Published B)? [0-9]+' "W1 Skill 重发布正文或完整 Prompt"
   assert_evidence_excludes_regex 'W1 Public Market QuickCreate [0-9]+' "W1 Public Market 浏览器完整 Prompt"
   assert_evidence_excludes_regex '"schema_version":"project_skill_permission_snapshot\.v2"' "Public Market Permission Canonical"
   if [[ -n "${BUSINESS_PROJECT_PROMPT_KEY_BASE64:-}" ]]; then
@@ -4426,24 +5129,19 @@ if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
   fi
 fi
 
-# 只有脱敏扫描、Runtime 退出和 etcd 租约摘除全部成功后，才原子发布 passed summary。
-jq '.status = "passed"' "$pending_evidence_file" >"${evidence_file}.tmp"
+# 只有脱敏扫描、Runtime 退出和 etcd 租约摘除全部成功后，才发布 passed summary。
 if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
-  jq '.status = "passed"' "$governance_pending_evidence_file" >"${governance_evidence_file}.tmp"
-  jq '.status = "passed"' "$skill_market_pending_evidence_file" >"${skill_market_evidence_file}.tmp"
-  jq '.status = "passed"' "$skill_market_binding_pending_evidence_file" >"${skill_market_binding_evidence_file}.tmp"
+  # 五份文件先进入不可见的同 run staging 目录，current.json 的最后一次 rename 是唯一提交点。
+  publish_w1_evidence_release "$w1_evidence_release_root" "$run_id" "$source_digest_sha256" \
+    "$pending_evidence_file" "$governance_pending_evidence_file" "$skill_market_pending_evidence_file" \
+    "$skill_market_binding_pending_evidence_file" "$skill_republish_pending_evidence_file" || \
+    fail "W1 五份 Evidence release 组原子发布失败"
+else
+  jq '.status = "passed"' "$pending_evidence_file" >"${evidence_file}.tmp"
+  rm -f "$pending_evidence_file"
+  # canonical W0.5 summary 是最后一次可失败写操作；旧 W0 summary 已在运行开始撤销，避免双真源假绿。
+  mv "${evidence_file}.tmp" "$evidence_file"
 fi
-rm -f "$pending_evidence_file"
-if [[ "$w1_skill_smoke_enabled" == "1" ]]; then
-  rm -f "$governance_pending_evidence_file"
-  rm -f "$skill_market_pending_evidence_file"
-  rm -f "$skill_market_binding_pending_evidence_file"
-  mv "${skill_market_binding_evidence_file}.tmp" "$skill_market_binding_evidence_file"
-  mv "${skill_market_evidence_file}.tmp" "$skill_market_evidence_file"
-  mv "${governance_evidence_file}.tmp" "$governance_evidence_file"
-fi
-# canonical W0.5 summary 是最后一次可失败写操作；旧 W0 summary 已在运行开始撤销，避免双真源假绿。
-mv "${evidence_file}.tmp" "$evidence_file"
 trap - EXIT
 
 if [[ "$w1_skill_smoke_enabled" == "1" && "$w1_browser_smoke_ran" == "true" ]]; then

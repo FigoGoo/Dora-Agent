@@ -833,6 +833,7 @@ Business schema expand
 - commit 前失败 → Query not_found → 原密文重发；
 - Query unavailable/conflict 保留 Outbox，不换键、不重解析；
 - 发布、解绑、编辑 Draft 后旧 Session 仍读取冻结 Item；
+- 同一 Skill 发布 Runtime Content 不同的 A、B 时，A 命令在 B 发布后重放仍返回原 Project/Session，新的 B 命令创建不同 Project/Session；两侧 content/runtime/set digest 分别与 Business、Agent 和正式 Load verifier 一致且 A/B 互不相同；
 - DB、日志、Event、Receipt 中检索不到 Prompt/Runtime Content fixture 明文；
 - 真实 PostgreSQL 16 Migration、锁、并发、COMMENT 和无外键测试。
 
