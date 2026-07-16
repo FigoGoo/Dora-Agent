@@ -1,0 +1,1000 @@
+{
+  "schema_version": "w2_r00_d09_candidate_input.v1",
+  "artifact_id": "CI-W2-R00-D09-v1",
+  "artifact_kind": "versioned_candidate_input_only",
+  "gate": "W2-R00",
+  "decision_id": "R00-D09",
+  "source_open_item_ids": [
+    "BILL-OPEN-007"
+  ],
+  "status": "prepared_unregistered",
+  "registration_status": "not_registered",
+  "owner_request_status": "not_created",
+  "approval_status": "not_requested",
+  "implementation_status": "prohibited",
+  "evidence_status": "candidate_only",
+  "implementation_unlocked": false,
+  "ballot_enabled": false,
+  "prerequisite_refs": [],
+  "cross_gate_alignment_refs": [
+    "R01-D02",
+    "R02-D09",
+    "R04-D14"
+  ],
+  "source_artifacts": [
+    {
+      "path": "docs/design/agent/w2-r00-owner-decision-matrix-v1.md",
+      "sha256": "sha256:0a0a0968a136c4c21d054a4c75e0f7996850c9885a758d8af3bc2364246abb30"
+    },
+    {
+      "path": "docs/design/agent/approvals/w2-r00-candidate-preparation-requests/CPR-W2-R00-v1.json",
+      "sha256": "sha256:6d9cd4a033d19c127fcfec04e975abdcb047247dcaa56c9fd381068b6977c836"
+    },
+    {
+      "path": "docs/design/cross-module/graph-execution-billing-contract-v1.md",
+      "sha256": "sha256:0380efa16bd8595618f1a3e9f0d6a014344e6d567a781150091472f004769b74"
+    },
+    {
+      "path": "docs/design/agent/runner-session-lane-review-v1.md",
+      "sha256": "sha256:dbc1a01a3054ca6e963981ba231ebaee81eb60ac16887c3e5aeeaea078e5bccb"
+    },
+    {
+      "path": "docs/design/agent/w2-r01-owner-decision-matrix-v1.md",
+      "sha256": "sha256:bd535482f552e04566c0ea0160dbc6d6771651cdfb2bbcb4e51a89b257440840"
+    },
+    {
+      "path": "docs/design/agent/w2-r02-owner-decision-matrix-v1.md",
+      "sha256": "sha256:05af025aec59ad2c44dad6e09c88fd66f64aa58d05dd7b1d7c2fe2ec9b7c5b5e"
+    },
+    {
+      "path": "docs/design/agent/w2-r04-owner-decision-matrix-v1.md",
+      "sha256": "sha256:15e8250291e5b41a999eae8f313d1338bdad1fddddb400b6bccd654c79f6e957"
+    },
+    {
+      "path": "docs/design/agent/graph-tool-result-receipt-contract-v1.md",
+      "sha256": "sha256:9cfad34de8b40cd958ae99116c9314579235ff1c7eb9b8426629e368901fdee5"
+    },
+    {
+      "path": "docs/design/agent/immutable-turn-context-design-v1.md",
+      "sha256": "sha256:6cecbb6918e8f04a3e061500042d9fc2cfd449b93af6f7363a7bb5aee45d75fb"
+    },
+    {
+      "path": "docs/design/agent/graphtool/plan_creation_spec-w2-r04-gap-review.md",
+      "sha256": "sha256:4ca49d37498ce395b99a57c74bd3c7f9a0e988708844015b79df18f64654892a"
+    }
+  ],
+  "validator_sources": [
+    {
+      "path": "agent/tests/contract/w2r00d09candidate/model_receipt_candidate_v1_test.go",
+      "sha256": "sha256:e679a827077af4866ba21ea50e33a787afca15d866afe26137077fcd9fd5ec5c"
+    },
+    {
+      "path": "agent/tests/contract/w2r00d09candidateguard/model_receipt_candidate_guard_v1_test.go",
+      "sha256": "sha256:7300710713d2ea8fe0bf34f778fa9a0aca87fc4a00c8b9a8a919b2541dbf570d"
+    }
+  ],
+  "contract_candidate": {
+    "profile": "plan_creation_spec_w2_r04_primary_only",
+    "terminal_receipt_schema_version": "dora.agent.terminal_model_receipt.v1",
+    "terminal_receipt_digest_domain": "dora.agent.model_receipt.terminal.v1",
+    "attempt_evidence_schema_version": "dora.agent.provider_attempt_evidence.v1",
+    "attempt_evidence_digest_domain": "dora.agent.model_attempt_evidence.v1",
+    "wire_contracts": [
+      {
+        "contract_name": "TerminalModelReceiptV1",
+        "field_order": [
+          "schema_version",
+          "model_receipt_id",
+          "receipt_version",
+          "causal_identity",
+          "execution_identity",
+          "tool_definition_pin",
+          "node_key",
+          "prompt_pin",
+          "model_config_pin",
+          "model_request_digest",
+          "budget_snapshot_digest",
+          "billing_prepare_binding",
+          "provider_execution",
+          "model_outcome",
+          "output",
+          "usage",
+          "finish_reason_code",
+          "final_error_code",
+          "model_started_at_unix_ms",
+          "model_completed_at_unix_ms",
+          "terminal_evidence_digest",
+          "model_receipt_digest"
+        ],
+        "fields": [
+          {
+            "name": "schema_version",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "equals:dora.agent.terminal_model_receipt.v1"
+            ]
+          },
+          {
+            "name": "model_receipt_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "receipt_version",
+            "wire_type": "int64",
+            "presence": "required",
+            "constraints": [
+              "equals:1",
+              "json_safe_integer"
+            ]
+          },
+          {
+            "name": "causal_identity",
+            "wire_type": "CausalIdentityV1",
+            "presence": "required",
+            "constraints": []
+          },
+          {
+            "name": "execution_identity",
+            "wire_type": "ModelExecutionIdentityV1",
+            "presence": "required",
+            "constraints": []
+          },
+          {
+            "name": "tool_definition_pin",
+            "wire_type": "ToolDefinitionPinV1",
+            "presence": "required",
+            "constraints": []
+          },
+          {
+            "name": "node_key",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "equals:call_model_primary"
+            ]
+          },
+          {
+            "name": "prompt_pin",
+            "wire_type": "PromptPinV1",
+            "presence": "required",
+            "constraints": []
+          },
+          {
+            "name": "model_config_pin",
+            "wire_type": "ModelConfigPinV1",
+            "presence": "required",
+            "constraints": []
+          },
+          {
+            "name": "model_request_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "budget_snapshot_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "billing_prepare_binding",
+            "wire_type": "BillingPrepareBindingV1",
+            "presence": "required",
+            "constraints": []
+          },
+          {
+            "name": "provider_execution",
+            "wire_type": "ProviderExecutionV1",
+            "presence": "required",
+            "constraints": []
+          },
+          {
+            "name": "model_outcome",
+            "wire_type": "enum_string",
+            "presence": "required",
+            "constraints": [
+              "enum:SUCCEEDED|FAILED|CANCELLED"
+            ]
+          },
+          {
+            "name": "output",
+            "wire_type": "ModelOutputRefV1",
+            "presence": "required_when:model_outcome=SUCCEEDED",
+            "constraints": [
+              "absent_when:model_outcome=FAILED|CANCELLED"
+            ]
+          },
+          {
+            "name": "usage",
+            "wire_type": "ModelUsageV1",
+            "presence": "required",
+            "constraints": []
+          },
+          {
+            "name": "finish_reason_code",
+            "wire_type": "enum_string",
+            "presence": "required",
+            "constraints": [
+              "enum:STOP|LENGTH_LIMIT|TOOL_CALLS|CONTENT_FILTER|ERROR|CANCELLED"
+            ]
+          },
+          {
+            "name": "final_error_code",
+            "wire_type": "string",
+            "presence": "required_when:model_outcome=FAILED|CANCELLED",
+            "constraints": [
+              "absent_when:model_outcome=SUCCEEDED",
+              "stable_safe_error_code"
+            ]
+          },
+          {
+            "name": "model_started_at_unix_ms",
+            "wire_type": "int64",
+            "presence": "required",
+            "constraints": [
+              "json_safe_integer",
+              "utc_unix_milliseconds"
+            ]
+          },
+          {
+            "name": "model_completed_at_unix_ms",
+            "wire_type": "int64",
+            "presence": "required",
+            "constraints": [
+              "gte:model_started_at_unix_ms",
+              "json_safe_integer",
+              "utc_unix_milliseconds"
+            ]
+          },
+          {
+            "name": "terminal_evidence_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "model_receipt_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "digest_of:TerminalModelReceiptV1_without_model_receipt_digest",
+              "sha256_prefixed_lowercase"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "CausalIdentityV1",
+        "field_order": [
+          "user_id",
+          "project_id",
+          "session_id",
+          "input_id",
+          "turn_id",
+          "run_id",
+          "tool_call_id",
+          "tool_receipt_id",
+          "graph_run_id"
+        ],
+        "fields": [
+          {
+            "name": "user_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "project_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "session_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "input_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "turn_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "run_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "tool_call_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "tool_receipt_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "graph_run_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "ModelExecutionIdentityV1",
+        "field_order": [
+          "logical_tool_execution_id",
+          "model_call_ordinal"
+        ],
+        "fields": [
+          {
+            "name": "logical_tool_execution_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "model_call_ordinal",
+            "wire_type": "int32",
+            "presence": "required",
+            "constraints": [
+              "equals:0"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "ToolDefinitionPinV1",
+        "field_order": [
+          "tool_key",
+          "definition_version",
+          "definition_digest"
+        ],
+        "fields": [
+          {
+            "name": "tool_key",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "equals:plan_creation_spec"
+            ]
+          },
+          {
+            "name": "definition_version",
+            "wire_type": "int64",
+            "presence": "required",
+            "constraints": [
+              "gte:1",
+              "json_safe_integer"
+            ]
+          },
+          {
+            "name": "definition_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "PromptPinV1",
+        "field_order": [
+          "prompt_key",
+          "prompt_version",
+          "prompt_digest"
+        ],
+        "fields": [
+          {
+            "name": "prompt_key",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "non_empty"
+            ]
+          },
+          {
+            "name": "prompt_version",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "non_empty"
+            ]
+          },
+          {
+            "name": "prompt_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "ModelConfigPinV1",
+        "field_order": [
+          "model_config_ref",
+          "model_config_version",
+          "model_config_digest",
+          "provider_route_ref"
+        ],
+        "fields": [
+          {
+            "name": "model_config_ref",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "non_empty"
+            ]
+          },
+          {
+            "name": "model_config_version",
+            "wire_type": "int64",
+            "presence": "required",
+            "constraints": [
+              "gte:1",
+              "json_safe_integer"
+            ]
+          },
+          {
+            "name": "model_config_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "provider_route_ref",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "non_empty",
+              "provider_capability_not_implied"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "BillingPrepareBindingV1",
+        "field_order": [
+          "billing_execution_id",
+          "prepare_command_id",
+          "prepare_request_digest",
+          "prepare_receipt_digest",
+          "charge_receipt_id"
+        ],
+        "fields": [
+          {
+            "name": "billing_execution_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "prepare_command_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "equals:tr:<tool_receipt_id>:charge.primary:v1"
+            ]
+          },
+          {
+            "name": "prepare_request_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "prepare_receipt_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "charge_receipt_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "ProviderExecutionV1",
+        "field_order": [
+          "provider_route_ref",
+          "provider_request_key",
+          "dispatch_disposition",
+          "dispatch_marker_digest",
+          "provider_request_id",
+          "attempt_count",
+          "attempts_digest",
+          "terminal_authority_kind",
+          "provider_authority_ref_digest"
+        ],
+        "fields": [
+          {
+            "name": "provider_route_ref",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "equals:model_config_pin.provider_route_ref"
+            ]
+          },
+          {
+            "name": "provider_request_key",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "non_empty",
+              "stable_across_attempts"
+            ]
+          },
+          {
+            "name": "dispatch_disposition",
+            "wire_type": "enum_string",
+            "presence": "required",
+            "constraints": [
+              "enum:NOT_DISPATCHED|DISPATCHED_DIRECT_TERMINAL|DISPATCHED_QUERY_TERMINAL"
+            ]
+          },
+          {
+            "name": "dispatch_marker_digest",
+            "wire_type": "string",
+            "presence": "required_when:dispatch_disposition=DISPATCHED_DIRECT_TERMINAL|DISPATCHED_QUERY_TERMINAL",
+            "constraints": [
+              "absent_when:dispatch_disposition=NOT_DISPATCHED",
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "provider_request_id",
+            "wire_type": "string",
+            "presence": "optional_when:provider_returns_request_id",
+            "constraints": [
+              "absent_when:dispatch_disposition=NOT_DISPATCHED",
+              "opaque_safe_identifier"
+            ]
+          },
+          {
+            "name": "attempt_count",
+            "wire_type": "int64",
+            "presence": "required",
+            "constraints": [
+              "equals:0_when:dispatch_disposition=NOT_DISPATCHED",
+              "gte:1_when:dispatch_disposition=DISPATCHED_DIRECT_TERMINAL|DISPATCHED_QUERY_TERMINAL",
+              "json_safe_integer"
+            ]
+          },
+          {
+            "name": "attempts_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "terminal_authority_kind",
+            "wire_type": "enum_string",
+            "presence": "required",
+            "constraints": [
+              "enum:AGENT_NO_DISPATCH_PROOF|PROVIDER_RESPONSE|PROVIDER_QUERY|CONTROLLED_LOCAL_FAKE"
+            ]
+          },
+          {
+            "name": "provider_authority_ref_digest",
+            "wire_type": "string",
+            "presence": "required_when:dispatch_disposition=DISPATCHED_DIRECT_TERMINAL|DISPATCHED_QUERY_TERMINAL",
+            "constraints": [
+              "absent_when:dispatch_disposition=NOT_DISPATCHED",
+              "sha256_prefixed_lowercase"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "ModelOutputRefV1",
+        "field_order": [
+          "output_schema_version",
+          "output_ref",
+          "output_digest"
+        ],
+        "fields": [
+          {
+            "name": "output_schema_version",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "non_empty"
+            ]
+          },
+          {
+            "name": "output_ref",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "controlled_object_reference",
+              "no_raw_output"
+            ]
+          },
+          {
+            "name": "output_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "ModelUsageV1",
+        "field_order": [
+          "usage_status",
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "fields": [
+          {
+            "name": "usage_status",
+            "wire_type": "enum_string",
+            "presence": "required",
+            "constraints": [
+              "enum:REPORTED|UNAVAILABLE"
+            ]
+          },
+          {
+            "name": "input_tokens",
+            "wire_type": "int64",
+            "presence": "required_when:usage_status=REPORTED",
+            "constraints": [
+              "absent_when:usage_status=UNAVAILABLE",
+              "gte:0",
+              "json_safe_integer"
+            ]
+          },
+          {
+            "name": "output_tokens",
+            "wire_type": "int64",
+            "presence": "required_when:usage_status=REPORTED",
+            "constraints": [
+              "absent_when:usage_status=UNAVAILABLE",
+              "gte:0",
+              "json_safe_integer"
+            ]
+          },
+          {
+            "name": "total_tokens",
+            "wire_type": "int64",
+            "presence": "required_when:usage_status=REPORTED",
+            "constraints": [
+              "absent_when:usage_status=UNAVAILABLE",
+              "equals:input_tokens+output_tokens",
+              "json_safe_integer"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "ProviderAttemptEvidenceV1",
+        "field_order": [
+          "schema_version",
+          "model_receipt_id",
+          "attempt_ordinal",
+          "provider_route_ref",
+          "provider_request_key",
+          "provider_request_id",
+          "request_digest",
+          "dispatch_marker_digest",
+          "attempt_state",
+          "response_digest",
+          "provider_authority_ref_digest",
+          "started_at_unix_ms",
+          "completed_at_unix_ms",
+          "attempt_evidence_digest"
+        ],
+        "fields": [
+          {
+            "name": "schema_version",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "equals:dora.agent.provider_attempt_evidence.v1"
+            ]
+          },
+          {
+            "name": "model_receipt_id",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "uuidv7_lowercase"
+            ]
+          },
+          {
+            "name": "attempt_ordinal",
+            "wire_type": "int64",
+            "presence": "required",
+            "constraints": [
+              "gte:1",
+              "json_safe_integer"
+            ]
+          },
+          {
+            "name": "provider_route_ref",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "non_empty"
+            ]
+          },
+          {
+            "name": "provider_request_key",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "non_empty"
+            ]
+          },
+          {
+            "name": "provider_request_id",
+            "wire_type": "string",
+            "presence": "optional_when:provider_returns_request_id",
+            "constraints": [
+              "opaque_safe_identifier"
+            ]
+          },
+          {
+            "name": "request_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "dispatch_marker_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "attempt_state",
+            "wire_type": "enum_string",
+            "presence": "required",
+            "constraints": [
+              "enum:PREPARED|DISPATCHED|RECEIVING|TERMINAL|UNKNOWN"
+            ]
+          },
+          {
+            "name": "response_digest",
+            "wire_type": "string",
+            "presence": "required_when:attempt_state=TERMINAL",
+            "constraints": [
+              "absent_when:attempt_state=PREPARED|DISPATCHED|RECEIVING|UNKNOWN",
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "provider_authority_ref_digest",
+            "wire_type": "string",
+            "presence": "required_when:attempt_state=TERMINAL",
+            "constraints": [
+              "absent_when:attempt_state=PREPARED|DISPATCHED|RECEIVING|UNKNOWN",
+              "sha256_prefixed_lowercase"
+            ]
+          },
+          {
+            "name": "started_at_unix_ms",
+            "wire_type": "int64",
+            "presence": "required",
+            "constraints": [
+              "json_safe_integer",
+              "utc_unix_milliseconds"
+            ]
+          },
+          {
+            "name": "completed_at_unix_ms",
+            "wire_type": "int64",
+            "presence": "required_when:attempt_state=TERMINAL",
+            "constraints": [
+              "absent_when:attempt_state=PREPARED|DISPATCHED|RECEIVING|UNKNOWN",
+              "gte:started_at_unix_ms",
+              "json_safe_integer"
+            ]
+          },
+          {
+            "name": "attempt_evidence_digest",
+            "wire_type": "string",
+            "presence": "required",
+            "constraints": [
+              "digest_of:ProviderAttemptEvidenceV1_without_attempt_evidence_digest",
+              "sha256_prefixed_lowercase"
+            ]
+          }
+        ]
+      }
+    ],
+    "canonicalization_rules": [
+      "canonical_json_is_compact_ascii_safe_string_subset_of_utf8_nfc",
+      "condition_not_applicable_means_field_absent",
+      "explicit_null_is_rejected",
+      "field_order_follows_wire_contract_field_order",
+      "floating_point_and_exponent_numbers_are_rejected",
+      "integers_are_base10_json_safe_integers",
+      "object_unknown_fields_are_rejected",
+      "recursive_duplicate_keys_are_rejected",
+      "sha256_is_domain_utf8_then_zero_byte_then_canonical_json",
+      "terminal_receipt_digest_excludes_only_model_receipt_digest",
+      "trailing_json_values_are_rejected"
+    ],
+    "terminal_rules": [
+      "attempt_records_never_change_model_receipt_id_or_execution_identity",
+      "all_string_values_use_unescaped_ascii_safe_charset_and_are_nfc",
+      "cancelled_requires_final_error_and_forbids_output",
+      "direct_terminal_allows_provider_response_or_controlled_local_fake",
+      "dispatched_terminal_requires_dispatch_marker_and_terminal_authority_digest",
+      "failed_requires_final_error_and_forbids_output",
+      "not_dispatched_requires_agent_no_dispatch_proof_and_zero_attempts",
+      "provider_route_ref_matches_frozen_model_config_pin",
+      "query_terminal_requires_provider_query",
+      "replay_same_identity_requires_same_model_receipt_digest",
+      "succeeded_requires_output_and_forbids_final_error",
+      "terminal_receipt_is_first_write_wins_and_immutable",
+      "unknown_outcome_never_creates_terminal_receipt"
+    ],
+    "finalize_projection": {
+      "field_order": [
+        "model_receipt_id",
+        "model_receipt_schema_version",
+        "model_receipt_digest",
+        "model_outcome",
+        "model_started_at_unix_ms",
+        "model_completed_at_unix_ms",
+        "provider_authority_ref_digest",
+        "final_error_code"
+      ],
+      "rules": [
+        "binding_matches_billing_execution_prepare_receipt_and_execution_identity",
+        "cancelled_or_failed_projects_final_error_code",
+        "dispatched_terminal_projects_provider_authority_ref_digest",
+        "finalize_does_not_mutate_model_receipt",
+        "finalize_does_not_recharge_reprice_refund_or_reverse",
+        "nonterminal_or_unknown_outcome_is_rejected",
+        "succeeded_omits_final_error_code",
+        "terminal_receipt_freezes_before_finalize"
+      ]
+    },
+    "cross_gate_boundaries": [
+      "R01-D02:terminal_model_receipt_is_not_generic_authority_outcome",
+      "R02-D09:model_receipt_freeze_is_not_run_turn_input_terminal_commit",
+      "R04-D14:provider_capability_and_enum_mapping_remain_unverified",
+      "R00-D08:no_real_provider_idempotency_query_or_not_found_fact_is_claimed",
+      "R00-D11:timestamps_are_audit_fields_and_causal_refs_remain_authority",
+      "R00-D13:no_prepare_or_finalize_slot_ordinal_is_selected"
+    ]
+  },
+  "required_evidence_projection": [
+    {
+      "evidence_id": "R00-D09-EV-CANONICAL-GOLDEN",
+      "candidate_coverage": [
+        "digest_domain_is_versioned",
+        "field_order_is_canonical",
+        "unicode_and_null_policy_is_exact"
+      ],
+      "registration_status": "candidate_vectors_only_not_registered"
+    },
+    {
+      "evidence_id": "R00-D09-EV-SCHEMA-NEGATIVE",
+      "candidate_coverage": [
+        "illegal_outcome_rejected",
+        "missing_conditional_field_rejected",
+        "provider_identity_mismatch_rejected",
+        "unknown_field_or_version_rejected"
+      ],
+      "registration_status": "candidate_vectors_only_not_registered"
+    },
+    {
+      "evidence_id": "R00-D09-EV-TERMINAL-UNIQUENESS",
+      "candidate_coverage": [
+        "one_execution_ordinal_one_terminal_receipt",
+        "replay_returns_immutable_receipt",
+        "terminal_receipt_not_rewritten"
+      ],
+      "registration_status": "pure_state_model_only_postgresql_evidence_missing"
+    },
+    {
+      "evidence_id": "R00-D09-EV-FINALIZE-GUARD",
+      "candidate_coverage": [
+        "finalize_does_not_reprice_or_recharge",
+        "finalize_requires_exact_receipt_digest",
+        "unknown_or_nonterminal_receipt_blocks_finalize"
+      ],
+      "registration_status": "pure_contract_model_only_cross_module_evidence_missing"
+    }
+  ],
+  "unmet_registration_evidence": [
+    "BUSINESS_FINALIZE_PUBLIC_IDL_AND_GOLDEN_MISSING",
+    "D08_REAL_PROVIDER_CAPABILITY_AND_MAPPING_MISSING",
+    "D11_CLOCK_THRESHOLD_AND_MONITORING_MISSING",
+    "D13_FINALIZE_SLOT_ORDINAL_MISSING",
+    "OWNER_DISPOSITIONS_R01_D02_R02_D09_R04_D14_MISSING",
+    "POSTGRESQL_TERMINAL_UNIQUENESS_AND_CRASH_EVIDENCE_MISSING",
+    "PRODUCTION_MODEL_RECEIPT_IMPLEMENTATION_MISSING",
+    "TRUSTED_BUILD_AND_REVIEW_FREEZE_MISSING"
+  ],
+  "forbidden_claims": [
+    "awaiting_owner_decision",
+    "ballot_ready",
+    "candidate_evidence_registered",
+    "cross_gate_decisions_closed",
+    "dr_w2_r00_created",
+    "implementation_unlocked",
+    "owner_approval_recorded",
+    "owner_request_created",
+    "production_model_receipt_implemented",
+    "provider_capability_verified",
+    "r00_canonical_manifest_created",
+    "review_frozen_or_approved",
+    "w2_b0a_or_w2_b1_unlocked"
+  ],
+  "block_statement": "本输入包只提出 Provider-neutral 的 R00-D09 terminal ModelReceipt 字段、canonical、条件 presence、terminal uniqueness 纯状态模型与 Finalize 投影候选；它未登记到 live W2-R00 candidate_evidence，未创建 Owner request/approval，未验证真实 Provider 能力、PostgreSQL 持久化、Business Finalize IDL 或跨 Gate disposition，也不授权生产 ModelReceipt、Billing、Graph、Migration、W2-B0a 或 W2-B1 实现。"
+}

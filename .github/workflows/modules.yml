@@ -1,0 +1,121 @@
+name: Modules and frontend
+
+on:
+  pull_request:
+    paths:
+      - "business/**"
+      - "agent/**"
+      - "worker/**"
+      - "frontend/**"
+      - "go.work"
+      - "Makefile"
+      - "scripts/**"
+      - ".github/workflows/modules.yml"
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  module:
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [business, agent, worker]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Check go.mod and go.sum are tidy
+        run: |
+          GOWORK=off go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - run: GOWORK=off go mod verify
+      - run: GOWORK=off go vet ./...
+      - run: GOWORK=off go test -shuffle=on -count=1 ./...
+      - run: GOWORK=off go test -race ./...
+      - run: GOWORK=off go build ./cmd/...
+
+  generated-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+          cache-dependency-path: |
+            business/go.sum
+            agent/go.sum
+      - name: Install pinned RPC generators
+        run: make rpc-tools
+      - name: Check RPC generated code drift
+        run: make check-generated
+
+  migration-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check migration pairs and physical foreign keys
+        run: ./scripts/check-migrations.sh
+
+  migration-empty-database:
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [business, agent, worker]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_USER: dora_test
+          POSTGRES_PASSWORD: dora_test_password
+          POSTGRES_DB: dora_${{ matrix.module }}_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dora_test -d dora_${{ matrix.module }}_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+      - name: Install golang-migrate
+        run: GOWORK=off go install -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.0
+      - name: Verify empty database migration and one-step rollback
+        env:
+          DATABASE_URL: postgres://dora_test:dora_test_password@127.0.0.1:5432/dora_${{ matrix.module }}_test?sslmode=disable
+        run: |
+          migrate -path "${{ matrix.module }}/migrations" -database "$DATABASE_URL" up
+          migrate -path "${{ matrix.module }}/migrations" -database "$DATABASE_URL" down 1
+          migrate -path "${{ matrix.module }}/migrations" -database "$DATABASE_URL" up
+      - name: Verify migrated schema and repository contracts
+        env:
+          DATABASE_URL: postgres://dora_test:dora_test_password@127.0.0.1:5432/dora_${{ matrix.module }}_test?sslmode=disable
+        run: GO_BIN=go ./scripts/check-database-contracts.sh "${{ matrix.module }}"

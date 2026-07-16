@@ -1,0 +1,317 @@
+{
+  "schema_version": "w2_adr_ballot_preparation_request.v1",
+  "request_id": "CPR-W2-ADR-v1",
+  "request_kind": "adr_readiness_and_dependency_closure_only",
+  "scope": "W2-P4-ADR-001-002-003-004-005-008-010-011",
+  "status": "prepared_unregistered",
+  "registration_status": "not_registered",
+  "decision_request_status": "not_created",
+  "approval_status": "not_requested",
+  "implementation_status": "prohibited",
+  "evidence_status": "candidate_only",
+  "implementation_unlocked": false,
+  "ballot_enabled": false,
+  "canonical_ballot_status": "not_created",
+  "owner_role_set_status": "not_derived",
+  "decision_document": {
+    "path": "docs/design/cross-module/w2-owner-decision-closure-v1.md",
+    "sha256": "sha256:29a39b727ba9089a8575b9807e090e97df5dcc6ae190b3f67dcae5b05ca01f8f"
+  },
+  "gate_manifest": {
+    "path": "docs/design/agent/approvals/w2-review-freeze-manifest.json",
+    "sha256": "sha256:a98059cfa4971f0123565d63ad56ab4d202ad354a0971bbecf99a0711bee616e"
+  },
+  "linked_requests": [
+    {
+      "request_id": "CPR-W2-R00-v1",
+      "path": "docs/design/agent/approvals/w2-r00-candidate-preparation-requests/CPR-W2-R00-v1.json",
+      "sha256": "sha256:6d9cd4a033d19c127fcfec04e975abdcb047247dcaa56c9fd381068b6977c836"
+    },
+    {
+      "request_id": "DR-W2-R01-v1",
+      "path": "docs/design/agent/approvals/w2-r01-owner-decision-requests/DR-W2-R01-v1.json",
+      "sha256": "sha256:676c4f83a1e7570c5ac41e3d0ffc8556fb936b0b363b93a6c7b79b2da7552018"
+    },
+    {
+      "request_id": "DR-W2-R02-v1",
+      "path": "docs/design/agent/approvals/w2-r02-owner-decision-requests/DR-W2-R02-v1.json",
+      "sha256": "sha256:4b6356f9d6b4da7adf348c2207135e2cebd8c972349f84c67ade274f6d274fe9"
+    },
+    {
+      "request_id": "DR-W2-R03-v1",
+      "path": "docs/design/agent/approvals/w2-r03-owner-decision-requests/DR-W2-R03-v1.json",
+      "sha256": "sha256:d0e229c8b2fbaaee21b67a87155d6f9607f08e581d36419ae3833ae65b2d7c6d"
+    },
+    {
+      "request_id": "DR-W2-R04-v1",
+      "path": "docs/design/agent/approvals/w2-r04-owner-decision-requests/DR-W2-R04-v1.json",
+      "sha256": "sha256:d8806af1289aff1b8a790bdbf861c97a7c348f70aa83213760bdc28b318cd0e7"
+    }
+  ],
+  "validator_sources": [
+    {
+      "path": "agent/tests/contract/w2adrballotpreparation/adr_ballot_preparation_v1_test.go",
+      "sha256": "sha256:b37c617171844800fa00830c73e8f9ce15e33c42b66b4d2a952c7e99a8c02b92"
+    },
+    {
+      "path": "agent/tests/contract/w2adrballotpreparationguard/adr_ballot_preparation_guard_v1_test.go",
+      "sha256": "sha256:e66eee5ed03fc049d1e6a9810e55e117354c8584bf31da2a808e159336dafc55"
+    }
+  ],
+  "required_adr_ids": [
+    "W2-ADR-001",
+    "W2-ADR-002",
+    "W2-ADR-003",
+    "W2-ADR-004",
+    "W2-ADR-005",
+    "W2-ADR-008",
+    "W2-ADR-010",
+    "W2-ADR-011"
+  ],
+  "items": [
+    {
+      "adr_id": "W2-ADR-001",
+      "semantic_recommendation_status": "recommendation_present_in_closure",
+      "canonical_ballot_status": "not_created",
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "p4_conflict_refs": [
+        "P4-C01",
+        "P4-C02",
+        "P4-C07"
+      ],
+      "joint_disposition_refs": [
+        "R00-D14",
+        "R01-D02",
+        "R01-D05",
+        "R02-D09",
+        "R02-D19",
+        "R04-D10",
+        "R04-D13",
+        "R04-D14",
+        "R04-D19"
+      ],
+      "unmet_evidence": [
+        "AUTHORITY_ENVELOPE_EXACT_SCHEMA_MISSING",
+        "PRODUCTION_TABLE_STATE_MAPPING_MISSING",
+        "R02_AGGREGATE_BUILD_TRUST_CLOSURE_MISSING",
+        "SLOT_OBSERVATION_IDENTITY_MISSING"
+      ],
+      "block_code": "W2_ADR_001_CANDIDATE_INCOMPLETE"
+    },
+    {
+      "adr_id": "W2-ADR-002",
+      "semantic_recommendation_status": "recommendation_present_in_closure",
+      "canonical_ballot_status": "not_created",
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "p4_conflict_refs": [
+        "P4-C03",
+        "P4-C04",
+        "P4-C07"
+      ],
+      "joint_disposition_refs": [
+        "R01-D01",
+        "R02-D19"
+      ],
+      "unmet_evidence": [
+        "DIGEST_OLD_TO_NEW_FIELD_MAPPING_MISSING",
+        "DIGEST_VERSION_POLICY_MISSING",
+        "DIGEST_GOLDEN_VECTORS_MISSING",
+        "R02_AGGREGATE_BUILD_TRUST_CLOSURE_MISSING"
+      ],
+      "block_code": "W2_ADR_002_CANDIDATE_INCOMPLETE"
+    },
+    {
+      "adr_id": "W2-ADR-003",
+      "semantic_recommendation_status": "recommendation_present_in_closure",
+      "canonical_ballot_status": "not_created",
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "p4_conflict_refs": [
+        "P4-C13"
+      ],
+      "joint_disposition_refs": [
+        "R01-D05",
+        "R03-D04",
+        "R03-D05",
+        "R03-D06",
+        "R03-D08",
+        "R03-D11",
+        "R04-D16",
+        "R04-D18",
+        "R04-D19"
+      ],
+      "unmet_evidence": [
+        "ACTIVATION_COMMAND_IDENTITY_EXACT_SCHEMA_MISSING",
+        "BUSINESS_COMMAND_RECEIPT_IDL_MISSING",
+        "UNKNOWN_OUTCOME_QUERY_VECTORS_MISSING"
+      ],
+      "block_code": "W2_ADR_003_CANDIDATE_INCOMPLETE"
+    },
+    {
+      "adr_id": "W2-ADR-004",
+      "semantic_recommendation_status": "recommendation_present_in_closure",
+      "canonical_ballot_status": "not_created",
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "p4_conflict_refs": [
+        "P4-C14"
+      ],
+      "joint_disposition_refs": [
+        "R01-D02",
+        "R02-D18",
+        "R03-D03",
+        "R03-D10",
+        "R03-D11",
+        "R04-D17",
+        "R04-D18",
+        "R04-D19"
+      ],
+      "unmet_evidence": [
+        "AUTHENTICATED_QUERY_EXACT_SCHEMA_MISSING",
+        "BIDIRECTIONAL_RPC_SECURITY_BOUNDARY_MISSING",
+        "SIGNATURE_KEY_ROTATION_DISPOSITION_MISSING"
+      ],
+      "block_code": "W2_ADR_004_CANDIDATE_INCOMPLETE"
+    },
+    {
+      "adr_id": "W2-ADR-005",
+      "semantic_recommendation_status": "recommendation_present_in_closure",
+      "canonical_ballot_status": "not_created",
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "p4_conflict_refs": [
+        "P4-C11"
+      ],
+      "joint_disposition_refs": [
+        "R00-D01",
+        "R00-D02",
+        "R00-D03",
+        "R00-D04",
+        "R00-D05",
+        "R00-D06",
+        "R00-D07",
+        "R00-D08",
+        "R00-D09",
+        "R00-D10",
+        "R00-D11",
+        "R00-D12",
+        "R00-D13",
+        "R00-D14",
+        "R03-D01",
+        "R04-D01",
+        "R04-D08",
+        "R04-D09",
+        "R04-D10",
+        "R04-D11",
+        "R04-D12",
+        "R04-D13",
+        "R04-D14",
+        "R04-D15"
+      ],
+      "unmet_evidence": [
+        "BILLING_POLICY_EXACT_VALUES_MISSING",
+        "PROVIDER_CAPABILITY_MATRIX_MISSING",
+        "R00_LIVE_CANDIDATE_SUBMISSION_MISSING"
+      ],
+      "block_code": "W2_ADR_005_CANDIDATE_INCOMPLETE"
+    },
+    {
+      "adr_id": "W2-ADR-008",
+      "semantic_recommendation_status": "recommendation_present_in_closure",
+      "canonical_ballot_status": "not_created",
+      "readiness_status": "joint_disposition_pending_not_ballot_ready",
+      "p4_conflict_refs": [
+        "P4-C07",
+        "P4-C08"
+      ],
+      "joint_disposition_refs": [
+        "R02-D19"
+      ],
+      "unmet_evidence": [
+        "R02_AGGREGATE_BUILD_TRUST_CLOSURE_MISSING",
+        "R02_D19_OWNER_DECISION_PENDING"
+      ],
+      "block_code": "W2_ADR_008_JOINT_DISPOSITION_PENDING"
+    },
+    {
+      "adr_id": "W2-ADR-010",
+      "semantic_recommendation_status": "recommendation_present_in_closure",
+      "canonical_ballot_status": "not_created",
+      "readiness_status": "joint_disposition_pending_not_ballot_ready",
+      "p4_conflict_refs": [
+        "P4-C07",
+        "P4-C08"
+      ],
+      "joint_disposition_refs": [
+        "R02-D19"
+      ],
+      "unmet_evidence": [
+        "R02_AGGREGATE_BUILD_TRUST_CLOSURE_MISSING",
+        "R02_D19_OWNER_DECISION_PENDING"
+      ],
+      "block_code": "W2_ADR_010_JOINT_DISPOSITION_PENDING"
+    },
+    {
+      "adr_id": "W2-ADR-011",
+      "semantic_recommendation_status": "recommendation_present_in_closure",
+      "canonical_ballot_status": "not_created",
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "p4_conflict_refs": [],
+      "joint_disposition_refs": [
+        "R01-D05",
+        "R03-D01",
+        "R03-D02",
+        "R03-D08",
+        "R03-D09",
+        "R03-D10",
+        "R03-D11",
+        "R04-D16",
+        "R04-D17",
+        "R04-D18",
+        "R04-D19"
+      ],
+      "unmet_evidence": [
+        "ACTIVATION_FIELD_CROSS_GATE_MAPPING_MISSING",
+        "R01_D05_SLOT_SCOPE_PENDING",
+        "SLOT_ORDINAL_UNIQUENESS_DOMAIN_MISSING"
+      ],
+      "block_code": "W2_ADR_011_CANDIDATE_INCOMPLETE"
+    }
+  ],
+  "hard_prerequisite_edges": [
+    {
+      "prerequisite_adr_id": "W2-ADR-005",
+      "dependent_adr_id": "W2-ADR-011"
+    }
+  ],
+  "blocked_production_gates": [
+    "W2-A1",
+    "W2-A2",
+    "W2-B0a",
+    "W2-B0b",
+    "W2-B1"
+  ],
+  "forbidden_capabilities": [
+    "accept_recommendation",
+    "authorize_production",
+    "create_approval_summary",
+    "create_ballot",
+    "create_canonical_contract_manifest",
+    "create_decision_request",
+    "create_idl_manifest",
+    "create_test_manifest",
+    "create_vector_manifest",
+    "derive_final_owner_exact_set",
+    "enable_ballot",
+    "formal_freeze",
+    "record_actor",
+    "record_owner_approval",
+    "record_platform_review",
+    "record_reviewer",
+    "record_selected_choice",
+    "register_candidate_evidence",
+    "reject_keep_blocked",
+    "reject_recommendation",
+    "select_owner_option",
+    "transition_gate",
+    "unlock_implementation"
+  ],
+  "block_statement": "本 CPR 只固定 W2-ADR-001/002/003/004/005/008/010/011 的准备态、P4 冲突、跨 Gate 联合裁决引用和 ADR-005→ADR-011 硬前置；它不是 decision request 或 ballot，不提供 accept/reject、选择、批准、Reviewer/Actor、candidate evidence、状态迁移或 implementation unlock。八项 ADR 的 canonical ballot 均未创建；R02-D19 只联合裁决 ADR-001/002/008/010 的 A1 scope，不代表 ADR semantic acceptance，也不得自动传播任何选择。W2-R00～R04 继续 expansion_frozen 且 freeze/reopen_exception 为 null，所有生产 Gate 继续失败关闭。"
+}

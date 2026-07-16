@@ -1,0 +1,705 @@
+{
+  "schema_version": "immutable_turn_context_approval_manifest.v1",
+  "decision_document": {
+    "path": "docs/design/agent/immutable-turn-context-decision-review-v1.md",
+    "sha256": "sha256:f3caab55110293b3f04ed1f4527044e1030d61d03ba64efe3cb10c709161191d"
+  },
+  "global_status": "awaiting_owner_approval",
+  "implementation_unlocked": false,
+  "awaiting_production_gate": {
+    "block_code": "TC_APPROVAL_GLOBAL_AWAITING_OWNER_APPROVAL",
+    "block_statement": "TC-P01 至 TC-P10 尚未取得全部 Owner 签字；禁止新增或修改不可变 Turn Context 相关生产实现。",
+    "forbidden_directories": [
+      "agent/internal/turncontext",
+      "agent/internal/runtime",
+      "agent/internal/chatmodelagent",
+      "agent/internal/middleware",
+      "agent/internal/checkpoint",
+      "agent/internal/receipt",
+      "agent/internal/approval",
+      "agent/internal/prompt",
+      "agent/internal/graphtool",
+      "business/internal/approval",
+      "business/internal/aigcapproval",
+      "business/api/thrift/approval",
+      "worker/internal/approval",
+      "frontend/src/features/aigc/a2ui/action",
+      "frontend/src/features/aigc/a2ui/actions"
+    ],
+    "forbidden_non_test_tokens": [
+      "dora.session_turn_context.v1",
+      "session_turn_context",
+      "SessionTurnContext",
+      "TurnContextRepository",
+      "ApprovalStore",
+      "ApprovalRepository",
+      "ApprovalDecisionRequestV1",
+      "ApprovalConsumptionReceiptV1",
+      "ApprovalContinuationResult",
+      "BatchContinuationResult",
+      "DecideCreationSpecCandidate",
+      "DecideStoryboardCandidate",
+      "DecidePromptResults",
+      "DecideAssemblyPlanCandidate",
+      "approval.decide",
+      "approval_continuation",
+      "dora.approval_binding.v1",
+      "tool_receipt_owner_record.v1",
+      "agent.session_turn",
+      "agent.session_run",
+      "agent.session_event_marker",
+      "agent.legacy_authority_attestation",
+      "agent.session_lane_upgrade_ledger"
+    ]
+  },
+  "items": [
+    {
+      "p0_id": "TC-P01",
+      "title": "冻结时点",
+      "status": "awaiting_owner_approval",
+      "owner_roles": [
+        "agent.runtime",
+        "agent.postgresql"
+      ],
+      "artifact_refs": [
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_ingress/manifest.json",
+          "sha256": "sha256:5b955d31f2f718c49f67fe24891fe154714cc9f88521345409b329c064591938",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_turn_context/manifest.json",
+          "sha256": "sha256:076ed67cbf22c3032fcf4686de9475e7a9cf968082cbafa98e4d11f5c98eaa13",
+          "kind": "corpus_manifest"
+        }
+      ],
+      "required_tests": [
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_lane_ingress_v1_corpus_test.go",
+          "test_name": "TestSessionLaneIngressV1ReplayUsesFrozenResultAfterRuntimeProgress",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_turn_context_v1_corpus_test.go",
+          "test_name": "TestSessionTurnContextV1FrozenReplay",
+          "mode": "normal"
+        }
+      ],
+      "approval_refs": [],
+      "unmet_evidence": [
+        "real_pg_ingress_atomicity",
+        "owner_signatures"
+      ],
+      "block_code": "TC_APPROVAL_P01_INGRESS_FREEZE_EVIDENCE_MISSING",
+      "block_statement": "未取得 Agent Runtime 与 Agent PostgreSQL 对同事务冻结及真实 PostgreSQL 原子性证据的签字；禁止 Turn/Context Writer、Claim 和 Runner。",
+      "production_gates": [
+        "turn_context_migration",
+        "turn_context_repository",
+        "ingress_writer",
+        "claim_runner"
+      ]
+    },
+    {
+      "p0_id": "TC-P02",
+      "title": "模型可见历史",
+      "status": "awaiting_owner_approval",
+      "owner_roles": [
+        "agent.history",
+        "agent.runtime",
+        "product",
+        "security"
+      ],
+      "artifact_refs": [
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_turn_context/manifest.json",
+          "sha256": "sha256:076ed67cbf22c3032fcf4686de9475e7a9cf968082cbafa98e4d11f5c98eaa13",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_marker/manifest.json",
+          "sha256": "sha256:d557a97f2981c40c944b2c9fafb6afb92f57ac3e0e84b1c2b08479fcb3f65c14",
+          "kind": "corpus_manifest"
+        }
+      ],
+      "required_tests": [
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_message_set_v1_corpus_test.go",
+          "test_name": "TestSessionMessageSetFullArrayV1ToolCausality",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_turn_context_v1_corpus_test.go",
+          "test_name": "TestSessionTurnContextV1SummaryCutoffIsolation",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_event_marker_v1_corpus_test.go",
+          "test_name": "TestSessionEventMarkerV1EventBinding",
+          "mode": "normal"
+        }
+      ],
+      "approval_refs": [],
+      "unmet_evidence": [
+        "history_summary_owner_corpus",
+        "summary_retention_and_security",
+        "owner_signatures"
+      ],
+      "block_code": "TC_APPROVAL_P02_HISTORY_SUMMARY_EVIDENCE_MISSING",
+      "block_statement": "History/Summary 来源、保留与安全证据尚未签字；禁止 Context Loader、Summary Store 与模型历史注入。",
+      "production_gates": [
+        "context_loader",
+        "history_summary_store",
+        "model_history_injection"
+      ]
+    },
+    {
+      "p0_id": "TC-P03",
+      "title": "Message Set",
+      "status": "awaiting_owner_approval",
+      "owner_roles": [
+        "agent.postgresql",
+        "data",
+        "agent.runtime"
+      ],
+      "artifact_refs": [
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_turn_context/manifest.json",
+          "sha256": "sha256:076ed67cbf22c3032fcf4686de9475e7a9cf968082cbafa98e4d11f5c98eaa13",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_upgrade/manifest.json",
+          "sha256": "sha256:7e67554d2dff826058060cab6ff624a4cc0522808310302cb6402ab589f9b1ce",
+          "kind": "corpus_manifest"
+        }
+      ],
+      "required_tests": [
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_message_set_v1_corpus_test.go",
+          "test_name": "TestSessionMessageSetFullArrayV1GoldenDigests",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_message_set_v1_corpus_test.go",
+          "test_name": "TestSessionMessageSetFullArrayV1Limit",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_message_set_v1_corpus_test.go",
+          "test_name": "TestSessionMessageSetFullArrayV1CanonicalFieldSensitivity",
+          "mode": "normal"
+        }
+      ],
+      "approval_refs": [],
+      "unmet_evidence": [
+        "total_byte_limit",
+        "legacy_real_recalculation",
+        "real_pg_explain_and_capacity",
+        "owner_signatures"
+      ],
+      "block_code": "TC_APPROVAL_P03_MESSAGE_SET_PHYSICAL_EVIDENCE_MISSING",
+      "block_statement": "Message Set 物理上限、legacy 回算或 PostgreSQL 性能证据尚未签字；禁止生产 digest 与 legacy Helper。",
+      "production_gates": [
+        "message_set_production_digest",
+        "legacy_upgrade_helper",
+        "turn_context_repository"
+      ]
+    },
+    {
+      "p0_id": "TC-P04",
+      "title": "Prompt Bundle",
+      "status": "awaiting_owner_approval",
+      "owner_roles": [
+        "agent.prompt_registry",
+        "agent.runtime",
+        "product",
+        "security"
+      ],
+      "artifact_refs": [
+        {
+          "path": "docs/design/agent/immutable-turn-context-design-v1.md",
+          "sha256": "sha256:6cecbb6918e8f04a3e061500042d9fc2cfd449b93af6f7363a7bb5aee45d75fb",
+          "kind": "design_doc"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_turn_context/manifest.json",
+          "sha256": "sha256:076ed67cbf22c3032fcf4686de9475e7a9cf968082cbafa98e4d11f5c98eaa13",
+          "kind": "corpus_manifest"
+        }
+      ],
+      "required_tests": [
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_turn_context_v1_corpus_test.go",
+          "test_name": "TestSessionTurnContextV1ConditionalGroups",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_turn_context_v1_corpus_test.go",
+          "test_name": "TestSessionTurnContextV1FrozenReplay",
+          "mode": "normal"
+        }
+      ],
+      "approval_refs": [],
+      "unmet_evidence": [
+        "prompt_bundle_owner_corpus",
+        "publish_withdraw_retention",
+        "secret_scan",
+        "owner_signatures"
+      ],
+      "block_code": "TC_APPROVAL_P04_PROMPT_REGISTRY_EVIDENCE_MISSING",
+      "block_statement": "Prompt canonical、发布撤回保留和无 Secret 证据尚未签字；禁止 Prompt Registry/Resolver 接入 Runner。",
+      "production_gates": [
+        "prompt_registry",
+        "prompt_resolver",
+        "chat_model_agent"
+      ]
+    },
+    {
+      "p0_id": "TC-P05",
+      "title": "Executable Tool Registry",
+      "status": "awaiting_owner_approval",
+      "owner_roles": [
+        "agent.runtime",
+        "agent.tool_registry",
+        "graph_tool.plan_creation_spec",
+        "graph_tool.analyze_materials",
+        "graph_tool.plan_storyboard",
+        "graph_tool.generate_media",
+        "graph_tool.write_prompts",
+        "graph_tool.assemble_output"
+      ],
+      "artifact_refs": [
+        {
+          "path": "agent/tests/contract/testdata/w2_r01/manifest.json",
+          "sha256": "sha256:41e554faaec0f023e7542eb5d5cbe4638ccbb871c1179906e69215b52538f497",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_turn_context/manifest.json",
+          "sha256": "sha256:076ed67cbf22c3032fcf4686de9475e7a9cf968082cbafa98e4d11f5c98eaa13",
+          "kind": "corpus_manifest"
+        }
+      ],
+      "required_tests": [
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/w2r01/tool_receipt_v1_corpus_test.go",
+          "test_name": "TestToolReceiptV1Corpus",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/internal/tool/catalog_test.go",
+          "test_name": "TestCatalogProviderReturnsExactIndependentCopies",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_message_set_v1_corpus_test.go",
+          "test_name": "TestSessionMessageSetFullArrayV1AllToolKeys",
+          "mode": "normal"
+        }
+      ],
+      "approval_refs": [],
+      "unmet_evidence": [
+        "six_graph_tool_owner_approvals",
+        "startup_compile",
+        "per_turn_and_per_call_pin",
+        "tool_reduction",
+        "owner_signatures"
+      ],
+      "block_code": "TC_APPROVAL_P05_EXECUTABLE_REGISTRY_EVIDENCE_MISSING",
+      "block_statement": "六 Tool Owner、Compile 与 Pin 证据尚未齐备；Catalog 必须保持 unavailable，禁止 Executable Registry 和 Graph 注册。",
+      "production_gates": [
+        "executable_tool_registry",
+        "graph_runtime",
+        "chat_model_agent"
+      ]
+    },
+    {
+      "p0_id": "TC-P06",
+      "title": "Runtime/Model/Budget",
+      "status": "awaiting_owner_approval",
+      "owner_roles": [
+        "agent.runner_policy",
+        "agent.model_gateway",
+        "agent.budget_policy",
+        "finance",
+        "operations_sre"
+      ],
+      "artifact_refs": [
+        {
+          "path": "agent/tests/contract/testdata/w2_r02/manifest.json",
+          "sha256": "sha256:9a73a22c7e6eeef179a5c46978ad1dfc3b6af54d765fea24890d3302f2ea5f26",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_turn_context/manifest.json",
+          "sha256": "sha256:076ed67cbf22c3032fcf4686de9475e7a9cf968082cbafa98e4d11f5c98eaa13",
+          "kind": "corpus_manifest"
+        }
+      ],
+      "required_tests": [
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_lane_v1_corpus_test.go",
+          "test_name": "TestSessionLaneV1Corpus",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_turn_context_v1_corpus_test.go",
+          "test_name": "TestSessionTurnContextV1FrozenReplay",
+          "mode": "normal"
+        }
+      ],
+      "approval_refs": [],
+      "unmet_evidence": [
+        "runtime_policy_owner_corpus",
+        "model_route_owner_corpus",
+        "budget_snapshot_owner_corpus",
+        "provider_unknown_outcome",
+        "remaining_budget_recovery",
+        "owner_signatures"
+      ],
+      "block_code": "TC_APPROVAL_P06_POLICY_MODEL_BUDGET_EVIDENCE_MISSING",
+      "block_statement": "Policy/Route/Budget 默认值、费用和恢复剩余额度尚未签字；禁止生产 Runner、Model 调用和预算执行。",
+      "production_gates": [
+        "runner",
+        "model_gateway",
+        "budget_enforcer"
+      ]
+    },
+    {
+      "p0_id": "TC-P07",
+      "title": "Access/Approval",
+      "status": "awaiting_owner_approval",
+      "owner_roles": [
+        "business.authorization",
+        "agent.access_snapshot",
+        "agent.approval_store",
+        "product",
+        "frontend",
+        "security",
+        "finance",
+        "testing"
+      ],
+      "artifact_refs": [
+        {
+          "path": "agent/tests/contract/testdata/w2_r01/manifest.json",
+          "sha256": "sha256:41e554faaec0f023e7542eb5d5cbe4638ccbb871c1179906e69215b52538f497",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_turn_context/manifest.json",
+          "sha256": "sha256:076ed67cbf22c3032fcf4686de9475e7a9cf968082cbafa98e4d11f5c98eaa13",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "docs/design/agent/approval-continuation-cross-object-evidence-v1.md",
+          "sha256": "sha256:38dd40f2d0bf8d2c9c13d8b698de592f5ddca9b2712e584c2609ae9828fc2523",
+          "kind": "design_doc"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r03_cross_object/manifest.json",
+          "sha256": "sha256:cee3d3c8422df61a1c6e3cceb6a9a714c66c6308e94e96d69ad180afa568a0bf",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "docs/design/agent/approval-consumption-receipt-contract-v1.md",
+          "sha256": "sha256:f6cafd8e508a0c00875992673119c7c4cd055cb55e1b4d379cd361e34c68cbb1",
+          "kind": "design_doc"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r04_approval_consumption/manifest.json",
+          "sha256": "sha256:6ad8c58dbeeaf514994fc3db8c8beca0192de6b2e52121201060f37a7c900ba0",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "docs/design/agent/continuation-child-tool-receipt-contract-v1.md",
+          "sha256": "sha256:bc9b4df32dbc71aaf650b904ad7bae490bb111c9b1d599ae5c4567838001d5fa",
+          "kind": "design_doc"
+        },
+        {
+          "path": "scripts/check-database-contracts.sh",
+          "sha256": "sha256:6ed8a8b329adc7e1d8823d8891587ecc7881e8091ed30c25b808f3d31d9ec125",
+          "kind": "required_mode_script"
+        }
+      ],
+      "required_tests": [
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/approval_continuation_cross_object_evidence_v1_corpus_test.go",
+          "test_name": "TestW2R03CrossObjectEvidenceManifest",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/approval_continuation_cross_object_evidence_v1_corpus_test.go",
+          "test_name": "TestApprovalContinuationCrossObjectEvidenceV1Corpus",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_turn_context_v1_corpus_test.go",
+          "test_name": "TestSessionTurnContextV1ContinuationStructuralGroups",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/w2r01/tool_receipt_v1_corpus_test.go",
+          "test_name": "TestToolReceiptV1Corpus",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/approval_continuation_cross_object_evidence_v1_corpus_test.go",
+          "test_name": "TestApprovalContinuationCrossObjectEvidenceV1TurnContextBinding",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/w2r04approvalconsumption/approval_consumption_receipt_v1_corpus_test.go",
+          "test_name": "TestW2R04ApprovalConsumptionManifest",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/w2r04approvalconsumption/approval_consumption_receipt_v1_corpus_test.go",
+          "test_name": "TestApprovalConsumptionReceiptCoreV1Corpus",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/w2r04approvalconsumption/approval_consumption_receipt_v1_corpus_test.go",
+          "test_name": "TestApprovalConsumptionReceiptCoreV1ReplayAndQuery",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/w2r04approvalconsumption/approval_consumption_receipt_v1_corpus_test.go",
+          "test_name": "TestApprovalConsumptionReceiptCoreV1SingleUseConflicts",
+          "mode": "normal"
+        },
+        {
+          "module": "business",
+          "source_path": "business/internal/postgres/authorization_repository_integration_test.go",
+          "test_name": "TestAuthorizationRepositoryPostgreSQLLifecycle",
+          "mode": "required_pg"
+        }
+      ],
+      "approval_refs": [],
+      "unmet_evidence": [
+        "cross_module_approval_contract",
+        "cross_user_and_project",
+        "resource_version_revalidation",
+        "decision_consumption_once",
+        "real_pg_decision_expiry_cancel_atomicity",
+        "child_receipt_business_decide_unknown_outcome",
+        "owner_signatures"
+      ],
+      "block_code": "TC_APPROVAL_P07_ACCESS_APPROVAL_EVIDENCE_MISSING",
+      "block_statement": "Access/Approval 跨 Module、再验证、Decision/Consumption 和 child Receipt 恢复证据尚未签字；禁止 Approval Action、Continuation 与高风险副作用。",
+      "production_gates": [
+        "approval_action",
+        "approval_repository",
+        "approval_continuation",
+        "high_risk_side_effect"
+      ]
+    },
+    {
+      "p0_id": "TC-P08",
+      "title": "被引用事实不可变性",
+      "status": "awaiting_owner_approval",
+      "owner_roles": [
+        "agent.postgresql",
+        "data",
+        "security",
+        "operations_sre"
+      ],
+      "artifact_refs": [
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_marker/manifest.json",
+          "sha256": "sha256:d557a97f2981c40c944b2c9fafb6afb92f57ac3e0e84b1c2b08479fcb3f65c14",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_upgrade/manifest.json",
+          "sha256": "sha256:7e67554d2dff826058060cab6ff624a4cc0522808310302cb6402ab589f9b1ce",
+          "kind": "corpus_manifest"
+        }
+      ],
+      "required_tests": [
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_event_marker_v1_corpus_test.go",
+          "test_name": "TestSessionEventMarkerV1Corpus",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_lane_legacy_upgrade_v1_corpus_test.go",
+          "test_name": "TestLegacyEventRetentionV1FailsClosed",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/internal/postgres/session_repository_contract_test.go",
+          "test_name": "TestSessionSkillSnapshotV2MigrationDeclaresImmutableTriggers",
+          "mode": "normal"
+        }
+      ],
+      "approval_refs": [],
+      "unmet_evidence": [
+        "real_pg_append_only_triggers",
+        "controlled_retention",
+        "rooted_anti_join",
+        "key_rotation_semantic_digest",
+        "owner_signatures"
+      ],
+      "block_code": "TC_APPROVAL_P08_IMMUTABILITY_RETENTION_EVIDENCE_MISSING",
+      "block_statement": "引用事实不可变、Retention 与 Key Rotation 的真实 PostgreSQL 证据尚未签字；禁止 Writer、Retention 和 Runner 读取。",
+      "production_gates": [
+        "append_only_writer",
+        "event_retention",
+        "legacy_upgrade_helper",
+        "runner"
+      ]
+    },
+    {
+      "p0_id": "TC-P09",
+      "title": "Turn/Run 与 Activation",
+      "status": "awaiting_owner_approval",
+      "owner_roles": [
+        "agent.runtime",
+        "agent.postgresql",
+        "operations_sre"
+      ],
+      "artifact_refs": [
+        {
+          "path": "agent/tests/contract/testdata/w2_r02/manifest.json",
+          "sha256": "sha256:9a73a22c7e6eeef179a5c46978ad1dfc3b6af54d765fea24890d3302f2ea5f26",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_ingress/manifest.json",
+          "sha256": "sha256:5b955d31f2f718c49f67fe24891fe154714cc9f88521345409b329c064591938",
+          "kind": "corpus_manifest"
+        },
+        {
+          "path": "agent/tests/contract/testdata/w2_r02_upgrade/manifest.json",
+          "sha256": "sha256:7e67554d2dff826058060cab6ff624a4cc0522808310302cb6402ab589f9b1ce",
+          "kind": "corpus_manifest"
+        }
+      ],
+      "required_tests": [
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_lane_v1_corpus_test.go",
+          "test_name": "TestSessionLaneV1Corpus",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_lane_ingress_v1_corpus_test.go",
+          "test_name": "TestSessionLaneIngressV1ReplayUsesFrozenResultAfterRuntimeProgress",
+          "mode": "normal"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_lane_legacy_upgrade_v1_corpus_test.go",
+          "test_name": "TestLegacyLaneReadinessV1SeparatesFoundation",
+          "mode": "normal"
+        }
+      ],
+      "approval_refs": [],
+      "unmet_evidence": [
+        "turn_run_repository",
+        "lease_fence_race",
+        "redis_lost_wake_scanner",
+        "old_writer_drain",
+        "stale_generation",
+        "quarantine_recovery",
+        "owner_signatures"
+      ],
+      "block_code": "TC_APPROVAL_P09_LANE_ACTIVATION_EVIDENCE_MISSING",
+      "block_statement": "HOL/Fence/Scanner/Drain/Generation 的生产证据尚未签字；禁止启动 Processor、Scanner、Claim、Wake 与 Run。",
+      "production_gates": [
+        "lane_capability",
+        "processor",
+        "scanner",
+        "claim",
+        "run"
+      ]
+    },
+    {
+      "p0_id": "TC-P10",
+      "title": "物理与证据",
+      "status": "awaiting_owner_approval",
+      "owner_roles": [
+        "data",
+        "quality_engineering",
+        "operations_sre",
+        "security"
+      ],
+      "artifact_refs": [
+        {
+          "path": "docs/design/agent/session-lane-postgresql-design-v1.md",
+          "sha256": "sha256:86c5d2631d75d479ef274341a794286b40fc25236f64694f8e9465368d5c3c74",
+          "kind": "design_doc"
+        },
+        {
+          "path": "scripts/check-database-contracts.sh",
+          "sha256": "sha256:6ed8a8b329adc7e1d8823d8891587ecc7881e8091ed30c25b808f3d31d9ec125",
+          "kind": "required_mode_script"
+        }
+      ],
+      "required_tests": [
+        {
+          "module": "agent",
+          "source_path": "agent/internal/postgres/session_lane_upgrade_baseline_contract_test.go",
+          "test_name": "TestSessionLaneUpgradeBaselinePostgreSQLContract",
+          "mode": "required_pg"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/internal/postgres/client_contract_test.go",
+          "test_name": "TestMigratedSchemaContract",
+          "mode": "required_pg"
+        },
+        {
+          "module": "agent",
+          "source_path": "agent/tests/contract/session_lane_legacy_upgrade_v1_corpus_test.go",
+          "test_name": "TestLegacyUpgradeDownGuardV1",
+          "mode": "normal"
+        }
+      ],
+      "approval_refs": [],
+      "unmet_evidence": [
+        "forward_migration_and_upgrade",
+        "crash_and_race",
+        "cli_down_guard",
+        "explain_and_capacity",
+        "evidence_redaction",
+        "owner_signatures"
+      ],
+      "block_code": "TC_APPROVAL_P10_PHYSICAL_PG_EVIDENCE_MISSING",
+      "block_statement": "新物理 Schema、PostgreSQL 16 upgrade/crash/race/Down/Explain/脱敏证据尚未签字；禁止新 Migration、Repository 与 Readiness。",
+      "production_gates": [
+        "turn_context_migration",
+        "turn_context_repository",
+        "readiness"
+      ]
+    }
+  ]
+}

@@ -1,12 +1,70 @@
 # AIGC ChatModelAgent Demo 详细设计
 
-> 状态：Current Implementation + Target Gaps
-> 日期：2026-07-12
-> 关联文档：[AIGC Tool 编排与动态故事板详细设计](./aigc-tool-storyboard-design.md)、[AIGC Generation Worker 详细设计](./aigc-worker-design.md)
+> 状态：Historical `main@6d0fc111fd49a874dad213a61389a6d83999ebc8` Implementation + Target Migration Reference
+> 日期：2026-07-14
+> 关联文档：[AIGC Tool 编排与动态故事板详细设计](./aigc-tool-storyboard-design.md)、[AIGC Generation Worker 详细设计](./aigc-worker-design.md)、[AIGC A2UI 全栈详细设计](./aigc-a2ui-design.md)
+
+> 当前事实警告（2026-07-15）：本文后续所有“当前实现/已实现”只描述上述历史单体 Demo，不描述当前重构分支。当前 `agent-service` 只具备 Session/Workspace、Session Skill Snapshot v2 与静态 Tool Catalog 基础；Eino 仅完成依赖锁定与兼容测试，生产 Runner、ChatModelAgent、Graph、Approval 和 A2UI 均未注册。当前事实必须以生产代码、Migration、专项 Approved 契约和 [全功能冒烟架构审计](./design/cross-module/full-function-smoke-architecture-audit-2026-07-15.md) 为准。
 
 本文档记录 Dora Agent 当前 ChatModelAgent、Runner、持久化 Session Runtime、Capability Tool、A2UI 和后续目标。Tool 暴露面、动态故事板和局部操作以 `aigc-tool-storyboard-design.md` 为准；异步 Batch、Job、Worker 和 Finalization 以 `aigc-worker-design.md` 为准。当前产品定位是受信本地 Demo，没有面向公网的真实登录鉴权、租户授权或接口限流。
 
 本地 Demo 的验收目标是跑通 Agent Tool、durable Approval/Continuation、Worker、Batch Barrier、SessionEventLog/SSE 和 React 投影，并保留 DeepSeek 与真实 Image2。Image2 使用 `DORA_IMAGE2_API_KEY` 调用真实同步 Adapter，`b64_json` 解码后写入本地素材目录；Seedance 可使用确定性 MP4 占位，Audio 使用 Demo WAV，Assembly 使用 JSON manifest。验收不要求真实视频/音频合成、拼接或转码，也不得据此宣称这些生产 Provider 已完成。
+
+## 0. 已确认目标架构（覆盖旧 Demo 假设）
+
+本节是 2026-07-14 确认的目标决策。本文后续“当前实现”用于说明迁移起点；凡与本节冲突，以本节和关联的 Worker、A2UI 设计为准。
+
+### 0.1 所有权
+
+| Module | 拥有的业务对象 | 禁止拥有或直接写入 |
+| --- | --- | --- |
+| Business | Skill 草稿/发布快照、Storyboard/Revision、Element/Slot、Asset、Binding、积分账户与扣费流水 | Agent Run/Turn/Graph、Worker lease/provider receipt |
+| Agent | Session Runtime、Run/Turn/Checkpoint、Graph 定义、会话 Skill 快照、Operation/Batch/Job、A2UI EventLog/Inbox | Storyboard、Binding、Asset 和积分真值 |
+| Worker | 队列消费、并发/lease、Provider 执行、生成重试、TOS 上传及执行回执 | Skill、Storyboard、Binding、积分、A2UI 和 Agent 决策 |
+
+Agent 读取或修改 Storyboard/Binding 时必须通过 Graph 的确定性 Query/Command Node 调用 Business RPC。Worker 可按 Job 的 `binding_mode` 请求绑定资产或故事板，但只能调用 Business `FinalizeGeneration` RPC；Business 是唯一写入者，绑定是可选收尾步骤。
+
+### 0.2 Skill 发布语义
+
+1. 产品只展示 `draft` 和 `published`，不向用户提供版本明细、版本列表或版本切换。
+2. Skill 聚合保留一个可编辑草稿和一个当前发布快照；发布原子替换当前发布快照。
+3. 发布只对发布后创建的新会话生效。会话创建时冻结 Skill 发布快照，已有会话和已有 Turn 都不热更新。
+4. 后端仍保存内部 `publication_revision`、内容 digest、发布时间和操作人，用于并发控制、审计和 receipt；它不是产品版本功能。
+5. 发布失败不改变当前发布快照；相同发布幂等键重放返回第一次结果。
+
+### 0.3 生成与事件回流
+
+```mermaid
+sequenceDiagram
+    participant G as Agent Graph Node
+    participant B as Business RPC
+    participant W as Worker
+    participant A as Agent Session Lane
+
+    G->>B: PrepareGeneration(idempotency_key, targets, estimate)
+    B->>B: 校验 + 创建元素/资产占位 + 生成前原子直接扣费
+    B-->>G: charged + preparation_id + element_ids/asset_ids + ledger_ids
+    G->>G: 创建 Operation/Batch/Job/Outbox
+    G-->>G: Graph 返回 accepted 并结束
+    G->>W: durable job wake-up
+    W->>W: Provider + 并发 + 上传 TOS
+    W->>B: FinalizeGeneration(asset metadata, optional binding)
+    B-->>W: committed
+    W-->>A: durable batch terminal event
+    A->>A: Inbox 去重 + BatchContinuationResult + Session Lane
+```
+
+这里的“预扣费”定义为**生成前原子直接扣费**，成功后账务状态即为 `charged`，不是可释放的 reservation。系统不支持退款；Provider 失败、取消、结果过期或绑定失败均不自动退回积分。Business RPC 未确认扣费成功及未返回元素/资产 ID 时，Agent 不得派发 Worker Job。
+
+Worker 完成后通过 Outbox/消息通道向 Agent 投递持久化批次终态事件，不直接调用 ChatModelAgent，也不恢复已经结束的 Graph 栈。Agent 消费事件后以 `(batch_id, result_version)` 去重，写入 Durable `BatchContinuationResult` 并唤醒对应 Session Lane；只有需要语义解释或下一步选择时才开启新 Turn。
+
+### 0.4 A2UI
+
+A2UI 的完整协议、组件注册、后端包、前端包、安全和验收见 [AIGC A2UI 全栈详细设计](./aigc-a2ui-design.md)。所有交互组件以具备 Markdown 展示能力的 Card 为基类，首期至少支持单选、多选、提交按钮、输入框、多图片/视频/音频、纵向步骤、Tool 和 Status 渲染组件。A2UI 只投影到创作页聊天框，不替代 Business Storyboard/Asset 真值。
+
+### 0.5 Graph Tool 目录
+
+目标 Registry 必须包含 `plan_creation_spec`、`analyze_materials`、`plan_storyboard`、`generate_media`、`write_prompts` 和 `assemble_output` 六个稳定 Graph Tool。当前固定五 Tool Registry 是迁移起点；缺少独立 `write_prompts`，不得用故事板内部 Prompt Node 或旧 Prompt Tool 代替。六个工具的场景和专项验收以 [Graph Tool 功能需求总览](./requirements/graph-tool-requirements-overview.md) 为准。
 
 ### 当前实施状态
 
@@ -36,14 +94,14 @@
 ## 1. 设计目标
 
 1. 使用 Eino ADK `ChatModelAgent` 作为创作决策中枢，理解用户意图并选择高层 Capability Tool。
-2. Agent 只决定整体规划和正常生产推进，不直接调用业务 CRUD、Provider、余额、权限或用户资产 Tool。
+2. Agent 只决定整体规划和正常生产推进；所有 Storyboard、Binding、Asset、积分与权限读写均由 Graph 确定性节点调用 Business RPC，不把底层 CRUD 暴露给模型。
 3. 故事板根据当前场景动态创建模块和元素，不预先枚举所有角色、场景、歌词、分镜或音乐类型。
 4. 明确区分整体 Replan 与局部操作：新背景/新目标触发整体规划；前端 Prompt 编辑和目标重生成走定向 HTTP Command。
 5. 提示词生成是元素规划之后的独立 Graph 内部 ChatModel Node，不作为 Agent-facing `prepare_prompts` Tool。
 6. Graph 只执行有界流程；图片、视频和音频任务持久化为 Operation/Batch/Job 后立即返回 `accepted`。
 7. Worker 的终态 Job/Batch 通过 generation outbox 投影 UI；Batch 终态只创建一次带完整可信 `PostBatchPayload` 的 Durable `BatchContinuationResult`，必要时最多触发一次 Agent 解释。
 8. 前端左右分离：左侧是动态故事板，右侧是聊天、工具阶段、确认和错误卡片。
-9. 对话、创作规范、动态故事板 Revision、PromptSlot、资产绑定、Approval、Operation、Batch、Job、SessionInput 和外部 EventLog 持久化；独立 Stage Ledger/ToolOperationResult 尚未实现。
+9. Agent 持久化对话、会话 Skill 快照、Approval、Operation、Batch、Job、SessionInput 和外部 EventLog；Business 持久化创作规范、Storyboard Revision、PromptSlot、Asset、Binding 与积分。跨 Module 只传稳定 ID、版本和已发布契约。
 10. 支持断线恢复、版本冲突、用户打断、迟到结果保护、技术重试和业务重生成。
 
 ## 2. Eino 模块与业务作用
@@ -67,7 +125,7 @@
 1. 生产代码通过 Runner 执行 Agent，不直接调用 `agent.Run()`。
 2. Graph 固定拓扑并预先 Compile；动态 Module、Element 和 Scope 放在 Graph State。
 3. Graph 不跨分钟等待 Provider，不使用 Checkpoint 代替 Operation/Batch/Job 状态。
-4. Provider、Storage、Billing 和 Asset Finalizer 由 Worker 调用，不进入 Agent Tool Registry。
+4. Provider 和 Storage Adapter 只由 Worker 调用；Billing 只由 Graph Node 调用 Business，Asset/Binding Finalization 由 Worker 调用 Business。三者都不进入 Agent Tool Registry。
 
 ## 3. 总体架构
 
@@ -637,7 +695,7 @@ SessionSignalPublisher consumes batch terminal Outbox
 → NeedsAgentExplanation=true: fresh Agent turn explains persisted batch/operation status once from a trusted system event
 ```
 
-`PostBatchPayload` 已包含 Session/Workflow/Stage/Operation/ToolCall/Batch 关联、BatchVersion、终态、完整 CostSummary、逐 Job target/slot/status/disposition/result asset IDs/error code/gross/refund/net、解释策略与创建时间，并同时保存于 Operation.Result 和 terminal outbox。当前没有额外的 PostBatchContinuation Graph、ActiveBatchID fence、StageRun 或 ToolOperationResult。Candidate Approval 在单 Job Finalization 中创建。未来若引入独立 PostBatchContinuation，应放在 terminal outbox 与 SessionInput 之间，并保持现有稳定 InputID；不能把“Graph 未实现”误写成“当前 continuation 没有完整结果”。
+目标 `PostBatchPayload` 包含 Session/Workflow/Stage/Operation/ToolCall/Batch 关联、BatchVersion、终态、逐 Job target/slot/status/disposition/result asset IDs/error code、`preparation_id/ledger_entry_ids/charged_points`、解释策略与创建时间，并同时保存于 Operation.Result 和 terminal outbox。当前实现中的 gross/refund/net 字段属于迁移前账务模型，迁移后不得继续作为产品合同。当前没有额外的 PostBatchContinuation Graph、ActiveBatchID fence、StageRun 或 ToolOperationResult；未来引入时应放在 terminal outbox 与 SessionInput 之间，并保持稳定 InputID。
 
 | Batch status | Domain Event | Stage status | A2UI status |
 | --- | --- | --- | --- |
@@ -676,7 +734,7 @@ Handlers: []adk.ChatModelAgentMiddleware{
 5. PatchToolCalls 修复不完整 Tool Call 链。
 6. Reduction 先处理大型 Tool Result，Summarization 再压缩长期会话事实。
 7. TurnContext 在压缩后注入最新 Spec/Storyboard 瞬态状态。
-8. Dynamic Skill middleware 在每个 Agent run 先调用 `SkillBackend.List`：空列表直接透传，不注入 Eino Skill 系统指令或 `skill` loader；导入 Skill 后下一 turn 在同一 Runner 自动启用。`skill` loader 的 ToolCall/Tool result（包括错误）保留给内部 ReAct 历史，但服务端不把它们投影为用户 `tool_runs` 卡。ToolException 规范化其余预期业务异常。
+8. Dynamic Skill middleware 在会话创建时读取 Business 当前已发布 Skill，并冻结为 Session Skill Snapshot；后续每个 Agent run 只读取该快照。空快照不注入 Eino Skill 系统指令或 `skill` loader；新发布内容只对新会话生效。`skill` loader 的 ToolCall/Tool result（包括错误）保留给内部 ReAct 历史，但服务端不把它们投影为用户 `tool_runs` 卡。ToolException 规范化其余预期业务异常。
 
 当前 Runner 没有接入 ToolSearch 或额外 Observability Middleware；五 Tool Registry 是固定小集合，不需要动态 Tool Search。
 
@@ -710,16 +768,18 @@ type CapabilityError struct {
 | `dependency_not_ready` | Spec/Storyboard/Approval 未就绪 | 告知依赖并停止调用 |
 | `version_conflict` | 当前 Revision 已变化 | 加载最新状态后重新决策 |
 | `permission_denied` | 用户无资产或模型权限 | 不重试 |
-| `insufficient_balance` | 最终计费时余额不足 | 不重新调用 Provider，等待业务处理 |
+| `insufficient_balance` | Business 生成前扣费时余额不足 | 不创建 Job，不调用 Provider |
 | `provider_rejected` | 内容审核或参数永久失败 | 请求用户调整 Prompt |
 | `transient_failure` | 网络、限流、暂时 5xx | 由所属层重试 |
 | `fatal` | 数据损坏、关联错误 | 终止并告警 |
 
-模型重试只处理模型调用；Provider、Storage、Billing 和 Finalization 重试由 Worker 状态机处理。
+模型重试只处理模型调用；Provider、Storage 和媒体执行重试由 Worker 状态机处理，Business 扣费和 Finalization RPC 按各自稳定幂等键恢复。
 
 ### 9.3 Skill Middleware
 
 Skill 只提供阶段语义和推荐 Capability Tool，不直接暴露内部 Query/Command 或 Provider。
+
+Skill 的产品生命周期只有草稿和发布：Business 保存可编辑草稿与当前发布快照，发布时原子替换快照；Agent 在新建 Session 时通过 Business RPC 取得当前发布内容、内部 `publication_revision` 和 digest，保存不可变 Session Skill Snapshot。同一会话的所有 Turn 使用同一快照，发布、撤销草稿修改或再次发布都不影响已有会话。UI 不展示内部 revision 明细，Agent 也不按 Turn 动态切换 Skill。
 
 ```go
 type SkillStage struct {
@@ -1021,9 +1081,10 @@ aggregate_version
 input_fingerprint
 binding_mode
 approval_policy
-charge_policy
+preparation_id
+ledger_entry_ids
+charged_points
 result_disposition
-compensation_status
 ```
 
 这些字段决定迟到结果是否仍能绑定当前 Storyboard。普通媒体 Job 的 `SpecVersion` 必须与 Active Revision/Confirmed Spec 一致，`AggregateVersion=0`，由 Target/Prompt/Epoch/Fingerprint 允许无关 Aggregate 编辑；Assembly Job 同时冻结非零 `AggregateVersion`，任何整板变化都会使旧 manifest 结果失效。
@@ -1109,11 +1170,15 @@ load Active Revision and required bindings
 
 ## 14. A2UI 与前端
 
-### 14.1 当前 UI 来源
+本节只保留当前实现与 Agent 集成边界；目标组件模型、协议、目录结构、安全、非功能指标和可执行验收统一以 [AIGC A2UI 全栈详细设计](./aigc-a2ui-design.md) 为准。
+
+目标实现必须在 Agent Module 建立独立 `internal/a2ui/{protocol,component,action,registry,validator,projector,publisher}` 包，在前端建立独立 `features/aigc/a2ui/` 包。Card 是所有组件的共同结构并内置安全 Markdown；Worker 只发布生成领域事件，Agent Inbox/Projector 才能创建或更新 Tool/Status Card。
+
+### 14.1 当前 UI 来源与迁移边界
 
 1. ChatModelAgent 直接输出聊天类 A2UI Action，例如说明和信息收集卡片。
 2. Generation Outbox 的 `SessionSignalPublisher` 从 Operation、Job、Batch、Billing durable truth 计算同一张高层 Capability ToolRun；终态发布 `refresh_resources`，不把素材或 Candidate Approval 投影到 chat。
-3. Capability 创建的 Storyboard/Spec Approval 卡与 Approval Decision 仍在业务事务提交后直接发布 Action。
+3. 当前 Capability 创建的 Storyboard/Spec Approval 卡与 Approval Decision 仍在业务事务提交后直接发布 Action；目标态由 Business 事件进入 Agent Inbox 后统一投影。
 
 统一 Domain Event Projector/Inbox 尚未实现；`job.succeeded` 只是专用可重试 projector，因此当前仍不能承诺从所有领域事件完整重建 UI 投影。Generation/Approval Outbox 单行失败按指数退避，普通事件 10 次后 dead；Job 终态/补偿 settlement 同事务写入的内部 `batch.finalize_requested` 持续重试直至确认，以恢复 Barrier。当前没有 publisher claim lease 或 dead-row 管理 API。
 
@@ -1257,7 +1322,7 @@ approval: approval:<approval_id>
 | `aigc_approval_continuations` / `aigc_approval_command_ledger` | deterministic continuation、lease 和冻结命令幂等。 |
 | `aigc_generation_operations` / `aigc_generation_batches` / `aigc_generation_workflow_jobs` | 当前 Generation Workflow 真源。 |
 | `aigc_generation_outbox_events` | Generation Transactional Outbox。 |
-| `aigc_point_accounts` / `aigc_point_transactions` | 余额、扣费和退款交易。 |
+| Business `point_accounts` / `point_ledger` | 余额和不可变扣费流水；不属于 Agent 数据库，不包含退款状态。 |
 | `aigc_model_output_receipts` | 外层 Agent ChatModel 按 durable TurnID + model-call ordinal 冻结的完整响应。 |
 | `aigc_session_inputs` / `aigc_session_input_counters` | Durable SessionInput 和每 Session enqueue 顺序。 |
 | `aigc_session_runtime_leases` / `aigc_session_turn_runs` | Session fence、稳定 TurnID、冻结 ContextMessageSeq/ContextSeqFrozen、完整 OutputPayload/OutputDigest 和 Turn 状态。 |
@@ -1472,11 +1537,10 @@ type EventProjector interface {
 | `/api/aigc/sessions/:id/events/stream` | `GET` | 按 after_seq/Last-Event-ID cursor 回放并持续 Tail。 |
 | `/api/aigc/assets` | `POST` | multipart 上传素材并保存对象存储 Asset。 |
 | `/api/aigc/assets/:asset_id?session_id=:session_id` | `GET` | 仅返回属于该 Session 且 available 的 Asset 元数据与已保存 URL。 |
-| `/api/aigc/admin/generation/jobs/:job_id/compensation/finalize` | `POST` | 仅永久补偿失败可用；要求 `AIGC_ADMIN_TOKEN` Bearer Token，固化人工退款/`manual_final` 并重跑 Barrier。 |
 
 生产 generic Runner interrupt 使用 durable `/messages/resume`；仅当 Runtime 未配置时，该路由才退化为同步测试路径。Spec/Storyboard 使用单项 Approval Decision API，Candidate 使用 Storyboard 级批量 Decision API；Approval-bound mapping 禁止 generic resume。
 
-安全边界：这些 API 当前只适用于受信本地 Demo。`ensureSession`、Session/User 关联和 available Asset 过滤不是登录鉴权或租户授权，服务也没有通用 rate limit/Provider 配额。人工 Compensation 端点的 `AIGC_ADMIN_TOKEN` 只是最小 Demo 保护，不替代后台 RBAC 与审计。Provider 下载具备 HTTPS/重定向/私网地址/响应体大小防护，但不改变上述业务安全边界。本地 `/api/aigc/local-assets/*` 是开发环境静态文件路由，不提供私有对象鉴权；验收中的 Image2 是真实 Provider，而 Seedance 占位 Adapter、Audio 和 Assembly 仍不是生产媒体能力。
+安全边界：这些 API 当前只适用于受信本地 Demo。`ensureSession`、Session/User 关联和 available Asset 过滤不是登录鉴权或租户授权，服务也没有通用 rate limit/Provider 配额。Provider 下载具备 HTTPS/重定向/私网地址/响应体大小防护，但不改变上述业务安全边界。本地 `/api/aigc/local-assets/*` 是开发环境静态文件路由，不提供私有对象鉴权；验收中的 Image2 是真实 Provider，而 Seedance 占位 Adapter、Audio 和 Assembly 仍不是生产媒体能力。
 
 Prompt Update 示例：
 
@@ -1598,25 +1662,21 @@ Batch partial_failed
 
 ## 20. 费用和成功边界
 
-遵循 Worker 设计：
+费用以 Business 为唯一真源，Worker 不计费、不退款，也不决定价格：
 
-1. Dispatch 校验 Provider 注册、参数白名单/边界、预计费用和余额；图片估算按输出数量相乘，但不预占额度。
-2. Provider 完成后保存 Pending Asset，并在任何外部 Charge 前冻结 Provider usage receipt（actual points + breakdown）。
-3. 扣费前再次校验 Target Binding Token。
-4. 实际费用由服务端根据真实模型、媒体类型、数量、时长和已经冻结的 Provider usage receipt 计算；恢复不能用后续响应改写 receipt。
-5. 使用稳定 Billing IdempotencyKey 幂等扣费；同 key 还校验 kind/user/points/reference/operation/batch/job/breakdown 不可变，任何差异返回 conflict。
-6. Job 只在 Asset、费用和 Candidate/Active Binding 完成后进入 succeeded；当前 generation Job/outbox 与 Asset/Storyboard/Approval 使用幂等的多事务收尾，并非一个跨聚合数据库事务。领域 Commit 不发布 UI，随后 `job.succeeded` outbox 更新高层 ToolRun 并触发 `refresh_resources`；Candidate durable Approval 保留在服务端供左侧 Storyboard 批量入口消费。投影失败不会回滚 Job 或触发补偿。
-7. 完整 PostBatchPayload 和 Batch CostSummary 包含可信的 gross/refund/net 本轮费用与逐 Job 结果，并写入 Operation/terminal outbox/BatchContinuationResult；当前没有独立 ToolOperationResult。
+1. Graph 根据已解析的生成目标调用 Business `PrepareGeneration`，提交用户、模型配置、输出数量/时长、目标版本和幂等键。
+2. Business 在一个本地事务内校验权限、余额、目标版本和模型积分配置，创建/冻结 `preparation_id`、元素/资产占位及账务流水，并执行生成前原子直接扣费。
+3. 成功响应必须返回 `charge_status=charged`、`ledger_entry_ids`、`charged_points`、`element_ids/asset_ids`、Business 聚合版本和 request digest；Agent 只有拿到该响应才能创建 Operation/Batch/Job。
+4. 同一幂等键和相同 payload 返回第一次结果；同键不同用户、目标、模型、数量、金额或 digest 返回 conflict。RPC 结果未知时先按幂等键查询，不能猜测失败并重新扣费。
+5. 本产品不支持退款。Provider 失败、取消、超时、内容拒绝、上传失败、结果 superseded 或绑定冲突都保留原扣费流水，不创建 refund/compensation。
+6. Worker Job 必须携带 `preparation_id`、`ledger_entry_ids`、Business element/asset IDs、预期聚合版本和 `binding_mode`，但不得修改金额或账务状态。
+7. Worker 上传 TOS 后调用 Business `FinalizeGeneration`，由 Business 幂等保存 Asset metadata，并按冻结的 `binding_mode` 选择不绑定、创建 Candidate Binding 或激活允许自动绑定的目标。
+8. Job 成功边界是 Provider 结果已验证、TOS 上传完成且 Business Finalize RPC 已提交；是否绑定 Storyboard 是可选策略，不绑定时 Asset 仍必须进入可查询状态。
+9. Batch 终态费用汇总只聚合生成前已经 `charged` 的不可变流水，字段为 `charged_points`，不再使用 gross/refund/net 语义。
 
-如果 Token 在扣费前已过期，默认不向用户扣费，底层 Asset quarantine 且 ResultDisposition 标记 superseded，Job 以 `failed/error_code=result_superseded` 进入 Worker 已知终态。Provider 输入/配置、401/403 和大多数 4xx 为永久错误，网络/存储/5xx 默认 transient。Billing 的账户不存在、余额不足、引用交易不存在、超额退款和幂等冲突为永久业务拒绝；其他数据库/基础设施失败可重试并进入 `retry_wait/phase=billing_charge`。
+扣费成功后、Agent Job 事务提交前崩溃是必须恢复的窗口：Agent 以 `preparation_id` 扫描 `charged + undispatched` 记录，使用冻结 payload 和稳定 Operation/Batch/Job ID 续派发；不得重新扣费，也不得通过退款消除窗口。超过恢复时限仍未派发时进入 `dispatch_recovery_required` 告警和人工处置队列，账务流水仍保持 charged。
 
-扣费后发生 Binding CAS 竞态时，Job 进入明确失败并创建 `billing.compensation_requested`；使用 `generation:refund:<job_id>:<billing_transaction_id>` 幂等补偿。Compensation 以 `pending → running` claim/lease 防止并发退款；可重试失败会先持久化 `retry_wait/next_run_at` 与 successor outbox，再把原 generation outbox 标记 published（不是 Redis List ACK）。只有显式永久补偿失败才允许受 `AIGC_ADMIN_TOKEN` Bearer 保护的管理端点固化人工退款/`manual_final`；Batch 在补偿完成或人工终结前不发布最终费用汇总。用户看到的本轮费用是 gross charge 减去去重后的 refund。
-
-`binding_mode/approval_policy/charge_policy` 在 Batch/Job 创建时冻结。Review-required 结果只创建 Candidate Binding；只有 auto-approve 才允许 Worker 直接切 Active，但两条激活路径都会传播依赖 stale。当前 Worker 文档的 `postpaid_no_reservation` 模式会承担并发 Batch 生成完后余额不足的风险；生产可选幂等 Reservation，但最终扣费仍发生在结果完成后。
-
-Provider 每次真实 Poll 前持久增加 ProviderPollAttempts，默认总上限 120，跨重启不重置；accepted/pending 不增加 RetryCount，只有真实可重试错误消耗 MaxAttempts 失败预算。Seedance 202 取消不视为 confirmed，Provider cancelled 收敛为 Job cancelled，未知状态 fail closed。Worker 技术重试先按 SourceJobID 恢复完整/部分 Provider Asset receipt；完整 receipt 直接续 Finalization，partial receipt 留在 Job 并在最终失败/取消时 quarantine。Job 终态/补偿 settlement 与 `batch.finalize_requested` 同 mutation，普通 Generation/Approval Outbox 才在 10 次失败后 dead；当前仍无 publisher claim lease/dead-row 管理。
-
-Finalization 领域 Commit 失败时保留 Commit 前的原 Job ID，并用该 ID 重读最新 Job；retry/permanent 分类和最终返回保留原始 Commit error，不允许零值 Job 或派生的 `job not found` 掩盖根因。这样错误会稳定收敛到 `retry_wait` 或明确失败，而不是停留在 `finalizing`。
+Provider 每次真实 Poll 前持久增加 ProviderPollAttempts，默认总上限 120，跨重启不重置；accepted/pending 不增加 RetryCount，只有真实可重试错误消耗 MaxAttempts 失败预算。Worker 技术重试先按 SourceJobID 恢复 Provider/上传/Business Finalize receipt，避免重新生成或重复上传。Job 终态与 `batch.finalize_requested` 同 mutation；普通 Generation Outbox 可进入 dead-letter，Barrier 触发必须持续恢复直至形成唯一批次终态。
 
 ## 21. 当前代码状态映射
 
@@ -1643,9 +1703,10 @@ Finalization 领域 Commit 失败时保留 Commit 前的原 Job ID，并用该 I
 
 ### Phase 1：一致性与投影
 
-1. 为仍直发的 Capability/Approval Decision 增加 Transactional Outbox，并把现有 Finalization 专用投影收敛到统一 Domain Projector/Inbox。
-2. 独立 PostBatchContinuation、ToolOperationResult 和可选持久化 Stage Ledger。
-3. 收敛 Turn 的 Message/EventLog/TurnRun/Input/必要 Outbox commit 边界；当前 frozen output + AppendOnce 不是该最终原子事务的替代品。
+1. 新增独立 `write_prompts`，并将 Registry、工具箱、权限、计费、A2UI 和启动校验统一切换为六个稳定 Graph Tool。
+2. 为仍直发的 Capability/Approval Decision 增加 Transactional Outbox，并把现有 Finalization 专用投影收敛到统一 Domain Projector/Inbox。
+3. 独立 PostBatchContinuation、ToolOperationResult 和可选持久化 Stage Ledger。
+4. 收敛 Turn 的 Message/EventLog/TurnRun/Input/必要 Outbox commit 边界；当前 frozen output + AppendOnce 不是该最终原子事务的替代品。
 
 ### Phase 2：Runtime 与 Provider 完整性
 
@@ -1661,7 +1722,7 @@ Finalization 领域 Commit 失败时保留 Commit 前的原 Job ID，并用该 I
 
 ## 23. 验收清单
 
-1. Agent Registry 精确暴露五个高层 Capability，生产环境没有 Echo、Prompt、Provider 或 CRUD Tool。
+1. 目标 Agent Registry 精确暴露六个高层 Graph Tool，其中只允许独立 `write_prompts` 作为 Prompt 场景能力；生产环境没有 Echo、旧 Prompt、Provider 或 CRUD Tool。当前五 Tool Registry 在完成迁移前不得通过目标验收。
 2. `plan_storyboard` schema 不包含 TargetID、Scope 和 Patch。
 3. 元素规划 ChatModel 只声明动态模块/元素/数量/Prompt purpose/Asset/Dependency；缺失/重复 ID/key 被领域层规范化后，由独立 Prompt ChatModel 节点统一生成所有 Provider-backed AssetSlot Prompt，空值、遗漏、重复或额外项任一出现时不提交审核。UI Prompt Edit 当前是直接 replace，AI Rewrite 待实现。
 4. 动态 Storyboard 可以创建无分镜的音乐场景和有分镜的短剧场景。
@@ -1670,9 +1731,9 @@ Finalization 领域 Commit 失败时保留 Commit 前的原 Job ID，并用该 I
 7. 每个 Target 有稳定 ID、TargetRevision、PromptRevision 和 GenerationEpoch。
 8. 用户编辑后，旧 Job 结果只能 superseded，不能覆盖当前 Asset。
 9. Graph 派发媒体 Job 后立即返回 accepted。
-10. Provider、上传、Asset、Billing、Storyboard Binding 完成后 Job 才 succeeded。
+10. Business 生成前扣费成功并返回元素/资产 ID 后才创建 Job；Provider、TOS 上传和 Business Finalize 完成后 Job 才 succeeded，Storyboard Binding 可按 Job 策略省略。
 11. Job 状态只归并更新该 Capability 的单张高层 ToolRun；一个 Batch terminal 只创建一个带完整 PostBatchPayload 的稳定 `BatchContinuationResult` 和一个 `refresh_resources`，并且最多创建一条解释用 SessionInput。
-12. Batch 结果包含可信的逐 Job AssetRef/状态/错误码和本轮 gross/refund/net 费用汇总。
+12. Batch 结果包含可信的逐 Job AssetRef/状态/错误码和本轮不可变 `charged_points/ledger_entry_ids` 汇总，不包含退款字段。
 13. Approval 版本不匹配时进入 stale，不恢复旧 Graph。
 14. 只有外部 SessionEventLog Row 分配 seq；SSE Relay 能在 Append 后崩溃、NOTIFY 丢失和断线时按序补读且不跳洞。
 15. MessageRebuilder 按 RunID 因果组和冻结 ContextMessageSeq 恢复合法 Tool Call/Result 链；ThroughSeq 不留下后排孤儿输出，Limit 作为软预算只选择完整 Run，并完整保留当前用户 Run。
@@ -1687,13 +1748,13 @@ Finalization 领域 Commit 失败时保留 Commit 前的原 Job ID，并用该 I
 24. 槽位本地上传后按精确版本直接绑定，动态 Active/Candidate 图片、视频、音频与 Assembly manifest 的预览只在左侧工作区；音频可试听，聊天 ToolRun 不复制素材。
 25. Operation 取消不创建新 Operation；`retry_failed` replay-first，只为 provider/transient 且语义有效的失败创建 recovery Operation，排除 stale/superseded/orphaned Job。
 26. `auto_approve` 上游替换传播 dependency stale；required stale Slot 阻止 Assembly preview/export 派发。
-27. Worker 领域 Commit 后不直接发布 UI；`job.succeeded` outbox 可重试更新高层 ToolRun 并发出 `refresh_resources`，不发布素材或 Candidate chat Approval。
+27. Worker 不直接发布 UI；Batch 终态 Outbox 进入 Agent Inbox/Session Lane 后，Projector 可重试更新高层 ToolRun 并发出 `refresh_resources`。
 28. failed ApprovalContinuation 可重领；有效 claim lease 只触发 lease-aware 延后、不消费失败预算；领域 commit receipt 可补齐 ledger；Approval/Generation outbox 普通单行失败退避、10 次后 dead，不阻塞后续 Row，`batch.finalize_requested` 则持续恢复 Barrier。
-29. Provider pending Poll 不消耗失败 RetryCount，但持久 Poll 总预算默认 120 且跨重启有效；Provider usage/result receipt 支持恢复；Compensation successor schedule 落库后 ACK 原事件，终态/settlement 的 durable Barrier trigger 可重放。
-30. 用户 Job API 不泄露 Payload/Result、BindingToken、Provider task/request、lease、错误正文和账务内部字段（Provider 名称保留）；Storyboard/Approval 也使用公开 DTO，Asset detail 只返回指定 Session 的 available Asset。
+29. Provider pending Poll 不消耗失败 RetryCount，但持久 Poll 总预算默认 120 且跨重启有效；Provider、上传和 Business Finalize receipt 支持恢复；终态 durable Barrier trigger 可重放。
+30. 用户 Job API 不泄露 Payload/Result、BindingToken、Provider task/request、lease、错误正文和账务内部字段（Provider 名称保留）；Storyboard、Binding 和 Asset 通过 Business 公开 DTO 返回。
 31. Storyboard command payload fingerprint 与 `(storyboard_id,command_id)` 复合唯一拒绝变体重放；局部重生成保存 dispatch snapshot；replan promotion rebase 审核期间新批准的兼容资产。
 32. Assembly Plan 是冻结 Spec/Storyboard/manifest 的不可变 Artifact；本地验收的图片来自真实 Image2，Seedance 可输出确定性 MP4 占位 Asset，Demo Audio 输出 WAV，Demo Assembly 输出 JSON manifest。它们完整经过 Worker/Asset/Finalization/A2UI，但只有 Image2 属于真实 Provider 调用，视频/音频/装配不属于真实合成或转码验收。
-33. 当前是受信本地 Demo；真实鉴权、租户授权、接口/Provider 限流、正式后台 Compensation RBAC 和生产媒体能力尚未实现。
+33. 当前是受信本地 Demo；真实鉴权、租户授权、接口/Provider 限流和生产媒体能力尚未实现。
 34. Runtime 配置下 `/messages/resume` 不在 HTTP claim/调用 Runner；Processor 可从 `resuming` 以同一 Turn identity replay，先冻结 output，Approval-bound 路径 Apply Continuation 后才权威投影，再依次固化 `resume_applied/resumed` 和 `a2ui.interrupt_resolved`。Approval-bound mapping 不能走 generic resume。
 35. 外层 Agent model receipt 按 TurnID/ordinal 重放相同响应；流式响应在 ADK 使用前完整冻结，ToolCallID 与原始 idempotency base 跨 resume 稳定；内部 Capability ChatModel 不在该保证内。
 36. frozen Turn output 的权威投影失败不会重调 Runner/模型，也不会因普通 MaxAttempts 进入 dead；无 frozen output 的终态失败与脱敏 `a2ui.error` Row 同事务，TailRelay 在 consumer 成功后才推进 cursor。
@@ -1704,8 +1765,10 @@ Finalization 领域 Commit 失败时保留 Commit 前的原 Job ID，并用该 I
 41. 正常媒体和装配 Batch 使用 `on_failure`；每次 Capability 的成功由 generation outbox 更新同一张高层 ToolRun 并 `refresh_resources`，不依赖模型解释。
 42. 派发、Finalization 和 Candidate 审批都复用 `ResolveGenerationInput`，包括唯一 PromptSlot fallback；Finalization Commit error 保留原 Job ID 和原始错误。
 43. Candidate durable Approval 不产生逐项 chat 卡；相关 Job 全终态后左侧 Storyboard 一次 POST 冻结精确批次，同一幂等键可恢复逐项 Decision 且不纳入新 Candidate。
-44. 每个 Agent run 都重新 List Skill；空列表不注入指令/loader，运行中导入后下一 turn 无需重启即可使用，内部 loader progress/error 不生成用户 ToolRun 卡。
+44. Skill 产品状态只有 draft/published；Session 创建时冻结当前发布快照，重新发布只影响新会话，内部 loader progress/error 不生成用户 ToolRun 卡。
 45. Chat 中一次 `generate_media`/`assemble_output` 只能存在一张稳定高层 ToolRun，不得输出 Operation/Job/Stage 多卡、逐 Job 节点或素材预览；底层事实从 Store/read model 读取，终态刷新左侧资源。
+46. Agent、Worker 均不能直接持有或写 Storyboard/Binding；所有查询、命令和 Finalize 都通过 Business RPC。
+47. A2UI Card 可安全展示 Markdown，组件白名单至少覆盖单选、多选、提交、输入、多媒体、纵向步骤、Tool 和 Status；未知组件不执行 Action。
 
 ## 24. 非目标
 
@@ -1719,12 +1782,12 @@ Finalization 领域 Commit 失败时保留 Commit 前的原 Job ID，并用该 I
 ## 25. 最终决策摘要
 
 ```text
-ChatModelAgent：理解意图，只选择高层 Capability。
-Capability Graph：完成一次有界规划或派发。
+ChatModelAgent：理解意图，只选择目标六个高层 Graph Tool。
+Capability Graph：完成一次有界规划或派发；生成派发前调用 Business 直接扣费。
 UI 定向 HTTP Command：执行用户确定目标的 Prompt 编辑、上传绑定和局部重生成。
-Dynamic Storyboard：保存持续演进、版本化、可局部寻址的创作状态。
+Business：拥有 Skill 草稿/发布、Dynamic Storyboard、Asset、Binding 和积分，并提供正式 RPC。
 Durable Session Lane：started HOL + 因果 transcript + 分层 receipt，冻结后再投影并可精确重放。
-Worker：可靠完成 Provider、对象存储、费用和资产回填。
+Worker：可靠完成队列/并发、Provider、TOS 上传和 Business Finalize，不计费、不直接写 Storyboard/Binding。
 Batch Barrier：只在业务终态写一次 terminal outbox，并按需向 Session 投递一次解释输入。
-A2UI Publisher：当前按 Agent、Generation、Storyboard、Approval 和 Runtime terminal error 分路径写 SessionEventLog；TailRelay 按 seq 投递，后续再收敛为统一领域 Projector。
+A2UI Projector：目标通过 Agent Inbox 将可信领域事件投影为聊天 Card；当前多 Publisher 路径是迁移起点。
 ```

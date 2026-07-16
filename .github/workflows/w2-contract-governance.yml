@@ -1,0 +1,49 @@
+name: W2 contract governance
+
+on:
+  pull_request:
+    paths:
+      - "agent/tests/contract/**"
+      - "agent/tests/reviewfreeze/**"
+      - "business/tests/contract/**"
+      - "docs/design/agent/**"
+      - "docs/design/cross-module/**"
+      - "docs/design/testing/full-function-smoke-engineering-design.md"
+      - "docs/requirements/full-function-smoke-development-plan.md"
+      - "frontend/tests/contract/**"
+      - "Makefile"
+      - "smoke/contracts/**"
+      - "worker/tests/contract/**"
+      - ".github/workflows/w2-contract-governance.yml"
+      - ".github/workflows/w2-review-freeze-transition.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "agent/tests/contract/**"
+      - "agent/tests/reviewfreeze/**"
+      - "business/tests/contract/**"
+      - "docs/design/agent/**"
+      - "docs/design/cross-module/**"
+      - "docs/design/testing/full-function-smoke-engineering-design.md"
+      - "docs/requirements/full-function-smoke-development-plan.md"
+      - "frontend/tests/contract/**"
+      - "Makefile"
+      - "smoke/contracts/**"
+      - "worker/tests/contract/**"
+      - ".github/workflows/w2-contract-governance.yml"
+      - ".github/workflows/w2-review-freeze-transition.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  review-freeze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+          cache-dependency-path: agent/go.sum
+      - name: Validate W2 Review Freeze manifest
+        run: make check-w2-review-freeze

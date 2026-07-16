@@ -1,0 +1,223 @@
+{
+  "schema_version": "w2_r02_owner_decision_request.v1",
+  "request_id": "DR-W2-R02-v1",
+  "gate": "W2-R02",
+  "status": "awaiting_owner_decision",
+  "implementation_unlocked": false,
+  "owner_role_set_status": "provisional_candidates_not_final",
+  "decision_document": {
+    "path": "docs/design/agent/w2-r02-owner-decision-matrix-v1.md",
+    "sha256": "sha256:05af025aec59ad2c44dad6e09c88fd66f64aa58d05dd7b1d7c2fe2ec9b7c5b5e"
+  },
+  "gate_manifest": {
+    "path": "docs/design/agent/approvals/w2-review-freeze-manifest.json",
+    "sha256": "sha256:a98059cfa4971f0123565d63ad56ab4d202ad354a0971bbecf99a0711bee616e"
+  },
+  "validator_source": {
+    "path": "agent/tests/contract/w2_r02_owner_decision_request_v1_test.go",
+    "sha256": "sha256:b0cc44031d07dfef7b5aa3d06c86bd133bcb7b65120586efd4343023f89eb3f4"
+  },
+  "items": [
+    {
+      "decision_id": "R02-D01",
+      "title": "Runtime command durable Receipt exact-set",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "data_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d01",
+      "block_code": "W2_R02_D01_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D02",
+      "title": "失败命令 Receipt 持久化边界",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "data_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d02",
+      "block_code": "W2_R02_D02_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D03",
+      "title": "Source/Class/Authority Registry owner",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "product_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d03",
+      "block_code": "W2_R02_D03_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D04",
+      "title": "全局 Header、origin Result 与 alias 物理模型",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "data_owner", "operations_owner", "security_owner"],
+      "matrix_anchor": "r02-d04",
+      "block_code": "W2_R02_D04_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D05",
+      "title": "Enqueue 事务、锁顺序与故障原子性",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "data_owner", "operations_owner", "test_owner"],
+      "matrix_anchor": "r02-d05",
+      "block_code": "W2_R02_D05_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D06",
+      "title": "HOL、Lease/Fence、Takeover 与数据库时间",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "data_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d06",
+      "block_code": "W2_R02_D06_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D07",
+      "title": "legacy Authority、升级资格与 Helper",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "data_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d07",
+      "block_code": "W2_R02_D07_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D08",
+      "title": "EventLog、Foundation Marker 与 Retention",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "data_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d08",
+      "block_code": "W2_R02_D08_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D09",
+      "title": "terminal commit 与 Evidence 原子拓扑",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "data_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d09",
+      "block_code": "W2_R02_D09_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D10",
+      "title": "Redis Wake、Scanner 与 Readiness generation",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "data_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d10",
+      "block_code": "W2_R02_D10_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D11",
+      "title": "Eino Runner、Checkpoint 与 Drain 适配",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d11",
+      "block_code": "W2_R02_D11_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D12",
+      "title": "Cancel command 权限与不抢占",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "frontend_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d12",
+      "block_code": "W2_R02_D12_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D13",
+      "title": "HTTP/IDL、错误 Registry 与 Query 防枚举",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "frontend_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d13",
+      "block_code": "W2_R02_D13_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D14",
+      "title": "R02 Evidence 与 Smoke 通过条件",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "frontend_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d14",
+      "block_code": "W2_R02_D14_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D15",
+      "title": "SMK-018 Worker 范围归属",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "operations_owner", "security_owner", "test_owner", "worker_owner"],
+      "matrix_anchor": "r02-d15",
+      "block_code": "W2_R02_D15_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D16",
+      "title": "Turn/Context 创建、不可变与恢复边界",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "data_owner", "operations_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d16",
+      "block_code": "W2_R02_D16_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D17",
+      "title": "模型历史、Message Set 与 Summary",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "data_owner", "product_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d17",
+      "block_code": "W2_R02_D17_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D18",
+      "title": "不可变 Ref 的发布、解析与保留 Owner",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "finance_owner", "operations_owner", "product_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d18",
+      "block_code": "W2_R02_D18_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R02-D19",
+      "title": "ADR-001/002/008/010 对 A1 的适用范围",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": ["accept_recommendation", "reject_keep_blocked"],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": ["agent_owner", "business_owner", "data_owner", "finance_owner", "operations_owner", "product_owner", "security_owner", "test_owner"],
+      "matrix_anchor": "r02-d19",
+      "block_code": "W2_R02_D19_OWNER_DECISION_PENDING"
+    }
+  ],
+  "unmet_evidence": [
+    "ADR_DISPOSITIONS_PENDING",
+    "AGGREGATE_MANIFEST_MISSING",
+    "BUILD_TRUST_CLOSURE_MISSING",
+    "FINAL_OWNER_ROLE_EXACT_SET_MISSING",
+    "GOVERNANCE_AUTHORITY_NOT_ACTIVE",
+    "OWNER_DECISIONS_PENDING",
+    "UPGRADE_EXACT_SET_PENDING"
+  ],
+  "blocked_production_gates": ["W2-A1", "W2-A2"],
+  "block_statement": "本请求只登记推荐候选与待决 Owner 角色，不记录任何选择、批准或平台 Review；R02 仍为 expansion_frozen，禁止创建 aggregate、Formal Freeze 或生产 A1/A2 实现。"
+}

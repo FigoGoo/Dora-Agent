@@ -1,0 +1,531 @@
+{
+  "schema_version": "tool_receipt_v1_corpus.v1",
+  "initial_state": {
+    "state_id": "open.empty",
+    "snapshot": {
+      "schema_version": "tool_receipt_snapshot.v1",
+      "receipt_id": "019f0000-0000-7000-8000-000000000204",
+      "session_id": "019f0000-0000-7000-8000-000000000801",
+      "turn_id": "019f0000-0000-7000-8000-000000000802",
+      "run_id": "019f0000-0000-7000-8000-000000000803",
+      "tool_call_id": "019f0000-0000-7000-8000-000000000804",
+      "tool_key": "generate_media",
+      "definition_version": "generate_media.2026-07-14",
+      "intent_schema_version": "generate_media_intent.v1",
+      "result_schema_version": "graph_tool_result.v1",
+      "request_canonicalization_version": "dora.tool_request.v1",
+      "request_semantic_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "write_state": "open",
+      "receipt_version": 1,
+      "owner_fence": 7,
+      "execution_slots": [],
+      "result_refs": []
+    }
+  },
+  "slot_policies": [
+    {"tool_key": "analyze_materials", "definition_version": "analyze_materials.2026-07-14", "ref_slot": "resource.primary", "slot_ordinal": 1, "ref_type": "resource", "ref_schema_version": "resource_ref.v1", "authority_owner": "business", "query_contract": "business.resource.query.v1", "effect_class": "side_effect"},
+    {"tool_key": "generate_media", "definition_version": "generate_media.2026-07-14", "ref_slot": "batch.primary", "slot_ordinal": 2, "ref_type": "batch", "ref_schema_version": "batch_ref.v1", "authority_owner": "agent", "query_contract": "agent.batch.query.v1", "effect_class": "side_effect"},
+    {"tool_key": "generate_media", "definition_version": "generate_media.2026-07-14", "ref_slot": "dispatch.primary", "slot_ordinal": 3, "ref_type": "dispatch_receipt", "ref_schema_version": "dispatch_receipt.v1", "authority_owner": "agent", "query_contract": "agent.dispatch.query.v1", "effect_class": "side_effect"},
+    {"tool_key": "generate_media", "definition_version": "generate_media.2026-07-14", "ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "query_contract": "agent.operation.query.v1", "effect_class": "side_effect"},
+    {"tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "ref_slot": "approval.primary", "slot_ordinal": 1, "ref_type": "approval", "ref_schema_version": "approval_ref.v1", "authority_owner": "agent", "query_contract": "agent.approval.query.v1", "effect_class": "side_effect"},
+    {"tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "ref_slot": "consumption.primary", "slot_ordinal": 1, "ref_type": "approval_consumption_receipt", "ref_schema_version": "approval_consumption_receipt.v1", "authority_owner": "agent", "query_contract": "agent.approval_consumption.query.v1", "effect_class": "side_effect"},
+    {"tool_key": "write_prompts", "definition_version": "write_prompts.2026-07-14", "ref_slot": "resource.primary", "slot_ordinal": 1, "ref_type": "resource", "ref_schema_version": "resource_ref.v1", "authority_owner": "business", "query_contract": "business.resource.query.v1", "effect_class": "side_effect"}
+  ],
+  "transition_cases": [
+    {
+      "id": "TR-P01-reserve-operation",
+      "from_state": "open.empty",
+      "save_as_state": "open.operation-prepared",
+      "expect": "accept",
+      "error_code": "",
+      "expected_snapshot_digest": "sha256:dd2f620a86843fb0b9c1abfc2b3b8075c6eb79defa89efe9a96f2373e06273b3",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 1,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.primary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"}
+      }
+    },
+    {
+      "id": "TR-P02-resolve-operation",
+      "from_state": "open.operation-prepared",
+      "save_as_state": "open.operation-resolved",
+      "expect": "accept",
+      "error_code": "",
+      "expected_snapshot_digest": "sha256:8729d199df213aa068dcb69eba1746af50db998d5b817fb902684afdbc441309",
+      "command": {
+        "kind": "resolve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 2,
+        "owner_fence": 7,
+        "ref_slot": "operation.primary",
+        "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000201", "authority_version": 1, "authority_semantic_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"}
+      }
+    },
+    {
+      "id": "TR-P03-reserve-batch",
+      "from_state": "open.operation-resolved",
+      "save_as_state": "open.batch-prepared",
+      "expect": "accept",
+      "error_code": "",
+      "expected_snapshot_digest": "sha256:7778b793cde889dac737a4e9d5a069a53b7f80feb04fe201ef5d0e81eaa53150",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 3,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "batch.primary", "slot_ordinal": 2, "ref_type": "batch", "ref_schema_version": "batch_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:batch.primary:v1", "request_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "query_contract": "agent.batch.query.v1", "resolution_state": "prepared"}
+      }
+    },
+    {
+      "id": "TR-P04-resolve-batch",
+      "from_state": "open.batch-prepared",
+      "save_as_state": "open.batch-resolved",
+      "expect": "accept",
+      "error_code": "",
+      "expected_snapshot_digest": "sha256:93a090f61cee7b26952becd29d83c97ca925f0b41acb782bb617cc1c616412ed",
+      "command": {
+        "kind": "resolve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 4,
+        "owner_fence": 7,
+        "ref_slot": "batch.primary",
+        "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000202", "authority_version": 1, "authority_semantic_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"}
+      }
+    },
+    {
+      "id": "TR-P05-reserve-dispatch",
+      "from_state": "open.batch-resolved",
+      "save_as_state": "open.dispatch-prepared",
+      "expect": "accept",
+      "error_code": "",
+      "expected_snapshot_digest": "sha256:f7b0cf0c85503ece5e2d9c9b08462397faf70b70dc538072df8cf2f1810fb49c",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 5,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "dispatch.primary", "slot_ordinal": 3, "ref_type": "dispatch_receipt", "ref_schema_version": "dispatch_receipt.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:dispatch.primary:v1", "request_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "query_contract": "agent.dispatch.query.v1", "resolution_state": "prepared"}
+      }
+    },
+    {
+      "id": "TR-P06-resolve-dispatch",
+      "from_state": "open.dispatch-prepared",
+      "save_as_state": "open.dispatch-resolved",
+      "expect": "accept",
+      "error_code": "",
+      "expected_snapshot_digest": "sha256:8e6da7c884dbbc5193783aabbc865a9fa354673715700829634e0942cecb13ff",
+      "command": {
+        "kind": "resolve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 6,
+        "owner_fence": 7,
+        "ref_slot": "dispatch.primary",
+        "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000203", "authority_version": 1, "authority_semantic_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"}
+      }
+    },
+    {
+      "id": "TR-P07-freeze-accepted",
+      "from_state": "open.dispatch-resolved",
+      "save_as_state": "frozen.accepted",
+      "expect": "accept",
+      "error_code": "",
+      "expected_snapshot_digest": "sha256:d2ae06b617363b7d4684079b2564b4a26dab51bb682479c054b2efac5ba39eef",
+      "command": {
+        "kind": "freeze",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 7,
+        "owner_fence": 7,
+        "result": {
+          "schema_version": "graph_tool_result.v1",
+          "status": "accepted",
+          "result_code": "GENERATION_DISPATCHED",
+          "summary": "媒体生成任务已受理。",
+          "resource_refs": [],
+          "operation_ref": {"operation_id": "019f0000-0000-7000-8000-000000000201", "operation_version": 1, "operation_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "batch_id": "019f0000-0000-7000-8000-000000000202", "batch_version": 1, "batch_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"},
+          "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000204", "dispatch_receipt_id": "019f0000-0000-7000-8000-000000000203", "dispatch_receipt_version": 1, "dispatch_receipt_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"},
+          "warnings": [],
+          "retryable": false
+        },
+        "claimed_result_digest": "sha256:02ce413e1f0904a303b6c16f02e58b283042beba30f5fa4bb0764c88bbad9d2d",
+        "result_ref_slots": ["operation.primary", "batch.primary", "dispatch.primary"]
+      }
+    },
+    {
+      "id": "TR-P08-replay-frozen",
+      "from_state": "frozen.accepted",
+      "save_as_state": "frozen.accepted-replay",
+      "expect": "accept",
+      "error_code": "",
+      "expected_snapshot_digest": "sha256:d2ae06b617363b7d4684079b2564b4a26dab51bb682479c054b2efac5ba39eef",
+      "command": {"kind": "replay", "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "expected_receipt_version": 0, "owner_fence": 0}
+    },
+    {
+      "id": "TR-P09-replay-open",
+      "from_state": "open.operation-resolved",
+      "save_as_state": "open.operation-resolved-replay",
+      "expect": "accept",
+      "error_code": "",
+      "expected_snapshot_digest": "sha256:8729d199df213aa068dcb69eba1746af50db998d5b817fb902684afdbc441309",
+      "command": {"kind": "replay", "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "expected_receipt_version": 0, "owner_fence": 0}
+    },
+    {
+      "id": "TR-N01-request-conflict",
+      "from_state": "open.empty",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "TOOL_RECEIPT_CONFLICT",
+      "expected_snapshot_digest": "",
+      "command": {"kind": "replay", "presented_request_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "expected_receipt_version": 0, "owner_fence": 0}
+    },
+    {
+      "id": "TR-N02-slot-conflict",
+      "from_state": "open.operation-prepared",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "TOOL_EXECUTION_REF_CONFLICT",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 2,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.primary:v2", "request_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"}
+      }
+    },
+    {
+      "id": "TR-N03-ref-conflict",
+      "from_state": "open.operation-resolved",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "TOOL_EXECUTION_REF_CONFLICT",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "resolve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 3,
+        "owner_fence": 7,
+        "ref_slot": "operation.primary",
+        "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000201", "authority_version": 2, "authority_semantic_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}
+      }
+    },
+    {
+      "id": "TR-N04-unresolved-freeze",
+      "from_state": "open.dispatch-prepared",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "TOOL_EXECUTION_SLOT_UNRESOLVED",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "freeze",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 6,
+        "owner_fence": 7,
+        "result": {"schema_version": "graph_tool_result.v1", "status": "accepted", "result_code": "GENERATION_DISPATCHED", "summary": "媒体生成任务已受理。", "resource_refs": [], "operation_ref": {"operation_id": "019f0000-0000-7000-8000-000000000201", "operation_version": 1, "operation_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "batch_id": "019f0000-0000-7000-8000-000000000202", "batch_version": 1, "batch_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"}, "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000204", "dispatch_receipt_id": "019f0000-0000-7000-8000-000000000203", "dispatch_receipt_version": 1, "dispatch_receipt_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"}, "warnings": [], "retryable": false},
+        "result_ref_slots": ["operation.primary", "batch.primary", "dispatch.primary"]
+      }
+    },
+    {
+      "id": "TR-N05-frozen-append",
+      "from_state": "frozen.accepted",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "TOOL_RECEIPT_FROZEN",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 8,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "charge.primary", "slot_ordinal": 4, "ref_type": "charge_receipt", "ref_schema_version": "charge_receipt.v1", "authority_owner": "business", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:charge.primary:v1", "request_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "query_contract": "business.charge.query.v1", "resolution_state": "prepared"}
+      }
+    },
+    {
+      "id": "TR-N06-result-digest-mismatch",
+      "from_state": "open.dispatch-resolved",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "RESULT_DIGEST_MISMATCH",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "freeze",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 7,
+        "owner_fence": 7,
+        "result": {"schema_version": "graph_tool_result.v1", "status": "accepted", "result_code": "GENERATION_DISPATCHED", "summary": "媒体生成任务已受理。", "resource_refs": [], "operation_ref": {"operation_id": "019f0000-0000-7000-8000-000000000201", "operation_version": 1, "operation_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "batch_id": "019f0000-0000-7000-8000-000000000202", "batch_version": 1, "batch_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"}, "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000204", "dispatch_receipt_id": "019f0000-0000-7000-8000-000000000203", "dispatch_receipt_version": 1, "dispatch_receipt_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"}, "warnings": [], "retryable": false},
+        "claimed_result_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "result_ref_slots": ["operation.primary", "batch.primary", "dispatch.primary"]
+      }
+    },
+    {
+      "id": "TR-N07-stale-fence",
+      "from_state": "open.empty",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "STALE_FENCE",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 1,
+        "owner_fence": 6,
+        "slot": {"ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.primary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"}
+      }
+    },
+    {
+      "id": "TR-N08-version-conflict",
+      "from_state": "open.empty",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "RECEIPT_VERSION_CONFLICT",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 2,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.primary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"}
+      }
+    },
+    {
+      "id": "TR-N09-result-ref-mismatch",
+      "from_state": "open.dispatch-resolved",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "RESULT_REF_MISMATCH",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "freeze",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 7,
+        "owner_fence": 7,
+        "result": {"schema_version": "graph_tool_result.v1", "status": "accepted", "result_code": "GENERATION_DISPATCHED", "summary": "媒体生成任务已受理。", "resource_refs": [], "operation_ref": {"operation_id": "019f0000-0000-7000-8000-000000000201", "operation_version": 1, "operation_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "batch_id": "019f0000-0000-7000-8000-000000000202", "batch_version": 1, "batch_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"}, "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000204", "dispatch_receipt_id": "019f0000-0000-7000-8000-000000000203", "dispatch_receipt_version": 1, "dispatch_receipt_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"}, "warnings": [], "retryable": false},
+        "result_ref_slots": ["operation.primary", "batch.primary"]
+      }
+    },
+    {
+      "id": "TR-N10-illegal-result",
+      "from_state": "open.dispatch-resolved",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "ILLEGAL_STATUS_FIELD_COMBINATION",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "freeze",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 7,
+        "owner_fence": 7,
+        "result": {"schema_version": "graph_tool_result.v1", "status": "accepted", "result_code": "GENERATION_DISPATCHED", "summary": "媒体生成任务已受理。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000204", "dispatch_receipt_id": "019f0000-0000-7000-8000-000000000203", "dispatch_receipt_version": 1, "dispatch_receipt_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"}, "warnings": [], "retryable": false},
+        "result_ref_slots": ["operation.primary", "batch.primary", "dispatch.primary"]
+      }
+    },
+    {
+      "id": "TR-P10-replay-reserve-slot",
+      "from_state": "open.operation-prepared",
+      "save_as_state": "open.operation-prepared-replay",
+      "expect": "accept",
+      "error_code": "",
+      "expected_snapshot_digest": "sha256:dd2f620a86843fb0b9c1abfc2b3b8075c6eb79defa89efe9a96f2373e06273b3",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 1,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.primary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"}
+      }
+    },
+    {
+      "id": "TR-P11-replay-resolve-slot",
+      "from_state": "open.batch-resolved",
+      "save_as_state": "open.batch-resolved-operation-replay",
+      "expect": "accept",
+      "error_code": "",
+      "expected_snapshot_digest": "sha256:93a090f61cee7b26952becd29d83c97ca925f0b41acb782bb617cc1c616412ed",
+      "command": {
+        "kind": "resolve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 2,
+        "owner_fence": 7,
+        "ref_slot": "operation.primary",
+        "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000201", "authority_version": 1, "authority_semantic_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"}
+      }
+    },
+    {
+      "id": "TR-N11-forged-higher-fence",
+      "from_state": "open.empty",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "STALE_FENCE",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 1,
+        "owner_fence": 8,
+        "slot": {"ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.primary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"}
+      }
+    },
+    {
+      "id": "TR-N12-stale-freeze-version",
+      "from_state": "open.dispatch-resolved",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "RECEIPT_VERSION_CONFLICT",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "freeze",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 6,
+        "owner_fence": 7,
+        "result": {"schema_version": "graph_tool_result.v1", "status": "accepted", "result_code": "GENERATION_DISPATCHED", "summary": "媒体生成任务已受理。", "resource_refs": [], "operation_ref": {"operation_id": "019f0000-0000-7000-8000-000000000201", "operation_version": 1, "operation_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "batch_id": "019f0000-0000-7000-8000-000000000202", "batch_version": 1, "batch_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"}, "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000204", "dispatch_receipt_id": "019f0000-0000-7000-8000-000000000203", "dispatch_receipt_version": 1, "dispatch_receipt_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"}, "warnings": [], "retryable": false},
+        "result_ref_slots": ["operation.primary", "batch.primary", "dispatch.primary"]
+      }
+    },
+    {
+      "id": "TR-N13-unpinned-slot",
+      "from_state": "open.empty",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "INVALID_TOOL_RECEIPT",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 1,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "operation.secondary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.secondary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"}
+      }
+    },
+    {
+      "id": "TR-N14-replay-reserve-piggyback",
+      "from_state": "open.operation-prepared",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "INVALID_TOOL_RECEIPT",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "reserve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 1,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.primary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"},
+        "ref_slot": "operation.primary"
+      }
+    },
+    {
+      "id": "TR-N15-replay-resolve-piggyback",
+      "from_state": "open.batch-resolved",
+      "save_as_state": "",
+      "expect": "reject",
+      "error_code": "INVALID_TOOL_RECEIPT",
+      "expected_snapshot_digest": "",
+      "command": {
+        "kind": "resolve_slot",
+        "presented_request_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_receipt_version": 2,
+        "owner_fence": 7,
+        "slot": {"ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.primary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"},
+        "ref_slot": "operation.primary",
+        "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000201", "authority_version": 1, "authority_semantic_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"}
+      }
+    }
+  ],
+  "evidence_cases": [
+    {
+      "id": "TR-E01-waiting-user",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000000303", "session_id": "019f0000-0000-7000-8000-000000000901", "turn_id": "019f0000-0000-7000-8000-000000000902", "run_id": "019f0000-0000-7000-8000-000000000903", "tool_call_id": "019f0000-0000-7000-8000-000000000904", "tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "intent_schema_version": "plan_creation_spec_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "write_state": "open", "receipt_version": 1, "owner_fence": 11, "execution_slots": [], "result_refs": []},
+      "setup_slots": [{"slot": {"ref_slot": "approval.primary", "slot_ordinal": 1, "ref_type": "approval", "ref_schema_version": "approval_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000303:approval.primary:v1", "request_digest": "sha256:9898989898989898989898989898989898989898989898989898989898989898", "query_contract": "agent.approval.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000301", "authority_version": 1, "authority_semantic_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "projection_id": "019f0000-0000-7000-8000-000000000302"}}],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "waiting_user", "result_code": "APPROVAL_REQUIRED", "summary": "需要确认后才能继续。", "resource_refs": [], "approval_ref": {"approval_id": "019f0000-0000-7000-8000-000000000301", "approval_version": 1, "approval_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "card_id": "019f0000-0000-7000-8000-000000000302"}, "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000303"}, "warnings": [], "retryable": false},
+      "result_ref_slots": ["approval.primary"], "expect": "accept", "error_code": "", "expected_snapshot_digest": "sha256:9b2b4914077d23e3375f56ff8f33d4b31235b9c37dda2664456468b9fe16126e"
+    },
+    {
+      "id": "TR-E02-waiting-user-missing-approval",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000000303", "session_id": "019f0000-0000-7000-8000-000000000901", "turn_id": "019f0000-0000-7000-8000-000000000902", "run_id": "019f0000-0000-7000-8000-000000000903", "tool_call_id": "019f0000-0000-7000-8000-000000000904", "tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "intent_schema_version": "plan_creation_spec_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "write_state": "open", "receipt_version": 1, "owner_fence": 11, "execution_slots": [], "result_refs": []},
+      "setup_slots": [],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "waiting_user", "result_code": "APPROVAL_REQUIRED", "summary": "需要确认后才能继续。", "resource_refs": [], "approval_ref": {"approval_id": "019f0000-0000-7000-8000-000000000301", "approval_version": 1, "approval_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "card_id": "019f0000-0000-7000-8000-000000000302"}, "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000303"}, "warnings": [], "retryable": false},
+      "result_ref_slots": [], "expect": "reject", "error_code": "RESULT_REF_MISMATCH", "expected_snapshot_digest": ""
+    },
+    {
+      "id": "TR-E03-completed",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000000103", "session_id": "019f0000-0000-7000-8000-000000000911", "turn_id": "019f0000-0000-7000-8000-000000000912", "run_id": "019f0000-0000-7000-8000-000000000913", "tool_call_id": "019f0000-0000-7000-8000-000000000914", "tool_key": "analyze_materials", "definition_version": "analyze_materials.2026-07-14", "intent_schema_version": "analyze_materials_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:9191919191919191919191919191919191919191919191919191919191919191", "write_state": "open", "receipt_version": 1, "owner_fence": 12, "execution_slots": [], "result_refs": []},
+      "setup_slots": [{"slot": {"ref_slot": "resource.primary", "slot_ordinal": 1, "ref_type": "resource", "ref_schema_version": "resource_ref.v1", "authority_owner": "business", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000103:resource.primary:v1", "request_digest": "sha256:9292929292929292929292929292929292929292929292929292929292929292", "query_contract": "business.resource.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000101", "authority_version": 3, "authority_semantic_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "resource_type": "material_analysis"}}],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "completed", "result_code": "MATERIAL_ANALYSIS_SAVED", "summary": "素材分析已保存。", "resource_refs": [{"resource_type": "material_analysis", "resource_id": "019f0000-0000-7000-8000-000000000101", "resource_version": 3, "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000103"}, "warnings": [], "retryable": false},
+      "result_ref_slots": ["resource.primary"], "expect": "accept", "error_code": "", "expected_snapshot_digest": "sha256:413fd6720beb3bcd260e799c72fb1eb8a59168bb18f385983e349273cd91d92e"
+    },
+    {
+      "id": "TR-E04-completed-missing-resource",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000000103", "session_id": "019f0000-0000-7000-8000-000000000911", "turn_id": "019f0000-0000-7000-8000-000000000912", "run_id": "019f0000-0000-7000-8000-000000000913", "tool_call_id": "019f0000-0000-7000-8000-000000000914", "tool_key": "analyze_materials", "definition_version": "analyze_materials.2026-07-14", "intent_schema_version": "analyze_materials_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:9191919191919191919191919191919191919191919191919191919191919191", "write_state": "open", "receipt_version": 1, "owner_fence": 12, "execution_slots": [], "result_refs": []},
+      "setup_slots": [],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "completed", "result_code": "MATERIAL_ANALYSIS_SAVED", "summary": "素材分析已保存。", "resource_refs": [{"resource_type": "material_analysis", "resource_id": "019f0000-0000-7000-8000-000000000101", "resource_version": 3, "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000103"}, "warnings": [], "retryable": false},
+      "result_ref_slots": [], "expect": "reject", "error_code": "RESULT_REF_MISMATCH", "expected_snapshot_digest": ""
+    },
+    {
+      "id": "TR-E05-partial",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000000403", "session_id": "019f0000-0000-7000-8000-000000000921", "turn_id": "019f0000-0000-7000-8000-000000000922", "run_id": "019f0000-0000-7000-8000-000000000923", "tool_call_id": "019f0000-0000-7000-8000-000000000924", "tool_key": "write_prompts", "definition_version": "write_prompts.2026-07-14", "intent_schema_version": "write_prompts_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:9393939393939393939393939393939393939393939393939393939393939393", "write_state": "open", "receipt_version": 1, "owner_fence": 13, "execution_slots": [], "result_refs": []},
+      "setup_slots": [{"slot": {"ref_slot": "resource.primary", "slot_ordinal": 1, "ref_type": "resource", "ref_schema_version": "resource_ref.v1", "authority_owner": "business", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000403:resource.primary:v1", "request_digest": "sha256:9494949494949494949494949494949494949494949494949494949494949494", "query_contract": "business.resource.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000401", "authority_version": 2, "authority_semantic_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666", "resource_type": "prompt_revision"}}],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "partial", "result_code": "PROMPTS_PARTIALLY_SAVED", "summary": "部分提示词已保存。", "resource_refs": [{"resource_type": "prompt_revision", "resource_id": "019f0000-0000-7000-8000-000000000401", "resource_version": 2, "content_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000403"}, "warnings": [{"code": "TARGET_VERSION_CONFLICT", "params": [{"key": "failed_count", "integer_value": 1}], "target_refs": [{"target_type": "storyboard_slot", "target_id": "019f0000-0000-7000-8000-000000000402", "target_version": 4, "input_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"}]}], "retryable": false},
+      "result_ref_slots": ["resource.primary"], "expect": "accept", "error_code": "", "expected_snapshot_digest": "sha256:3912acf4ba84778bb7cd6a9a29c34060637a4644631b5685c399006dd3dd00f8"
+    },
+    {
+      "id": "TR-E06-partial-missing-resource",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000000403", "session_id": "019f0000-0000-7000-8000-000000000921", "turn_id": "019f0000-0000-7000-8000-000000000922", "run_id": "019f0000-0000-7000-8000-000000000923", "tool_call_id": "019f0000-0000-7000-8000-000000000924", "tool_key": "write_prompts", "definition_version": "write_prompts.2026-07-14", "intent_schema_version": "write_prompts_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:9393939393939393939393939393939393939393939393939393939393939393", "write_state": "open", "receipt_version": 1, "owner_fence": 13, "execution_slots": [], "result_refs": []},
+      "setup_slots": [],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "partial", "result_code": "PROMPTS_PARTIALLY_SAVED", "summary": "部分提示词已保存。", "resource_refs": [{"resource_type": "prompt_revision", "resource_id": "019f0000-0000-7000-8000-000000000401", "resource_version": 2, "content_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"}], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000403"}, "warnings": [{"code": "TARGET_VERSION_CONFLICT", "params": [{"key": "failed_count", "integer_value": 1}], "target_refs": [{"target_type": "storyboard_slot", "target_id": "019f0000-0000-7000-8000-000000000402", "target_version": 4, "input_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"}]}], "retryable": false},
+      "result_ref_slots": [], "expect": "reject", "error_code": "RESULT_REF_MISMATCH", "expected_snapshot_digest": ""
+    },
+    {
+      "id": "TR-E07-retryable-failed-after-side-effect",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000000103", "session_id": "019f0000-0000-7000-8000-000000000911", "turn_id": "019f0000-0000-7000-8000-000000000912", "run_id": "019f0000-0000-7000-8000-000000000913", "tool_call_id": "019f0000-0000-7000-8000-000000000914", "tool_key": "analyze_materials", "definition_version": "analyze_materials.2026-07-14", "intent_schema_version": "analyze_materials_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:9191919191919191919191919191919191919191919191919191919191919191", "write_state": "open", "receipt_version": 1, "owner_fence": 12, "execution_slots": [], "result_refs": []},
+      "setup_slots": [{"slot": {"ref_slot": "resource.primary", "slot_ordinal": 1, "ref_type": "resource", "ref_schema_version": "resource_ref.v1", "authority_owner": "business", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000103:resource.primary:v1", "request_digest": "sha256:9292929292929292929292929292929292929292929292929292929292929292", "query_contract": "business.resource.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000101", "authority_version": 3, "authority_semantic_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "resource_type": "material_analysis"}}],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "DEPENDENCY_UNAVAILABLE", "summary": "依赖暂时不可用。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000103"}, "warnings": [], "retryable": true},
+      "result_ref_slots": [], "expect": "reject", "error_code": "RESULT_REF_MISMATCH", "expected_snapshot_digest": ""
+    },
+    {
+      "id": "TR-E08-card-projection-mismatch",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000000303", "session_id": "019f0000-0000-7000-8000-000000000901", "turn_id": "019f0000-0000-7000-8000-000000000902", "run_id": "019f0000-0000-7000-8000-000000000903", "tool_call_id": "019f0000-0000-7000-8000-000000000904", "tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "intent_schema_version": "plan_creation_spec_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "write_state": "open", "receipt_version": 1, "owner_fence": 11, "execution_slots": [], "result_refs": []},
+      "setup_slots": [{"slot": {"ref_slot": "approval.primary", "slot_ordinal": 1, "ref_type": "approval", "ref_schema_version": "approval_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000303:approval.primary:v1", "request_digest": "sha256:9898989898989898989898989898989898989898989898989898989898989898", "query_contract": "agent.approval.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000301", "authority_version": 1, "authority_semantic_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "projection_id": "019f0000-0000-7000-8000-000000000302"}}],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "waiting_user", "result_code": "APPROVAL_REQUIRED", "summary": "需要确认后才能继续。", "resource_refs": [], "approval_ref": {"approval_id": "019f0000-0000-7000-8000-000000000301", "approval_version": 1, "approval_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "card_id": "019f0000-0000-7000-8000-000000000399"}, "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000303"}, "warnings": [], "retryable": false},
+      "result_ref_slots": ["approval.primary"], "expect": "reject", "error_code": "RESULT_REF_MISMATCH", "expected_snapshot_digest": ""
+    },
+    {
+      "id": "TR-E09-cancelled-after-side-effects",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000000204", "session_id": "019f0000-0000-7000-8000-000000000801", "turn_id": "019f0000-0000-7000-8000-000000000802", "run_id": "019f0000-0000-7000-8000-000000000803", "tool_call_id": "019f0000-0000-7000-8000-000000000804", "tool_key": "generate_media", "definition_version": "generate_media.2026-07-14", "intent_schema_version": "generate_media_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "write_state": "open", "receipt_version": 1, "owner_fence": 7, "execution_slots": [], "result_refs": []},
+      "setup_slots": [
+        {"slot": {"ref_slot": "operation.primary", "slot_ordinal": 1, "ref_type": "operation", "ref_schema_version": "operation_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:operation.primary:v1", "request_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "query_contract": "agent.operation.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000201", "authority_version": 1, "authority_semantic_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"}},
+        {"slot": {"ref_slot": "batch.primary", "slot_ordinal": 2, "ref_type": "batch", "ref_schema_version": "batch_ref.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:batch.primary:v1", "request_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "query_contract": "agent.batch.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000202", "authority_version": 1, "authority_semantic_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"}},
+        {"slot": {"ref_slot": "dispatch.primary", "slot_ordinal": 3, "ref_type": "dispatch_receipt", "ref_schema_version": "dispatch_receipt.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000000204:dispatch.primary:v1", "request_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "query_contract": "agent.dispatch.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000000203", "authority_version": 1, "authority_semantic_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"}}
+      ],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "cancelled", "result_code": "RUN_CANCELLED_AFTER_SIDE_EFFECTS_RESOLVED", "summary": "已核对并收口取消前发生的副作用。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000204"}, "warnings": [], "cancellation_stage": "after_side_effects_resolved", "retryable": false},
+      "result_ref_slots": ["operation.primary", "batch.primary", "dispatch.primary"], "expect": "accept", "error_code": "", "expected_snapshot_digest": "sha256:8da046a0a919b2e8b39f607009373ac3064a3a5fb1830dc12afc3454579e736c"
+    },
+    {
+      "id": "TR-E10-failed-before-side-effect",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000000103", "session_id": "019f0000-0000-7000-8000-000000000911", "turn_id": "019f0000-0000-7000-8000-000000000912", "run_id": "019f0000-0000-7000-8000-000000000913", "tool_call_id": "019f0000-0000-7000-8000-000000000914", "tool_key": "analyze_materials", "definition_version": "analyze_materials.2026-07-14", "intent_schema_version": "analyze_materials_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:9191919191919191919191919191919191919191919191919191919191919191", "write_state": "open", "receipt_version": 1, "owner_fence": 12, "execution_slots": [], "result_refs": []},
+      "setup_slots": [],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "DEPENDENCY_UNAVAILABLE", "summary": "依赖暂时不可用，且尚未发生副作用。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000000103"}, "warnings": [], "retryable": true},
+      "result_ref_slots": [], "expect": "accept", "error_code": "", "expected_snapshot_digest": "sha256:eb955299947d5962235e2aafa53e121cac9eeb52cf8d943f0bffa329525f2d61"
+    },
+    {
+      "id": "TR-E11-failed-hidden-policy-side-effect",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000001103", "session_id": "019f0000-0000-7000-8000-000000001111", "turn_id": "019f0000-0000-7000-8000-000000001112", "run_id": "019f0000-0000-7000-8000-000000001113", "tool_call_id": "019f0000-0000-7000-8000-000000001114", "tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "intent_schema_version": "plan_creation_spec_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "write_state": "open", "receipt_version": 1, "owner_fence": 14, "execution_slots": [], "result_refs": []},
+      "setup_slots": [{"slot": {"ref_slot": "consumption.primary", "slot_ordinal": 1, "ref_type": "approval_consumption_receipt", "ref_schema_version": "approval_consumption_receipt.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000001103:consumption.primary:v1", "request_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "query_contract": "agent.approval_consumption.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000001101", "authority_version": 1, "authority_semantic_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "failed", "result_code": "DEPENDENCY_UNAVAILABLE", "summary": "依赖暂时不可用。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000001103"}, "warnings": [], "retryable": true},
+      "result_ref_slots": [], "expect": "reject", "error_code": "RESULT_REF_MISMATCH", "expected_snapshot_digest": ""
+    },
+    {
+      "id": "TR-E12-cancelled-after-policy-side-effect",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000001103", "session_id": "019f0000-0000-7000-8000-000000001111", "turn_id": "019f0000-0000-7000-8000-000000001112", "run_id": "019f0000-0000-7000-8000-000000001113", "tool_call_id": "019f0000-0000-7000-8000-000000001114", "tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "intent_schema_version": "plan_creation_spec_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "write_state": "open", "receipt_version": 1, "owner_fence": 14, "execution_slots": [], "result_refs": []},
+      "setup_slots": [{"slot": {"ref_slot": "consumption.primary", "slot_ordinal": 1, "ref_type": "approval_consumption_receipt", "ref_schema_version": "approval_consumption_receipt.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000001103:consumption.primary:v1", "request_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "query_contract": "agent.approval_consumption.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000001101", "authority_version": 1, "authority_semantic_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "cancelled", "result_code": "RUN_CANCELLED_AFTER_SIDE_EFFECTS_RESOLVED", "summary": "已核对并收口批准消费副作用。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000001103"}, "warnings": [], "cancellation_stage": "after_side_effects_resolved", "retryable": false},
+      "result_ref_slots": ["consumption.primary"], "expect": "accept", "error_code": "", "expected_snapshot_digest": "sha256:d6abda7c98e2f3299d2cb921e8d45213c16655b8c2c98dc293ae337a0c07df12"
+    },
+    {
+      "id": "TR-E13-cancelled-after-missing-policy-side-effect",
+      "base_snapshot": {"schema_version": "tool_receipt_snapshot.v1", "receipt_id": "019f0000-0000-7000-8000-000000001103", "session_id": "019f0000-0000-7000-8000-000000001111", "turn_id": "019f0000-0000-7000-8000-000000001112", "run_id": "019f0000-0000-7000-8000-000000001113", "tool_call_id": "019f0000-0000-7000-8000-000000001114", "tool_key": "plan_creation_spec", "definition_version": "plan_creation_spec.2026-07-14", "intent_schema_version": "plan_creation_spec_intent.v1", "result_schema_version": "graph_tool_result.v1", "request_canonicalization_version": "dora.tool_request.v1", "request_semantic_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "write_state": "open", "receipt_version": 1, "owner_fence": 14, "execution_slots": [], "result_refs": []},
+      "setup_slots": [{"slot": {"ref_slot": "consumption.primary", "slot_ordinal": 1, "ref_type": "approval_consumption_receipt", "ref_schema_version": "approval_consumption_receipt.v1", "authority_owner": "agent", "idempotency_key": "tr:019f0000-0000-7000-8000-000000001103:consumption.primary:v1", "request_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "query_contract": "agent.approval_consumption.query.v1", "resolution_state": "prepared"}, "authority_ref": {"authority_id": "019f0000-0000-7000-8000-000000001101", "authority_version": 1, "authority_semantic_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],
+      "result": {"schema_version": "graph_tool_result.v1", "status": "cancelled", "result_code": "RUN_CANCELLED_AFTER_SIDE_EFFECTS_RESOLVED", "summary": "已核对并收口批准消费副作用。", "resource_refs": [], "receipt_ref": {"receipt_id": "019f0000-0000-7000-8000-000000001103"}, "warnings": [], "cancellation_stage": "after_side_effects_resolved", "retryable": false},
+      "result_ref_slots": [], "expect": "reject", "error_code": "RESULT_REF_MISMATCH", "expected_snapshot_digest": ""
+    }
+  ]
+}

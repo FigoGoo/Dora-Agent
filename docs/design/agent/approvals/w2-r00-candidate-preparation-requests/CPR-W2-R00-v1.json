@@ -1,0 +1,654 @@
+{
+  "schema_version": "w2_r00_candidate_preparation_request.v1",
+  "request_id": "CPR-W2-R00-v1",
+  "request_kind": "candidate_input_requirements_only",
+  "gate": "W2-R00",
+  "status": "readiness_inventory_only",
+  "approval_status": "not_requested",
+  "implementation_status": "prohibited",
+  "evidence_status": "candidate_only",
+  "implementation_unlocked": false,
+  "ballot_enabled": false,
+  "owner_role_set_status": "scope_not_derived",
+  "decision_document": {
+    "path": "docs/design/agent/w2-r00-owner-decision-matrix-v1.md",
+    "sha256": "sha256:0a0a0968a136c4c21d054a4c75e0f7996850c9885a758d8af3bc2364246abb30"
+  },
+  "source_contract": {
+    "path": "docs/design/cross-module/graph-execution-billing-contract-v1.md",
+    "sha256": "sha256:0380efa16bd8595618f1a3e9f0d6a014344e6d567a781150091472f004769b74"
+  },
+  "gate_manifest": {
+    "path": "docs/design/agent/approvals/w2-review-freeze-manifest.json",
+    "sha256": "sha256:a98059cfa4971f0123565d63ad56ab4d202ad354a0971bbecf99a0711bee616e"
+  },
+  "validator_sources": [
+    {
+      "path": "agent/tests/contract/w2r00candidatepreparation/candidate_preparation_request_v1_test.go",
+      "sha256": "sha256:fae576a627fa8825195dad798cf81d8172c2e71a5b50d0bb1b6e7e38224ed8f5"
+    },
+    {
+      "path": "agent/tests/contract/w2r00candidatepreparationguard/candidate_preparation_request_guard_v1_test.go",
+      "sha256": "sha256:2b083143feb8d73e4c6b156c00ed61410852fb3c1574236c12d39ea5cbbeb8c9"
+    }
+  ],
+  "readiness_baseline": {
+    "scope_derivation_pending": [
+      "R00-D01"
+    ],
+    "awaiting_owner_decision": [
+      "R00-D02",
+      "R00-D03",
+      "R00-D04",
+      "R00-D06",
+      "R00-D10",
+      "R00-D12",
+      "R00-D14"
+    ],
+    "candidate_incomplete_not_ballot_ready": [
+      "R00-D05",
+      "R00-D07",
+      "R00-D08",
+      "R00-D09",
+      "R00-D11",
+      "R00-D13"
+    ]
+  },
+  "items": [
+    {
+      "decision_id": "R00-D05",
+      "matrix_row_id": "R00-D05",
+      "source_open_item_ids": [
+        "BILL-OPEN-004"
+      ],
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "candidate_submission_status": "missing_not_submitted",
+      "prerequisite_refs": [
+        "R00-D03",
+        "R00-D04",
+        "W2-ADR-005"
+      ],
+      "cross_gate_alignment_refs": [],
+      "required_inputs": [
+        {
+          "input_id": "R00-D05-IN-POLICY-CAP-SCOPE",
+          "kind": "typed_candidate_input",
+          "required_dimensions": [
+            "billing_unit",
+            "currency_code",
+            "eligible_scope_exact_set",
+            "policy_cap_points",
+            "quantity_binding",
+            "scope_precedence"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D05-IN-POLICY-LIFECYCLE",
+          "kind": "typed_candidate_input",
+          "required_dimensions": [
+            "effective_window_rules",
+            "immutable_version_and_digest",
+            "published_suspended_retired_transitions",
+            "version_pin_rules"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D05-IN-EMERGENCY-PAUSE",
+          "kind": "typed_candidate_input",
+          "required_dimensions": [
+            "audit_record_requirements",
+            "pause_authority",
+            "pause_charge_commit_race_rule",
+            "resume_authority"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "required_evidence": [
+        {
+          "evidence_id": "R00-D05-EV-BOUNDARY-VECTORS",
+          "kind": "deterministic_vectors",
+          "required_assertions": [
+            "cap_boundary_accept_reject",
+            "currency_unit_quantity_binding",
+            "scope_mismatch_fails_closed"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D05-EV-LIFECYCLE-VECTORS",
+          "kind": "deterministic_vectors",
+          "required_assertions": [
+            "expired_policy_rejected",
+            "immutable_published_version",
+            "suspended_policy_rejected"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D05-EV-PAUSE-RACE",
+          "kind": "postgresql_concurrency_evidence",
+          "required_assertions": [
+            "pause_after_charge_does_not_rewrite_history",
+            "pause_audit_record_immutable",
+            "pause_before_charge_blocks_new_commit",
+            "race_has_single_authoritative_outcome",
+            "unauthorized_pause_resume_rejected"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D05-EV-VERSION-PIN",
+          "kind": "contract_vectors",
+          "required_assertions": [
+            "digest_mismatch_rejected",
+            "unpinned_policy_rejected",
+            "version_drift_does_not_change_frozen_execution"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "block_code": "W2_R00_D05_CANDIDATE_INPUTS_MISSING"
+    },
+    {
+      "decision_id": "R00-D07",
+      "matrix_row_id": "R00-D07",
+      "source_open_item_ids": [
+        "BILL-OPEN-005"
+      ],
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "candidate_submission_status": "missing_not_submitted",
+      "prerequisite_refs": [
+        "R00-D06"
+      ],
+      "cross_gate_alignment_refs": [],
+      "required_inputs": [
+        {
+          "input_id": "R00-D07-IN-MAPPING-IDENTITY",
+          "kind": "typed_candidate_input",
+          "required_dimensions": [
+            "mapping_cardinality",
+            "mapping_field_exact_set",
+            "mapping_key",
+            "model_tool_price_pin_relationship"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D07-IN-MAPPING-LIFECYCLE",
+          "kind": "typed_candidate_input",
+          "required_dimensions": [
+            "effective_window",
+            "retire_rules",
+            "rollback_rules",
+            "version_and_digest_rules"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D07-IN-MAPPING-AUTHORITY",
+          "kind": "typed_candidate_input",
+          "required_dimensions": [
+            "audit_owner_boundary",
+            "authority_query_contract",
+            "pin_mismatch_semantics",
+            "tamper_detection_boundary"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "required_evidence": [
+        {
+          "evidence_id": "R00-D07-EV-RPC-GOLDEN",
+          "kind": "cross_module_golden_vectors",
+          "required_assertions": [
+            "agent_business_digest_match",
+            "field_exact_set_match",
+            "mapping_key_round_trip"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D07-EV-PIN-MISMATCH",
+          "kind": "negative_contract_vectors",
+          "required_assertions": [
+            "model_pin_mismatch_rejected",
+            "price_pin_mismatch_rejected",
+            "tool_definition_mismatch_rejected"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D07-EV-LIFECYCLE",
+          "kind": "deterministic_vectors",
+          "required_assertions": [
+            "retired_mapping_rejected",
+            "rollback_selects_explicit_version",
+            "version_window_is_deterministic"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D07-EV-TAMPER",
+          "kind": "security_vectors",
+          "required_assertions": [
+            "authority_query_mismatch_fails_closed",
+            "digest_tamper_rejected",
+            "unregistered_mapping_rejected"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "block_code": "W2_R00_D07_CANDIDATE_INPUTS_MISSING"
+    },
+    {
+      "decision_id": "R00-D08",
+      "matrix_row_id": "R00-D08",
+      "source_open_item_ids": [
+        "BILL-OPEN-006"
+      ],
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "candidate_submission_status": "missing_not_submitted",
+      "prerequisite_refs": [],
+      "cross_gate_alignment_refs": [
+        "R04-D14"
+      ],
+      "required_inputs": [
+        {
+          "input_id": "R00-D08-IN-PROVIDER-CAPABILITY",
+          "kind": "provider_route_candidate_input",
+          "required_dimensions": [
+            "idempotency_support",
+            "provider_and_route_identity",
+            "query_by_original_key_support",
+            "request_key_derivation"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D08-IN-UNKNOWN-SEMANTICS",
+          "kind": "provider_route_candidate_input",
+          "required_dimensions": [
+            "late_result_semantics",
+            "not_found_semantics",
+            "response_lost_recovery",
+            "unsupported_query_quarantine"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D08-IN-PROVIDER-SECURITY",
+          "kind": "provider_route_candidate_input",
+          "required_dimensions": [
+            "credential_isolation",
+            "log_redaction",
+            "provider_payload_retention",
+            "query_audit_fields"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "required_evidence": [
+        {
+          "evidence_id": "R00-D08-EV-SANDBOX-CAPABILITY",
+          "kind": "provider_sandbox_evidence",
+          "required_assertions": [
+            "capability_is_route_specific",
+            "query_capability_observed",
+            "request_identity_observed"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D08-EV-RESPONSE-LOST",
+          "kind": "fault_injection_evidence",
+          "required_assertions": [
+            "no_blind_redispatch",
+            "original_key_query_if_supported",
+            "same_key_replay_capability_observed_and_enforced"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D08-EV-LATE-RESULT",
+          "kind": "fault_injection_evidence",
+          "required_assertions": [
+            "late_result_does_not_duplicate_effect",
+            "not_found_does_not_fake_terminal",
+            "unsupported_query_remains_quarantined"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D08-EV-REDACTION",
+          "kind": "security_evidence",
+          "required_assertions": [
+            "credentials_absent_from_logs",
+            "provider_payload_not_exposed",
+            "request_identity_auditable_without_secret"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "block_code": "W2_R00_D08_CANDIDATE_INPUTS_MISSING"
+    },
+    {
+      "decision_id": "R00-D09",
+      "matrix_row_id": "R00-D09",
+      "source_open_item_ids": [
+        "BILL-OPEN-007"
+      ],
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "candidate_submission_status": "missing_not_submitted",
+      "prerequisite_refs": [],
+      "cross_gate_alignment_refs": [
+        "R01-D02",
+        "R02-D09",
+        "R04-D14"
+      ],
+      "required_inputs": [
+        {
+          "input_id": "R00-D09-IN-MODEL-RECEIPT-SCHEMA",
+          "kind": "typed_contract_candidate_input",
+          "required_dimensions": [
+            "conditional_presence_rules",
+            "field_and_type_exact_set",
+            "outcome_and_terminal_state_exact_set",
+            "schema_domain_and_version"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D09-IN-MODEL-RECEIPT-CANONICAL",
+          "kind": "typed_contract_candidate_input",
+          "required_dimensions": [
+            "canonicalization_rules",
+            "digest_domain_separation",
+            "execution_identity_binding",
+            "provider_identity_binding"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D09-IN-FINALIZE-BINDING",
+          "kind": "typed_contract_candidate_input",
+          "required_dimensions": [
+            "finalize_allowed_outcomes",
+            "finalize_ref_and_digest_binding",
+            "terminal_before_finalize_rule",
+            "unknown_outcome_prohibition"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "required_evidence": [
+        {
+          "evidence_id": "R00-D09-EV-CANONICAL-GOLDEN",
+          "kind": "canonical_golden_vectors",
+          "required_assertions": [
+            "digest_domain_is_versioned",
+            "field_order_is_canonical",
+            "unicode_and_null_policy_is_exact"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D09-EV-SCHEMA-NEGATIVE",
+          "kind": "negative_contract_vectors",
+          "required_assertions": [
+            "illegal_outcome_rejected",
+            "missing_conditional_field_rejected",
+            "provider_identity_mismatch_rejected",
+            "unknown_field_or_version_rejected"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D09-EV-TERMINAL-UNIQUENESS",
+          "kind": "persistence_evidence",
+          "required_assertions": [
+            "one_execution_ordinal_one_terminal_receipt",
+            "replay_returns_immutable_receipt",
+            "terminal_receipt_not_rewritten"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D09-EV-FINALIZE-GUARD",
+          "kind": "cross_module_contract_vectors",
+          "required_assertions": [
+            "finalize_does_not_reprice_or_recharge",
+            "finalize_requires_exact_receipt_digest",
+            "unknown_or_nonterminal_receipt_blocks_finalize"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "block_code": "W2_R00_D09_CANDIDATE_INPUTS_MISSING"
+    },
+    {
+      "decision_id": "R00-D11",
+      "matrix_row_id": "R00-D11",
+      "source_open_item_ids": [
+        "BILL-OPEN-009"
+      ],
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "candidate_submission_status": "missing_not_submitted",
+      "prerequisite_refs": [],
+      "cross_gate_alignment_refs": [
+        "R02-D06",
+        "R04-D13",
+        "R04-D14"
+      ],
+      "required_inputs": [
+        {
+          "input_id": "R00-D11-IN-CLOCK-SOURCES",
+          "kind": "operational_candidate_input",
+          "required_dimensions": [
+            "agent_database_clock_source",
+            "business_database_clock_source",
+            "provider_clock_source",
+            "source_unavailable_semantics"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D11-IN-SKEW-POLICY",
+          "kind": "operational_candidate_input",
+          "required_dimensions": [
+            "alert_severity_mapping",
+            "measurement_window",
+            "threshold_versioning",
+            "tolerance_threshold"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D11-IN-CLOCK-RECOVERY",
+          "kind": "operational_candidate_input",
+          "required_dimensions": [
+            "clock_regression_handling",
+            "recovery_confirmation",
+            "timestamp_authority_limit",
+            "unknown_measurement_handling"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "required_evidence": [
+        {
+          "evidence_id": "R00-D11-EV-SKEW-INJECTION",
+          "kind": "fault_injection_evidence",
+          "required_assertions": [
+            "cross_service_skew_detected",
+            "threshold_boundary_is_deterministic",
+            "unknown_measurement_fails_safe"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D11-EV-ALERT-RECOVERY",
+          "kind": "operational_evidence",
+          "required_assertions": [
+            "alert_has_stable_severity",
+            "recovery_requires_confirmed_window",
+            "repeated_alerts_are_deduplicated"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D11-EV-CLOCK-REGRESSION",
+          "kind": "fault_injection_evidence",
+          "required_assertions": [
+            "clock_regression_is_audited",
+            "negative_elapsed_time_not_trusted",
+            "time_order_does_not_replace_causal_refs"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D11-EV-AUTHORITY-INDEPENDENCE",
+          "kind": "contract_evidence",
+          "required_assertions": [
+            "idempotency_ignores_wall_clock_drift",
+            "receipt_authority_uses_ref_and_version",
+            "timestamp_anomaly_does_not_change_outcome"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "block_code": "W2_R00_D11_CANDIDATE_INPUTS_MISSING"
+    },
+    {
+      "decision_id": "R00-D13",
+      "matrix_row_id": "R00-D13",
+      "source_open_item_ids": [
+        "BILL-OPEN-011"
+      ],
+      "readiness_status": "candidate_incomplete_not_ballot_ready",
+      "candidate_submission_status": "missing_not_submitted",
+      "prerequisite_refs": [
+        "R01-D05",
+        "R04-D10"
+      ],
+      "cross_gate_alignment_refs": [
+        "W2-ADR-011"
+      ],
+      "required_inputs": [
+        {
+          "input_id": "R00-D13-IN-REGISTRY-SCOPE",
+          "kind": "cross_gate_registry_candidate_input",
+          "required_dimensions": [
+            "complete_retained_registry_entry_exact_set",
+            "receipt_identity_scope",
+            "ref_slot_name_exact_set",
+            "registry_definition_identity",
+            "segment_identity_scope"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D13-IN-SLOT-ORDINALS",
+          "kind": "cross_gate_registry_candidate_input",
+          "required_dimensions": [
+            "charge_finalization_positive_ordinal",
+            "charge_prepare_positive_ordinal",
+            "distinct_ordinal_rule",
+            "ordinal_uniqueness_domain",
+            "ordinals_unique_across_complete_registry"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "input_id": "R00-D13-IN-REF-AUTHORITY",
+          "kind": "cross_gate_registry_candidate_input",
+          "required_dimensions": [
+            "authority_owner_and_query_contract",
+            "effect_class_and_kind",
+            "ref_type_and_schema_version",
+            "tool_receipt_command_key_derivation"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "required_evidence": [
+        {
+          "evidence_id": "R00-D13-EV-REGISTRY-DIGEST",
+          "kind": "cross_gate_golden_vectors",
+          "required_assertions": [
+            "r01_r04_registry_digest_match",
+            "receipt_and_segment_scope_match",
+            "slot_names_are_exact"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D13-EV-ORDINAL-NEGATIVE",
+          "kind": "negative_contract_vectors",
+          "required_assertions": [
+            "duplicate_ordinal_rejected",
+            "equal_prepare_finalize_ordinal_rejected",
+            "nonpositive_ordinal_rejected",
+            "same_tool_receipt_ref_slot_reuse_rejected"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D13-EV-ORDINAL-DOMAIN",
+          "kind": "negative_contract_vectors",
+          "required_assertions": [
+            "model_call_ordinal_not_reused_as_slot_ordinal",
+            "ordinal_scope_drift_rejected",
+            "slot_switch_cannot_bypass_conflict"
+          ],
+          "status": "missing_not_submitted"
+        },
+        {
+          "evidence_id": "R00-D13-EV-COMMAND-KEY",
+          "kind": "cross_module_contract_vectors",
+          "required_assertions": [
+            "prepare_and_finalize_keys_are_distinct",
+            "query_uses_original_key",
+            "slot_identity_is_bound_into_key"
+          ],
+          "status": "missing_not_submitted"
+        }
+      ],
+      "block_code": "W2_R00_D13_CANDIDATE_INPUTS_MISSING"
+    }
+  ],
+  "unmet_evidence": [
+    "BILLING_SLOT_ORDINALS_AND_SCOPE_MISSING",
+    "CLOCK_TOLERANCE_AND_RECOVERY_RULES_MISSING",
+    "FINAL_OWNER_ROLE_EXACT_SET_MISSING",
+    "MODEL_RECEIPT_SCHEMA_AND_DIGEST_MISSING",
+    "OWNER_DECISIONS_PENDING",
+    "POLICY_EXACT_VALUES_AND_LIFECYCLE_MISSING",
+    "PRICE_MODEL_MAPPING_EXACT_SET_MISSING",
+    "PROVIDER_CAPABILITY_MATRIX_MISSING",
+    "R00_CANONICAL_CANDIDATE_MISSING"
+  ],
+  "blocked_production_gates": [
+    "W2-B0a",
+    "W2-B1"
+  ],
+  "forbidden_capabilities": [
+    "accept_recommendation",
+    "authorize_production",
+    "create_canonical_manifest",
+    "create_idl_manifest",
+    "create_vector_test_exact_set",
+    "derive_final_owner_exact_set",
+    "freeze_review",
+    "record_owner_approval",
+    "record_platform_review",
+    "register_candidate_evidence",
+    "reject_recommendation",
+    "select_owner_option",
+    "transition_gate",
+    "unlock_implementation"
+  ],
+  "block_statement": "本 CPR 只固定 R00-D01～D14 的 readiness 基线，以及 R00-D05/D07/D08/D09/D11/D13 仍缺少的版本化候选输入与关闭证据；它不提交任何 Policy 数值、Price/Model mapping、Provider 能力事实、ModelReceipt 字段、时钟阈值、slot ordinal、Owner 角色或 ballot 选项。R00 继续为 expansion_frozen、candidate_evidence 为空、freeze/reopen_exception 为空，禁止生成 DR-W2-R00-v1、canonical/IDL/vector/test manifest、Owner approval、Formal Freeze、W2-B0a/W2-B1 或生产实现。"
+}

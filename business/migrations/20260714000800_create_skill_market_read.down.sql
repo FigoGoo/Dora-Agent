@@ -1,0 +1,1 @@
+DROP INDEX business.idx_skill_published_snapshot__published_skill_id;

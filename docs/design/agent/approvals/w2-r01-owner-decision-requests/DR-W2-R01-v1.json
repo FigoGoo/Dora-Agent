@@ -1,0 +1,271 @@
+{
+  "schema_version": "w2_r01_owner_decision_request.v1",
+  "request_id": "DR-W2-R01-v1",
+  "gate": "W2-R01",
+  "status": "awaiting_owner_decision",
+  "implementation_unlocked": false,
+  "owner_role_set_status": "provisional_candidates_not_final",
+  "decision_document": {
+    "path": "docs/design/agent/w2-r01-owner-decision-matrix-v1.md",
+    "sha256": "sha256:bd535482f552e04566c0ea0160dbc6d6771651cdfb2bbcb4e51a89b257440840"
+  },
+  "gate_manifest": {
+    "path": "docs/design/agent/approvals/w2-review-freeze-manifest.json",
+    "sha256": "sha256:a98059cfa4971f0123565d63ad56ab4d202ad354a0971bbecf99a0711bee616e"
+  },
+  "candidate_contract_manifest": {
+    "path": "agent/tests/contract/testdata/w2_r01/manifest.json",
+    "sha256": "sha256:41e554faaec0f023e7542eb5d5cbe4638ccbb871c1179906e69215b52538f497"
+  },
+  "validator_sources": [
+    {
+      "path": "agent/tests/contract/w2r01ownerdecision/owner_decision_request_v1_test.go",
+      "sha256": "sha256:5bec67d2947c84113cdd2ba88a7ee08f74792c69e500a672def357bf25c7cf3c"
+    },
+    {
+      "path": "agent/tests/contract/w2r01ownerdecisionguard/owner_decision_request_guard_v1_test.go",
+      "sha256": "sha256:5890f95ac9c898fb30c1ef978deebc3f705acdf4d33aebba0bfd0abc0d177fb8"
+    }
+  ],
+  "items": [
+    {
+      "decision_id": "R01-D01",
+      "title": "GraphToolResultV1 exact-version 与未知字段策略",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": [
+        "accept_recommendation",
+        "reject_keep_blocked"
+      ],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "security_owner",
+        "test_owner"
+      ],
+      "matrix_row_id": "R01-D01",
+      "block_code": "W2_R01_D01_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R01-D02",
+      "title": "authority_outcome、failed-after 与 Billing authority projection 范围",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": [
+        "accept_recommendation",
+        "reject_keep_blocked"
+      ],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "finance_owner",
+        "operations_owner",
+        "security_owner"
+      ],
+      "matrix_row_id": "R01-D02",
+      "block_code": "W2_R01_D02_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R01-D03",
+      "title": "waiting_user.approval_ref.card_id 的 R01/R08 边界",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": [
+        "accept_recommendation",
+        "reject_keep_blocked"
+      ],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": [
+        "agent_owner",
+        "frontend_owner",
+        "product_owner",
+        "security_owner"
+      ],
+      "matrix_row_id": "R01-D03",
+      "block_code": "W2_R01_D03_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R01-D04",
+      "title": "Tool Registry 机制与六 Tool Key exact-set",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": [
+        "accept_recommendation",
+        "reject_keep_blocked"
+      ],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "finance_owner",
+        "operations_owner",
+        "security_owner",
+        "test_owner"
+      ],
+      "matrix_row_id": "R01-D04",
+      "block_code": "W2_R01_D04_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "R01-D05",
+      "title": "Approval Consumption slot identity、Receipt/segment scope 与 ordinal",
+      "status": "candidate_incomplete_not_ballot_ready",
+      "allowed_option_ids": [
+        "submit_versioned_candidate",
+        "keep_blocked"
+      ],
+      "recommended_option_id": "submit_versioned_candidate",
+      "candidate_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "security_owner",
+        "test_owner"
+      ],
+      "matrix_row_id": "R01-D05",
+      "block_code": "W2_R01_D05_CANDIDATE_INCOMPLETE"
+    },
+    {
+      "decision_id": "R01-D06",
+      "title": "R01 required_owner_roles exact-set",
+      "status": "scope_derivation_pending",
+      "allowed_option_ids": [
+        "derive_after_scope_closure",
+        "keep_blocked"
+      ],
+      "recommended_option_id": "derive_after_scope_closure",
+      "candidate_owner_roles": [
+        "agent_owner",
+        "business_owner",
+        "finance_owner",
+        "frontend_owner",
+        "integration_owner",
+        "operations_owner",
+        "product_owner",
+        "security_owner",
+        "test_owner"
+      ],
+      "matrix_row_id": "R01-D06",
+      "block_code": "W2_R01_D06_SCOPE_DERIVATION_PENDING"
+    },
+    {
+      "decision_id": "GOV-D01",
+      "title": "Owner role 到平台 actor/team authority",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": [
+        "accept_recommendation",
+        "reject_keep_blocked"
+      ],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": [
+        "integration_owner",
+        "security_owner"
+      ],
+      "matrix_row_id": "GOV-D01",
+      "block_code": "W2_GOV_D01_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "GOV-D02",
+      "title": "Approval 与 current PR head freshness",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": [
+        "accept_recommendation",
+        "reject_keep_blocked"
+      ],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": [
+        "integration_owner",
+        "security_owner",
+        "test_owner"
+      ],
+      "matrix_row_id": "GOV-D02",
+      "block_code": "W2_GOV_D02_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "GOV-D03",
+      "title": "Distinct actor per required role",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": [
+        "accept_recommendation",
+        "reject_keep_blocked"
+      ],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": [
+        "integration_owner",
+        "security_owner",
+        "test_owner"
+      ],
+      "matrix_row_id": "GOV-D03",
+      "block_code": "W2_GOV_D03_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "GOV-D04",
+      "title": "Required check、Ruleset 与 no-bypass",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": [
+        "accept_recommendation",
+        "reject_keep_blocked"
+      ],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": [
+        "integration_owner",
+        "operations_owner",
+        "security_owner",
+        "test_owner"
+      ],
+      "matrix_row_id": "GOV-D04",
+      "block_code": "W2_GOV_D04_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "GOV-D05",
+      "title": "Base-owned trust root 与 verifier source 保护",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": [
+        "accept_recommendation",
+        "reject_keep_blocked"
+      ],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": [
+        "integration_owner",
+        "operations_owner",
+        "security_owner",
+        "test_owner"
+      ],
+      "matrix_row_id": "GOV-D05",
+      "block_code": "W2_GOV_D05_OWNER_DECISION_PENDING"
+    },
+    {
+      "decision_id": "GOV-D06",
+      "title": "Validator transitive build-input closure",
+      "status": "awaiting_owner_decision",
+      "allowed_option_ids": [
+        "accept_recommendation",
+        "reject_keep_blocked"
+      ],
+      "recommended_option_id": "accept_recommendation",
+      "candidate_owner_roles": [
+        "agent_owner",
+        "integration_owner",
+        "operations_owner",
+        "security_owner",
+        "test_owner"
+      ],
+      "matrix_row_id": "GOV-D06",
+      "block_code": "W2_GOV_D06_OWNER_DECISION_PENDING"
+    }
+  ],
+  "unmet_evidence": [
+    "ADR_DISPOSITIONS_PENDING",
+    "AUTHORITY_OUTCOME_FAILED_AFTER_BASELINE_MISSING",
+    "BUILD_TRUST_CLOSURE_MISSING",
+    "CARD_AND_REGISTRY_SCOPE_PENDING",
+    "FINAL_OWNER_ROLE_EXACT_SET_MISSING",
+    "FULL_GATE_BASELINE_MISSING",
+    "GOVERNANCE_AUTHORITY_NOT_ACTIVE",
+    "GRAPH_TOOL_RESULT_RECEIPT_CANDIDATE_PARTIAL_ONLY",
+    "OWNER_DECISIONS_PENDING",
+    "SLOT_REGISTRY_ORDINAL_PENDING",
+    "VERSION_POLICY_PENDING"
+  ],
+  "blocked_production_gates": [
+    "W2-A2",
+    "W2-B1"
+  ],
+  "block_statement": "本请求只登记 R01-D01～D04、GOV-D01～D06 的推荐候选、R01-D05 的 candidate_incomplete_not_ballot_ready、R01-D06 的 scope_derivation_pending、provisional Owner roles 与当前 partial_candidate 绑定；D05/D06 不提供接受推荐选项，也不记录任何选择、批准、平台 Review、compile attestation 或实现解锁。1 个 fixture、87 条向量和 4 个目标测试不能替代 failed-after/Billing/full-gate baseline，x/text transitive build input、toolchain 与 base-owned trust root 仍未闭合。R01 继续为 expansion_frozen，禁止创建 production DTO/Repository/Migration/Runner/Receipt projection、Formal Freeze、W2-A2 或 W2-B1 实现。"
+}
