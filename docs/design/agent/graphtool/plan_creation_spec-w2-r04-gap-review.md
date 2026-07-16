@@ -24,7 +24,7 @@
 | `PLAN-P0-04` | 嵌套 DTO、精确数量/长度/精度上限和 canonicalization 未冻结 | Schema `additionalProperties=false`、完整类型表、固定边界向量和版本兼容矩阵 | 产品、Business、Agent、测试 |
 | `PLAN-P0-05` | 当前只有 primary 前一次 Charge，correction 前无独立扣费，与“每次模型执行前扣费”冲突 | primary/correction 独立 ordinal、charge key、Prepare/Finalize/Query、汇总和 no-refund 规则；同步重画 Graph/Node/Recovery | 财务、Business、Agent |
 | `PLAN-P0-06` | Skill Invocation/Publisher 收益归因未进入可信上下文和 execution digest | `InvocationAttributionV1`、冻结 Snapshot/Publisher/规则版本、Charge/Receipt 字段和直调零收益用例 | Business、Agent、财务 |
-| `PLAN-P0-07` | `BIZ-AIGC-001/003/004/005/007/008` 仍是候选，Candidate expired/cancelled 语义未定 | 版本化 RPC DTO、幂等键、查询/确定性重放、Expected Version、Receipt、Outbox 和合法状态迁移 | Business、Agent、财务 |
+| `PLAN-P0-07` | `BIZ-AIGC-001/003/004/005/007/008` 仍是候选；`BIZ-AIGC-008` 已有 70 条 Agent consumer-side test-only command/query/authority 向量，但无正式 IDL、认证 envelope、Business producer parity、PostgreSQL/Outbox 与 Owner Approved；Candidate expired/cancelled 语义未定 | 版本化 RPC DTO、幂等键、查询/确定性重放、Expected Version、Receipt、Outbox 和合法状态迁移；test-only 证据不得关闭本 P0 | Business、Agent、财务 |
 | `PLAN-P0-08` | Graph State 缺完整字段类型/敏感级别/Checkpoint 策略；defer/abort 无具名输出 | 完整 `PlanCreationSpecStateV1` 与 `PlanCreationSpecGraphOutputV1`，区分 terminal/recovery_deferred/conflict_aborted | Agent、安全 |
 | `PLAN-P0-09` | `AllPredecessor` 下多上游互斥汇合没有 typed fan-in 设计 | 每个汇合点的输入 Key/类型、缺席分支、Merge/Join 策略；必要时拆分复用 Node | Agent、测试 |
 | `PLAN-P0-10` | SMK-009 的 Candidate Card、两类 Approval scope、Action 和完整 Resource Read 不可执行 | Approved A2UI Card/Action/Error、CreationSpec Read API、现有 Catalog v1 的兼容升级方案或经评审的新版本、Definition Pin 和 Golden 向量 | Agent、Business、前端、测试、安全 |

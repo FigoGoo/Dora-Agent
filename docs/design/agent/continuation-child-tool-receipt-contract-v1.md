@@ -4,7 +4,7 @@
 >
 > 适用范围：`plan_creation_spec` 的 `approval_type=candidate_activation` 结构化 Decision 形成受信 Continuation Input 后，为 `effect_kind=creation_spec_activation` 创建或恢复 child ToolReceipt，并在未来 `DecideCreationSpecCandidate` 前后保存可查询、可隔离的阶段证据
 >
-> 实现门禁：本文只冻结测试候选 canonical、继承矩阵、纯状态机、槽位角色与失败优先级。本文不定义生产表、生产 Go DTO、签名格式、HTTP/Thrift IDL、Business Query 语义或 Runner 实现；不得据此创建生产 Migration、Repository、RPC、Graph Node 或宣称 `SMK-009/017/033` 已通过。
+> 实现门禁：本文只冻结测试候选 canonical、继承矩阵、纯状态机、槽位角色与失败优先级。关联的 Business Decision 文件也只提供 test-only command/query/authority canonical；两者都不定义生产表、生产 Go DTO、签名格式、HTTP/Thrift IDL、Business 事务或 Runner 实现，不得据此创建生产 Migration、Repository、RPC、Graph Node 或宣称 `SMK-009/017/033` 已通过。
 >
 > Corpus 状态：独立 child Corpus 已绑定 1 个 fixture、172 条向量和 11 个目标测试；共享 R01 failed-after/outcome-aware 与 R04 Consumption evidence 已通过显式 bridge 消费。该证据仍只覆盖 candidate canonical 与纯状态机，不代表生产持久化、公共 IDL/RPC、Business Query、真实 PostgreSQL 原子性或 Runtime 已实现。
 
@@ -14,6 +14,7 @@
 - [Approval Continuation 跨对象证据契约 v1](./approval-continuation-cross-object-evidence-v1.md)
 - [Approval Consumption Receipt v1 候选契约](./approval-consumption-receipt-contract-v1.md)
 - [AIGC 跨 Module 契约目录](../cross-module/aigc-contract-catalog.md)
+- [CreationSpec Candidate Decision 公共契约候选 v1](../cross-module/creation-spec-candidate-decision-contract-v1.md)
 - [`plan_creation_spec` Graph Tool 设计](./graphtool/plan_creation_spec-design.md)
 - [全功能冒烟推进计划](../../requirements/full-function-smoke-development-plan.md)
 
@@ -41,7 +42,7 @@ frozen waiting_user parent ToolReceipt
 
 1. Approval、Decision、Consumption 或 ToolReceipt 的生产物理表与事务实现；
 2. Agent 内部身份断言、审计签名、Key Version、验签算法或密钥轮换；
-3. `DecideCreationSpecCandidate` 的正式请求、响应与 Query IDL；Storyboard、Prompt Results、Assembly Plan 必须分别设计，不得复用本文外推；
+3. `DecideCreationSpecCandidate` 的正式请求、响应与 Query IDL；关联文件只有 70 条 Agent consumer-side test-only canonical，尚无 Business producer parity、认证 envelope、正式字段编号或 Owner Approved。Storyboard、Prompt Results、Assembly Plan 必须分别设计，不得复用本文外推；
 4. Graph Tool 的业务 Node、计费、模型、资源状态机或 A2UI Card/Action Schema；
 5. 用本候选摘要替代 Owner 签字、真实 PostgreSQL 并发证据、跨 Module 契约测试或 Chromium Smoke。
 
@@ -302,7 +303,7 @@ resolution_state=prepared
 11. 确定未提交只能由同一 Business Decision Authority envelope 以 `outcome=not_committed` resolve 原槽；`committed/not_committed` 是 authority 语义而不是第二套 slot 状态。在该 authority 存在前，任何 transport/RPC 错误都仍是 `resolution_state=prepared` + unknown；
 12. positive/negative ref 必须来自 Business 权威契约，不得用 HTTP/RPC 2xx、日志、Trace 或内存对象代替。更高 Fence 看到 prepared 只能 Query；除非未来 Query 证明 final not-found/no-late-commit 并指定唯一 Retry Owner，不得重发。
 
-本文不冻结 `business_method_key`、请求字段编号、Query 方法名、Query 三态或 Business Receipt Schema。`DecideCreationSpecCandidate` 的正式 IDL 不存在时，prepared slot 只能进入后续 test-only Corpus，不能解锁 RPC 实现。
+关联的 [`CreationSpec Candidate Decision 公共契约候选 v1`](../cross-module/creation-spec-candidate-decision-contract-v1.md) 已以 70 条向量冻结 test-only `method_key`、command/query/authority canonical、`committed/not_committed` 与 `found/not_found/conflict`；其中 `not_found` 明确仍属 unknown，绝不授权重发。这些名字与字段不是正式 Thrift/DTO 承诺，也没有认证 envelope、Business producer parity、PostgreSQL 事务或 Owner Approved，因此 prepared slot 仍只能用于 test-only Corpus，不能解锁 RPC 实现。
 
 ## 8. approve 与 reject 分支
 
@@ -365,7 +366,7 @@ Decision determined
 
 ## 9. Business Query 与 unknown outcome
 
-Business `DecideCreationSpecCandidate` 的响应超时、连接中断、解码失败、缺少必填权威 Receipt、返回摘要不匹配，全部视为 unknown outcome；RPC 框架错误分类不能证明业务未提交。
+Business `DecideCreationSpecCandidate` 的响应超时、连接中断、解码失败、缺少必填权威 Receipt、返回摘要不匹配，全部视为 unknown outcome；RPC 框架错误分类不能证明业务未提交。关联 70 条 test-only Business Decision 向量只验证这一纯语义，尚不提供生产 Query 的线性化或 late-commit 排除证明。
 
 恢复矩阵：
 
