@@ -18,7 +18,7 @@
 - [全功能冒烟工程设计](../../testing/full-function-smoke-engineering-design.md)：Fixture、可控 Adapter、故障注入和 Evidence Bundle。
 - [`main` 分支迁移资产清单](../../migration/main-branch-aigc-asset-inventory.md)：旧单体代码的选择性复用、重写和废弃边界。
 - [AIGC ChatModelAgent 历史/目标设计](../../../aigc-chatmodelagent-demo-design.md)、[Tool/Storyboard 历史/目标设计](../../../aigc-tool-storyboard-design.md)、[Worker 历史/目标设计](../../../aigc-worker-design.md)：仅作迁移参考，不能覆盖当前独立设计。
-- **评审对案**：[Dora AIGC 创作体系设计终版 v1](../../../superpowers/specs/2026-07-11-aigc-system-design-final.md) + [GraphTool/node 详设](../../../superpowers/specs/2026-07-13-aigc-graphtool-node-detail.md)——主张「4 模态路由 GraphTool + node 词汇 + 动态四档编排 + 场景 skill 注册匹配」，与本索引六 Tool 功能阶段式分工为竞争方案；W2 评审须对两方案作出取舍或融合裁决后，方可冻结 Tool 白名单。
+- **评审对案**：[Dora AIGC 创作体系设计终版 v1](../../../superpowers/specs/2026-07-11-aigc-system-design-final.md) + [GraphTool/node 详设](../../../superpowers/specs/2026-07-13-aigc-graphtool-node-detail.md)——主张「4 模态路由 GraphTool + node 词汇 + 动态四档编排 + 场景 skill 注册匹配」，与本索引六 Tool 功能阶段式分工为竞争方案。**两方案分歧已压缩为 [W2 两方案冲突清单 v1](w2-design-conflict-review-v1.md)（5 硬冲突 + 6 必答问题 + 同频底座 + 融合建议）**；W2 评审须逐题裁决后，方可冻结 Tool 白名单。
 
 ## 2. 六个独立设计
 
