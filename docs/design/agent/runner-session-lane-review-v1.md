@@ -10,6 +10,12 @@
 >
 > 实现门禁：本文未标记 Approved。评审通过前不得据此创建 Go 生产实现、SQL Migration、IDL 或前端执行契约。
 
+> 2026-07-16 子集批准：上述门禁继续约束完整生产 Runtime；[`plan_creation_spec` V1 Preview](./graphtool/plan_creation_spec-design.md#0-v1-开发预览设计冻结2026-07-16) 已批准实现 `pending/running/recovery_pending/resolved/dead`、严格 HOL、Session Lease/Input Fence、稳定 Run/Receipt 和结果先冻结后投影的最小子集。该子集不含 Approval、Checkpoint、Budget/Cancel 全量或六 Tool 通用生产承诺。
+>
+> 2026-07-17 子集完成：[`user_message.runtime.v2preview1`](./user-message-runtime-v2-design.md) 方案 A 已闭合统一 Lane 的首个 QuickCreate `user_message`、空 Tool Registry、无 Tool ChatModelAgent、Direct Response/Failure Receipt、Snapshot/SSE/Card 与恢复投影；最终源码 canonical Trial 为 `20260716T202111Z-58305`。该完成事实不批准任何 Tool 或生产通用 Runtime。
+>
+> 2026-07-17 独立子集完成：[`analyze_materials.runtime.v2preview1`](./analyze-materials-runtime-v2-design.md) 的 `M0`～`M4` Development Preview 已闭合显式 typed ingress、exact-set 单 Tool Registry、Router/Graph Model Receipt、Tool Receipt、HOL/Fence、失败恢复、Card 与 canonical Chromium Trial；`analyze_materials` 生产静态 Catalog 继续为 `unavailable/DESIGN_REVIEW_PENDING`，完整生产 Runtime 继续未 Approved。
+
 ## 1. 评审目标
 
 本文冻结 Agent 通用运行契约，使六个 Agent-facing Graph Tool 能共享同一套可恢复、可审计、可重放的运行底座，并为前后端全功能冒烟提供明确的失败与恢复语义。
@@ -36,19 +42,19 @@
 
 ## 2. 当前实现事实与目标形态
 
-### 2.1 当前实现事实（2026-07-14）
+### 2.1 当前实现事实（2026-07-17）
 
 | 能力 | 当前事实 | 不能据此推断的目标能力 |
 |---|---|---|
 | Session | 已有 W0 Session 基础 | 不代表已有可执行 Runner 或完整多轮语义 |
-| `session_runtime_lease` | 表已存在，但明确是空 W0 租约骨架 | 不代表已有 Claim、Heartbeat、Fence 校验或 Recovery Scanner |
-| `session_input` | Schema 有 `pending/claimed/running/retry_wait/resolved/dead` | 生产路径目前只写 `pending`，不存在状态处理器 |
-| Input Source | 当前约束只允许 `user_message` | 尚无 `ApprovalContinuationResult`、`BatchContinuationResult`；`ResumeRequested` 已在 W2-R02 候选中改为绑定当前 HOL 的持久化恢复控制命令，不作为后序普通 Input |
-| Turn/Run | 未实现 | 没有稳定 Turn/Run 重试或取消语义 |
-| Receipt | ModelReceipt、ToolReceipt 未实现 | 不能安全宣称模型/Tool 可回放或可解决 unknown outcome |
+| `session_runtime_lease` | V1 CreationSpec Preview 与方案 A 已实现 PostgreSQL HOL Claim、Heartbeat、单调 Fence、到期接管和 Scanner；方案 A 最终源码 Trial 已验证重启恢复 | 不代表六 Tool 通用 Runtime、Provider unknown outcome 或任意 Source Dispatcher 已实现 |
+| `session_input` | Schema 已含 `pending/claimed/running/retry_wait/recovery_pending/resolved/dead`；当前稳定 Source 为 `user_message/creation_spec_preview`，方案 A 已让首个 QuickCreate `user_message` 进入统一 Processor | 不代表已有 Approval/Batch/Resume Source；`analyze_materials_preview` 只在其独立 Profile 的 `M1` Migration 获得持久化接入 |
+| Input Source | 当前约束允许 `user_message/creation_spec_preview` | 尚无 `ApprovalContinuationResult`、`BatchContinuationResult`；`ResumeRequested` 仍只是 W2-R02 候选控制命令 |
+| Turn/Run | V1 Preview 与方案 A 均已有稳定 Input/Turn/Run 身份、严格 HOL 和 Fence 恢复；实现仍由各自获批 Profile 约束 | 不代表已有多 Source 通用重试、取消、Checkpoint 或生产恢复语义 |
+| Receipt | V1 Preview 有专用 Model/Tool Receipt；方案 A 有独立 Direct Response Model/Result Receipt，且空 Tool Registry 已验证零 ToolCall | 不能外推为任意模型/Tool 可回放或真实 Provider unknown outcome 已解决 |
 | Approval | 未实现 | 前端确认、自然语言确认均不是正式授权 |
 | Checkpoint | 未实现 | 已独立锁定 Eino 依赖，但没有 Runner 或 PostgreSQL CheckpointStore |
-| A2UI | Agent 后端未实现 | 前端遗留 `/api/aigc/**` 资产没有匹配后端，不是目标契约承诺 |
+| A2UI | V1 Preview 有 CreationSpec Card；方案 A 已有 Direct Response/Failure Card、Snapshot/SSE 与硬刷新重放子集 | 不能外推为完整 A2UI 或任意 Tool Card 已实现；素材分析 Card 仍受独立 Profile `M3` 门禁约束 |
 
 ### 2.2 目标形态
 

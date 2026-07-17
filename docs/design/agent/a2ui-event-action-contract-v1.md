@@ -8,17 +8,19 @@
 >
 > 不授权事项：本文不批准 Go/SQL/IDL/生产前端 Action，不把任何候选字段标记为 Approved
 
+> 2026-07-16 子集批准：完整 A2UI Event/Card/Action 仍未通过 W2-R08；V1 Preview 只获准实现无 Action 的 CreationSpec Draft Card、`creation_spec.preview.completed/failed` Event 与 Snapshot/SSE 恢复。它不开放通用组件、Approval Action 或生产 A2UI availability。
+
 关联基线：
 
 - [Agent Runner 与 PostgreSQL Session Lane v1 设计评审](./runner-session-lane-review-v1.md)
 - [Agent Session / Event 基础评审](./session-event-foundation-review.md)
 - [AIGC 跨 Module 契约目录](../cross-module/aigc-contract-catalog.md)
-- [全功能冒烟推进计划](../../requirements/full-function-smoke-development-plan.md)
+- [功能优先开发与试跑计划](../../requirements/full-function-smoke-development-plan.md)
 - [历史 Target Design：AIGC A2UI](../../aigc-a2ui-design.md)
 
 ## 1. 评审结论与范围
 
-当前结论：**Draft，可用于跨角色逐字段评审，不可用于开工或宣称 W2-R08 已关闭。**
+当前完整生产结论：**Draft，可用于跨角色逐字段评审，不可用于完整生产开工或宣称 W2-R08 已关闭。** 文档顶部冻结的 V1 Preview 无 Action 子集不受该生产结论撤销。
 
 本文冻结的是“候选评审基线”，不是已批准实现：
 
@@ -567,4 +569,4 @@ W2-R08 关闭至少要求单一真实 Chromium、真实 Business/Agent/PostgreSQ
 - [ ] 第 14 节未决策全部关闭，状态从 Draft 变为 Approved；
 - [ ] 批准后才允许创建 Go/SQL/IDL/生产 Action 和修改 Event 白名单。
 
-在上述复选项全部关闭前，W2-R08 结论保持：**Draft，不通过实现门禁；Graph Tool 目录继续 `DESIGN_REVIEW_PENDING`。**
+在上述复选项全部关闭前，完整生产 W2-R08 结论保持：**Draft，不通过生产实现门禁；生产 Graph Tool Catalog 继续 `DESIGN_REVIEW_PENDING`。** 该结论不撤销文档顶部批准的 V1 Preview 无 Action Card/Event/Snapshot 子集。

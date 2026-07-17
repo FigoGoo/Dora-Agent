@@ -1,18 +1,20 @@
-# `plan_creation_spec` W2-R04 开工差距评审
+# `plan_creation_spec` W2-R04 完整生产差距评审
 
-> 评审状态：Audit Complete / 实现门禁未通过
+> 评审状态：Audit Complete / 完整生产实现门禁未通过
 >
 > 评审日期：2026-07-14
 >
 > 评审范围：`GTL-PLAN-001`、W2-R01～R04、W2-R08、`SMK-009`
 >
-> 不授权事项：本文不修改 `plan_creation_spec` 的 Draft 状态，不批准 Graph、Runner、Migration、RPC、前端 Action 或目录 availability。
+> 不授权事项：本文不修改 `plan_creation_spec` 的完整生产 Draft 状态，不批准生产 Graph、Runner、Migration、RPC、前端 Action 或目录 availability；V1 Preview 授权仅来自关联设计第 0 节。
+
+> 2026-07-16 口径更新：本文继续作为完整生产范围的 P1 差距清单；它不再阻塞 [`plan_creation_spec-design.md` 第 0 节](./plan_creation_spec-design.md#0-v1-开发预览设计冻结2026-07-16)批准的 V1 开发预览。预览不含计费、Approval、Correction、生产 Catalog availability，因此不能用预览实现关闭下列生产 P0。
 
 ## 1. 结论
 
-现有 [`plan_creation_spec-design.md`](./plan_creation_spec-design.md) 已具备独立中文设计、Mermaid DAG、稳定 Node/Branch 清单、Typed State 草案，以及 ToolReceipt、Approval、CreationSpecRevision 三套分离状态机。但设计仍存在十类 P0 开工缺口；共享 Runner/Receipt/Approval/A2UI 契约也未 Approved，因此必须继续保持 `DESIGN_REVIEW_PENDING`。
+现有 [`plan_creation_spec-design.md`](./plan_creation_spec-design.md) 已具备独立中文设计、Mermaid DAG、稳定 Node/Branch 清单、Typed State 草案，以及 ToolReceipt、Approval、CreationSpecRevision 三套分离状态机。但完整生产设计仍存在十类 P0 缺口；共享 Runner/Receipt/Approval/A2UI 生产契约也未 Approved，因此生产 Catalog 必须继续保持 `DESIGN_REVIEW_PENDING`。
 
-推荐推进顺序不是直接写 Graph，而是：独立依赖锁定 → 共享 W2-R01/R02/R03/R08 冻结 → W2-R04 产品/计费/Business 契约冻结 → 纯 DTO/Validator/Graph Compile → Runtime 与真实全栈纵切。
+完整生产依赖闭合关系为：独立依赖锁定 → 共享 W2-R01/R02/R03/R08 冻结 → W2-R04 产品/计费/Business 契约冻结 → 纯 DTO/Validator/Graph Compile → 生产 Runtime 与真实全栈纵切。这是 P1 目标依赖，不是当前排期；当前步骤以[功能优先开发与试跑计划](../../../requirements/full-function-smoke-development-plan.md)为准。
 
 ## 2. P0 关闭矩阵
 
@@ -43,23 +45,23 @@
 
 该方案比“一次预扣覆盖两次模型调用”更直接满足 `GTL-BILL-001`，并能把 ModelReceipt ordinal、ChargeReceipt 和 Skill 收益明细逐一对应。
 
-## 4. Runtime 最短实现批次
+## 4. 完整生产 Runtime 目标依赖（非当前排期）
 
-| 批次 | 内容 | 前置 |
+| 依赖项 | 内容 | 生产前置 |
 |---|---|---|
 | B1 | Eino `v0.9.10`、DeepSeek Adapter 精确锁定与兼容测试 | 本依赖评审 |
 | B2 | GraphToolResult、Tool Pin、可信上下文、Strict Schema 纯契约 | W2-R01 冻结 |
 | B3 | Session Lane、HOL、Lease/Fence、Input/Turn/Run、Recovery | W2-R02 冻结 |
 | B4 | ToolCallInput、Tool/Model Receipt、Execution Ref、Prompt Artifact | W2-R01/R02 冻结 |
 | B5 | Model/Prompt Registry、单主 ChatModelAgent、Runner | B3/B4，且 Runtime 评审 Approved |
-| B6 | Business CreationSpec 与计费 RPC/Migration/Outbox | W2-R01/R02/R03/R04、计费与 CreationSpec 状态机、跨 Module RPC/Outbox 和 Business Migration 设计全部 Approved；届时可与 Agent Runtime 批次并行 |
+| B6 | Business CreationSpec 与计费 RPC/Migration/Outbox | W2-R01/R02/R03/R04、计费与 CreationSpec 状态机、跨 Module RPC/Outbox 和 Business Migration 设计全部 Approved；与 Agent Runtime 依赖可独立闭合 |
 | B7 | Approval/Continuation/A2UI/BFF/前端 Renderer | W2-R03/R08 Approved |
 | B8 | `plan_creation_spec` DTO、Validator、Graph 与启动 Compile | W2-R04 Approved，B2～B7 可用 |
 | B9 | API、PostgreSQL、单一真实 Chromium `SMK-009` Evidence | B8 真实注册完成；先冻结正式 canary audience/Definition 发布与目录能力协商，不得使用隐藏测试端点或生产测试后门 |
 
-## 5. `SMK-009` 最小真实闭环
+## 5. P1 `SMK-009` 完整生产闭环
 
-首个全功能纵切固定为：
+P1 完整生产验收的目标纵切固定为；它不是当前 V1 Preview 路径：
 
 ```text
 Workspace → Tool Definition Pin → strict Intent → durable Input/Turn/Run/ToolReceipt
@@ -97,10 +99,10 @@ Workspace → Tool Definition Pin → strict Intent → durable Input/Turn/Run/T
 - `w2.plan-creation-spec.smoke.evidence.v1` 冻结 exact-set Schema，至少关联 RequestID、ActionID、ActionReceiptID、ToolReceiptID、ApprovalID、CreationSpecID 和 EventID；
 - Evidence 只保存 ID/version/digest、稳定错误码、计数和布尔断言，禁止保存 Prompt、Candidate/Card/Form 原文、Cookie、CSRF、内部断言或模型响应。
 
-## 6. 下一评审动作
+## 6. P1 完整生产评审动作
 
-1. 主线先关闭 W2-R01/R02/R03/R08 的共享未决策；
+1. P1 生产评审关闭 W2-R01/R02/R03/R08 的共享未决策；
 2. 产品冻结 Intent/Candidate DTO；
 3. 财务与 Business 冻结逐模型计费、收益归因和 AIGC RPC；
 4. Agent 据此重画 Graph 计费/恢复路径并补 typed fan-in、State/Output、错误矩阵和固定向量；
-5. 六角色复核全部通过后，才允许把 `plan_creation_spec-design.md` 状态改为 Approved。
+5. 六角色复核全部通过后，才允许把 `plan_creation_spec-design.md` 完整生产状态改为 Approved；V1 Preview 状态不参与此结论。

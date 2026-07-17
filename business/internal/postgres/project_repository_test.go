@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -298,6 +299,78 @@ func TestProjectRepositoryFindBootstrapHidesMissingAndUnauthorized(t *testing.T)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet bootstrap not-found SQL expectations: %v", err)
+	}
+}
+
+func TestProjectRepositoryListOwnedUsesOneBoundedQueryForPageSizes(t *testing.T) {
+	for _, size := range []int{1, 10, 100} {
+		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
+			repository, mock := newProjectRepositoryTestDB(t)
+			ownerUserID := newRepositoryTestUUIDv7(t)
+			rows := sqlmock.NewRows([]string{
+				"project_id", "title", "lifecycle_status", "recent_run_status", "initial_prompt_status", "updated_at",
+			})
+			for index := 0; index < size; index++ {
+				rows.AddRow(
+					newRepositoryTestUUIDv7(t), fmt.Sprintf("项目 %d", index+1), string(project.LifecycleStatusActive),
+					string(project.RecentRunStatusIdle), string(project.InitialPromptStatusAbsent),
+					time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC).Add(-time.Duration(index)*time.Second),
+				)
+			}
+			mock.ExpectQuery(`(?s)SELECT project\.id AS project_id.*FROM business\.project AS project.*project\.owner_user_id = \$1.*project\.lifecycle_status IN \(\$2,\$3\).*ORDER BY project\.updated_at DESC,project\.id DESC LIMIT \$4`).
+				WithArgs(ownerUserID, string(project.LifecycleStatusActive), string(project.LifecycleStatusArchived), size+1).
+				WillReturnRows(rows)
+
+			result, err := repository.ListOwned(context.Background(), project.ProjectListQuery{OwnerUserID: ownerUserID, Limit: size})
+			if err != nil {
+				t.Fatalf("list owned projects: %v", err)
+			}
+			if len(result.Items) != size || result.NextAfter != nil {
+				t.Fatalf("unexpected project page: items=%d next=%+v", len(result.Items), result.NextAfter)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("project list query count drifted: %v", err)
+			}
+		})
+	}
+}
+
+func TestProjectRepositoryListOwnedAppliesStableAfterCursorAndReturnsNextCursor(t *testing.T) {
+	repository, mock := newProjectRepositoryTestDB(t)
+	ownerUserID := newRepositoryTestUUIDv7(t)
+	afterProjectID := newRepositoryTestUUIDv7(t)
+	afterTime := time.Date(2026, 7, 17, 12, 0, 0, 123000000, time.UTC)
+	projectIDs := []string{newRepositoryTestUUIDv7(t), newRepositoryTestUUIDv7(t), newRepositoryTestUUIDv7(t)}
+	updatedTimes := []time.Time{afterTime.Add(-time.Second), afterTime.Add(-2 * time.Second), afterTime.Add(-3 * time.Second)}
+	rows := sqlmock.NewRows([]string{
+		"project_id", "title", "lifecycle_status", "recent_run_status", "initial_prompt_status", "updated_at",
+	})
+	for index := range projectIDs {
+		rows.AddRow(
+			projectIDs[index], fmt.Sprintf("项目 %d", index+1), string(project.LifecycleStatusArchived),
+			string(project.RecentRunStatusSucceeded), string(project.InitialPromptStatusAccepted), updatedTimes[index],
+		)
+	}
+	mock.ExpectQuery(`(?s)SELECT project\.id AS project_id.*FROM business\.project AS project.*project\.owner_user_id = \$1.*project\.lifecycle_status IN \(\$2,\$3\).*project\.updated_at < \$4.*project\.updated_at = \$5 AND project\.id < \$6.*ORDER BY project\.updated_at DESC,project\.id DESC LIMIT \$7`).
+		WithArgs(
+			ownerUserID, string(project.LifecycleStatusActive), string(project.LifecycleStatusArchived),
+			afterTime, afterTime, afterProjectID, 3,
+		).
+		WillReturnRows(rows)
+
+	result, err := repository.ListOwned(context.Background(), project.ProjectListQuery{
+		OwnerUserID: ownerUserID, Limit: 2,
+		After: &project.ProjectListCursor{UpdatedAt: afterTime, ProjectID: afterProjectID},
+	})
+	if err != nil {
+		t.Fatalf("list owned projects after cursor: %v", err)
+	}
+	if len(result.Items) != 2 || result.Items[0].ProjectID != projectIDs[0] || result.Items[1].ProjectID != projectIDs[1] ||
+		result.NextAfter == nil || result.NextAfter.ProjectID != projectIDs[1] || !result.NextAfter.UpdatedAt.Equal(updatedTimes[1]) {
+		t.Fatalf("unexpected keyset project page: %+v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet keyset list SQL expectation: %v", err)
 	}
 }
 

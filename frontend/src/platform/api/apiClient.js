@@ -15,7 +15,7 @@ export class ApiError extends Error {
 
 // requestJSON 通过统一的 Cookie 会话调用 JSON API，并将失败响应转换为 ApiError。
 export async function requestJSON(path, options = {}) {
-  const { suppressAuthExpiryNotification = false, ...fetchOptions } = options;
+  const { suppressAuthExpiryNotification = false, expectedStatus, ...fetchOptions } = options;
   const headers = normalizeHeaders(options.headers);
   const body = options.body;
 
@@ -38,6 +38,14 @@ export async function requestJSON(path, options = {}) {
       notifyAuthSessionExpired(error);
     }
     throw error;
+  }
+  if (expectedStatus != null && response.status !== expectedStatus) {
+    throw new ApiError({
+      status: response.status,
+      code: 'UNEXPECTED_HTTP_STATUS',
+      message: `服务返回了非预期状态（HTTP ${response.status}）`,
+      requestID: response.headers?.get?.('x-request-id') || ''
+    });
   }
   if (response.status === 204) {
     return null;

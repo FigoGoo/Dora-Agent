@@ -2,13 +2,15 @@
 
 > 状态：Draft / 待产品、Business、Agent、Worker、财务、安全与运维评审
 >
+> Development Preview 例外：[`media.runtime.v3preview1`](../media-runtime-v3-preview-design.md) 已获 **Approved for Development Preview**，只允许复用同项目 ready Preview PNG，经共享 Operation/Batch/Job/Terminal Outbox 和固定白名单 `ffmpeg` argv 生成 `2s` H.264/`yuv420p`/`faststart` 真 MP4，再由 Business 同源 Range 下载/播放。它不允许任意 Timeline/ffmpeg 参数、模型规划、计费、Approval、TOS、真实 Provider、复杂 Batch 或生产导出；本文第 1～12 节完整生产范围继续 Draft。
+>
 > Graph Key：`assemble_output_graph_v1`
 >
 > Tool Definition Version：`assemble_output.v1alpha1`
 >
 > Migration Owner：Business（AssemblyPlan/Output Asset/Binding/Charge），Agent（Run/Receipt/Approval/Operation/Job），Worker（Render Attempt/Receipt）
 >
-> 实现门禁：评审结论为“通过”前禁止创建生产代码、Migration 或渲染 Worker。
+> 实现门禁：评审结论为“通过”前禁止创建生产代码、Migration 或渲染 Worker；上面的 local-only Preview exact-set 可按独立设计创建隔离的 Preview 代码、向前 Migration 与版本化 Consumer，不得复用其结论宣称生产能力。
 
 共同契约见 [`../../cross-module/aigc-contract-catalog.md`](../../cross-module/aigc-contract-catalog.md)。本设计禁止“只生成 manifest 就冒充导出成功”：`preview/export` 必须创建真实渲染 Job，由 Worker 生成可播放/可下载的 Output Asset。
 

@@ -44,6 +44,7 @@ type approvalProductionGateV1 struct {
 	BlockStatement         string   `json:"block_statement"`
 	ForbiddenDirectories   []string `json:"forbidden_directories"`
 	ForbiddenNonTestTokens []string `json:"forbidden_non_test_tokens"`
+	AllowedPreviewFiles    []string `json:"allowed_preview_files"`
 }
 
 // approvalItemV1 描述一个 P0 决策项的 Owner、证据和生产阻断范围。
@@ -288,19 +289,100 @@ func TestImmutableTurnContextApprovalManifestV1AwaitingProductionGate(t *testing
 		"agent.legacy_authority_attestation",
 		"agent.session_lane_upgrade_ledger",
 	}
+	wantPreviewFiles := []string{
+		"agent/internal/turncontext/context.go",
+		"agent/internal/turncontext/user_message.go",
+		"agent/internal/turncontext/analyze_materials.go",
+		"agent/internal/turncontext/plan_storyboard.go",
+		"agent/internal/turncontext/write_prompts.go",
+		"agent/internal/runtime/dto.go",
+		"agent/internal/runtime/eino_runner.go",
+		"agent/internal/runtime/processor.go",
+		"agent/internal/runtime/service.go",
+		"agent/internal/chatmodelagent/main.go",
+		"agent/internal/chatmodelagent/direct_response.go",
+		"agent/internal/chatmodelagent/analyze_materials.go",
+		"agent/internal/chatmodelagent/plan_storyboard.go",
+		"agent/internal/chatmodelagent/write_prompts.go",
+		"agent/internal/graphtool/analyzematerials/branch.go",
+		"agent/internal/graphtool/analyzematerials/dto.go",
+		"agent/internal/graphtool/analyzematerials/errors.go",
+		"agent/internal/graphtool/analyzematerials/graph.go",
+		"agent/internal/graphtool/analyzematerials/node_evidence.go",
+		"agent/internal/graphtool/analyzematerials/node_load_inputs.go",
+		"agent/internal/graphtool/analyzematerials/node_model.go",
+		"agent/internal/graphtool/analyzematerials/node_prompt.go",
+		"agent/internal/graphtool/analyzematerials/node_result.go",
+		"agent/internal/graphtool/analyzematerials/node_validate.go",
+		"agent/internal/graphtool/analyzematerials/node_validate_candidate.go",
+		"agent/internal/graphtool/analyzematerials/state.go",
+		"agent/internal/graphtool/analyzematerials/tool.go",
+		"agent/internal/graphtool/analyzematerials/validation.go",
+		"agent/internal/graphtool/plancreationspec/dto.go",
+		"agent/internal/graphtool/plancreationspec/graph.go",
+		"agent/internal/graphtool/plancreationspec/tool.go",
+		"agent/internal/graphtool/plancreationspec/validation.go",
+		"agent/internal/graphtool/planstoryboard/artifacts.go",
+		"agent/internal/graphtool/planstoryboard/dto.go",
+		"agent/internal/graphtool/planstoryboard/errors.go",
+		"agent/internal/graphtool/planstoryboard/graph.go",
+		"agent/internal/graphtool/planstoryboard/prompt.go",
+		"agent/internal/graphtool/planstoryboard/tool.go",
+		"agent/internal/graphtool/planstoryboard/validation.go",
+		"agent/internal/graphtool/writeprompts/artifacts.go",
+		"agent/internal/graphtool/writeprompts/branch.go",
+		"agent/internal/graphtool/writeprompts/dto.go",
+		"agent/internal/graphtool/writeprompts/errors.go",
+		"agent/internal/graphtool/writeprompts/graph.go",
+		"agent/internal/graphtool/writeprompts/node_candidate.go",
+		"agent/internal/graphtool/writeprompts/node_persistence.go",
+		"agent/internal/graphtool/writeprompts/node_result.go",
+		"agent/internal/graphtool/writeprompts/node_scope.go",
+		"agent/internal/graphtool/writeprompts/prompt.go",
+		"agent/internal/graphtool/writeprompts/tool.go",
+		"agent/internal/graphtool/writeprompts/validation.go",
+	}
 	gate := manifest.AwaitingProductionGate
 	if gate.BlockCode != "TC_APPROVAL_GLOBAL_AWAITING_OWNER_APPROVAL" || strings.TrimSpace(gate.BlockStatement) == "" {
 		t.Fatalf("invalid global production block: code=%q statement=%q", gate.BlockCode, gate.BlockStatement)
 	}
-	if !reflect.DeepEqual(gate.ForbiddenDirectories, wantDirectories) || !reflect.DeepEqual(gate.ForbiddenNonTestTokens, wantTokens) {
-		t.Fatalf("%s gate list drift: directories=%v tokens=%v", gate.BlockCode, gate.ForbiddenDirectories, gate.ForbiddenNonTestTokens)
+	if !reflect.DeepEqual(gate.ForbiddenDirectories, wantDirectories) || !reflect.DeepEqual(gate.ForbiddenNonTestTokens, wantTokens) ||
+		!reflect.DeepEqual(gate.AllowedPreviewFiles, wantPreviewFiles) {
+		t.Fatalf("%s gate list drift: directories=%v tokens=%v preview_files=%v", gate.BlockCode,
+			gate.ForbiddenDirectories, gate.ForbiddenNonTestTokens, gate.AllowedPreviewFiles)
+	}
+	allowedPreview := make(map[string]struct{}, len(wantPreviewFiles))
+	for _, relative := range wantPreviewFiles {
+		allowedPreview[relative] = struct{}{}
+		if info, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); err != nil || info.IsDir() {
+			t.Fatalf("approved Preview exception must be one existing file: %s err=%v", relative, err)
+		}
 	}
 	for _, relative := range gate.ForbiddenDirectories {
 		path := filepath.Join(root, filepath.FromSlash(relative))
-		if _, err := os.Lstat(path); err == nil {
-			t.Fatalf("%s: %s; forbidden production path exists: %s", gate.BlockCode, gate.BlockStatement, relative)
-		} else if !os.IsNotExist(err) {
+		if _, err := os.Lstat(path); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
 			t.Fatalf("inspect forbidden path %s: %v", relative, err)
+		}
+		if err := filepath.WalkDir(path, func(candidate string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || strings.HasSuffix(entry.Name(), "_test.go") {
+				return nil
+			}
+			candidateRelative, err := filepath.Rel(root, candidate)
+			if err != nil {
+				return err
+			}
+			candidateRelative = filepath.ToSlash(candidateRelative)
+			if _, approved := allowedPreview[candidateRelative]; !approved {
+				return fmt.Errorf("%s: %s; forbidden production file exists: %s", gate.BlockCode, gate.BlockStatement, candidateRelative)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
 		}
 	}
 

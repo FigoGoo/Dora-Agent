@@ -10,24 +10,30 @@ import (
 
 	"github.com/FigoGoo/Dora-Agent/business/internal/agentidentity"
 	"github.com/FigoGoo/Dora-Agent/business/internal/agentsessionrpc"
+	"github.com/FigoGoo/Dora-Agent/business/internal/assetanalysis"
 	"github.com/FigoGoo/Dora-Agent/business/internal/auth"
 	"github.com/FigoGoo/Dora-Agent/business/internal/authorization"
 	"github.com/FigoGoo/Dora-Agent/business/internal/clock"
 	"github.com/FigoGoo/Dora-Agent/business/internal/config"
+	"github.com/FigoGoo/Dora-Agent/business/internal/creationspec"
 	"github.com/FigoGoo/Dora-Agent/business/internal/etcdregistry"
 	"github.com/FigoGoo/Dora-Agent/business/internal/foundationrpc"
 	"github.com/FigoGoo/Dora-Agent/business/internal/health"
 	"github.com/FigoGoo/Dora-Agent/business/internal/httpserver"
 	"github.com/FigoGoo/Dora-Agent/business/internal/idgen"
+	"github.com/FigoGoo/Dora-Agent/business/internal/mediapreview"
 	"github.com/FigoGoo/Dora-Agent/business/internal/postgres"
 	"github.com/FigoGoo/Dora-Agent/business/internal/project"
 	"github.com/FigoGoo/Dora-Agent/business/internal/projectcreation"
 	"github.com/FigoGoo/Dora-Agent/business/internal/projectdispatch"
 	"github.com/FigoGoo/Dora-Agent/business/internal/projectdispatchv2"
 	"github.com/FigoGoo/Dora-Agent/business/internal/promptcrypto"
+	"github.com/FigoGoo/Dora-Agent/business/internal/promptpreview"
 	redisadapter "github.com/FigoGoo/Dora-Agent/business/internal/redis"
 	"github.com/FigoGoo/Dora-Agent/business/internal/rpcserver"
 	"github.com/FigoGoo/Dora-Agent/business/internal/skill"
+	"github.com/FigoGoo/Dora-Agent/business/internal/storyboardpreview"
+	"github.com/FigoGoo/Dora-Agent/business/internal/textmaterial"
 	"github.com/FigoGoo/Dora-Agent/business/kitex_gen/foundationv1"
 )
 
@@ -68,6 +74,24 @@ func Run(ctx context.Context, build BuildInfo) error {
 	}()
 	if err := postgresClient.VerifySchema(ctx, cfg.PostgreSQL.PingTimeout); err != nil {
 		return err
+	}
+	if cfg.MediaRuntime.Enabled() {
+		if err := postgresClient.VerifyMediaPreviewSchema(ctx, cfg.PostgreSQL.PingTimeout); err != nil {
+			return err
+		}
+	}
+
+	var mediaObjectStore *mediapreview.LocalObjectStore
+	if cfg.MediaRuntime.Enabled() {
+		mediaObjectStore, err = mediapreview.OpenLocalObjectStore(cfg.MediaRuntime.ObjectRoot)
+		if err != nil {
+			return fmt.Errorf("open Business media preview object root: %w", err)
+		}
+		defer func() {
+			if closeErr := mediaObjectStore.Close(); closeErr != nil {
+				logger.Error("关闭媒体对象根失败", "error_class", "media_object_root_close_failed")
+			}
+		}()
 	}
 
 	redisClient, err := redisadapter.Open(ctx, cfg.Redis)
@@ -144,6 +168,46 @@ func Run(ctx context.Context, build BuildInfo) error {
 		_ = registry.Close(ctx)
 		return fmt.Errorf("create business project repository: %w", err)
 	}
+	creationSpecRepository, err := postgres.NewCreationSpecRepository(postgresClient)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Business CreationSpec repository: %w", err)
+	}
+	creationSpecService, err := creationspec.NewService(creationSpecRepository, clock.System{}, idgen.UUIDv7{})
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Business CreationSpec service: %w", err)
+	}
+	storyboardPreviewRepository, err := postgres.NewStoryboardPreviewRepository(postgresClient)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Business Storyboard Preview repository: %w", err)
+	}
+	storyboardPreviewService, err := storyboardpreview.NewService(storyboardPreviewRepository, clock.System{}, idgen.UUIDv7{})
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Business Storyboard Preview service: %w", err)
+	}
+	promptPreviewRepository, err := postgres.NewPromptPreviewRepository(postgresClient)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Business Prompt Preview repository: %w", err)
+	}
+	promptPreviewService, err := promptpreview.NewService(promptPreviewRepository, clock.System{}, idgen.UUIDv7{})
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Business Prompt Preview service: %w", err)
+	}
+	assetAnalysisRepository, err := postgres.NewAssetAnalysisRepository(postgresClient)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Business AssetAnalysis repository: %w", err)
+	}
+	assetAnalysisService, err := assetanalysis.NewService(assetAnalysisRepository)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Business AssetAnalysis service: %w", err)
+	}
 	promptProtector, err := promptcrypto.NewAESGCMProtectorWithPreviousSystemRandom(
 		cfg.Project.PromptProtectionKey,
 		cfg.Project.PromptProtectionKeyVersion,
@@ -194,6 +258,41 @@ func Run(ctx context.Context, build BuildInfo) error {
 	if err != nil {
 		_ = registry.Close(ctx)
 		return fmt.Errorf("create business project HTTP handler: %w", err)
+	}
+	textMaterialRepository, err := postgres.NewTextMaterialRepository(postgresClient)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business text material repository: %w", err)
+	}
+	textMaterialService, err := textmaterial.NewService(textMaterialRepository, clock.System{}, idgen.UUIDv7{})
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business text material service: %w", err)
+	}
+	textMaterialHandler, err := httpserver.NewTextMaterialHandler(
+		textMaterialService, idgen.UUIDv7{}, cfg.Project.MaxRequestBodyBytes,
+	)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create business text material HTTP handler: %w", err)
+	}
+	var mediaPreviewHandler *httpserver.MediaPreviewHandler
+	if cfg.MediaRuntime.Enabled() {
+		mediaPreviewRepository, repositoryErr := postgres.NewMediaPreviewRepository(postgresClient, mediaObjectStore)
+		if repositoryErr != nil {
+			_ = registry.Close(ctx)
+			return fmt.Errorf("create Business media preview repository: %w", repositoryErr)
+		}
+		mediaPreviewService, serviceErr := mediapreview.NewService(mediaPreviewRepository, clock.System{}, idgen.UUIDv7{})
+		if serviceErr != nil {
+			_ = registry.Close(ctx)
+			return fmt.Errorf("create Business media preview service: %w", serviceErr)
+		}
+		mediaPreviewHandler, err = httpserver.NewMediaPreviewHandler(mediaPreviewService, mediaObjectStore, idgen.UUIDv7{})
+		if err != nil {
+			_ = registry.Close(ctx)
+			return fmt.Errorf("create Business media preview HTTP handler: %w", err)
+		}
 	}
 	skillRepository, err := postgres.NewSkillRepository(postgresClient)
 	if err != nil {
@@ -261,10 +360,37 @@ func Run(ctx context.Context, build BuildInfo) error {
 		_ = registry.Close(ctx)
 		return fmt.Errorf("create Agent proxy HTTP handler: %w", err)
 	}
+	planStoryboardBinder, err := httpserver.NewPlanStoryboardPreviewCreationSpecBinder(agentProxyHandler, storyboardPreviewService)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Plan Storyboard Preview CreationSpec binder: %w", err)
+	}
+	planStoryboardProxy, err := httpserver.NewPlanStoryboardPreviewProxy(
+		agentProxyHandler, planStoryboardBinder, cfg.AgentHTTP.PlanStoryboardRuntimeEnabled,
+	)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Plan Storyboard Preview proxy: %w", err)
+	}
+	writePromptsBinder, err := httpserver.NewWritePromptsPreviewStoryboardBinder(agentProxyHandler, promptPreviewService)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Write Prompts Preview Storyboard binder: %w", err)
+	}
+	writePromptsProxy, err := httpserver.NewWritePromptsPreviewProxy(
+		agentProxyHandler, writePromptsBinder, cfg.AgentHTTP.WritePromptsRuntimeEnabled,
+	)
+	if err != nil {
+		_ = registry.Close(ctx)
+		return fmt.Errorf("create Write Prompts Preview proxy: %w", err)
+	}
 	agentSessionClient, err := agentsessionrpc.NewClient(ctx, agentsessionrpc.ClientConfig{
-		ConnectTimeout: cfg.AgentSessionRPC.ConnectTimeout,
-		RequestTimeout: cfg.AgentSessionRPC.RequestTimeout,
-		AuthSecret:     cfg.AgentSessionRPC.AuthSecret,
+		ConnectTimeout:               cfg.AgentSessionRPC.ConnectTimeout,
+		RequestTimeout:               cfg.AgentSessionRPC.RequestTimeout,
+		AuthSecret:                   cfg.AgentSessionRPC.AuthSecret,
+		Environment:                  cfg.Service.Environment,
+		PlanStoryboardRuntimeEnabled: cfg.AgentHTTP.PlanStoryboardRuntimeEnabled,
+		WritePromptsRuntimeEnabled:   cfg.AgentHTTP.WritePromptsRuntimeEnabled,
 	}, cfg.Etcd)
 	if err != nil {
 		_ = registry.Close(ctx)
@@ -311,8 +437,11 @@ func Run(ctx context.Context, build BuildInfo) error {
 		return fmt.Errorf("create project session dispatch runner: %w", err)
 	}
 	server, err := httpserver.New(cfg.HTTP, cfg.Service, state, httpserver.RouteHandlers{
-		Auth: authHandler, Project: projectHandler, Agent: agentProxyHandler,
-		Skill: skillHandler, SkillReview: skillReviewHandler, SkillGovernance: skillGovernanceHandler,
+		Auth: authHandler, Project: projectHandler, TextMaterial: textMaterialHandler,
+		Agent: agentProxyHandler, PlanStoryboard: planStoryboardProxy,
+		WritePrompts: writePromptsProxy,
+		MediaPreview: mediaPreviewHandler,
+		Skill:        skillHandler, SkillReview: skillReviewHandler, SkillGovernance: skillGovernanceHandler,
 		SkillMarket: skillMarketHandler,
 	})
 	if err != nil {
@@ -324,7 +453,13 @@ func Run(ctx context.Context, build BuildInfo) error {
 		_ = registry.Close(ctx)
 		return err
 	}
-	foundationHandler, err := foundationrpc.NewHandler(cfg.Service, clock.System{}, logger)
+	foundationHandler, err := foundationrpc.NewHandlerWithAllDevelopmentPreviewsAndPromptPreview(
+		cfg.Service, clock.System{}, logger,
+		creationSpecService, cfg.AgentHTTP.PlanSpecPreviewEnabled,
+		assetAnalysisService, cfg.AssetAnalysisPreview.Enabled,
+		storyboardPreviewService, cfg.AgentHTTP.PlanStoryboardRuntimeEnabled,
+		promptPreviewService, cfg.AgentHTTP.WritePromptsRuntimeEnabled,
+	)
 	if err != nil {
 		_ = listener.Close()
 		_ = registry.Close(ctx)

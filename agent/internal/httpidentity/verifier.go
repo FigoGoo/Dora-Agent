@@ -33,13 +33,26 @@ const (
 	ScopeEventsRead = "agent.session.events.read"
 	// ScopeToolsRead 仅允许读取指定 Session 的静态 Tool Definition Catalog。
 	ScopeToolsRead = "agent.session.tools.read"
+	// ScopeCreationSpecPreviewWrite 只允许向指定 Session 持久化一条 CreationSpec Preview Intent。
+	ScopeCreationSpecPreviewWrite = "creation_spec.preview.write"
+	// ScopeAnalyzeMaterialsPreviewWrite 只允许向指定 Session 持久化一条素材分析 Preview Intent。
+	ScopeAnalyzeMaterialsPreviewWrite = "analyze_materials.preview.write"
+	// ScopePlanStoryboardPreviewWrite 只允许向指定 Session 持久化一条 Storyboard Preview Intent。
+	ScopePlanStoryboardPreviewWrite = "plan_storyboard.preview.write"
+	// ScopeWritePromptsPreviewWrite 只允许向指定 Session 持久化一条 Prompt Preview Intent。
+	ScopeWritePromptsPreviewWrite = "write_prompts.preview.write"
+	// ScopeGenerateMediaPreviewWrite 只允许向指定 Session 入队 generate_media typed Intent。
+	ScopeGenerateMediaPreviewWrite = "generate_media.preview.write"
+	// ScopeAssembleOutputPreviewWrite 只允许向指定 Session 入队 assemble_output typed Intent。
+	ScopeAssembleOutputPreviewWrite = "assemble_output.preview.write"
 
-	assertionSchema    = "agent_http_identity_assertion.v1"
-	assertionIssuer    = "dora-business-service"
-	assertionAudience  = "dora.agent.http.v1"
-	assertionLineCount = 16
-	maxAssertionBytes  = 2048
-	maxAssertionTTL    = time.Minute
+	assertionSchema              = "agent_http_identity_assertion.v1"
+	assertionIssuer              = "dora-business-service"
+	assertionAudience            = "dora.agent.http.v1"
+	assertionLineCount           = 16
+	maxAssertionBytes            = 2048
+	maxAssertionTTL              = time.Minute
+	maximumJavaScriptSafeInteger = uint64(1<<53 - 1)
 )
 
 var (
@@ -65,7 +78,7 @@ type ReplayStore interface {
 type Request struct {
 	// Headers 是内部 HTTP 请求头；Verifier 只读取冻结的三个身份 Header。
 	Headers http.Header
-	// Method 必须是 GET。
+	// Method 必须与 Scope 对应，只允许冻结白名单中的 GET 或 Preview POST。
 	Method string
 	// CanonicalTarget 是 Handler 从白名单路径和规范 Cursor 构造的唯一 Target。
 	CanonicalTarget string
@@ -91,7 +104,7 @@ type Claims struct {
 	ProjectID string
 	// AgentSessionID 是此次读取绑定的 Agent Session UUIDv7。
 	AgentSessionID string
-	// Scope 是此次调用唯一允许的只读权限。
+	// Scope 是此次调用唯一允许的最小读或 Preview 写权限。
 	Scope string
 	// IssuedAt 是断言签发 UTC 时间。
 	IssuedAt time.Time
@@ -191,13 +204,16 @@ func (v *Verifier) Verify(ctx context.Context, request Request) (Claims, error) 
 
 // parseCanonical 把通过 HMAC 的固定 16 行内容解析为唯一规范字段，并与 Handler 白名单路由交叉绑定。
 func parseCanonical(canonical, headerKid string, request Request) (Claims, []byte, error) {
+	if !validRequestBinding(request) {
+		return Claims{}, nil, ErrInvalid
+	}
 	if strings.ContainsRune(canonical, '\r') || strings.HasSuffix(canonical, "\n") {
 		return Claims{}, nil, ErrInvalid
 	}
 	lines := strings.Split(canonical, "\n")
 	if len(lines) != assertionLineCount || lines[0] != assertionSchema || lines[1] != assertionIssuer ||
-		lines[2] != assertionAudience || lines[3] != headerKid || lines[5] != http.MethodGet ||
-		request.Method != http.MethodGet || lines[6] != request.CanonicalTarget || lines[12] != request.Scope {
+		lines[2] != assertionAudience || lines[3] != headerKid || lines[5] != request.Method ||
+		lines[6] != request.CanonicalTarget || lines[12] != request.Scope {
 		return Claims{}, nil, ErrInvalid
 	}
 	requestID, err := canonicalUUIDv7(lines[4])
@@ -244,6 +260,46 @@ func parseCanonical(canonical, headerKid string, request Request) (Claims, []byt
 	}, nonce, nil
 }
 
+// validRequestBinding 独立于 Handler 再次冻结 Scope、Method 与 Canonical Target 的唯一映射。
+func validRequestBinding(request Request) bool {
+	agentSessionID, err := canonicalUUIDv7(request.AgentSessionID)
+	if err != nil {
+		return false
+	}
+	workspaceTarget := "/api/v1/agent/sessions/" + agentSessionID + "/workspace"
+	eventsPrefix := "/api/v1/agent/sessions/" + agentSessionID + "/events?after_seq="
+	toolsTarget := "/api/v1/agent/sessions/" + agentSessionID + "/tools"
+	creationSpecPreviewTarget := "/internal/v1/workspaces/sessions/" + agentSessionID + "/creation-spec-previews"
+	analyzeMaterialsPreviewTarget := "/internal/v1/workspaces/sessions/" + agentSessionID + "/analyze-materials-previews"
+	planStoryboardPreviewTarget := "/internal/v1/workspaces/sessions/" + agentSessionID + "/plan-storyboard-previews"
+	writePromptsPreviewTarget := "/internal/v1/workspaces/sessions/" + agentSessionID + "/write-prompts-previews"
+	generateMediaPreviewTarget := "/internal/v1/workspaces/sessions/" + agentSessionID + "/generate-media-previews"
+	assembleOutputPreviewTarget := "/internal/v1/workspaces/sessions/" + agentSessionID + "/assemble-output-previews"
+	switch request.Scope {
+	case ScopeWorkspaceRead:
+		return request.Method == http.MethodGet && request.CanonicalTarget == workspaceTarget
+	case ScopeEventsRead:
+		cursor := strings.TrimPrefix(request.CanonicalTarget, eventsPrefix)
+		return request.Method == http.MethodGet && cursor != request.CanonicalTarget && canonicalNonNegativeInt(cursor)
+	case ScopeToolsRead:
+		return request.Method == http.MethodGet && request.CanonicalTarget == toolsTarget
+	case ScopeCreationSpecPreviewWrite:
+		return request.Method == http.MethodPost && request.CanonicalTarget == creationSpecPreviewTarget
+	case ScopeAnalyzeMaterialsPreviewWrite:
+		return request.Method == http.MethodPost && request.CanonicalTarget == analyzeMaterialsPreviewTarget
+	case ScopePlanStoryboardPreviewWrite:
+		return request.Method == http.MethodPost && request.CanonicalTarget == planStoryboardPreviewTarget
+	case ScopeWritePromptsPreviewWrite:
+		return request.Method == http.MethodPost && request.CanonicalTarget == writePromptsPreviewTarget
+	case ScopeGenerateMediaPreviewWrite:
+		return request.Method == http.MethodPost && request.CanonicalTarget == generateMediaPreviewTarget
+	case ScopeAssembleOutputPreviewWrite:
+		return request.Method == http.MethodPost && request.CanonicalTarget == assembleOutputPreviewTarget
+	default:
+		return false
+	}
+}
+
 // singleCanonicalHeader 要求目标 Header 只出现一次，且值没有空白折叠或逗号合并的第二语义。
 func singleCanonicalHeader(headers http.Header, name string) (string, bool) {
 	values := headers.Values(name)
@@ -272,6 +328,23 @@ func canonicalPositiveInt64(value string) (int64, error) {
 		return 0, ErrInvalid
 	}
 	return parsed, nil
+}
+
+// canonicalNonNegativeInt 固定 Event Cursor 为无前导零且不超过 JavaScript 安全整数的十进制。
+func canonicalNonNegativeInt(value string) bool {
+	if value == "0" {
+		return true
+	}
+	if value == "" || value[0] < '1' || value[0] > '9' {
+		return false
+	}
+	for index := 1; index < len(value); index++ {
+		if value[index] < '0' || value[index] > '9' {
+			return false
+		}
+	}
+	parsed, err := strconv.ParseUint(value, 10, 64)
+	return err == nil && parsed <= maximumJavaScriptSafeInteger
 }
 
 // validKeyVersion 固定 kid 为 1..64 字节小写 ASCII，避免 Header、Canonical 与 Redis Key 出现第二语义。

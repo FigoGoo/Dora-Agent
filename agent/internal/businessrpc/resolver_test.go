@@ -27,7 +27,7 @@ func TestParseRegistrationInstance(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			instance, ok := parseRegistrationInstance("dora.business.foundation.v1", []byte(test.value))
+			instance, ok := parseRegistrationInstance("dora.business.foundation.v1", []byte(test.value), false)
 			if ok != test.want {
 				t.Fatalf("parseRegistrationInstance() ok = %v, want %v", ok, test.want)
 			}
@@ -44,5 +44,21 @@ func TestParseRegistrationInstance(t *testing.T) {
 				t.Fatalf("instance_id tag = %q, exists = %v", got, exists)
 			}
 		})
+	}
+}
+
+func TestParseRegistrationInstanceAllowsLoopbackOnlyForApprovedLocalProfile(t *testing.T) {
+	t.Parallel()
+
+	for _, address := range []string{"127.0.0.1:19081", "[::1]:19081", "localhost:19081"} {
+		value := []byte(`{"service":"dora.business.foundation.v1","instance_id":"business-local-1","address":"` + address + `","version":"dev"}`)
+		instance, ok := parseRegistrationInstance("dora.business.foundation.v1", value, true)
+		if !ok || instance == nil || instance.Address().String() != address {
+			t.Fatalf("local loopback registration %q 未被接受: instance=%v ok=%v", address, instance, ok)
+		}
+	}
+	wildcard := []byte(`{"service":"dora.business.foundation.v1","instance_id":"business-local-1","address":"0.0.0.0:19081","version":"dev"}`)
+	if instance, ok := parseRegistrationInstance("dora.business.foundation.v1", wildcard, true); ok || instance != nil {
+		t.Fatalf("local Profile 接受 wildcard: instance=%v ok=%v", instance, ok)
 	}
 }

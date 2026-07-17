@@ -5,11 +5,13 @@ import (
 	"net/url"
 )
 
-// IsSafeLocalBusinessDSN 只接受本地 Smoke 专用数据库、角色和唯一明文 sslmode 参数。
+// IsSafeLocalBusinessDSN 只接受本地 Smoke 数据库、专用角色和唯一明文 sslmode 参数。
+// canonical Trial 使用隔离的 dora_business_test；日常本地联调保留 dora_business。
 func IsSafeLocalBusinessDSN(dsn string) bool {
 	parsed, err := url.Parse(dsn)
 	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") || parsed.Opaque != "" ||
-		parsed.User == nil || parsed.User.Username() != "dora_business_app" || parsed.Path != "/dora_business" ||
+		parsed.User == nil || parsed.User.Username() != "dora_business_app" ||
+		(parsed.Path != "/dora_business" && parsed.Path != "/dora_business_test") ||
 		parsed.Fragment != "" {
 		return false
 	}

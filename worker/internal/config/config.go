@@ -3,13 +3,27 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
 
 const serviceName = "dora-business-worker"
+
+const (
+	// MediaRuntimeProfileV3Preview1 是 Worker 唯一允许启用的本地媒体 Preview Profile。
+	MediaRuntimeProfileV3Preview1 = "media.runtime.v3preview1"
+	// defaultMediaMaxResponseBytes 是 Business 严格 JSON 响应的默认读取上限。
+	defaultMediaMaxResponseBytes = 64 * 1024
+	// defaultMediaMaxPNGBytes 是固定 640x360 PNG 的默认字节预算。
+	defaultMediaMaxPNGBytes = 2 * 1024 * 1024
+	// defaultMediaMaxMP4Bytes 是固定 2 秒 MP4 的默认字节预算。
+	defaultMediaMaxMP4Bytes = 16 * 1024 * 1024
+)
 
 // Config 是 Business Worker 启动后不可变的完整配置。
 type Config struct {
@@ -25,6 +39,8 @@ type Config struct {
 	Etcd EtcdConfig
 	// Worker 保存执行器并发、租约和尝试边界。
 	Worker WorkerConfig
+	// MediaRuntime 保存 local-only 媒体 Job Consumer、Business Client 和产物预算。
+	MediaRuntime MediaRuntimeConfig
 	// ShutdownTimeout 是进程收到退出信号后的最大收尾时间。
 	ShutdownTimeout time.Duration
 }
@@ -111,6 +127,55 @@ type WorkerConfig struct {
 	MaxAttempts int
 }
 
+// MediaRuntimeConfig 定义 media.runtime.v3preview1 的本地依赖和硬预算。
+//
+// Profile 为空时整个切片关闭且 Bootstrap 不建立任何额外连接；未知非空值一律失败关闭。
+type MediaRuntimeConfig struct {
+	// Profile 必须为空或精确等于 media.runtime.v3preview1。
+	Profile string
+	// ObjectRoot 是与 Business 共享的绝对、非符号链接、0700 本地对象根。
+	ObjectRoot string
+	// AgentConsumerDSN 是只具备 Agent Preview View/Function 权限的 loopback PostgreSQL URL。
+	AgentConsumerDSN string
+	// AgentMaxOpenConns 是 Agent Consumer 连接池最大连接数。
+	AgentMaxOpenConns int
+	// AgentMaxIdleConns 是 Agent Consumer 连接池最大空闲连接数。
+	AgentMaxIdleConns int
+	// AgentConnMaxLifetime 是 Agent Consumer 单连接最大复用时间。
+	AgentConnMaxLifetime time.Duration
+	// AgentConnMaxIdleTime 是 Agent Consumer 空闲连接最大保留时间。
+	AgentConnMaxIdleTime time.Duration
+	// AgentPingTimeout 是 Agent Consumer 启动 Ping 和契约探针超时。
+	AgentPingTimeout time.Duration
+	// BusinessBaseURL 是仅允许 loopback HTTP 的 Business 内部媒体端点根 URL。
+	BusinessBaseURL string
+	// FFMPEGPath 是非符号链接绝对 ffmpeg 可执行文件路径。
+	FFMPEGPath string
+	// FFprobePath 是非符号链接绝对 ffprobe 可执行文件路径。
+	FFprobePath string
+	// AgentCallTimeout 是单次 Agent PostgreSQL 函数调用上限。
+	AgentCallTimeout time.Duration
+	// BusinessCallTimeout 是单次 Business 内部 HTTP 调用上限。
+	BusinessCallTimeout time.Duration
+	// MaxResponseBytes 是 Business JSON 响应最大字节数。
+	MaxResponseBytes int64
+	// MaxPNGBytes 是允许提交 Finalize 的 PNG 最大字节数。
+	MaxPNGBytes int64
+	// MaxMP4Bytes 是允许提交 Finalize 的 MP4 最大字节数。
+	MaxMP4Bytes int64
+	// StderrLimitBytes 是 ffmpeg/ffprobe 单次诊断保留上限。
+	StderrLimitBytes int64
+	// RetryBaseDelay 是 retry_wait Full Jitter 的初始上限。
+	RetryBaseDelay time.Duration
+	// RetryMaxDelay 是 retry_wait Full Jitter 的最大上限。
+	RetryMaxDelay time.Duration
+}
+
+// Enabled 报告 Worker 是否显式启用完整媒体 Job Runtime。
+func (c MediaRuntimeConfig) Enabled() bool {
+	return c.Profile == MediaRuntimeProfileV3Preview1
+}
+
 // Load 从环境变量加载 Business Worker 配置并执行完整校验。
 func Load(version string) (Config, error) {
 	cfg := Config{
@@ -150,6 +215,27 @@ func Load(version string) (Config, error) {
 			HeartbeatInterval: mustDuration("WORKER_HEARTBEAT_INTERVAL", "5s"),
 			AttemptTimeout:    mustDuration("WORKER_ATTEMPT_TIMEOUT", "2m"),
 			MaxAttempts:       mustPositiveInt("WORKER_MAX_ATTEMPTS", 3),
+		},
+		MediaRuntime: MediaRuntimeConfig{
+			Profile:              strings.TrimSpace(os.Getenv("DORA_WORKER_MEDIA_RUNTIME_PROFILE")),
+			ObjectRoot:           strings.TrimSpace(os.Getenv("DORA_WORKER_MEDIA_OBJECT_ROOT")),
+			AgentConsumerDSN:     strings.TrimSpace(os.Getenv("DORA_WORKER_AGENT_CONSUMER_DSN")),
+			AgentMaxOpenConns:    mustPositiveInt("DORA_WORKER_AGENT_DB_MAX_OPEN_CONNS", 4),
+			AgentMaxIdleConns:    mustPositiveInt("DORA_WORKER_AGENT_DB_MAX_IDLE_CONNS", 2),
+			AgentConnMaxLifetime: mustDuration("DORA_WORKER_AGENT_DB_CONN_MAX_LIFETIME", "10m"),
+			AgentConnMaxIdleTime: mustDuration("DORA_WORKER_AGENT_DB_CONN_MAX_IDLE_TIME", "2m"),
+			AgentPingTimeout:     mustDuration("DORA_WORKER_AGENT_DB_PING_TIMEOUT", "3s"),
+			BusinessBaseURL:      strings.TrimSpace(os.Getenv("DORA_WORKER_BUSINESS_BASE_URL")),
+			FFMPEGPath:           strings.TrimSpace(os.Getenv("DORA_WORKER_FFMPEG_PATH")),
+			FFprobePath:          strings.TrimSpace(os.Getenv("DORA_WORKER_FFPROBE_PATH")),
+			AgentCallTimeout:     mustDuration("DORA_WORKER_MEDIA_AGENT_CALL_TIMEOUT", "2s"),
+			BusinessCallTimeout:  mustDuration("DORA_WORKER_MEDIA_BUSINESS_CALL_TIMEOUT", "5s"),
+			MaxResponseBytes:     mustPositiveInt64("DORA_WORKER_MEDIA_MAX_RESPONSE_BYTES", defaultMediaMaxResponseBytes),
+			MaxPNGBytes:          mustPositiveInt64("DORA_WORKER_MEDIA_MAX_PNG_BYTES", defaultMediaMaxPNGBytes),
+			MaxMP4Bytes:          mustPositiveInt64("DORA_WORKER_MEDIA_MAX_MP4_BYTES", defaultMediaMaxMP4Bytes),
+			StderrLimitBytes:     mustPositiveInt64("DORA_WORKER_MEDIA_STDERR_LIMIT_BYTES", 16*1024),
+			RetryBaseDelay:       mustDuration("DORA_WORKER_MEDIA_RETRY_BASE_DELAY", "1s"),
+			RetryMaxDelay:        mustDuration("DORA_WORKER_MEDIA_RETRY_MAX_DELAY", "30s"),
 		},
 		ShutdownTimeout: mustDuration("WORKER_SHUTDOWN_TIMEOUT", "30s"),
 	}
@@ -207,6 +293,64 @@ func (c Config) Validate() error {
 	if c.ShutdownTimeout <= 0 {
 		return fmt.Errorf("WORKER_SHUTDOWN_TIMEOUT must be positive")
 	}
+	if err := c.validateMediaRuntime(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateMediaRuntime 在 Profile 开启时校验 local-only 隔离、loopback 依赖、文件根和全部执行预算。
+func (c Config) validateMediaRuntime() error {
+	media := c.MediaRuntime
+	if media.Profile == "" {
+		return nil
+	}
+	if media.Profile != MediaRuntimeProfileV3Preview1 {
+		return fmt.Errorf("DORA_WORKER_MEDIA_RUNTIME_PROFILE is unsupported")
+	}
+	if c.Service.Environment != "local" {
+		return fmt.Errorf("media runtime requires DORA_ENV=local")
+	}
+	if err := validateLoopbackAddress(c.HTTP.Address); err != nil {
+		return fmt.Errorf("WORKER_HTTP_ADDR must be loopback for media runtime: %w", err)
+	}
+	if err := validateLoopbackPostgresURL(c.PostgreSQL.DSN); err != nil {
+		return fmt.Errorf("WORKER_DATABASE_URL must be loopback for media runtime: %w", err)
+	}
+	if err := validateLoopbackAddress(c.Redis.Address); err != nil {
+		return fmt.Errorf("WORKER_REDIS_ADDR must be loopback for media runtime: %w", err)
+	}
+	for _, endpoint := range c.Etcd.Endpoints {
+		if err := validateLoopbackEndpoint(endpoint); err != nil {
+			return fmt.Errorf("WORKER_ETCD_ENDPOINTS must be loopback for media runtime: %w", err)
+		}
+	}
+	if err := validateObjectRoot(media.ObjectRoot); err != nil {
+		return fmt.Errorf("DORA_WORKER_MEDIA_OBJECT_ROOT is invalid: %w", err)
+	}
+	if err := validateLoopbackPostgresURL(media.AgentConsumerDSN); err != nil {
+		return fmt.Errorf("DORA_WORKER_AGENT_CONSUMER_DSN must be a loopback PostgreSQL URL: %w", err)
+	}
+	if err := validateLoopbackBaseURL(media.BusinessBaseURL); err != nil {
+		return fmt.Errorf("DORA_WORKER_BUSINESS_BASE_URL must be a loopback HTTP URL: %w", err)
+	}
+	if !filepath.IsAbs(media.FFMPEGPath) || !filepath.IsAbs(media.FFprobePath) {
+		return fmt.Errorf("DORA_WORKER_FFMPEG_PATH and DORA_WORKER_FFPROBE_PATH must be absolute")
+	}
+	if media.AgentMaxOpenConns <= 0 || media.AgentMaxIdleConns <= 0 ||
+		media.AgentMaxIdleConns > media.AgentMaxOpenConns || media.AgentConnMaxLifetime <= 0 ||
+		media.AgentConnMaxIdleTime <= 0 || media.AgentPingTimeout <= 0 {
+		return fmt.Errorf("media Agent Consumer pool limits and timeouts are invalid")
+	}
+	if media.AgentCallTimeout <= 0 || media.AgentCallTimeout >= c.Worker.HeartbeatInterval ||
+		media.BusinessCallTimeout <= 0 || media.BusinessCallTimeout >= c.Worker.AttemptTimeout ||
+		media.MaxResponseBytes < 4096 || media.MaxResponseBytes > 1024*1024 ||
+		media.MaxPNGBytes <= 0 || media.MaxMP4Bytes < media.MaxPNGBytes ||
+		media.StderrLimitBytes < 1024 || media.StderrLimitBytes > 64*1024 ||
+		media.RetryBaseDelay <= 0 || media.RetryMaxDelay < media.RetryBaseDelay ||
+		media.RetryMaxDelay >= c.Worker.AttemptTimeout {
+		return fmt.Errorf("media runtime budgets are invalid")
+	}
 	return nil
 }
 
@@ -237,6 +381,19 @@ func mustPositiveInt(key string, fallback int) int {
 	return parsed
 }
 
+// mustPositiveInt64 读取正整数预算；非法或非正值返回 0 交由统一 Validate 失败关闭。
+func mustPositiveInt64(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		return 0
+	}
+	return parsed
+}
+
 func mustNonNegativeInt(key string, fallback int) int {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -258,4 +415,74 @@ func splitNonEmpty(raw string) []string {
 		}
 	}
 	return result
+}
+
+// validateObjectRoot 校验共享对象根已经存在、是绝对非符号链接目录且权限精确为 0700。
+func validateObjectRoot(root string) error {
+	if root == "" || !filepath.IsAbs(root) {
+		return fmt.Errorf("object root must be absolute")
+	}
+	info, err := os.Lstat(filepath.Clean(root))
+	if err != nil {
+		return fmt.Errorf("inspect object root: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return fmt.Errorf("object root must be a non-symlink 0700 directory")
+	}
+	return nil
+}
+
+// validateLoopbackPostgresURL 只接受带 loopback Host 的 postgres/postgresql URL DSN。
+func validateLoopbackPostgresURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") || parsed.Host == "" {
+		return fmt.Errorf("invalid PostgreSQL URL")
+	}
+	if !isLoopbackHost(parsed.Hostname()) {
+		return fmt.Errorf("PostgreSQL host is not loopback")
+	}
+	return nil
+}
+
+// validateLoopbackBaseURL 只接受无凭据、无 Query/Fragment、根 Path 的 loopback HTTP URL。
+func validateLoopbackBaseURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("invalid Business base URL")
+	}
+	if !isLoopbackHost(parsed.Hostname()) {
+		return fmt.Errorf("Business host is not loopback")
+	}
+	return nil
+}
+
+// validateLoopbackEndpoint 校验可带 http/https scheme 的 etcd 地址仍指向 loopback。
+func validateLoopbackEndpoint(raw string) error {
+	if strings.Contains(raw, "://") {
+		parsed, err := url.Parse(raw)
+		if err != nil || parsed.Host == "" || !isLoopbackHost(parsed.Hostname()) {
+			return fmt.Errorf("endpoint is not loopback")
+		}
+		return nil
+	}
+	return validateLoopbackAddress(raw)
+}
+
+// validateLoopbackAddress 校验 host:port 地址显式绑定 loopback，拒绝空 Host 的全接口监听。
+func validateLoopbackAddress(address string) error {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil || port == "" || !isLoopbackHost(host) {
+		return fmt.Errorf("address is not explicit loopback host:port")
+	}
+	return nil
+}
+
+// isLoopbackHost 只信任 localhost 字面量或 net.ParseIP 确认的 loopback IP，不做外部 DNS 解析。
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(strings.TrimSpace(host), "localhost") {
+		return true
+	}
+	parsed := net.ParseIP(strings.TrimSpace(host))
+	return parsed != nil && parsed.IsLoopback()
 }

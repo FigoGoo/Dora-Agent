@@ -2,7 +2,7 @@
   "schema_version": "immutable_turn_context_approval_manifest.v1",
   "decision_document": {
     "path": "docs/design/agent/immutable-turn-context-decision-review-v1.md",
-    "sha256": "sha256:f3caab55110293b3f04ed1f4527044e1030d61d03ba64efe3cb10c709161191d"
+    "sha256": "sha256:2b2a8b3acb123fd7b036d4ad0cc51126b342a75dc44f814b879a946650160f48"
   },
   "global_status": "awaiting_owner_approval",
   "implementation_unlocked": false,
@@ -25,6 +25,59 @@
       "worker/internal/approval",
       "frontend/src/features/aigc/a2ui/action",
       "frontend/src/features/aigc/a2ui/actions"
+    ],
+    "allowed_preview_files": [
+      "agent/internal/turncontext/context.go",
+      "agent/internal/turncontext/user_message.go",
+      "agent/internal/turncontext/analyze_materials.go",
+      "agent/internal/turncontext/plan_storyboard.go",
+      "agent/internal/turncontext/write_prompts.go",
+      "agent/internal/runtime/dto.go",
+      "agent/internal/runtime/eino_runner.go",
+      "agent/internal/runtime/processor.go",
+      "agent/internal/runtime/service.go",
+    "agent/internal/chatmodelagent/main.go",
+    "agent/internal/chatmodelagent/direct_response.go",
+    "agent/internal/chatmodelagent/analyze_materials.go",
+    "agent/internal/chatmodelagent/plan_storyboard.go",
+    "agent/internal/chatmodelagent/write_prompts.go",
+    "agent/internal/graphtool/analyzematerials/branch.go",
+    "agent/internal/graphtool/analyzematerials/dto.go",
+    "agent/internal/graphtool/analyzematerials/errors.go",
+    "agent/internal/graphtool/analyzematerials/graph.go",
+    "agent/internal/graphtool/analyzematerials/node_evidence.go",
+    "agent/internal/graphtool/analyzematerials/node_load_inputs.go",
+    "agent/internal/graphtool/analyzematerials/node_model.go",
+    "agent/internal/graphtool/analyzematerials/node_prompt.go",
+    "agent/internal/graphtool/analyzematerials/node_result.go",
+    "agent/internal/graphtool/analyzematerials/node_validate.go",
+    "agent/internal/graphtool/analyzematerials/node_validate_candidate.go",
+    "agent/internal/graphtool/analyzematerials/state.go",
+    "agent/internal/graphtool/analyzematerials/tool.go",
+    "agent/internal/graphtool/analyzematerials/validation.go",
+    "agent/internal/graphtool/plancreationspec/dto.go",
+      "agent/internal/graphtool/plancreationspec/graph.go",
+      "agent/internal/graphtool/plancreationspec/tool.go",
+      "agent/internal/graphtool/plancreationspec/validation.go",
+      "agent/internal/graphtool/planstoryboard/artifacts.go",
+      "agent/internal/graphtool/planstoryboard/dto.go",
+      "agent/internal/graphtool/planstoryboard/errors.go",
+      "agent/internal/graphtool/planstoryboard/graph.go",
+      "agent/internal/graphtool/planstoryboard/prompt.go",
+      "agent/internal/graphtool/planstoryboard/tool.go",
+      "agent/internal/graphtool/planstoryboard/validation.go",
+      "agent/internal/graphtool/writeprompts/artifacts.go",
+      "agent/internal/graphtool/writeprompts/branch.go",
+      "agent/internal/graphtool/writeprompts/dto.go",
+      "agent/internal/graphtool/writeprompts/errors.go",
+      "agent/internal/graphtool/writeprompts/graph.go",
+      "agent/internal/graphtool/writeprompts/node_candidate.go",
+      "agent/internal/graphtool/writeprompts/node_persistence.go",
+      "agent/internal/graphtool/writeprompts/node_result.go",
+      "agent/internal/graphtool/writeprompts/node_scope.go",
+      "agent/internal/graphtool/writeprompts/prompt.go",
+      "agent/internal/graphtool/writeprompts/tool.go",
+      "agent/internal/graphtool/writeprompts/validation.go"
     ],
     "forbidden_non_test_tokens": [
       "dora.session_turn_context.v1",
@@ -235,7 +288,7 @@
       "artifact_refs": [
         {
           "path": "docs/design/agent/immutable-turn-context-design-v1.md",
-          "sha256": "sha256:6cecbb6918e8f04a3e061500042d9fc2cfd449b93af6f7363a7bb5aee45d75fb",
+          "sha256": "sha256:4a647ff92d9902fe3cce50a81899e54937b3b0cd80f31a130576271a020086c2",
           "kind": "design_doc"
         },
         {
@@ -437,7 +490,7 @@
         },
         {
           "path": "docs/design/agent/continuation-child-tool-receipt-contract-v1.md",
-          "sha256": "sha256:e67a0ca9ea1d556c1e254285e1cbd6e02828e7e65dd4bf32f6e263255184d944",
+          "sha256": "sha256:a2fd35fe31a236187e1d67d9200aef3d0a48a4e4f9401b272f53fd9801cbe6f0",
           "kind": "design_doc"
         },
         {
@@ -457,7 +510,7 @@
         },
         {
           "path": "scripts/check-database-contracts.sh",
-          "sha256": "sha256:6ed8a8b329adc7e1d8823d8891587ecc7881e8091ed30c25b808f3d31d9ec125",
+          "sha256": "sha256:73ff4b4769f53bd25568768850a854652f68d78c2dd7e5076c56b503a917af2b",
           "kind": "required_mode_script"
         }
       ],
@@ -770,12 +823,12 @@
       "artifact_refs": [
         {
           "path": "docs/design/agent/session-lane-postgresql-design-v1.md",
-          "sha256": "sha256:86c5d2631d75d479ef274341a794286b40fc25236f64694f8e9465368d5c3c74",
+          "sha256": "sha256:2d1479d90cde078993fe21f7b534efa85fcf8fdd71bf33a77214d45e1589dae3",
           "kind": "design_doc"
         },
         {
           "path": "scripts/check-database-contracts.sh",
-          "sha256": "sha256:6ed8a8b329adc7e1d8823d8891587ecc7881e8091ed30c25b808f3d31d9ec125",
+          "sha256": "sha256:73ff4b4769f53bd25568768850a854652f68d78c2dd7e5076c56b503a917af2b",
           "kind": "required_mode_script"
         }
       ],

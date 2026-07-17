@@ -86,6 +86,27 @@ describe('Project Quick Create API', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ initial_prompt: '继续使用 V1' });
   });
 
+  it('explicitly defers the initial prompt for the Preview handoff in the v2 Skill variant', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({
+      project_id: 'p1', creation_status: 'provisioning'
+    }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await quickCreateProject({
+      prompt: '只通过内存交给 Preview 表单',
+      enabledSkillIDs: ['019f0000-0000-7000-8000-000000000121'],
+      deferInitialPrompt: true,
+      idempotencyKey: 'quick-create-idem-preview',
+      csrfToken: 'csrf-1'
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      schema_version: PROJECT_QUICK_CREATE_SCHEMA_V2,
+      initial_prompt: null,
+      enabled_skill_ids: ['019f0000-0000-7000-8000-000000000121']
+    });
+  });
+
   it('rejects an ambiguous duplicate selection before transport', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

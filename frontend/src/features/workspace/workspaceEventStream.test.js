@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { inputAcceptedEventFixture, WORKSPACE_IDS } from '../../test/workspaceFixtures.js';
+import {
+  creationSpecPreviewCompletedEventFixture,
+  inputAcceptedEventFixture,
+  storyboardAcceptedEventFixture,
+  storyboardEventFixture,
+  turnEventFixture,
+  WORKSPACE_IDS
+} from '../../test/workspaceFixtures.js';
 import { openWorkspaceEventStream } from './workspaceEventStream.js';
 
 describe('Workspace EventSource adapter', () => {
@@ -24,6 +31,62 @@ describe('Workspace EventSource adapter', () => {
     expect(source.close).toHaveBeenCalledTimes(1);
     source.emit('session.input.accepted', inputAcceptedEventFixture(), '2');
     expect(onEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('registers and delivers the persistent Creation Spec Preview event types', () => {
+    const source = new MockEventSource();
+    const onEvent = vi.fn();
+    openWorkspaceEventStream({
+      projectID: WORKSPACE_IDS.project,
+      sessionID: WORKSPACE_IDS.session,
+      cursor: 1,
+      eventSourceFactory: () => source,
+      onEvent
+    });
+    source.emit('creation_spec.preview.completed', creationSpecPreviewCompletedEventFixture(), '2');
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'creation_spec.preview.completed',
+      payload: expect.objectContaining({ creationSpecID: WORKSPACE_IDS.creationSpec })
+    }));
+  });
+
+  it.each(['session.turn.completed', 'session.turn.failed', 'session.turn.recovery_pending'])(
+    'registers and delivers %s through the same strict parser',
+    (eventName) => {
+      const source = new MockEventSource();
+      const onEvent = vi.fn();
+      openWorkspaceEventStream({
+        projectID: WORKSPACE_IDS.project,
+        sessionID: WORKSPACE_IDS.session,
+        cursor: 2,
+        eventSourceFactory: () => source,
+        onEvent
+      });
+      source.emit(eventName, turnEventFixture(eventName), '3');
+      expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+        event: eventName,
+        payload: expect.objectContaining({ turnID: WORKSPACE_IDS.turn })
+      }));
+    }
+  );
+
+  it.each([
+    ['plan_storyboard.preview.accepted', storyboardAcceptedEventFixture, 2],
+    ['plan_storyboard.preview.completed', () => storyboardEventFixture(), 3],
+    ['plan_storyboard.preview.failed', () => storyboardEventFixture('plan_storyboard.preview.failed'), 3],
+    ['plan_storyboard.preview.runtime_failed', () => storyboardEventFixture('plan_storyboard.preview.runtime_failed'), 3]
+  ])('registers and strictly delivers %s', (eventName, fixture, seq) => {
+    const source = new MockEventSource();
+    const onEvent = vi.fn();
+    openWorkspaceEventStream({
+      projectID: WORKSPACE_IDS.project,
+      sessionID: WORKSPACE_IDS.session,
+      cursor: seq - 1,
+      eventSourceFactory: () => source,
+      onEvent
+    });
+    source.emit(eventName, fixture(), String(seq));
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ event: eventName, seq }));
   });
 
   it('closes on protocol failure, reset, or transport failure instead of auto-reconnecting', () => {

@@ -18,6 +18,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   DefaultMockEventSource.instances = [];
   window.history.pushState({}, '', '/');
 });
@@ -96,6 +97,53 @@ describe('DORAIGC landing page', () => {
     const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByText('做一个霓虹城市里的音乐短片')).toBeInTheDocument();
+  });
+
+  it('hands a Preview-enabled QuickCreate goal to the formal Workspace without sending or persisting it', async () => {
+    vi.stubEnv('VITE_DORA_PLAN_SPEC_PREVIEW_ENABLED', 'true');
+    ensureDefaultEventSource();
+    const fetchMock = mockAppFetch({ authenticatedBootstrap: true });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole('button', { name: '用户菜单' });
+    await user.type(screen.getByPlaceholderText('由一个想法或故事开始...'), '只交给 Preview 的新品短片目标');
+    await user.click(screen.getByRole('button', { name: '开始创作' }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => (
+      requestPath(input) === '/api/v1/projects:quick-create'
+    ))).toHaveLength(1));
+    const quickCall = fetchMock.mock.calls.find(([input]) => requestPath(input) === '/api/v1/projects:quick-create');
+    expect(JSON.parse(quickCall[1].body)).toEqual({ initial_prompt: null });
+    expect(window.location.pathname).toBe(`/projects/${WORKSPACE_IDS.project}/workspace`);
+    expect(window.location.href).not.toContain(encodeURIComponent('只交给 Preview 的新品短片目标'));
+    expect(JSON.stringify(window.history.state)).not.toContain('只交给 Preview 的新品短片目标');
+    expect(await screen.findByLabelText('创作目标')).toHaveValue('只交给 Preview 的新品短片目标');
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      requestPath(input) === `/api/v1/agent/sessions/${WORKSPACE_IDS.session}/creation-spec-previews`
+    ))).toHaveLength(0);
+  });
+
+  it('preserves the initial user message and also hands the goal to Creation Spec in the unified MVP Profile', async () => {
+    vi.stubEnv('VITE_DORA_RUNTIME_PROFILE', 'mvp_all_tools.runtime.v1preview1');
+    ensureDefaultEventSource();
+    const fetchMock = mockAppFetch({ authenticatedBootstrap: true });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole('button', { name: '用户菜单' });
+    await user.type(screen.getByPlaceholderText('由一个想法或故事开始...'), '统一 Profile 的完整主链目标');
+    await user.click(screen.getByRole('button', { name: '开始创作' }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => (
+      requestPath(input) === '/api/v1/projects:quick-create'
+    ))).toHaveLength(1));
+    const quickCall = fetchMock.mock.calls.find(([input]) => requestPath(input) === '/api/v1/projects:quick-create');
+    expect(JSON.parse(quickCall[1].body)).toEqual({ initial_prompt: '统一 Profile 的完整主链目标' });
+    expect(window.location.pathname).toBe(`/projects/${WORKSPACE_IDS.project}/workspace`);
+    expect(await screen.findByLabelText('创作目标')).toHaveValue('统一 Profile 的完整主链目标');
   });
 
   it('selects only a published active Owner Skill and submits explicit QuickCreate v2', async () => {
@@ -642,7 +690,7 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建项目' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '最近编辑' })).not.toBeInTheDocument();
-    expect(screen.getByText('Seedance 2.0 视频制作')).toBeInTheDocument();
+    expect(await screen.findByText('Seedance 2.0 视频制作')).toBeInTheDocument();
     expect(screen.getByText('功能介绍 202606140505')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '资产库' }));
@@ -3445,18 +3493,18 @@ describe('DORAIGC static client pages', () => {
     expect(screen.getByText('DORA-2026-CREATOR')).toBeInTheDocument();
   });
 
-  it('keeps write actions on mock pages behind the login intent modal', async () => {
+  it('opens a real listed project through its formal workspace route', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await loginFromHeader(user);
 
     await user.click(screen.getByRole('button', { name: '项目' }));
-    await user.click(screen.getByRole('button', { name: '继续创作 Seedance 2.0 视频制作' }));
+    await user.click(await screen.findByRole('button', { name: '继续创作 Seedance 2.0 视频制作' }));
 
-    const dialog = screen.getByRole('dialog', { name: '登录后继续创作' });
-    expect(within(dialog).getByText('继续创作 Seedance 2.0 视频制作')).toBeInTheDocument();
-    expect(within(dialog).getByText('进入项目后会恢复最近会话和资产上下文。')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe(`/projects/${WORKSPACE_IDS.project}/workspace`));
+    expect(await screen.findByText('工作台已就绪')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '登录后继续创作' })).not.toBeInTheDocument();
   });
 
   it('opens the account menu from the avatar after login', async () => {
@@ -3490,7 +3538,7 @@ describe('DORAIGC static client pages', () => {
     await loginFromHeader(user);
 
     await user.click(screen.getByRole('button', { name: '项目' }));
-    expect(screen.getAllByTestId('project-card')).toHaveLength(11);
+    expect(await screen.findAllByTestId('project-card')).toHaveLength(3);
     expect(screen.getByText('创建新项目')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '资产库' }));
@@ -3581,6 +3629,33 @@ function mockAppFetch({
         workspace_ref: `/projects/${WORKSPACE_IDS.project}/workspace`,
         request_id: WORKSPACE_IDS.request
       }, 201);
+    }
+    if (path === '/api/v1/projects' && method === 'GET') {
+      const secondProjectID = '019f0000-0000-7000-8000-000000000212';
+      return jsonResponse({
+        items: [
+          {
+            project_id: WORKSPACE_IDS.project,
+            title: 'Seedance 2.0 视频制作',
+            lifecycle_status: 'active',
+            recent_run_status: 'running',
+            initial_prompt_status: 'accepted',
+            updated_at: '2026-07-17T09:08:07.123Z',
+            workspace_ref: `/projects/${WORKSPACE_IDS.project}/workspace`
+          },
+          {
+            project_id: secondProjectID,
+            title: '功能介绍 202606140505',
+            lifecycle_status: 'active',
+            recent_run_status: 'idle',
+            initial_prompt_status: 'absent',
+            updated_at: '2026-07-16T08:07:06Z',
+            workspace_ref: `/projects/${secondProjectID}/workspace`
+          }
+        ],
+        next_after: null,
+        request_id: WORKSPACE_IDS.request
+      });
     }
     if (path === `/api/v1/projects/${WORKSPACE_IDS.project}/bootstrap` && method === 'GET') {
       return jsonResponse(projectBootstrapFixture());

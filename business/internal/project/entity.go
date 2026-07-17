@@ -30,6 +30,8 @@ var (
 	ErrInvalidIdempotencyKey = errors.New("invalid project idempotency key")
 	// ErrPromptProtection 表示首提示词认证加密失败，外层不得返回密钥、算法实现或原始正文。
 	ErrPromptProtection = errors.New("project prompt protection unavailable")
+	// ErrInvalidProjectListQuery 表示项目列表的 owner、limit 或 after 游标不符合冻结查询契约。
+	ErrInvalidProjectListQuery = errors.New("invalid project list query")
 )
 
 const (
@@ -55,6 +57,8 @@ const (
 	DefaultProjectTitle = "未命名项目"
 	// MaxInitialPromptBytes W0 NFC 规范化后允许的首提示词 UTF-8 最大字节数。
 	MaxInitialPromptBytes = 64 * 1024
+	// MaxProjectListLimit 是单次项目列表查询允许返回的最大数量，防止无界读取。
+	MaxProjectListLimit = 100
 )
 
 // LifecycleStatus 项目生命周期状态，独立于最近一次运行摘要。
@@ -267,6 +271,91 @@ type Project struct {
 	CreatedAt time.Time
 	// UpdatedAt 项目最近更新的 UTC 时间。
 	UpdatedAt time.Time
+}
+
+// ProjectListCursor 是项目列表按 updated_at DESC、id DESC 排序的稳定 Keyset 游标。
+// 游标只定位上一页最后一条已返回记录，不承载授权信息。
+type ProjectListCursor struct {
+	// UpdatedAt 是上一页最后一个项目的 UTC 更新时间。
+	UpdatedAt time.Time
+	// ProjectID 是与 UpdatedAt 共同确定唯一排序位置的 UUIDv7。
+	ProjectID string
+}
+
+// Validate 校验项目列表游标已包含非零时间和 UUIDv7；失败返回 ErrInvalidProjectListQuery。
+func (cursor ProjectListCursor) Validate() error {
+	if cursor.UpdatedAt.IsZero() || !isUUIDv7(cursor.ProjectID) {
+		return ErrInvalidProjectListQuery
+	}
+	return nil
+}
+
+// ProjectListQuery 定义项目所有者列表的有界 Keyset 查询。
+type ProjectListQuery struct {
+	// OwnerUserID 只能来自可信鉴权 Principal，不接受查询参数覆盖。
+	OwnerUserID string
+	// Limit 是本页最大项目数，取值范围为 1 到 MaxProjectListLimit。
+	Limit int
+	// After 可选定位上一页最后一条记录；nil 表示从首页开始。
+	After *ProjectListCursor
+}
+
+// Validate 校验可信 owner、有界 limit 和可选 Keyset 游标；失败不应发起数据库查询。
+func (query ProjectListQuery) Validate() error {
+	if !isUUIDv7(query.OwnerUserID) || query.Limit < 1 || query.Limit > MaxProjectListLimit {
+		return ErrInvalidProjectListQuery
+	}
+	if query.After != nil {
+		return query.After.Validate()
+	}
+	return nil
+}
+
+// ProjectListItem 是项目列表一次集合查询返回的安全读模型。
+// 该类型不包含 owner、首提示词、Outbox 或 Agent 内部状态。
+type ProjectListItem struct {
+	// ProjectID 是当前用户拥有的 Project UUIDv7。
+	ProjectID string
+	// Title 是项目安全展示标题。
+	Title string
+	// LifecycleStatus 是项目生命周期，列表只返回 active 或 archived。
+	LifecycleStatus LifecycleStatus
+	// RecentRunStatus 是项目最近运行摘要。
+	RecentRunStatus RecentRunStatus
+	// InitialPromptStatus 是首提示词初始化摘要。
+	InitialPromptStatus InitialPromptStatus
+	// UpdatedAt 是项目最近更新的 UTC 时间。
+	UpdatedAt time.Time
+}
+
+// Validate 校验项目列表读模型的标识、展示字段和状态集；失败表示持久化投影不可信。
+func (item ProjectListItem) Validate() error {
+	if !isUUIDv7(item.ProjectID) || item.Title == "" || item.UpdatedAt.IsZero() {
+		return ErrInvalidProjectListQuery
+	}
+	if item.LifecycleStatus != LifecycleStatusActive && item.LifecycleStatus != LifecycleStatusArchived {
+		return ErrInvalidProjectListQuery
+	}
+	if item.RecentRunStatus != RecentRunStatusIdle && item.RecentRunStatus != RecentRunStatusQueued &&
+		item.RecentRunStatus != RecentRunStatusRunning && item.RecentRunStatus != RecentRunStatusWaitingUser &&
+		item.RecentRunStatus != RecentRunStatusWaitingAsync && item.RecentRunStatus != RecentRunStatusSucceeded &&
+		item.RecentRunStatus != RecentRunStatusPartialFailed && item.RecentRunStatus != RecentRunStatusFailed &&
+		item.RecentRunStatus != RecentRunStatusCancelled {
+		return ErrInvalidProjectListQuery
+	}
+	if item.InitialPromptStatus != InitialPromptStatusAbsent && item.InitialPromptStatus != InitialPromptStatusPending &&
+		item.InitialPromptStatus != InitialPromptStatusAccepted && item.InitialPromptStatus != InitialPromptStatusFailed {
+		return ErrInvalidProjectListQuery
+	}
+	return nil
+}
+
+// ProjectListResult 是项目列表单页结果，NextAfter 仅在数据库还有后续记录时返回。
+type ProjectListResult struct {
+	// Items 是按 updated_at DESC、id DESC 稳定排序的当页项目。
+	Items []ProjectListItem
+	// NextAfter 定位当页最后一条记录；nil 表示已到末页。
+	NextAfter *ProjectListCursor
 }
 
 // CreationReceipt 项目快速创建幂等回执，冻结首次安全响应以支持同键重放。
@@ -757,6 +846,8 @@ type Repository interface {
 	FindOwnedByID(ctx context.Context, projectID string, ownerUserID string) (Project, error)
 	// FindBootstrapOwnedByID 以一次集合查询读取 Project 与默认 Session 绑定；不存在或越权统一返回 ErrProjectNotFound。
 	FindBootstrapOwnedByID(ctx context.Context, projectID string, ownerUserID string) (BootstrapResult, error)
+	// ListOwned 以单次有界查询返回 owner 可见的 active/archived 项目和下一页游标。
+	ListOwned(ctx context.Context, query ProjectListQuery) (ProjectListResult, error)
 }
 
 // ResultFromReceipt 将持久化回执投影为安全结果；replay 只改变重放标记，不改变首次业务快照。

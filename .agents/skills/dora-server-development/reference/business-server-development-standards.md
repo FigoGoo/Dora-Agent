@@ -20,7 +20,7 @@
 4. Business Service 对外 HTTP 使用 Gin，内部 RPC 使用 Kitex + Thrift。
 5. etcd 只用于服务注册发现，不作为业务配置中心。
 6. Runtime 数据访问统一使用 GORM；Schema 统一由版本化 SQL Migration 管理。
-7. PostgreSQL 使用 16，当前本地镜像为 `postgres:16-alpine`。
+7. PostgreSQL 使用 16，当前本地镜像为 `postgres:16.4-alpine`，与 `deploy/local/compose.yaml` 一致。
 8. Redis 只用于缓存、限流、短期协调和异步任务唤醒。
 9. PostgreSQL Job/Outbox 是异步任务的权威状态。
 10. 当前系统没有 Tenant；用户分为普通用户和企业用户，企业用户不等于租户。
@@ -41,7 +41,7 @@
 | RPC | Kitex + Thrift | IDL 优先，生成器与 Runtime 版本一致 |
 | 注册发现 | etcd | 只负责注册发现 |
 | 数据访问 | GORM + PostgreSQL Driver | Repository 之外不得直接使用 GORM |
-| 数据库 | PostgreSQL 16 | 本地使用 `postgres:16-alpine` |
+| 数据库 | PostgreSQL 16 | 本地使用 `postgres:16.4-alpine` |
 | 数据迁移 | golang-migrate + SQL | `business/migrations` 是 Business Schema 的唯一 Migration 目录，禁止服务启动时 AutoMigrate |
 | 缓存 | Redis | 不作为业务最终事实来源 |
 | 对象存储 | TOS + ObjectStore 接口 | 业务层不依赖厂商 SDK 类型 |
@@ -82,7 +82,7 @@ GOWORK=off /Users/figo/sdk/go1.26.3/bin/go -C business test ./...
 
 | 中间件 | 本地基线 | 默认端口 |
 | --- | --- | --- |
-| PostgreSQL | `postgres:16-alpine` | 5432 |
+| PostgreSQL | `postgres:16.4-alpine` | 5432 |
 | Redis | Redis 7 Alpine，Compose 锁定已验证版本 | 6379 |
 | etcd | etcd 3.6.x，Compose 锁定已验证版本 | 2379 |
 
@@ -546,7 +546,7 @@ COMMENT ON COLUMN business.user_account.created_at
 
 - Domain/Application 单元测试不得依赖真实网络。
 - Clock、ID Generator 和随机源必须可注入。
-- Repository 集成测试使用真实 `postgres:16-alpine`，禁止使用 SQLite 替代 PostgreSQL。
+- Repository 集成测试使用真实 `postgres:16.4-alpine`，禁止使用 SQLite 替代 PostgreSQL。
 - Redis、etcd 集成测试使用本地 Docker 或 Testcontainers。
 - 本地测试使用独立测试数据库。
 - 金额测试覆盖两位小数、边界、舍入和禁止浮点转换。
@@ -649,7 +649,7 @@ PR 必须说明：
 - [ ] Business 生产 Runtime 入口仅位于 `business/cmd/business-service`。
 - [ ] Business Migration 仅位于 `business/migrations`，且只维护 Business Module 拥有的数据库对象。
 - [ ] 本地命令使用 `/Users/figo/sdk/go1.26.3/bin/go`。
-- [ ] PostgreSQL 本地基线为 `postgres:16-alpine`。
+- [ ] PostgreSQL 本地基线为 `postgres:16.4-alpine`。
 - [ ] Runtime 数据访问统一使用 GORM。
 - [ ] 未使用服务启动 AutoMigrate。
 - [ ] Migration 和实际 Schema 未创建任何数据库物理外键约束。

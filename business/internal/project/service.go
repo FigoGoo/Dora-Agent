@@ -118,6 +118,15 @@ func (s *Service) Bootstrap(ctx context.Context, projectID string, ownerUserID s
 	return s.repository.FindBootstrapOwnedByID(ctx, projectID, ownerUserID)
 }
 
+// ListOwned 校验可信 owner 与有界 Keyset 查询后，返回当前用户可见的项目单页读模型。
+// 非法 owner、limit 或 after 游标会在进入 Repository 前返回 ErrInvalidProjectListQuery。
+func (s *Service) ListOwned(ctx context.Context, query ProjectListQuery) (ProjectListResult, error) {
+	if err := query.Validate(); err != nil {
+		return ProjectListResult{}, err
+	}
+	return s.repository.ListOwned(ctx, query)
+}
+
 // idempotencyKeyDigest 校验代理可安全转发的可见 ASCII 意图键，并计算不落原文的 SHA-256 摘要。
 func idempotencyKeyDigest(value string) (Digest, error) {
 	if value == "" || len(value) > maxIdempotencyKeyBytes || !utf8.ValidString(value) || strings.TrimSpace(value) != value {

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,12 @@ import (
 )
 
 const serviceName = "dora-business-service"
+
+// MVPAllToolsRuntimeProfile 是只允许本地回环环境使用的统一基本功能开发预览。
+const MVPAllToolsRuntimeProfile = "mvp_all_tools.runtime.v1preview1"
+
+// MediaRuntimeProfile 是只允许依附统一基础 Profile 的本地媒体开发预览。
+const MediaRuntimeProfile = "media.runtime.v3preview1"
 
 // Config 是 Business Service 启动后不可变的完整配置。
 type Config struct {
@@ -33,6 +40,12 @@ type Config struct {
 	AgentSessionRPC AgentSessionRPCConfig
 	// AgentHTTP 保存同源 BFF 调用 Agent Workspace HTTP 的 Endpoint、超时和断言签名配置。
 	AgentHTTP AgentHTTPConfig
+	// RuntimeProfile 保存统一开发预览能力真相；空值继续使用隔离 Preview 开关。
+	RuntimeProfile string
+	// MediaRuntime 保存依附统一 Profile 的 Business 媒体 Asset 与对象根配置。
+	MediaRuntime MediaRuntimeConfig
+	// AssetAnalysisPreview 保存只允许本地显式开启的素材分析输入预览门禁。
+	AssetAnalysisPreview AssetAnalysisPreviewConfig
 	// ProjectDispatch 保存 Session Outbox 后台派发的租约、退避和轮询配置。
 	ProjectDispatch ProjectDispatchConfig
 	// RPC 保存 Foundation Kitex Server 的监听和资源边界配置。
@@ -157,7 +170,38 @@ type AgentHTTPConfig struct {
 	AssertionSecret []byte
 	// AssertionTTL 是每次内部请求的一次性身份断言有效期。
 	AssertionTTL time.Duration
+	// PlanSpecPreviewEnabled 仅在显式开发配置下注册 CreationSpec Preview 写入口，默认失败关闭。
+	PlanSpecPreviewEnabled bool
+	// AnalyzeMaterialsRuntimeEnabled 仅在显式本地开发配置下注册素材分析 Runtime 写入口，默认失败关闭。
+	AnalyzeMaterialsRuntimeEnabled bool
+	// PlanStoryboardRuntimeEnabled 仅在显式本地开发配置下开放 Storyboard Preview Foundation RPC；M3 BFF 复用同一门禁。
+	PlanStoryboardRuntimeEnabled bool
+	// WritePromptsRuntimeEnabled 仅在显式本地开发配置下开放 Prompt Preview BFF 与 Foundation RPC，默认失败关闭。
+	WritePromptsRuntimeEnabled bool
+	// WritePromptsRuntimeProfile 是双端必须精确匹配的 Development Preview Profile。
+	WritePromptsRuntimeProfile string
+	// MediaRuntimeEnabled 只在 media.runtime.v3preview1 通过本地对象根门禁后开放两个媒体 BFF 写入口。
+	MediaRuntimeEnabled bool
+	// PreviewMaxRequestBodyBytes 限制 BFF 接收并转发的严格 Intent JSON 字节数。
+	PreviewMaxRequestBodyBytes int64
 }
+
+// AssetAnalysisPreviewConfig 描述独立于 Agent HTTP 写入口的只读 Foundation RPC 预览门禁。
+type AssetAnalysisPreviewConfig struct {
+	// Enabled 默认关闭，且只允许 DORA_ENV=local 显式开启。
+	Enabled bool
+}
+
+// MediaRuntimeConfig 描述 Business local-only 媒体预览 Profile 与共享对象根。
+type MediaRuntimeConfig struct {
+	// Profile 为空时完全关闭；非空只允许 media.runtime.v3preview1。
+	Profile string
+	// ObjectRoot 是与 Worker 共享的绝对、非符号链接、精确 0700 本地目录。
+	ObjectRoot string
+}
+
+// Enabled 判断媒体 Runtime 是否按唯一冻结 Profile 显式开启。
+func (config MediaRuntimeConfig) Enabled() bool { return config.Profile == MediaRuntimeProfile }
 
 // ProjectDispatchConfig 描述 Project Session Outbox 单实例派发边界。
 type ProjectDispatchConfig struct {
@@ -221,6 +265,14 @@ type EtcdConfig struct {
 
 // Load 从环境变量加载 Business Service 配置并执行完整校验。
 func Load(version string) (Config, error) {
+	runtimeProfile := strings.TrimSpace(os.Getenv("DORA_BUSINESS_RUNTIME_PROFILE"))
+	if runtimeProfile != "" && runtimeProfile != MVPAllToolsRuntimeProfile {
+		return Config{}, fmt.Errorf("DORA_BUSINESS_RUNTIME_PROFILE is unsupported")
+	}
+	mediaRuntimeProfile := strings.TrimSpace(os.Getenv("DORA_BUSINESS_MEDIA_RUNTIME_PROFILE"))
+	if mediaRuntimeProfile != "" && mediaRuntimeProfile != MediaRuntimeProfile {
+		return Config{}, fmt.Errorf("DORA_BUSINESS_MEDIA_RUNTIME_PROFILE is unsupported")
+	}
 	cookieSecure, err := strconv.ParseBool(envOrDefault("BUSINESS_AUTH_COOKIE_SECURE", "false"))
 	if err != nil {
 		return Config{}, fmt.Errorf("BUSINESS_AUTH_COOKIE_SECURE must be true or false")
@@ -232,6 +284,37 @@ func Load(version string) (Config, error) {
 	agentSessionV2CapabilityConfirmed, err := strconv.ParseBool(envOrDefault("BUSINESS_AGENT_SESSION_V2_CAPABILITY_CONFIRMED", "false"))
 	if err != nil {
 		return Config{}, fmt.Errorf("BUSINESS_AGENT_SESSION_V2_CAPABILITY_CONFIRMED must be true or false")
+	}
+	planSpecPreviewEnabled, err := strconv.ParseBool(envOrDefault("DORA_AGENT_PLAN_SPEC_PREVIEW_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("DORA_AGENT_PLAN_SPEC_PREVIEW_ENABLED must be true or false")
+	}
+	analyzeMaterialsRuntimeEnabled, err := strconv.ParseBool(envOrDefault("DORA_BUSINESS_ANALYZE_MATERIALS_RUNTIME_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("DORA_BUSINESS_ANALYZE_MATERIALS_RUNTIME_ENABLED must be true or false")
+	}
+	planStoryboardRuntimeEnabled, err := strconv.ParseBool(envOrDefault("DORA_BUSINESS_PLAN_STORYBOARD_RUNTIME_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("DORA_BUSINESS_PLAN_STORYBOARD_RUNTIME_ENABLED must be true or false")
+	}
+	writePromptsRuntimeEnabled, err := strconv.ParseBool(envOrDefault("DORA_BUSINESS_WRITE_PROMPTS_RUNTIME_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("DORA_BUSINESS_WRITE_PROMPTS_RUNTIME_ENABLED must be true or false")
+	}
+	assetAnalysisPreviewEnabled, err := strconv.ParseBool(envOrDefault("DORA_BUSINESS_ASSET_ANALYSIS_PREVIEW_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("DORA_BUSINESS_ASSET_ANALYSIS_PREVIEW_ENABLED must be true or false")
+	}
+	if runtimeProfile == MVPAllToolsRuntimeProfile {
+		if planSpecPreviewEnabled || analyzeMaterialsRuntimeEnabled || planStoryboardRuntimeEnabled ||
+			writePromptsRuntimeEnabled || assetAnalysisPreviewEnabled {
+			return Config{}, fmt.Errorf("DORA_BUSINESS_RUNTIME_PROFILE must not be combined with isolated preview flags")
+		}
+		planSpecPreviewEnabled = true
+		analyzeMaterialsRuntimeEnabled = true
+		planStoryboardRuntimeEnabled = true
+		writePromptsRuntimeEnabled = true
+		assetAnalysisPreviewEnabled = true
 	}
 	csrfSecret, err := base64.StdEncoding.DecodeString(strings.TrimSpace(os.Getenv("BUSINESS_AUTH_CSRF_SECRET_BASE64")))
 	if err != nil {
@@ -327,9 +410,23 @@ func Load(version string) (Config, error) {
 			AssertionKeyVersion: strings.TrimSpace(
 				os.Getenv("BUSINESS_AGENT_HTTP_ASSERTION_KEY_VERSION"),
 			),
-			AssertionSecret: agentHTTPAssertionSecret,
-			AssertionTTL:    mustDuration("BUSINESS_AGENT_HTTP_ASSERTION_TTL", "30s"),
+			AssertionSecret:                agentHTTPAssertionSecret,
+			AssertionTTL:                   mustDuration("BUSINESS_AGENT_HTTP_ASSERTION_TTL", "30s"),
+			PlanSpecPreviewEnabled:         planSpecPreviewEnabled,
+			AnalyzeMaterialsRuntimeEnabled: analyzeMaterialsRuntimeEnabled,
+			PlanStoryboardRuntimeEnabled:   planStoryboardRuntimeEnabled,
+			WritePromptsRuntimeEnabled:     writePromptsRuntimeEnabled,
+			WritePromptsRuntimeProfile:     envOrDefault("DORA_BUSINESS_WRITE_PROMPTS_RUNTIME_PROFILE", "write_prompts.runtime.v2preview1"),
+			MediaRuntimeEnabled:            mediaRuntimeProfile == MediaRuntimeProfile,
+			PreviewMaxRequestBodyBytes: int64(mustPositiveInt(
+				"BUSINESS_AGENT_HTTP_PREVIEW_MAX_REQUEST_BODY_BYTES", 16384,
+			)),
 		},
+		RuntimeProfile: runtimeProfile,
+		MediaRuntime: MediaRuntimeConfig{
+			Profile: mediaRuntimeProfile, ObjectRoot: strings.TrimSpace(os.Getenv("DORA_BUSINESS_MEDIA_OBJECT_ROOT")),
+		},
+		AssetAnalysisPreview: AssetAnalysisPreviewConfig{Enabled: assetAnalysisPreviewEnabled},
 		ProjectDispatch: ProjectDispatchConfig{
 			LeaseDuration: mustDuration("BUSINESS_PROJECT_DISPATCH_LEASE_DURATION", "15s"),
 			RetryDelay:    mustDuration("BUSINESS_PROJECT_DISPATCH_RETRY_DELAY", "1s"),
@@ -371,19 +468,36 @@ func Load(version string) (Config, error) {
 
 // Validate 校验必填连接、服务注册地址和所有有界资源参数。
 func (c Config) Validate() error {
+	if c.RuntimeProfile != "" && c.RuntimeProfile != MVPAllToolsRuntimeProfile {
+		return fmt.Errorf("DORA_BUSINESS_RUNTIME_PROFILE is unsupported")
+	}
+	if c.RuntimeProfile == MVPAllToolsRuntimeProfile && !strings.EqualFold(c.Service.Environment, "local") {
+		return fmt.Errorf("DORA_BUSINESS_RUNTIME_PROFILE is allowed only in local environment")
+	}
+	if err := c.validateMediaRuntime(); err != nil {
+		return err
+	}
 	if c.Service.Version == "" {
 		return fmt.Errorf("business service version is required")
 	}
 	if c.Service.InstanceID == "" {
 		return fmt.Errorf("BUSINESS_INSTANCE_ID is required")
 	}
-	if err := validateAdvertisedAddress(c.Service.AdvertisedAddress); err != nil {
+	if c.AgentHTTP.PlanStoryboardRuntimeEnabled || c.AgentHTTP.WritePromptsRuntimeEnabled {
+		if !sameCanonicalLoopbackEndpoint(c.HTTP.Address, c.Service.AdvertisedAddress) {
+			return fmt.Errorf("BUSINESS_ADVERTISED_ADDRESS must equal the loopback BUSINESS_HTTP_ADDR for local preview runtime")
+		}
+	} else if err := validateAdvertisedAddress(c.Service.AdvertisedAddress); err != nil {
 		return fmt.Errorf("BUSINESS_ADVERTISED_ADDRESS: %w", err)
 	}
 	if err := validateListenAddress(c.RPC.ListenAddress); err != nil {
 		return fmt.Errorf("BUSINESS_RPC_LISTEN_ADDR: %w", err)
 	}
-	if err := validateAdvertisedAddress(c.RPC.AdvertisedAddress); err != nil {
+	if c.AgentHTTP.PlanStoryboardRuntimeEnabled || c.AgentHTTP.WritePromptsRuntimeEnabled {
+		if !sameCanonicalLoopbackEndpoint(c.RPC.ListenAddress, c.RPC.AdvertisedAddress) {
+			return fmt.Errorf("BUSINESS_RPC_ADVERTISED_ADDRESS must equal the loopback BUSINESS_RPC_LISTEN_ADDR for local preview runtime")
+		}
+	} else if err := validateAdvertisedAddress(c.RPC.AdvertisedAddress); err != nil {
 		return fmt.Errorf("BUSINESS_RPC_ADVERTISED_ADDRESS: %w", err)
 	}
 	if strings.TrimSpace(c.PostgreSQL.DSN) == "" {
@@ -491,6 +605,65 @@ func (c Config) Validate() error {
 	if c.AgentHTTP.AssertionTTL < time.Millisecond || c.AgentHTTP.AssertionTTL > 60*time.Second || c.AgentHTTP.AssertionTTL%time.Millisecond != 0 {
 		return fmt.Errorf("BUSINESS_AGENT_HTTP_ASSERTION_TTL must be whole milliseconds between 1ms and 60s")
 	}
+	if c.AgentHTTP.PreviewMaxRequestBodyBytes < 1024 || c.AgentHTTP.PreviewMaxRequestBodyBytes > 65536 {
+		return fmt.Errorf("BUSINESS_AGENT_HTTP_PREVIEW_MAX_REQUEST_BODY_BYTES must be between 1024 and 65536")
+	}
+	if c.AgentHTTP.PlanSpecPreviewEnabled && !strings.EqualFold(c.Service.Environment, "local") {
+		return fmt.Errorf("DORA_AGENT_PLAN_SPEC_PREVIEW_ENABLED is allowed only in local environment")
+	}
+	if c.AgentHTTP.AnalyzeMaterialsRuntimeEnabled && !strings.EqualFold(c.Service.Environment, "local") {
+		return fmt.Errorf("DORA_BUSINESS_ANALYZE_MATERIALS_RUNTIME_ENABLED is allowed only in local environment")
+	}
+	if c.AgentHTTP.PlanStoryboardRuntimeEnabled && !strings.EqualFold(c.Service.Environment, "local") {
+		return fmt.Errorf("DORA_BUSINESS_PLAN_STORYBOARD_RUNTIME_ENABLED is allowed only in local environment")
+	}
+	if c.AgentHTTP.WritePromptsRuntimeProfile != "write_prompts.runtime.v2preview1" {
+		return fmt.Errorf("DORA_BUSINESS_WRITE_PROMPTS_RUNTIME_PROFILE is unsupported")
+	}
+	if c.AgentHTTP.WritePromptsRuntimeEnabled && !strings.EqualFold(c.Service.Environment, "local") {
+		return fmt.Errorf("DORA_BUSINESS_WRITE_PROMPTS_RUNTIME_ENABLED is allowed only in local environment")
+	}
+	if c.AgentHTTP.PlanStoryboardRuntimeEnabled &&
+		(!isLoopbackListenAddress(c.HTTP.Address) || !isLoopbackListenAddress(c.RPC.ListenAddress) ||
+			!isLoopbackHTTPBaseURL(c.AgentHTTP.BaseURL) || !isLoopbackPostgreSQLDSN(c.PostgreSQL.DSN) ||
+			!isLoopbackEndpoint(c.Redis.Address) || !allLoopbackEndpoints(c.Etcd.Endpoints)) {
+		return fmt.Errorf("DORA_BUSINESS_PLAN_STORYBOARD_RUNTIME requires loopback HTTP, RPC, Agent HTTP, PostgreSQL, Redis, and etcd endpoints")
+	}
+	if c.AgentHTTP.WritePromptsRuntimeEnabled &&
+		(!isLoopbackListenAddress(c.HTTP.Address) || !isLoopbackListenAddress(c.RPC.ListenAddress) ||
+			!isLoopbackHTTPBaseURL(c.AgentHTTP.BaseURL) || !isLoopbackPostgreSQLDSN(c.PostgreSQL.DSN) ||
+			!isLoopbackEndpoint(c.Redis.Address) || !allLoopbackEndpoints(c.Etcd.Endpoints)) {
+		return fmt.Errorf("DORA_BUSINESS_WRITE_PROMPTS_RUNTIME requires loopback HTTP, RPC, Agent HTTP, PostgreSQL, Redis, and etcd endpoints")
+	}
+	enabledPreviewRuntimes := 0
+	for _, enabled := range []bool{
+		c.AgentHTTP.PlanSpecPreviewEnabled,
+		c.AgentHTTP.AnalyzeMaterialsRuntimeEnabled,
+		c.AgentHTTP.PlanStoryboardRuntimeEnabled,
+		c.AgentHTTP.WritePromptsRuntimeEnabled,
+	} {
+		if enabled {
+			enabledPreviewRuntimes++
+		}
+	}
+	if c.RuntimeProfile == "" && enabledPreviewRuntimes > 1 {
+		return fmt.Errorf("CreationSpec Preview, Analyze Materials Runtime, Plan Storyboard Runtime, and Write Prompts Runtime are mutually exclusive")
+	}
+	if c.RuntimeProfile == MVPAllToolsRuntimeProfile &&
+		(!c.AgentHTTP.PlanSpecPreviewEnabled || !c.AgentHTTP.AnalyzeMaterialsRuntimeEnabled ||
+			!c.AgentHTTP.PlanStoryboardRuntimeEnabled || !c.AgentHTTP.WritePromptsRuntimeEnabled ||
+			!c.AssetAnalysisPreview.Enabled) {
+		return fmt.Errorf("DORA_BUSINESS_RUNTIME_PROFILE effective capabilities are inconsistent")
+	}
+	if c.AssetAnalysisPreview.Enabled && !strings.EqualFold(c.Service.Environment, "local") {
+		return fmt.Errorf("DORA_BUSINESS_ASSET_ANALYSIS_PREVIEW_ENABLED is allowed only in local environment")
+	}
+	if c.AgentHTTP.AnalyzeMaterialsRuntimeEnabled && !c.AssetAnalysisPreview.Enabled {
+		return fmt.Errorf("DORA_BUSINESS_ASSET_ANALYSIS_PREVIEW_ENABLED must be true when Analyze Materials Runtime is enabled")
+	}
+	if c.RuntimeProfile == "" && c.AgentHTTP.WritePromptsRuntimeEnabled && c.AssetAnalysisPreview.Enabled {
+		return fmt.Errorf("DORA_BUSINESS_ASSET_ANALYSIS_PREVIEW_ENABLED must be false when Write Prompts Runtime is enabled")
+	}
 	if c.ProjectDispatch.LeaseDuration <= 3*c.AgentSessionRPC.RequestTimeout {
 		return fmt.Errorf("BUSINESS_PROJECT_DISPATCH_LEASE_DURATION must exceed three Agent RPC request timeouts")
 	}
@@ -519,6 +692,47 @@ func (c Config) Validate() error {
 	}
 	if c.ShutdownTimeout <= 0 {
 		return fmt.Errorf("BUSINESS_SHUTDOWN_TIMEOUT must be positive")
+	}
+	return nil
+}
+
+// validateMediaRuntime 要求媒体 Profile 依附统一基础 Profile，并复核 local、loopback 与安全对象根。
+func (c Config) validateMediaRuntime() error {
+	if c.MediaRuntime.Profile == "" {
+		return nil
+	}
+	if c.MediaRuntime.Profile != MediaRuntimeProfile {
+		return fmt.Errorf("DORA_BUSINESS_MEDIA_RUNTIME_PROFILE is unsupported")
+	}
+	if c.RuntimeProfile != MVPAllToolsRuntimeProfile {
+		return fmt.Errorf("DORA_BUSINESS_MEDIA_RUNTIME_PROFILE requires DORA_BUSINESS_RUNTIME_PROFILE=%s", MVPAllToolsRuntimeProfile)
+	}
+	if !strings.EqualFold(c.Service.Environment, "local") {
+		return fmt.Errorf("DORA_BUSINESS_MEDIA_RUNTIME_PROFILE is allowed only in local environment")
+	}
+	if !sameCanonicalLoopbackEndpoint(c.HTTP.Address, c.Service.AdvertisedAddress) ||
+		!sameCanonicalLoopbackEndpoint(c.RPC.ListenAddress, c.RPC.AdvertisedAddress) ||
+		!isLoopbackHTTPBaseURL(c.AgentHTTP.BaseURL) || !isLoopbackPostgreSQLDSN(c.PostgreSQL.DSN) ||
+		!isLoopbackEndpoint(c.Redis.Address) || !allLoopbackEndpoints(c.Etcd.Endpoints) {
+		return fmt.Errorf("DORA_BUSINESS_MEDIA_RUNTIME_PROFILE requires loopback HTTP, RPC, Agent HTTP, PostgreSQL, Redis, and etcd endpoints")
+	}
+	if err := validateMediaObjectRoot(c.MediaRuntime.ObjectRoot); err != nil {
+		return fmt.Errorf("DORA_BUSINESS_MEDIA_OBJECT_ROOT is invalid: %w", err)
+	}
+	return nil
+}
+
+// validateMediaObjectRoot 校验共享对象根已存在、绝对、非符号链接且权限精确为 0700。
+func validateMediaObjectRoot(root string) error {
+	if root == "" || strings.IndexByte(root, 0) >= 0 || !filepath.IsAbs(root) {
+		return fmt.Errorf("object root must be absolute")
+	}
+	info, err := os.Lstat(filepath.Clean(root))
+	if err != nil {
+		return fmt.Errorf("inspect object root: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return fmt.Errorf("object root must be a non-symlink 0700 directory")
 	}
 	return nil
 }
@@ -603,6 +817,57 @@ func validateListenAddress(address string) error {
 		return fmt.Errorf("port must be between 1 and 65535")
 	}
 	return nil
+}
+
+func isLoopbackListenAddress(address string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(address))
+	return err == nil && isLoopbackHost(host)
+}
+
+func sameCanonicalLoopbackEndpoint(listenAddress string, advertisedAddress string) bool {
+	listen := strings.TrimSpace(listenAddress)
+	advertised := strings.TrimSpace(advertisedAddress)
+	return listen != "" && listen == advertised && isLoopbackEndpoint(listen)
+}
+
+func isLoopbackEndpoint(address string) bool {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(address))
+	return err == nil && port != "" && isLoopbackHost(host)
+}
+
+func allLoopbackEndpoints(endpoints []string) bool {
+	if len(endpoints) == 0 {
+		return false
+	}
+	for _, endpoint := range endpoints {
+		if !isLoopbackEndpoint(endpoint) {
+			return false
+		}
+	}
+	return true
+}
+
+func isLoopbackHTTPBaseURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && parsed.Hostname() != "" && isLoopbackHost(parsed.Hostname())
+}
+
+func isLoopbackPostgreSQLDSN(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") || parsed.Hostname() == "" ||
+		strings.Trim(parsed.Path, "/") == "" {
+		return false
+	}
+	return isLoopbackHost(parsed.Hostname())
+}
+
+func isLoopbackHost(host string) bool {
+	plainHost := strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
+	if plainHost == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(plainHost)
+	return ip != nil && ip.IsLoopback()
 }
 
 // validateAdvertisedAddress 确保注册地址可被其他实例访问，拒绝本机回环和通配地址。

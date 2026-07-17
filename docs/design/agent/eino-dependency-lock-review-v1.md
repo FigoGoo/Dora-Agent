@@ -64,7 +64,7 @@ GOWORK=off /Users/figo/sdk/go1.26.3/bin/go build ./cmd/agent-service
 
 其中兼容性测试必须证明：经典 Message 接口断言成立，最小 DAG 在 `AllPredecessor` 下可 Compile/Invoke，且测试不触发真实 DeepSeek 请求。
 
-本批还必须用 `go version -m` 核对当前 `agent-service` 构建元数据不含 Eino 或 DeepSeek Adapter；只有后续 Runtime 评审通过并完成生产装配后，这两个模块才允许进入服务二进制。
+历史依赖锁批曾要求 `agent-service` 构建元数据不含 Eino 或 DeepSeek Adapter。2026-07-16 起，获批的 `plan_creation_spec.v1preview1` 允许 Eino `v0.9.10` 进入开发预览二进制；DeepSeek Adapter 仍不得进入默认预览路径。该例外不代表完整生产 Runtime 评审通过。
 
 ## 6. 后续实现门禁
 
@@ -72,7 +72,7 @@ GOWORK=off /Users/figo/sdk/go1.26.3/bin/go build ./cmd/agent-service
 
 1. `aigc-contract-catalog.md`、`runner-session-lane-review-v1.md` 和 `a2ui-event-action-contract-v1.md` 仍须 Approved；
 2. `plan_creation_spec-design.md` 的产品、Business、Agent、财务、安全和测试决策仍须全部冻结；
-3. 在上述文档 Approved 前，Tool Catalog 必须继续返回 `unavailable / DESIGN_REVIEW_PENDING`；
+3. 在上述文档完整生产范围 Approved 前，Tool Catalog 必须继续返回 `unavailable / DESIGN_REVIEW_PENDING`；开发预览入口不改变生产 Catalog；
 4. 依赖存在不等于生产 Runtime、模型配置或 Graph 已可用。
 
 Kitex/Gin 与当前三个 Module 的编译、测试没有回归；Eino Runtime 实际装配后的 Telemetry Callback、Trace 上下文和中间件顺序仍属于 Runner 集成评审，不由本依赖批关闭。

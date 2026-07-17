@@ -10,6 +10,8 @@
 >
 > 实现门禁：评审结论为“通过”前禁止创建生产代码。
 
+> Development Preview 例外：独立 [`plan_storyboard.runtime.v2preview1`](../plan-storyboard-runtime-v2-design.md) 已于 2026-07-17 完成 M0～M4，只允许消费 CreationSpec Draft 并创建 Business-owned Storyboard Preview Draft；Runtime、BFF、Workspace Snapshot/SSE/Card、硬刷新、Agent 重启与 canonical Trial 已按该 Profile 验证。该结论不批准本文的 Active CreationSpec、MaterialAnalysis、修订/Diff、计费、双 Approval 或生产 Catalog。
+
 共同契约见 [`../../cross-module/aigc-contract-catalog.md`](../../cross-module/aigc-contract-catalog.md)。本设计明确：Storyboard 只规划结构、元素、依赖和 Slot，不生成最终 Prompt；正式 Prompt 统一由 `write_prompts` 负责。
 
 ## 1. 场景、目标与边界

@@ -24,6 +24,8 @@ type SnapshotLimits struct {
 	MaxMessages int
 	// MaxInputs 是完整 Snapshot 允许的最大 Input 数。
 	MaxInputs int
+	// MaxMediaPreviews 为零时保持 V4/固定三查询；media Profile 固定为 16。
+	MaxMediaPreviews int
 }
 
 // SnapshotRecord 是一次只读一致性事务返回的内部加密投影，不得直接暴露给 HTTP。
@@ -34,10 +36,117 @@ type SnapshotRecord struct {
 	Messages []MessageRecord
 	// Inputs 是稳定排序的输入集合。
 	Inputs []InputRecord
+	// CreationSpecPreview 是同一只读快照观察到的 nullable 最新 Draft Card 投影。
+	CreationSpecPreview *CreationSpecPreviewRecord
+	// LatestTurnOutput 是同一只读快照观察到的 nullable 最新通用 Turn 安全投影。
+	LatestTurnOutput *TurnOutputRecord
+	// AnalyzeMaterialsPreview 是同一只读快照观察到的 nullable 最新素材分析安全投影。
+	AnalyzeMaterialsPreview *AnalyzeMaterialsPreviewRecord
+	// PlanStoryboardPreview 是同一只读快照观察到的 nullable 最新 Storyboard terminal Event 投影。
+	PlanStoryboardPreview *PlanStoryboardPreviewRecord
+	// WritePromptsPreview 是同一只读快照观察到的 nullable 最新 Prompt terminal Event 投影。
+	WritePromptsPreview *WritePromptsPreviewRecord
+	// MediaPreviews 是最新最多十六条媒体 Card Event，按 Event Seq 升序。
+	MediaPreviews []MediaPreviewRecord
 	// EventHighWatermark 是与 Session/集合来自同一 Snapshot 的 Event 最大序号。
 	EventHighWatermark int64
 	// MinAvailableSeq 是同一 Snapshot 内在线可重放的最小 Event 序号。
 	MinAvailableSeq int64
+}
+
+// WritePromptsPreviewRecord 是 Prompt terminal EventLog 到 Workspace Service 的安全只读记录。
+// PayloadJSON 必须按 EventType exact-set 解码；accepted Event 不会进入本记录。
+type WritePromptsPreviewRecord struct {
+	SessionID        string
+	SourceInputID    string
+	SourceEnqueueSeq int64
+	TurnID           string
+	RunID            string
+	ToolCallID       string
+	EventType        string
+	PayloadJSON      []byte
+	AggregateVersion int64
+	CreatedAt        time.Time
+}
+
+// MediaPreviewRecord 是 accepted/completed/failed/runtime_failed Event 的最小 Snapshot 记录。
+type MediaPreviewRecord struct {
+	Seq              int64
+	EventID          string
+	SessionID        string
+	EventType        string
+	AggregateType    string
+	AggregateID      string
+	AggregateVersion int64
+	PayloadJSON      []byte
+	CreatedAt        time.Time
+}
+
+// PlanStoryboardPreviewRecord 是 terminal EventLog 到 Workspace Service 的安全只读记录。
+// PayloadJSON 必须按 EventType exact-set 解码；accepted Event 不会进入本记录。
+type PlanStoryboardPreviewRecord struct {
+	SessionID        string
+	SourceInputID    string
+	SourceEnqueueSeq int64
+	TurnID           string
+	RunID            string
+	ToolCallID       string
+	EventType        string
+	PayloadJSON      []byte
+	AggregateVersion int64
+	CreatedAt        time.Time
+}
+
+// AnalyzeMaterialsPreviewRecord 是 PostgreSQL append-only Projection 到 Workspace Service 的安全只读记录。
+// PayloadJSON 仍需依据 OutcomeKind 严格解码并与身份列逐值交叉验证。
+type AnalyzeMaterialsPreviewRecord struct {
+	SessionID         string
+	SourceInputID     string
+	SourceEnqueueSeq  int64
+	TurnID            string
+	RunID             string
+	ToolCallID        string
+	SchemaVersion     string
+	OutcomeKind       string
+	Status            string
+	ResultDigest      string
+	PayloadJSON       []byte
+	ProjectionVersion int64
+	CreatedAt         time.Time
+}
+
+// TurnOutputRecord 是 PostgreSQL 安全 Projection 到 Workspace Service 的只读记录。
+// PayloadJSON 仍需由 Service 依据 Schema exact-set 解码，并与旁路身份/状态列逐值交叉验证。
+type TurnOutputRecord struct {
+	SessionID         string
+	SourceInputID     string
+	SourceEnqueueSeq  int64
+	TurnID            string
+	RunID             string
+	SchemaVersion     string
+	Status            string
+	PayloadJSON       []byte
+	ProjectionVersion int64
+	UpdatedAt         time.Time
+}
+
+// CreationSpecPreviewRecord 是 PostgreSQL Projection 到 Workspace Service 的安全只读记录。
+type CreationSpecPreviewRecord struct {
+	SchemaVersion   string
+	CreationSpecID  string
+	ProjectID       string
+	Version         int64
+	Status          string
+	ContentDigest   string
+	Title           string
+	Goal            string
+	DeliverableType string
+	Audience        *string
+	Locale          string
+	PhasesJSON      []byte
+	ConstraintsJSON []byte
+	AcceptanceJSON  []byte
+	UpdatedAt       time.Time
 }
 
 // SessionRecord 是 Repository→Service 的会话只读记录。
@@ -118,6 +227,15 @@ type EventRecord struct {
 	AggregateVersion int64
 	// Payload 是 PostgreSQL JSONB 的原始字节，只能由强类型 Mapper 解码。
 	Payload []byte
+	// PlanTurnID/PlanRunID/PlanToolCallID 仅 Storyboard terminal Event 从冻结 Context 旁路带出。
+	// 其他 Event 保持空值；Service 必须对 Storyboard Card 逐值交叉绑定。
+	PlanTurnID     string
+	PlanRunID      string
+	PlanToolCallID string
+	// WriteTurnID/WriteRunID/WriteToolCallID 仅 Prompt terminal Event 从冻结 Context 旁路带出。
+	WriteTurnID     string
+	WriteRunID      string
+	WriteToolCallID string
 	// CreatedAt 是事件冻结 UTC 时间。
 	CreatedAt time.Time
 }

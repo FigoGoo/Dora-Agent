@@ -24,6 +24,10 @@ type projectHTTPService struct {
 	bootstrapResult project.BootstrapResult
 	bootstrapErr    error
 	bootstrapCalls  int
+	listQuery       project.ProjectListQuery
+	listResult      project.ProjectListResult
+	listErr         error
+	listCalls       int
 }
 
 func (service *projectHTTPService) QuickCreate(_ context.Context, command project.QuickCreateCommand) (project.QuickCreateResult, error) {
@@ -33,6 +37,11 @@ func (service *projectHTTPService) QuickCreate(_ context.Context, command projec
 func (service *projectHTTPService) Bootstrap(_ context.Context, _, _ string) (project.BootstrapResult, error) {
 	service.bootstrapCalls++
 	return service.bootstrapResult, service.bootstrapErr
+}
+func (service *projectHTTPService) ListOwned(_ context.Context, query project.ProjectListQuery) (project.ProjectListResult, error) {
+	service.listCalls++
+	service.listQuery = query
+	return service.listResult, service.listErr
 }
 
 type projectRequestIDs struct{ value string }
@@ -179,6 +188,81 @@ func TestProjectHandlerBootstrapAndStableErrors(t *testing.T) {
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/bootstrap", nil))
 	if recorder.Code != http.StatusServiceUnavailable || strings.Contains(recorder.Body.String(), "secret") || strings.Contains(recorder.Body.String(), "SELECT") {
 		t.Fatalf("bootstrap error leaked details: %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestProjectHandlerListProjectsUsesTrustedOwnerAndStableKeysetContract(t *testing.T) {
+	projectID, _ := uuid.NewV7()
+	secondProjectID, _ := uuid.NewV7()
+	updatedAt := time.Date(2026, 7, 17, 9, 8, 7, 123000000, time.UTC)
+	secondUpdatedAt := updatedAt.Add(-time.Minute)
+	service := &projectHTTPService{listResult: project.ProjectListResult{
+		Items: []project.ProjectListItem{
+			{
+				ProjectID: projectID.String(), Title: "真实项目", LifecycleStatus: project.LifecycleStatusActive,
+				RecentRunStatus: project.RecentRunStatusRunning, InitialPromptStatus: project.InitialPromptStatusAccepted,
+				UpdatedAt: updatedAt,
+			},
+			{
+				ProjectID: secondProjectID.String(), Title: "归档项目", LifecycleStatus: project.LifecycleStatusArchived,
+				RecentRunStatus: project.RecentRunStatusSucceeded, InitialPromptStatus: project.InitialPromptStatusAbsent,
+				UpdatedAt: secondUpdatedAt,
+			},
+		},
+		NextAfter: &project.ProjectListCursor{UpdatedAt: secondUpdatedAt, ProjectID: secondProjectID.String()},
+	}}
+	router, _, trustedUserID := newProjectHandlerRouter(t, service)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/projects?limit=2", nil))
+
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected project list 200/no-store, got %d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+	if service.listCalls != 1 || service.listQuery.OwnerUserID != trustedUserID || service.listQuery.Limit != 2 || service.listQuery.After != nil {
+		t.Fatalf("project list did not freeze trusted owner/query: calls=%d query=%+v", service.listCalls, service.listQuery)
+	}
+	var response ProjectListResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode project list response: %v", err)
+	}
+	if len(response.Items) != 2 || response.Items[0].ProjectID != projectID.String() ||
+		response.Items[0].WorkspaceRef != "/projects/"+projectID.String()+"/workspace" ||
+		response.Items[0].UpdatedAt != updatedAt.Format(time.RFC3339Nano) || response.NextAfter == nil {
+		t.Fatalf("unexpected project list response: %+v", response)
+	}
+	decodedCursor, err := decodeProjectListCursor(*response.NextAfter)
+	if err != nil || decodedCursor.ProjectID != secondProjectID.String() || !decodedCursor.UpdatedAt.Equal(secondUpdatedAt) {
+		t.Fatalf("next_after did not round-trip: cursor=%+v err=%v", decodedCursor, err)
+	}
+}
+
+func TestProjectHandlerListProjectsDecodesAfterAndRejectsAmbiguousQueries(t *testing.T) {
+	projectID, _ := uuid.NewV7()
+	afterTime := time.Date(2026, 7, 17, 8, 0, 0, 456000000, time.UTC)
+	after, err := encodeProjectListCursor(project.ProjectListCursor{UpdatedAt: afterTime, ProjectID: projectID.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &projectHTTPService{listResult: project.ProjectListResult{Items: []project.ProjectListItem{}}}
+	router, _, _ := newProjectHandlerRouter(t, service)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/projects?limit=25&after="+after, nil))
+	if recorder.Code != http.StatusOK || service.listCalls != 1 || service.listQuery.After == nil ||
+		service.listQuery.After.ProjectID != projectID.String() || !service.listQuery.After.UpdatedAt.Equal(afterTime) {
+		t.Fatalf("valid after cursor not forwarded: status=%d calls=%d query=%+v body=%s", recorder.Code, service.listCalls, service.listQuery, recorder.Body.String())
+	}
+
+	for _, rawQuery := range []string{
+		"limit=0", "limit=101", "limit=abc", "limit=1&limit=2", "after=", "after=not-base64", "owner_user_id=forged",
+	} {
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/projects?"+rawQuery, nil))
+		if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "PROJECT_LIST_QUERY_INVALID") {
+			t.Fatalf("query %q: expected stable 400, got %d body=%s", rawQuery, recorder.Code, recorder.Body.String())
+		}
+	}
+	if service.listCalls != 1 {
+		t.Fatalf("invalid project list query reached service: calls=%d", service.listCalls)
 	}
 }
 

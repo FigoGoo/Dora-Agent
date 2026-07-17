@@ -7,6 +7,10 @@
 > 适用范围：`enqueue_input_v1`、全局 Command Receipt、W0 legacy Input 升级、Turn/Run/Lease、严格 HOL 与真实 PostgreSQL 证据
 >
 > 实现门禁：本文仍是候选物理设计。第 10 节 P0 和跨角色评审关闭前，不得创建生产 Migration/Repository，不得启用 Processor，也不得宣称 `SMK-017/020` 已通过。
+>
+> 2026-07-16 Preview 例外：上述门禁继续约束完整生产 Lane、legacy 升级和通用 Processor；[`plan_creation_spec.v1preview1`](./graphtool/plan_creation_spec-design.md#0-v1-开发预览设计冻结2026-07-16) 已批准只实现现有 Session 表上的最小 HOL/Lease/Fence 与专用 Preview Run/Receipt/Projection，不批准本文的通用 Turn Context、Marker、Retention 或 `SMK-017/020` 结论。
+>
+> 2026-07-17 Preview 例外：[`user_message.runtime.v2preview1`](./user-message-runtime-v2-design.md) 方案 A 只允许以前向 Migration 新增 `session_user_message_*` Preview 对象、eligible-only Upgrade Ledger 与统一 Lane 最小物理子集；不得创建本文候选的生产 `session_turn/session_run/session_turn_context/session_event_marker`，不得把本例外解释为完整 legacy upgrade 或 `SMK-017/020` 已 Approved。
 
 ## 1. 目的与当前事实
 
@@ -22,10 +26,10 @@
 - `agent.session_command_receipt(command_id)` 已是 Session Command 域唯一全局 Header，Ensure V1/V2 共用同一主键和 advisory lock；
 - Receipt 的 `skill_snapshot_digest/skill_count`、Message/Input 成对 CHECK 和 GORM 完整性校验仍是 Ensure 专用；
 - `session_sequence_counter`、`session_event_counter`、`session_runtime_lease` 已存在；后者还没有 Claim/Heartbeat/Takeover Repository；
-- `session_input` 只允许 `user_message`，生产 Repository 只创建 `pending/attempts=0/无 owner/无 lease/fence=0`；Schema 虽允许其他状态，但当前没有合法生产 Writer；
+- Ensure Repository 创建 `user_message/pending/attempts=0/无 owner/无 lease/fence=0`；Migration 006/007 已前向加入 `creation_spec_preview`、`recovery_pending` 及其专用合法 Writer/Run/Receipt/Projection，但没有 `user_message` 通用 Processor；
 - `session_input` 自带 `lease_until`，若继续读取会与 `session_runtime_lease` 形成双 TTL 真源；
-- 已有 `session.input.accepted` EventLog，但它受 `min_available_seq` 在线保留水位约束，升级不能直接把它当不可裁剪 Marker；仓库没有独立 Marker、Turn 或 Run 表；
-- 当前 Claim partial index 只能发现 `pending/retry_wait`，不能证明每个 Session 的最早非终态 Head。
+- 已有 `session.input.accepted` EventLog，但它受 `min_available_seq` 在线保留水位约束，升级不能直接把它当不可裁剪 Marker；仓库没有独立 Marker 或通用 Turn/Run 表，只有 Preview 专用 Run；
+- 当前 Preview Claim/index 只服务其专用 Source/状态，不能证明统一 Scanner 在 Source 分派前选中每个 Session 的最早非终态 Head。
 
 本批推荐物理方案，但不新增 `.sql`、GORM Model 或 Repository。
 
@@ -401,4 +405,4 @@ Repository 测试只证明持久化顺序和事务原子性，不证明 Adapter 
 9. durable pending/strict HOL Scanner 的有界发现结构、Query 计划和 Claim 二次校验；
 10. 第 8 节全部 PG contract/race/crash/unknown-outcome 证据。
 
-关闭这些 P0 前，下一步只能继续设计和测试基础设施，不得直接落生产 Runtime。
+关闭这些 P0 前，完整生产 Lane 的下一步只能继续设计和测试基础设施，不得把 V1 Preview 专用实现扩张为通用生产 Runtime。

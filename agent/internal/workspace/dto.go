@@ -1,10 +1,25 @@
 package workspace
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/FigoGoo/Dora-Agent/agent/internal/event"
+	"github.com/FigoGoo/Dora-Agent/agent/internal/graphtool/plancreationspec"
+)
 
 const (
 	// SnapshotSchemaVersionV1 是 Agent Workspace Snapshot 的冻结版本。
 	SnapshotSchemaVersionV1 = "session.workspace.v1"
+	// SnapshotSchemaVersionV2 在 V1 基础上增加显式 nullable latest_turn_output。
+	SnapshotSchemaVersionV2 = "session.workspace.v2"
+	// SnapshotSchemaVersionV3 在 V2 exact-set 基础上仅增加显式 nullable plan_storyboard_preview。
+	SnapshotSchemaVersionV3 = "session.workspace.v3"
+	// SnapshotSchemaVersionV4 在 V3 exact-set 基础上仅增加显式 nullable write_prompts_preview。
+	SnapshotSchemaVersionV4 = "session.workspace.v4"
+	// SnapshotSchemaVersionV5 在 V4 exact-set 基础上增加 event-ordered media_previews。
+	SnapshotSchemaVersionV5 = "session.workspace.v5"
 	// EventEnvelopeSchemaVersionV1 是前端持久事件 Envelope 的冻结版本。
 	EventEnvelopeSchemaVersionV1 = "workspace.event.v1"
 	// StreamControlSchemaVersionV1 是 Ready/Reset 控制帧的冻结版本。
@@ -13,7 +28,7 @@ const (
 
 // Snapshot 是授权后返回给同源 BFF 的完整 Workspace HTTP DTO。
 type Snapshot struct {
-	// SchemaVersion 固定为 session.workspace.v1。
+	// SchemaVersion 新响应固定为 session.workspace.v4；旧版本 Marshal 仍保持原 exact-set。
 	SchemaVersion string `json:"schema_version"`
 	// RequestID 是 Business 身份断言携带的内部请求 UUIDv7。
 	RequestID string `json:"request_id"`
@@ -23,10 +38,127 @@ type Snapshot struct {
 	Messages []MessageDTO `json:"messages"`
 	// Inputs 是不含 Lease/Fence/Attempts/Source 的有序输入数组，空集合编码为 []。
 	Inputs []InputDTO `json:"inputs"`
+	// CreationSpecPreview 始终存在于 V1 Snapshot；未生成时编码为显式 null。
+	CreationSpecPreview *plancreationspec.Card `json:"creation_spec_preview"`
+	// LatestTurnOutput 是 Agent-owned 最新通用 Turn 安全 Card；未执行时编码为显式 null。
+	LatestTurnOutput *TurnOutputDTO `json:"latest_turn_output"`
+	// AnalyzeMaterialsPreview 是最新独立素材分析 Runtime 的安全 Card；未执行时编码为显式 null。
+	AnalyzeMaterialsPreview *event.AnalyzeMaterialsPreviewCardPayload `json:"analyze_materials_preview"`
+	// PlanStoryboardPreview 是最新独立 Storyboard Runtime 的 terminal 安全 Card；未执行时编码为显式 null。
+	PlanStoryboardPreview *event.PlanStoryboardPreviewCardPayload `json:"plan_storyboard_preview"`
+	// WritePromptsPreview 是最新独立 Prompt Runtime 的 terminal 安全 Card；未执行时编码为显式 null。
+	WritePromptsPreview *event.WritePromptsPreviewCardPayload `json:"write_prompts_preview"`
+	// MediaPreviews 是最多十六条、按 Event Seq 升序的媒体 accepted/terminal Card。
+	MediaPreviews []event.MediaPreviewCardPayload `json:"media_previews"`
 	// EventHighWatermark 是与 Snapshot 同一事务观察到的 Event 最大 Seq。
 	EventHighWatermark int64 `json:"event_high_watermark"`
 	// MinAvailableSeq 是当前在线可重放的最小 Event Seq。
 	MinAvailableSeq int64 `json:"min_available_seq"`
+}
+
+// MarshalJSON 依据 schema_version 输出冻结 exact-set，禁止给 v1/v2 静默追加未来字段。
+func (snapshot Snapshot) MarshalJSON() ([]byte, error) {
+	type v1 struct {
+		SchemaVersion       string                 `json:"schema_version"`
+		RequestID           string                 `json:"request_id"`
+		Session             SessionDTO             `json:"session"`
+		Messages            []MessageDTO           `json:"messages"`
+		Inputs              []InputDTO             `json:"inputs"`
+		CreationSpecPreview *plancreationspec.Card `json:"creation_spec_preview"`
+		EventHighWatermark  int64                  `json:"event_high_watermark"`
+		MinAvailableSeq     int64                  `json:"min_available_seq"`
+	}
+	base := v1{
+		SchemaVersion: snapshot.SchemaVersion, RequestID: snapshot.RequestID, Session: snapshot.Session,
+		Messages: snapshot.Messages, Inputs: snapshot.Inputs, CreationSpecPreview: snapshot.CreationSpecPreview,
+		EventHighWatermark: snapshot.EventHighWatermark, MinAvailableSeq: snapshot.MinAvailableSeq,
+	}
+	switch snapshot.SchemaVersion {
+	case SnapshotSchemaVersionV1:
+		return json.Marshal(base)
+	case SnapshotSchemaVersionV2:
+		return json.Marshal(struct {
+			v1
+			LatestTurnOutput        *TurnOutputDTO                            `json:"latest_turn_output"`
+			AnalyzeMaterialsPreview *event.AnalyzeMaterialsPreviewCardPayload `json:"analyze_materials_preview"`
+		}{base, snapshot.LatestTurnOutput, snapshot.AnalyzeMaterialsPreview})
+	case SnapshotSchemaVersionV3:
+		return json.Marshal(struct {
+			v1
+			LatestTurnOutput        *TurnOutputDTO                            `json:"latest_turn_output"`
+			AnalyzeMaterialsPreview *event.AnalyzeMaterialsPreviewCardPayload `json:"analyze_materials_preview"`
+			PlanStoryboardPreview   *event.PlanStoryboardPreviewCardPayload   `json:"plan_storyboard_preview"`
+		}{base, snapshot.LatestTurnOutput, snapshot.AnalyzeMaterialsPreview, snapshot.PlanStoryboardPreview})
+	case SnapshotSchemaVersionV4:
+		return json.Marshal(struct {
+			v1
+			LatestTurnOutput        *TurnOutputDTO                            `json:"latest_turn_output"`
+			AnalyzeMaterialsPreview *event.AnalyzeMaterialsPreviewCardPayload `json:"analyze_materials_preview"`
+			PlanStoryboardPreview   *event.PlanStoryboardPreviewCardPayload   `json:"plan_storyboard_preview"`
+			WritePromptsPreview     *event.WritePromptsPreviewCardPayload     `json:"write_prompts_preview"`
+		}{base, snapshot.LatestTurnOutput, snapshot.AnalyzeMaterialsPreview, snapshot.PlanStoryboardPreview, snapshot.WritePromptsPreview})
+	case SnapshotSchemaVersionV5:
+		return json.Marshal(struct {
+			v1
+			LatestTurnOutput        *TurnOutputDTO                            `json:"latest_turn_output"`
+			AnalyzeMaterialsPreview *event.AnalyzeMaterialsPreviewCardPayload `json:"analyze_materials_preview"`
+			PlanStoryboardPreview   *event.PlanStoryboardPreviewCardPayload   `json:"plan_storyboard_preview"`
+			WritePromptsPreview     *event.WritePromptsPreviewCardPayload     `json:"write_prompts_preview"`
+			MediaPreviews           []event.MediaPreviewCardPayload           `json:"media_previews"`
+		}{base, snapshot.LatestTurnOutput, snapshot.AnalyzeMaterialsPreview, snapshot.PlanStoryboardPreview,
+			snapshot.WritePromptsPreview, snapshot.MediaPreviews})
+	default:
+		return nil, fmt.Errorf("marshal Workspace snapshot: unsupported schema %q", snapshot.SchemaVersion)
+	}
+}
+
+// TurnOutputDTO 是 Direct Response 与 Failure Card 的内存联合；MarshalJSON 按 Schema 输出 exact-set。
+type TurnOutputDTO struct {
+	SchemaVersion    string
+	TurnID           string
+	RunID            string
+	InputID          string
+	Status           string
+	MessageCode      string
+	Summary          string
+	AvailableActions []string
+	ErrorCode        string
+	Retryable        bool
+}
+
+// MarshalJSON 禁止通过 Go 零值向不同 Card 变体泄漏不属于该 Schema 的字段。
+func (output TurnOutputDTO) MarshalJSON() ([]byte, error) {
+	if output.SchemaVersion == "session.turn.direct_response.card.v1" {
+		return json.Marshal(struct {
+			SchemaVersion    string   `json:"schema_version"`
+			TurnID           string   `json:"turn_id"`
+			RunID            string   `json:"run_id"`
+			InputID          string   `json:"input_id"`
+			Status           string   `json:"status"`
+			MessageCode      string   `json:"message_code"`
+			Summary          string   `json:"summary"`
+			AvailableActions []string `json:"available_actions"`
+		}{
+			output.SchemaVersion, output.TurnID, output.RunID, output.InputID, output.Status,
+			output.MessageCode, output.Summary, output.AvailableActions,
+		})
+	}
+	if output.SchemaVersion == "session.turn.failure.card.v1" {
+		return json.Marshal(struct {
+			SchemaVersion string `json:"schema_version"`
+			TurnID        string `json:"turn_id"`
+			RunID         string `json:"run_id"`
+			InputID       string `json:"input_id"`
+			Status        string `json:"status"`
+			ErrorCode     string `json:"error_code"`
+			Retryable     bool   `json:"retryable"`
+			Summary       string `json:"summary"`
+		}{
+			output.SchemaVersion, output.TurnID, output.RunID, output.InputID, output.Status,
+			output.ErrorCode, output.Retryable, output.Summary,
+		})
+	}
+	return nil, fmt.Errorf("marshal Workspace turn output: unsupported schema %q", output.SchemaVersion)
 }
 
 // SessionDTO 是 Workspace 对外安全会话投影。
@@ -63,8 +195,8 @@ type MessageDTO struct {
 type InputDTO struct {
 	// ID 是 Input UUIDv7。
 	ID string `json:"id"`
-	// MessageID 是关联 Message UUIDv7。
-	MessageID string `json:"message_id"`
+	// MessageID 是关联 Message UUIDv7；独立 analyze_materials_preview Input 必须编码为显式 null。
+	MessageID *string `json:"message_id"`
 	// SourceType 是可信来源类型。
 	SourceType string `json:"source_type"`
 	// Status 是当前持久化处理状态。

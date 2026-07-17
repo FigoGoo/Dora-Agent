@@ -138,6 +138,127 @@ func TestVerifierBindsToolCatalogToExactScopeTargetAndMethod(t *testing.T) {
 	}
 }
 
+// TestVerifierBindsCreationSpecPreviewToExactPOSTScopeAndInternalTarget 验证写断言不能降级为 GET、外部路径或其他 Scope。
+func TestVerifierBindsCreationSpecPreviewToExactPOSTScopeAndInternalTarget(t *testing.T) {
+	const sessionID = "019f0000-0000-7000-8000-000000000005"
+	const target = "/internal/v1/workspaces/sessions/" + sessionID + "/creation-spec-previews"
+	canonical := strings.Replace(fixedCanonical,
+		"/api/v1/agent/sessions/"+sessionID+"/events?after_seq=42", target, 1)
+	canonical = strings.Replace(canonical, "\nGET\n", "\nPOST\n", 1)
+	canonical = strings.Replace(canonical, ScopeEventsRead, ScopeCreationSpecPreviewWrite, 1)
+	headers := fixedHeaders(canonical, "test-2026-07-a", signCanonical(fixedKey(), canonical))
+	request := Request{
+		Headers: headers, Method: http.MethodPost, CanonicalTarget: target,
+		Scope: ScopeCreationSpecPreviewWrite, AgentSessionID: sessionID,
+	}
+	claims, err := newFixedVerifier(t, &memoryReplayStore{seen: make(map[string]struct{})}).Verify(context.Background(), request)
+	if err != nil || claims.Scope != ScopeCreationSpecPreviewWrite || claims.AgentSessionID != sessionID {
+		t.Fatalf("CreationSpec Preview POST assertion rejected: claims=%+v err=%v", claims, err)
+	}
+
+	for _, mutate := range []func(*Request){
+		func(candidate *Request) { candidate.Method = http.MethodGet },
+		func(candidate *Request) { candidate.Scope = ScopeEventsRead },
+		func(candidate *Request) {
+			candidate.CanonicalTarget = "/api/v1/agent/sessions/" + sessionID + "/creation-spec-previews"
+		},
+		func(candidate *Request) { candidate.CanonicalTarget += "?preview=1" },
+		func(candidate *Request) { candidate.AgentSessionID = "019f0000-0000-7000-8000-000000000006" },
+	} {
+		candidate := request
+		candidate.Headers = headers.Clone()
+		mutate(&candidate)
+		if _, err := newFixedVerifier(t, &memoryReplayStore{seen: make(map[string]struct{})}).Verify(context.Background(), candidate); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("cross-bound CreationSpec Preview assertion accepted: request=%+v err=%v", candidate, err)
+		}
+	}
+}
+
+// TestVerifierBindsAnalyzeMaterialsPreviewToExactPOSTScopeAndInternalTarget 验证素材分析写断言不能跨 Method、路径或 Scope 重放。
+func TestVerifierBindsAnalyzeMaterialsPreviewToExactPOSTScopeAndInternalTarget(t *testing.T) {
+	const sessionID = "019f0000-0000-7000-8000-000000000005"
+	const target = "/internal/v1/workspaces/sessions/" + sessionID + "/analyze-materials-previews"
+	canonical := strings.Replace(fixedCanonical,
+		"/api/v1/agent/sessions/"+sessionID+"/events?after_seq=42", target, 1)
+	canonical = strings.Replace(canonical, "\nGET\n", "\nPOST\n", 1)
+	canonical = strings.Replace(canonical, ScopeEventsRead, ScopeAnalyzeMaterialsPreviewWrite, 1)
+	headers := fixedHeaders(canonical, "test-2026-07-a", signCanonical(fixedKey(), canonical))
+	request := Request{
+		Headers: headers, Method: http.MethodPost, CanonicalTarget: target,
+		Scope: ScopeAnalyzeMaterialsPreviewWrite, AgentSessionID: sessionID,
+	}
+	claims, err := newFixedVerifier(t, &memoryReplayStore{seen: make(map[string]struct{})}).Verify(context.Background(), request)
+	if err != nil || claims.Scope != ScopeAnalyzeMaterialsPreviewWrite || claims.AgentSessionID != sessionID {
+		t.Fatalf("Analyze Materials Preview POST assertion rejected: claims=%+v err=%v", claims, err)
+	}
+
+	for _, mutate := range []func(*Request){
+		func(candidate *Request) { candidate.Method = http.MethodGet },
+		func(candidate *Request) { candidate.Scope = ScopeCreationSpecPreviewWrite },
+		func(candidate *Request) {
+			candidate.CanonicalTarget = "/api/v1/agent/sessions/" + sessionID + "/analyze-materials-previews"
+		},
+		func(candidate *Request) { candidate.CanonicalTarget += "?preview=1" },
+		func(candidate *Request) { candidate.AgentSessionID = "019f0000-0000-7000-8000-000000000006" },
+	} {
+		candidate := request
+		candidate.Headers = headers.Clone()
+		mutate(&candidate)
+		if _, err := newFixedVerifier(t, &memoryReplayStore{seen: make(map[string]struct{})}).Verify(context.Background(), candidate); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("cross-bound Analyze Materials Preview assertion accepted: request=%+v err=%v", candidate, err)
+		}
+	}
+}
+
+// TestVerifierBindsPlanStoryboardPreviewToExactPOSTScopeAndInternalTarget 验证 Storyboard 写断言不能跨 Method、路径或 Scope 重放。
+func TestVerifierBindsPlanStoryboardPreviewToExactPOSTScopeAndInternalTarget(t *testing.T) {
+	const sessionID = "019f0000-0000-7000-8000-000000000005"
+	const target = "/internal/v1/workspaces/sessions/" + sessionID + "/plan-storyboard-previews"
+	canonical := strings.Replace(fixedCanonical,
+		"/api/v1/agent/sessions/"+sessionID+"/events?after_seq=42", target, 1)
+	canonical = strings.Replace(canonical, "\nGET\n", "\nPOST\n", 1)
+	canonical = strings.Replace(canonical, ScopeEventsRead, ScopePlanStoryboardPreviewWrite, 1)
+	headers := fixedHeaders(canonical, "test-2026-07-a", signCanonical(fixedKey(), canonical))
+	request := Request{
+		Headers: headers, Method: http.MethodPost, CanonicalTarget: target,
+		Scope: ScopePlanStoryboardPreviewWrite, AgentSessionID: sessionID,
+	}
+	claims, err := newFixedVerifier(t, &memoryReplayStore{seen: make(map[string]struct{})}).Verify(context.Background(), request)
+	if err != nil || claims.Scope != ScopePlanStoryboardPreviewWrite || claims.AgentSessionID != sessionID {
+		t.Fatalf("Plan Storyboard Preview POST assertion rejected: claims=%+v err=%v", claims, err)
+	}
+
+	for _, mutate := range []func(*Request){
+		func(candidate *Request) { candidate.Method = http.MethodGet },
+		func(candidate *Request) { candidate.Scope = ScopeCreationSpecPreviewWrite },
+		func(candidate *Request) {
+			candidate.CanonicalTarget = "/api/v1/agent/sessions/" + sessionID + "/plan-storyboard-previews"
+		},
+		func(candidate *Request) { candidate.CanonicalTarget += "?preview=1" },
+		func(candidate *Request) { candidate.AgentSessionID = "019f0000-0000-7000-8000-000000000006" },
+	} {
+		candidate := request
+		candidate.Headers = headers.Clone()
+		mutate(&candidate)
+		if _, err := newFixedVerifier(t, &memoryReplayStore{seen: make(map[string]struct{})}).Verify(context.Background(), candidate); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("cross-bound Plan Storyboard Preview assertion accepted: request=%+v err=%v", candidate, err)
+		}
+	}
+}
+
+// TestVerifierRejectsSignedButNonAllowlistedBinding 证明即使签名和 Request 自洽，也不能绕过 Scope 的路径白名单。
+func TestVerifierRejectsSignedButNonAllowlistedBinding(t *testing.T) {
+	const target = "/api/v1/agent/sessions/019f0000-0000-7000-8000-000000000005/arbitrary"
+	canonical := strings.Replace(fixedCanonical,
+		"/api/v1/agent/sessions/019f0000-0000-7000-8000-000000000005/events?after_seq=42", target, 1)
+	headers := fixedHeaders(canonical, "test-2026-07-a", signCanonical(fixedKey(), canonical))
+	request := fixedRequest(headers)
+	request.CanonicalTarget = target
+	if _, err := newFixedVerifier(t, &memoryReplayStore{seen: make(map[string]struct{})}).Verify(context.Background(), request); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("非白名单但自洽签名被接受: err=%v", err)
+	}
+}
+
 // TestVerifierConcurrentNonceOnlyOneSucceeds 验证一百个并发同 Nonce 中只有一次能通过原子重放保护。
 func TestVerifierConcurrentNonceOnlyOneSucceeds(t *testing.T) {
 	store := &memoryReplayStore{seen: make(map[string]struct{})}

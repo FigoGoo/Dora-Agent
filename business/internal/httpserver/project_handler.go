@@ -3,12 +3,15 @@ package httpserver
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 	"unicode/utf8"
 
@@ -22,12 +25,21 @@ import (
 // projectEmergencyRequestID 是 Request ID 生成器失效时的保留 UUIDv7，只用于保持错误 Envelope 契约。
 const projectEmergencyRequestID = "019f0000-0000-7000-8000-000000000098"
 
+const (
+	// projectListDefaultLimit 是未传 limit 时的有界项目列表页大小。
+	projectListDefaultLimit = 20
+	// projectListMaxCursorBytes 限制不透明 after 游标的编码长度，避免无界解码。
+	projectListMaxCursorBytes = 512
+)
+
 // ProjectService 定义 W0 Project HTTP Handler 消费的最小 QuickCreate 与 Bootstrap 应用边界。
 type ProjectService interface {
 	// QuickCreate 可靠接受一次带稳定幂等键的 Project 创建命令。
 	QuickCreate(ctx context.Context, command project.QuickCreateCommand) (project.QuickCreateResult, error)
 	// Bootstrap 读取可信用户拥有的 Project 与 Agent Session 初始化状态。
 	Bootstrap(ctx context.Context, projectID string, ownerUserID string) (project.BootstrapResult, error)
+	// ListOwned 读取可信用户的有界 Project Keyset 列表。
+	ListOwned(ctx context.Context, query project.ProjectListQuery) (project.ProjectListResult, error)
 }
 
 // ProjectSkillBindingV2Service 是 HTTP Handler 消费的显式 QuickCreate v2 最小应用边界。
@@ -89,6 +101,42 @@ type ProjectBootstrapResponse struct {
 	RequestID string `json:"request_id"`
 }
 
+// ProjectListItemResponse 是 GET /api/v1/projects 单个项目的安全 HTTP DTO。
+type ProjectListItemResponse struct {
+	// ProjectID 是当前用户拥有的 Project UUIDv7。
+	ProjectID string `json:"project_id"`
+	// Title 是 Project 安全展示标题。
+	Title string `json:"title"`
+	// LifecycleStatus 是 active 或 archived 生命周期代码。
+	LifecycleStatus string `json:"lifecycle_status"`
+	// RecentRunStatus 是最近运行摘要稳定代码。
+	RecentRunStatus string `json:"recent_run_status"`
+	// InitialPromptStatus 是首提示词初始化摘要稳定代码。
+	InitialPromptStatus string `json:"initial_prompt_status"`
+	// UpdatedAt 是 Project 最近更新的 UTC RFC3339Nano 时间。
+	UpdatedAt string `json:"updated_at"`
+	// WorkspaceRef 是不承载授权的前端正式工作台路由引用。
+	WorkspaceRef string `json:"workspace_ref"`
+}
+
+// ProjectListResponse 是 GET /api/v1/projects 的有界 Keyset 列表响应。
+type ProjectListResponse struct {
+	// Items 是按 updated_at DESC、id DESC 排序的项目列表。
+	Items []ProjectListItemResponse `json:"items"`
+	// NextAfter 是不透明的下一页 after 游标；末页为 null。
+	NextAfter *string `json:"next_after"`
+	// RequestID 是本次 HTTP 请求的 UUIDv7。
+	RequestID string `json:"request_id"`
+}
+
+// projectListCursorDTO 是 after 游标 Base64URL 内部的冻结 JSON 结构。
+type projectListCursorDTO struct {
+	// UpdatedAt 是上一页最后一条记录的 UTC RFC3339Nano 时间。
+	UpdatedAt string `json:"updated_at"`
+	// ProjectID 是上一页最后一条记录的 Project UUIDv7。
+	ProjectID string `json:"project_id"`
+}
+
 // ProjectHandler 负责 W0 QuickCreate/Bootstrap 的严格 DTO、可信 Principal、幂等 Header 和错误映射。
 type ProjectHandler struct {
 	service             ProjectService
@@ -120,6 +168,7 @@ func newProjectHandler(service ProjectService, serviceV2 ProjectSkillBindingV2Se
 // Register 使用读/写两种认证中间件注册 Frozen v1 路由；写中间件必须同时校验 Session 与 CSRF。
 func (h *ProjectHandler) Register(router gin.IRoutes, requireRead gin.HandlerFunc, requireWrite gin.HandlerFunc) {
 	router.POST("/api/v1/projects:quick-create", requireWrite, h.quickCreate)
+	router.GET("/api/v1/projects", requireRead, h.listProjects)
 	router.GET("/api/v1/projects/:project_id/bootstrap", requireRead, h.bootstrap)
 }
 
@@ -299,6 +348,124 @@ func parseJSONHexCodeUnit(raw []byte, start int) (uint16, bool) {
 	return value, true
 }
 
+// listProjects 从可信 Principal 冻结 owner，严格解析 limit/after，并返回不暴露所有者或内部任务的项目读模型。
+func (h *ProjectHandler) listProjects(c *gin.Context) {
+	requestID, ok := h.newProjectRequestID(c)
+	if !ok {
+		return
+	}
+	principal, ok := auth.PrincipalFromContext(c.Request.Context())
+	if !ok {
+		h.writeProjectError(c, http.StatusUnauthorized, "UNAUTHENTICATED", "未认证或会话已失效", requestID, false)
+		return
+	}
+	query, err := decodeProjectListQuery(c, principal.ID)
+	if err != nil {
+		h.writeMappedProjectError(c, err, requestID)
+		return
+	}
+	result, err := h.service.ListOwned(c.Request.Context(), query)
+	if err != nil {
+		h.writeMappedProjectError(c, err, requestID)
+		return
+	}
+
+	items := make([]ProjectListItemResponse, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, ProjectListItemResponse{
+			ProjectID: item.ProjectID, Title: item.Title,
+			LifecycleStatus: string(item.LifecycleStatus), RecentRunStatus: string(item.RecentRunStatus),
+			InitialPromptStatus: string(item.InitialPromptStatus), UpdatedAt: item.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			WorkspaceRef: "/projects/" + item.ProjectID + "/workspace",
+		})
+	}
+	var nextAfter *string
+	if result.NextAfter != nil {
+		encoded, encodeErr := encodeProjectListCursor(*result.NextAfter)
+		if encodeErr != nil {
+			h.writeProjectError(c, http.StatusServiceUnavailable, "PROJECT_UNAVAILABLE", "项目服务暂时不可用", requestID, true)
+			return
+		}
+		nextAfter = &encoded
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, ProjectListResponse{Items: items, NextAfter: nextAfter, RequestID: requestID})
+}
+
+// decodeProjectListQuery 只接受单值 limit/after，owner 始终来自可信 Principal。
+func decodeProjectListQuery(c *gin.Context, ownerUserID string) (project.ProjectListQuery, error) {
+	values, err := url.ParseQuery(c.Request.URL.RawQuery)
+	if err != nil {
+		return project.ProjectListQuery{}, project.ErrInvalidProjectListQuery
+	}
+	for key, entries := range values {
+		if (key != "limit" && key != "after") || len(entries) != 1 {
+			return project.ProjectListQuery{}, project.ErrInvalidProjectListQuery
+		}
+	}
+
+	limit := projectListDefaultLimit
+	if entries, exists := values["limit"]; exists {
+		parsed, err := strconv.Atoi(entries[0])
+		if err != nil {
+			return project.ProjectListQuery{}, project.ErrInvalidProjectListQuery
+		}
+		limit = parsed
+	}
+	query := project.ProjectListQuery{OwnerUserID: ownerUserID, Limit: limit}
+	if entries, exists := values["after"]; exists {
+		cursor, err := decodeProjectListCursor(entries[0])
+		if err != nil {
+			return project.ProjectListQuery{}, err
+		}
+		query.After = &cursor
+	}
+	if err := query.Validate(); err != nil {
+		return project.ProjectListQuery{}, err
+	}
+	return query, nil
+}
+
+// decodeProjectListCursor 严格解码有界 Base64URL JSON 游标，拒绝未知字段、trailing JSON 和非规范 UTC 时间。
+func decodeProjectListCursor(value string) (project.ProjectListCursor, error) {
+	if value == "" || len(value) > projectListMaxCursorBytes {
+		return project.ProjectListCursor{}, project.ErrInvalidProjectListQuery
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(raw) == 0 || len(raw) > projectListMaxCursorBytes {
+		return project.ProjectListCursor{}, project.ErrInvalidProjectListQuery
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var payload projectListCursorDTO
+	if err := decoder.Decode(&payload); err != nil || ensureJSONEOF(decoder) != nil {
+		return project.ProjectListCursor{}, project.ErrInvalidProjectListQuery
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, payload.UpdatedAt)
+	if err != nil || payload.UpdatedAt != updatedAt.UTC().Format(time.RFC3339Nano) {
+		return project.ProjectListCursor{}, project.ErrInvalidProjectListQuery
+	}
+	cursor := project.ProjectListCursor{UpdatedAt: updatedAt.UTC(), ProjectID: payload.ProjectID}
+	if err := cursor.Validate(); err != nil {
+		return project.ProjectListCursor{}, err
+	}
+	return cursor, nil
+}
+
+// encodeProjectListCursor 将 Repository 返回的末项位置编码为无 padding Base64URL，不包含 owner 或授权状态。
+func encodeProjectListCursor(cursor project.ProjectListCursor) (string, error) {
+	if err := cursor.Validate(); err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(projectListCursorDTO{
+		UpdatedAt: cursor.UpdatedAt.UTC().Format(time.RFC3339Nano), ProjectID: cursor.ProjectID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode project list cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
 // bootstrap 按 URL Project ID 与可信 Principal 做资源级读取；不存在和越权统一返回 404。
 func (h *ProjectHandler) bootstrap(c *gin.Context) {
 	requestID, ok := h.newProjectRequestID(c)
@@ -341,6 +508,8 @@ func (h *ProjectHandler) newProjectRequestID(c *gin.Context) (string, bool) {
 // writeMappedProjectError 将领域错误收敛为 Frozen v1 HTTP 状态，不暴露数据库、密钥、Prompt 或 Agent RPC 原文。
 func (h *ProjectHandler) writeMappedProjectError(c *gin.Context, err error, requestID string) {
 	switch {
+	case errors.Is(err, project.ErrInvalidProjectListQuery):
+		h.writeProjectError(c, http.StatusBadRequest, "PROJECT_LIST_QUERY_INVALID", "项目列表查询参数无效", requestID, false)
 	case errors.Is(err, project.ErrInvalidIdempotencyKey):
 		h.writeProjectError(c, http.StatusBadRequest, "IDEMPOTENCY_KEY_INVALID", "幂等键无效", requestID, false)
 	case errors.Is(err, project.ErrInvalidQuickCreate):

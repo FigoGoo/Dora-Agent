@@ -31,8 +31,10 @@ import {
   normalizePath
 } from '../../app/routes.js';
 import { AUTH_SESSION_STATUS, useAuthSession } from '../../platform/auth/authSession.js';
+import { runtimeCapabilityEnabled } from '../../platform/runtimeProfile.js';
 import { ProjectsPage } from '../projects/ProjectsPage.jsx';
 import { PROJECT_QUICK_CREATE_MAX_SKILL_COUNT, quickCreateProject } from '../projects/projectQuickCreate.js';
+import { stageQuickCreatePreviewGoal } from '../projects/quickCreatePreviewHandoff.js';
 import { QuickCreateSkillPicker } from '../projects/QuickCreateSkillPicker.jsx';
 import {
   createQuickCreateIntent,
@@ -874,11 +876,14 @@ export function LandingPage() {
     commitQuickCreateIntent(submitted);
     const controller = new AbortController();
     const operation = ++quickCreateOperationRef.current;
+    const planCreationSpecEnabled = runtimeCapabilityEnabled('planCreationSpec');
+    const deferInitialPrompt = planCreationSpecEnabled && !runtimeCapabilityEnabled('userMessage');
     const promise = (async () => {
       try {
         const payload = await quickCreateProject({
           prompt: submitted.prompt,
           enabledSkillIDs: submitted.enabledSkillIDs,
+          deferInitialPrompt,
           idempotencyKey: submitted.idempotencyKey,
           csrfToken: activeCSRFToken,
           signal: controller.signal
@@ -888,6 +893,9 @@ export function LandingPage() {
         }
         const resolved = resolveQuickCreateIntent(submitted, payload);
         commitQuickCreateIntent(resolved);
+        if (planCreationSpecEnabled) {
+          stageQuickCreatePreviewGoal(resolved.projectID, submitted.prompt);
+        }
         navigateToProjectWorkspace(resolved.projectID);
         return resolved;
       } catch (error) {

@@ -1,0 +1,47 @@
+{
+  "schema_version": "analyze_materials_runtime_v2preview1_corpus_manifest.v1",
+  "profile": "analyze_materials.runtime.v2preview1",
+  "files": [
+    {
+      "file": "analyze_materials_runtime_v2preview1.json",
+      "sha256": "sha256:ace7f87248d33153bda09ca25c53a5089187f26ee384a65ce095217a2e970282",
+      "vector_count": 22
+    }
+  ],
+  "fixture_ids": [
+    "analyze_materials.runtime.base"
+  ],
+  "vector_ids": [
+    "AM-P01-enqueue-accepted",
+    "AM-P02-idempotent-replay",
+    "AM-P03-tool-completed",
+    "AM-P04-tool-partial",
+    "AM-P05-tool-failed",
+    "AM-P06-runtime-failed",
+    "AM-P07-frozen-tool-projection-replay",
+    "AM-P08-terminal-response-loss",
+    "AM-P09-lost-wake-scanner",
+    "AM-P10-fence-takeover",
+    "AM-P11-session-hol",
+    "AM-P12-local-activation",
+    "AM-N01-idempotency-conflict",
+    "AM-N02-extra-tool",
+    "AM-N03-dual-processor",
+    "AM-N04-stale-fence",
+    "AM-N05-evidence-permission",
+    "AM-N06-business-side-effects",
+    "AM-N07-external-provider",
+    "AM-N08-shared-production-enable",
+    "AM-N09-recovery-pending",
+    "AM-N10-message-fabrication"
+  ],
+  "total_vector_count": 22,
+  "target_tests": [
+    "TestAnalyzeMaterialsRuntimeV2Preview1CorpusManifest",
+    "TestAnalyzeMaterialsRuntimeV2Preview1Corpus",
+    "TestAnalyzeMaterialsRuntimeV2Preview1ExactSets",
+    "TestAnalyzeMaterialsRuntimeV2Preview1ContextContractDigest",
+    "TestAnalyzeMaterialsRuntimeV2Preview1OutcomeAndNegativeInvariants",
+    "TestAnalyzeMaterialsRuntimeV2Preview1StrictJSON"
+  ]
+}

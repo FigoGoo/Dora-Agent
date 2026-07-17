@@ -44,6 +44,38 @@ func TestProbeReturnsFrozenIdentity(t *testing.T) {
 	if response.ReceivedAtUnixMs != now.UnixMilli() {
 		t.Fatalf("接收时间错误: got %d", response.ReceivedAtUnixMs)
 	}
+	if !response.IsSetPlanStoryboardRuntimeEnabled() || !response.IsSetPlanStoryboardRuntimeProfile() ||
+		response.GetPlanStoryboardRuntimeEnabled() || response.GetPlanStoryboardRuntimeProfile() != "" {
+		t.Fatalf("默认 Probe 意外开放 Storyboard Runtime: %+v", response)
+	}
+	if !response.IsSetWritePromptsRuntimeEnabled() || !response.IsSetWritePromptsRuntimeProfile() ||
+		response.GetWritePromptsRuntimeEnabled() || response.GetWritePromptsRuntimeProfile() != "" {
+		t.Fatalf("默认 Probe 意外开放 Write Prompts Runtime: %+v", response)
+	}
+
+	handler.storyboardEnabled = true
+	response, err = handler.Probe(context.Background(), &foundationv1.FoundationProbeRequestV1{
+		SchemaVersion: foundationv1.FOUNDATION_SCHEMA_VERSION,
+		RequestId:     requestID.String(), CallerService: "dora-agent-service", CallerVersion: "test",
+		SentAtUnixMs: now.Add(-time.Second).UnixMilli(),
+	})
+	if err != nil || !response.GetPlanStoryboardRuntimeEnabled() ||
+		response.GetPlanStoryboardRuntimeProfile() != foundationv1.PLAN_STORYBOARD_RUNTIME_PROFILE {
+		t.Fatalf("启用态 Probe Storyboard capability 漂移: response=%+v error=%v", response, err)
+	}
+
+	handler.storyboardEnabled = false
+	handler.promptPreviewEnabled = true
+	response, err = handler.Probe(context.Background(), &foundationv1.FoundationProbeRequestV1{
+		SchemaVersion: foundationv1.FOUNDATION_SCHEMA_VERSION,
+		RequestId:     requestID.String(), CallerService: "dora-agent-service", CallerVersion: "test",
+		SentAtUnixMs: now.Add(-time.Second).UnixMilli(),
+	})
+	if err != nil || !response.GetWritePromptsRuntimeEnabled() ||
+		response.GetWritePromptsRuntimeProfile() != foundationv1.WRITE_PROMPTS_RUNTIME_PROFILE ||
+		response.GetPlanStoryboardRuntimeEnabled() {
+		t.Fatalf("启用态 Probe Write Prompts capability 漂移: response=%+v error=%v", response, err)
+	}
 }
 
 // TestProbeRejectsInvalidContract 覆盖 v1 版本、UUID 和长度的失败关闭分支。

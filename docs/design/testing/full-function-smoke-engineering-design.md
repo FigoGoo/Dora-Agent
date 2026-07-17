@@ -4,15 +4,17 @@
 >
 > 版本：`smoke.engineering.v1alpha1`
 >
-> 更新日期：2026-07-16
+> 更新日期：2026-07-17
 >
 > 适用范围：`SMK-001`～`SMK-035`
 >
 > 实现门禁：本文评审通过前可以继续细化场景，不创建会被误认为生产 Runtime 的测试服务或不受控测试后门。
 
+> 开发顺序说明：本文是 P1 完整发布 Evidence 设计，不再作为 V1～T1 功能开工门禁。V1 的 `plan-spec-preview-smoke` 和 2026-07-17 已通过的 `make trial-basic` 都是渐进式 Trial Evidence：后者快速证明三 Module、统一 Profile、六 Tool、Worker PNG/MP4、受保护读取与 Workspace V5 主链可运行，但不等于本文定义的 35 条 SMK-P0、完整恢复门禁或 P1 发布 Evidence。
+
 ## 1. 目标与通过定义
 
-本文把[全功能冒烟开发推进计划](../../requirements/full-function-smoke-development-plan.md)中的 35 条 SMK-P0 场景落成可实施的测试工程、Fixture、确定性 Adapter、故障注入和 Evidence 规范。
+本文把[功能优先开发与试跑计划](../../requirements/full-function-smoke-development-plan.md)中后置到 P1 的 35 条 SMK-P0 场景落成可实施的测试工程、Fixture、确定性 Adapter、故障注入和 Evidence 规范。
 
 目标：
 
@@ -36,20 +38,20 @@ flowchart TD
     E --> P[Provider Sandbox Smoke]
 ```
 
-| 层级 | 运行对象 | 主要断言 | 合并要求 |
+| 层级 | 运行对象 | 主要断言 | 合并/发布要求 |
 |---|---|---|---|
 | Module Unit | 单包、Fake Clock/ID/Client | 状态转换、Validator、幂等键、错误映射 | 每个 Module PR 必跑 |
 | Module Integration | 单 Module + 自有 PostgreSQL/Redis | Migration、Repository、事务、Outbox/Inbox | 每个 Module PR 必跑；`GOWORK=off` |
 | Contract | Producer/Consumer Schema + Adapter | HTTP/Thrift/Event/Job/支付签名兼容 | 契约变更必跑 |
-| API Workflow Smoke | 三 Runtime + 基础设施 + Adapter | 权威状态、副作用次数、费用、恢复 | 合并主干必跑的 SMK-P0 核心集合，最终扩为 35 条 |
-| UI Smoke | 真实前端 + 三 Runtime | 菜单、表单、状态、SSE、可访问性、错误恢复 | SMK-P0 全量 |
+| API Workflow Smoke | 三 Runtime + 基础设施 + Adapter | 权威状态、副作用次数、费用、恢复 | P1 启用后合并主干必跑 SMK-P0 核心集合，最终扩为 35 条 |
+| UI Smoke | 真实前端 + 三 Runtime | 菜单、表单、状态、SSE、可访问性、错误恢复 | P1 完整发布门禁要求 SMK-P0 全量 |
 | Provider Sandbox | 真实外部测试账号 | 协议、签名、限流、真实媒体可用性 | 凭据具备时；对应能力上线前必跑 |
 
 UI Smoke 不重复实现所有数据库规则；它调用共享 Scenario Driver，并在 UI 断言后读取同一 Evidence Collector 的权威快照。API Smoke 与 UI Smoke 共享 Smoke ID、Fixture 和期望，不维护两套相互漂移的业务场景。
 
 ## 3. 目标目录布局
 
-以下是 M1/M2 应创建的目标布局，不表示当前仓库已经实现：
+以下是 P1 完整发布 Evidence 的目标布局，不表示当前仓库已经实现：
 
 ```text
 Dora-Agent/
@@ -297,7 +299,7 @@ Evidence Collector 默认脱敏：Authorization、Cookie、Secret、完整 Promp
 
 ## 11. CI 与目标命令
 
-以下是 M1/M2 的目标命令名，不是当前仓库可用命令：
+以下是 P1 完整发布 Evidence 的目标命令名，不是当前仓库可用命令：
 
 ```bash
 make test-business
@@ -330,7 +332,20 @@ make w05-smoke
 make w05-browser-smoke
 make w1-smoke
 make w1-browser-smoke
+make user-message-runtime-smoke
+make analyze-materials-runtime-smoke
+make plan-storyboard-runtime-smoke
+make write-prompts-runtime-smoke
+make trial-basic
 ```
+
+`trial-basic` 是当前最快的跨 Module 用户主链反馈。它在已启动的本地 PostgreSQL、Redis、etcd 上重置三个专用测试数据库，从当前工作树启动 Business、Agent、Worker、Vite 与 Chromium，并在统一基础/媒体 Profile 下验证登录、项目、文本素材、六个 Graph Tool、Worker 真实 PNG/MP4、Owner 保护的 `200/206/416` 内容读取、Workspace V5 硬刷新恢复、受控清理和源码零漂移。成功后发布 `.local/smoke/trial-basic.json`，Schema 为 `trial_basic.evidence.v1`、权限为 `0600`。
+
+该快速命令不会串行执行前述五条 Tool Runtime isolated smoke，也不会自动执行三 Module 全量测试、前端全量测试/build、Runtime 重启恢复、Fence takeover、unknown outcome 或故障注入。真实 Provider、计费和 Approval 同样不在其证明范围。isolated smoke、Module/Frontend 门禁与本设计的 35 条 SMK-P0 必须保持独立状态，禁止因 `trial-basic` 通过而标记为已通过。
+
+`user-message-runtime-smoke` 是方案 A 的窄 canonical Trial，不等于 35 条 SMK-P0 完整发布 Evidence。它在宿主机重建并启动 Business/Agent/Vite，直接连接 Docker 已映射到 `127.0.0.1:15432/16379/12379` 的 PostgreSQL/Redis/etcd，不把 Docker socket 或 Compose health 当作连接前置条件；运行时强制 `CreationSpec Preview=false`、`User Message Runtime=true`，再由真实 Chromium 通过 Business 同源入口证明原始 QuickCreate 输入、Workspace v2/SSE、Direct Response Card、工具箱纯前端定位与刷新同一 Turn/Run/Input。成功文件 `.local/smoke/user-message-runtime-trial-evidence.json` 固定为 `user_message_runtime.trial_evidence.v1`、`0600`，并在全部宿主机子进程退出、权威 PostgreSQL 唯一性、Model Receipt execution fence 与 Run fence 一致、持续 etcd exact-prefix provenance 与脱敏扫描通过后才从 pending 原子发布为 passed。最终源码 Run `20260716T202111Z-58305` 使用专用 `dora_agent_test`，source digest 为 `sha256:7b11d556defb379de05a04ff4e9b808618b784abc0244b3e75ceaeb9044d79ad`、Evidence SHA-256 为 `sha256:7d2b1c0d0db69695e4eea2f54e1ffcacb6f01294fcf116f3ce8c1c312f363ab1`，已以 32 项全真断言验证 Legacy Ledger `verified / generation=1 / version=3` 并关闭 B1/B4；它不关闭真实 Provider、Tool-enabled Profile 或 P1 发布门禁。
+
+`plan-storyboard-runtime-smoke` 是 `plan_storyboard.runtime.v2preview1` 的窄 canonical Trial，同样不等于 35 条 SMK-P0 完整发布 Evidence。它只直连宿主机 `127.0.0.1:15432/16379/12379`，不调用 Docker CLI、Socket、Compose、`psql`、`redis-cli` 或 `etcdctl`；先在 Storyboard exact-loopback Profile 创建空 Lane，再以宿主机可路由 IPv4 独占 CreationSpec Profile 准备可信 Draft，最后切回 Storyboard Profile。真实 Chromium 必须证明表单、accepted/terminal SSE、只读 Card、静态 Catalog unavailable、硬刷新及 Agent 受控停止/重启恢复；脚本还必须证明源码前后清单一致、etcd 精确实例摘除和自身进程/端口清理。最终源码 Run `20260717T010209Z-81125` 以 16/16 全真断言发布 `.local/smoke/plan-storyboard-runtime-v2.json`，Schema 为 `plan_storyboard_runtime_v2_smoke_evidence.v1`、权限为 `0600`，source digest 为 `sha256:3e7f04b585d6001ec6de341293f25a8e83256dfc8a370022f5240e3e0460d9f5`、Evidence SHA-256 为 `sha256:f2d915247536c6f0fd18417225194f0f5592d88519d7edeb518a0d3cf87d5fa7`。该结论只关闭 Storyboard Development Preview M4，不批准生产 Revision/Element/Slot、Active/Approval、计费或发布。
 
 `w05-browser-smoke` 使用两个真实密码账号、当前 worktree 重建的 Business/Agent 二进制和真实
 PostgreSQL/Redis/etcd。它必须先向 Agent 发送 TERM、有界等待退出，再用同一二进制重启并通过

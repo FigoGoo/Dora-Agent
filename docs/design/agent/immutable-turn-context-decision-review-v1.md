@@ -7,6 +7,12 @@
 > 适用范围：[`immutable-turn-context-design-v1.md`](./immutable-turn-context-design-v1.md) 第 12 节 10 项 P0、Session Lane 与 Eino Runner 的冻结边界
 >
 > 实现门禁：本文把 10 项 P0 转为可签字的推荐结论，但不代表任何一项已经 Approved。跨角色审核全部签字前，禁止创建 Turn/Context 生产 Migration、GORM Model、Repository、Helper、Runner、Graph、HTTP/IDL 或前端 Approval Action；测试专用 Canonical Corpus 也不得被生产代码导入。
+>
+> 2026-07-16 Preview 例外：上述门禁继续约束完整生产 Turn Context 与通用 Runtime；[`plan_creation_spec.v1preview1`](./graphtool/plan_creation_spec-design.md#0-v1-开发预览设计冻结2026-07-16) 已批准专用最小 Runner/Graph/Receipt 纵切，不表示本文任一 P0 或生产能力已签字。
+>
+> 2026-07-17 Preview 例外：[`user_message.runtime.v2preview1`](./user-message-runtime-v2-design.md) 方案 A 采用独立最小 Context 与空 Executable Tool Registry；全局 approval manifest 继续保持 `awaiting_owner_approval`、`implementation_unlocked=false`，TC-P01～TC-P10 的状态、Owner 签字和生产门禁均不变化。本例外不得扩为六 Tool Registry、58 字段 Context、Assistant/Tool History、Approval、Batch 或多轮 Chat。
+>
+> 2026-07-17 M2 Preview 例外：[`plan_storyboard.runtime.v2preview1`](./plan-storyboard-runtime-v2-design.md) 只允许清单中逐文件列出的 Storyboard Graph Tool Core、最小专用 Turn Context 和单 Tool ChatModelAgent，并以独立 PostgreSQL 表实现 local-only typed ingress、Session HOL/Fence 与分层 Receipt。它不批准通用 58 字段 Context、六 Tool Registry、生产 Catalog、History、Approval、Batch、Continuation、多轮 Chat 或多 Profile 并行；TC-P01～TC-P10 仍全部 Awaiting Owner Approval。
 
 ## 1. 评审目的与边界
 
@@ -149,10 +155,12 @@ Evidence 只记录安全 ID、状态、数量、reason code、generation、diges
 6. 重试时重置墙钟、费用、Token、调用或 Operation 预算；
 7. 为便利查询创建跨表物理 FK、cascade 或允许 no-op UPDATE；
 8. 用纯 Go Corpus、sqlmock 或一次成功启动替代真实 PostgreSQL 16 升级/崩溃/Down 证据；
-9. 在共享 R01/R02/R03/R08 未 Approved 前实现任一真实 Graph；
-10. 先实现 `write_prompts` 作为捷径。首个真实 Graph 仍应是 `plan_creation_spec`，对应 `SMK-009`，并且只能在共享门禁关闭后开始。
+9. 在共享 R01/R02/R03/R08 未 Approved 前实现任一完整生产 Graph；文档顶部单独批准的 V1 Preview 专用最小 Graph 不在此限。
+10. 先实现 `write_prompts` 作为生产捷径。首个完整生产 Graph 仍应是 `plan_creation_spec`，对应 `SMK-009`，并且只能在共享生产门禁关闭后开始；V1 Preview 不得被用于关闭该门禁。
 
-## 5. 审批与实现顺序
+## 5. 完整生产审批与依赖（非当前排期）
+
+当前阶段和“下一步”只以[功能优先开发与试跑计划](../../requirements/full-function-smoke-development-plan.md)为准；下列编号只表示完整生产 Turn Context 的依赖闭合关系。
 
 1. Agent Runtime、PostgreSQL/Data、Business Authorization、安全、财务/产品、运维/SRE、测试分别对第 2 节职责签字；
 2. 用独立 test-only Corpus 冻结 Message Set、Context canonical、exact-set、边界和稳定拒绝原因；
@@ -160,7 +168,7 @@ Evidence 只记录安全 ID、状态、数量、reason code、generation、diges
 4. 从真实 Migration 005 的 V1/V2/empty cohort 执行 PG16 forward Up、Helper、Verify、race/crash 和 CLI Down guard；
 5. 证据 Approved 后才接 Lane Capability/Processor/Scanner，并确保旧 Writer drain 与零早启；
 6. 最后装配 Eino Runner/Checkpoint/Model 与静态 Tool Registry；
-7. 共享 R01/R02/R03/R08 全部关闭后，才进入 `plan_creation_spec` / `SMK-009` 的首个真实 Graph 切片。
+7. 共享 R01/R02/R03/R08 全部关闭后，才进入 `plan_creation_spec` / `SMK-009` 的首个完整生产 Graph 切片；V1 Preview 依文档顶部例外独立执行。
 
 ## 6. 签字清单
 
@@ -174,4 +182,4 @@ Evidence 只记录安全 ID、状态、数量、reason code、generation、diges
 - [ ] 前端/A2UI：Event/Continuation 展示、刷新重连、未知类型、阻断状态与无伪授权入口；
 - [ ] 跨 Module Contract Owner：所有 RPC/Event/Receipt/Approval exact version 与兼容策略。
 
-当前结论：**10 项均已有推荐决策，但全部仍为 Awaiting Owner Approval；本文不授权生产实现。当前唯一允许的开发切片是独立 test-only Canonical Corpus 与评审证据。**
+当前结论：**10 项均已有推荐决策，但全部仍为 Awaiting Owner Approval；本文不授权完整生产实现。除另行批准的 `plan_creation_spec.v1preview1` 专用最小纵切外，当前只允许独立 test-only Canonical Corpus 与评审证据。**

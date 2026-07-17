@@ -4,7 +4,7 @@
 >
 > 版本：v0.1
 >
-> 更新日期：2026-07-14
+> 更新日期：2026-07-17
 >
 > 关联文档：[共通业务规则与验收基线](common-requirements-baseline.md)、[用户端需求总览](user-requirements-overview.md)、[管理端需求总览](admin-requirements-overview.md)、[服务端需求总览](server-requirements-overview.md)
 
@@ -24,6 +24,8 @@ v1 工具箱必须至少包含以下六个 Graph Tool，显示名称和默认顺
 仅在 Agent Registry 中存在内部 Tool、或只能由模型隐式调用，不能视为用户已经获得 Graph Tool 功能。六个工具必须同时满足目录可见、能力可理解、入口可操作、运行可追踪、结果可复用和费用可核对。
 
 本文是需求基线，不提前固定 Graph State、Node/Branch、DTO、RPC、Event、Job Payload 或数据表；这些内容按既定决策在详细设计阶段确定。
+
+本文描述的是生产目标需求。第 11 节同步记录的 local-only Development Preview 只用于证明基本功能主链可运行，不得据此降低本需求中的生产 Provider、计费、Approval、恢复、治理和发布要求。
 
 ## 2. 术语与边界
 
@@ -274,7 +276,9 @@ Worker 完成后只发布持久化 `generation.batch.*` 终态事件；Agent Inb
 
 ## 11. 当前设计与目标需求差距
 
-当前 `master` 尚无可运行的服务端实现。下表“历史设计状态”专指 `main` 分支及现有 AIGC 详细设计记录的迁移起点，不能视为当前分支能力，更不能直接视为本文需求已经实现。
+当前工作树已经建立 `business/`、`agent/`、`worker/` 三个独立 Module 与服务端 Runtime。`mvp_all_tools.runtime.v1preview1 + media.runtime.v3preview1` 已于 2026-07-17 通过 `make trial-basic`：同一主 Agent 在真实浏览器主链中跑通六个 Tool，Agent Job、Worker Claim/Finalize/Terminal、确定性 PNG、固定 MP4、Workspace V5、受保护 Range `200/206/416` 与页面刷新恢复均已闭环。
+
+该结论仅是 local-only Development Preview happy path 通过，不是本文生产需求验收通过。真实 Provider、计费、正式 Approval、异常与服务重启恢复、完整 production Registry/Catalog、生产治理和发布门禁仍为 Draft / P1。精确阶段状态只以[功能优先开发与试跑计划](full-function-smoke-development-plan.md)为准。下表“历史设计状态”仍只描述历史 `main` 单体实现的迁移起点，不能视为当前工作树能力，更不能直接视为本文完整生产需求已经实现。
 
 | 目标需求 | 历史设计状态 | 必须补齐 |
 | --- | --- | --- |
@@ -301,7 +305,7 @@ Worker 完成后只发布持久化 `generation.batch.*` 终态事件；Agent Inb
 - 单元、契约、故障注入、恢复、计费和用户验收用例。
 - 明确审核结论和与本文需求 ID 的追踪关系。
 
-六份独立设计草案及共同契约目录已收录在 [Graph Tool 详细设计索引](../design/agent/graphtool/README.md)。当前均为 Draft / 待评审；缺少设计或评审未通过时，对应 Graph Tool 都不得开始实现或宣称生产可用。
+六份独立设计草案及共同契约目录已收录在 [Graph Tool 详细设计索引](../design/agent/graphtool/README.md)。当前获批和已通过的一体化本地范围为 `mvp_all_tools.runtime.v1preview1 + media.runtime.v3preview1` 以及[六工具媒体扩展](../design/agent/mvp-six-tools-media-extension-v1-design.md)；2026-07-17 `make trial-basic` 是该 local-only Development Preview 的主链证据。六个 Tool 的完整生产范围仍为 Draft / 待评审；真实 Provider、计费、Approval、异常/重启恢复和完整 production Registry/Catalog 继续作为 P1 生产门禁。缺少独立设计或对应范围评审未通过时，不得超出已批准子集开始实现，更不得用工作树代码或 Development Preview Evidence 宣称生产可用。
 
 ## 13. 待确认参数
 

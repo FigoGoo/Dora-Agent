@@ -24,6 +24,44 @@ type Service struct {
 	skillSnapshotProtector SkillSnapshotContentProtector
 	// skillSnapshotLimits 是启动时冻结并通过协议 ceiling 校验的 Agent 接收剖面。
 	skillSnapshotLimits skill.LimitsProfileV1
+	// userMessageRuntimeProfile 仅允许显式本地方案 A，在 Ensure 事务内冻结最小 Turn/Context。
+	userMessageRuntimeProfile UserMessageRuntimeProfile
+	// runtimeWake 在入队事务成功后通知共享 Scanner；通知有损，PostgreSQL 仍是唯一真源。
+	runtimeWake func()
+}
+
+// WithRuntimeWake 返回只替换入队通知函数的不可变 Service 副本。
+// Composition Root 在 Coordinator 构造完成后、Transport 暴露前调用；既有隔离 Profile 不受影响。
+func (s *Service) WithRuntimeWake(wake func()) (*Service, error) {
+	if s == nil || wake == nil {
+		return nil, fmt.Errorf("configure session runtime wake: service and wake are required")
+	}
+	cloned := *s
+	cloned.runtimeWake = wake
+	return &cloned, nil
+}
+
+// NewServiceWithSkillSnapshotAndUserMessageRuntime 创建同时支持 Skill Snapshot 与方案 A 入队冻结的 Service。
+func NewServiceWithSkillSnapshotAndUserMessageRuntime(
+	repository Repository,
+	idGenerator IDGenerator,
+	clock Clock,
+	promptProtector ContentProtector,
+	snapshotProtector SkillSnapshotContentProtector,
+	limits skill.LimitsProfileV1,
+	profile UserMessageRuntimeProfile,
+) (*Service, error) {
+	service, err := NewServiceWithSkillSnapshot(
+		repository, idGenerator, clock, promptProtector, snapshotProtector, limits,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := profile.Validate(); err != nil {
+		return nil, err
+	}
+	service.userMessageRuntimeProfile = profile
+	return service, nil
 }
 
 // NewService 创建 Session 基础用例并校验全部强依赖。
@@ -172,6 +210,9 @@ func (s *Service) EnsureProjectSession(ctx context.Context, command EnsureComman
 		plan.Receipt.MessageID = stringPointer(messageID)
 		plan.Receipt.InputID = stringPointer(inputID)
 	}
+	if err := s.attachUserMessageRuntimePlan(&plan, now); err != nil {
+		return EnsureResult{}, err
+	}
 
 	createdEventID, err := s.newUUIDv7("session event")
 	if err != nil {
@@ -202,6 +243,9 @@ func (s *Service) EnsureProjectSession(ctx context.Context, command EnsureComman
 	result, err := s.repository.Ensure(ctx, plan)
 	if err != nil {
 		return EnsureResult{}, err
+	}
+	if plan.UserMessageRuntime != nil && s.runtimeWake != nil {
+		s.runtimeWake()
 	}
 	return result, nil
 }

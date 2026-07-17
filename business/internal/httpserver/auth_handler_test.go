@@ -207,6 +207,61 @@ func TestAuthGetDistinguishesUnauthenticatedFromUnavailable(t *testing.T) {
 	})
 }
 
+func TestAuthGetAbortsCanceledRequestWithoutFakeUnavailable(t *testing.T) {
+	service := &authHandlerTestService{resolveErr: context.Canceled}
+	_, router := newAuthHandlerTestRouter(t, service)
+	logs := captureHTTPTestLogs(t)
+	requestContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil).WithContext(requestContext)
+	request.AddCookie(&http.Cookie{Name: "dora_session", Value: "opaque"})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if service.resolveCalls != 1 || recorder.Body.Len() != 0 || recorder.Header().Get("Cache-Control") != "" || logs.Len() != 0 {
+		t.Fatalf("canceled auth GET produced a fake response or audit: resolves=%d headers=%v body=%s logs=%s",
+			service.resolveCalls, recorder.Header(), recorder.Body.String(), logs.String())
+	}
+}
+
+func TestAuthProtectionOnlySuppressesClientCancellation(t *testing.T) {
+	service := &authHandlerTestService{}
+	handler, _ := newAuthHandlerTestRouter(t, service)
+	router := gin.New()
+	downstreamCalls := 0
+	router.GET("/protected", handler.RequireSession(), func(c *gin.Context) {
+		downstreamCalls++
+		c.Status(http.StatusNoContent)
+	})
+	logs := captureHTTPTestLogs(t)
+
+	service.resolveErr = context.Canceled
+	requestContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	canceledRequest := httptest.NewRequest(http.MethodGet, "/protected", nil).WithContext(requestContext)
+	canceledRequest.AddCookie(&http.Cookie{Name: "dora_session", Value: "opaque"})
+	canceledRecorder := httptest.NewRecorder()
+	router.ServeHTTP(canceledRecorder, canceledRequest)
+	if downstreamCalls != 0 || canceledRecorder.Body.Len() != 0 || canceledRecorder.Header().Get("Cache-Control") != "" || logs.Len() != 0 {
+		t.Fatalf("client cancellation crossed middleware or emitted denial: downstream=%d headers=%v body=%s logs=%s",
+			downstreamCalls, canceledRecorder.Header(), canceledRecorder.Body.String(), logs.String())
+	}
+
+	logs.Reset()
+	// 只看返回错误会误吞内部依赖取消；Request Context 仍存活时必须保持可观测的 503 与审计。
+	service.resolveErr = context.Canceled
+	dependencyRequest := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	dependencyRequest.AddCookie(&http.Cookie{Name: "dora_session", Value: "opaque"})
+	dependencyRecorder := httptest.NewRecorder()
+	router.ServeHTTP(dependencyRecorder, dependencyRequest)
+	if dependencyRecorder.Code != http.StatusServiceUnavailable || downstreamCalls != 0 ||
+		!strings.Contains(dependencyRecorder.Body.String(), `"code":"AUTH_UNAVAILABLE"`) ||
+		!strings.Contains(logs.String(), `"error_code":"AUTH_UNAVAILABLE"`) {
+		t.Fatalf("live dependency failure did not retain 503/audit: status=%d downstream=%d body=%s logs=%s",
+			dependencyRecorder.Code, downstreamCalls, dependencyRecorder.Body.String(), logs.String())
+	}
+}
+
 func TestAuthLogoutRequiresCSRFAndIsNoCookieIdempotent(t *testing.T) {
 	t.Run("invalid csrf", func(t *testing.T) {
 		service := &authHandlerTestService{logoutErr: auth.ErrInvalidCSRF}

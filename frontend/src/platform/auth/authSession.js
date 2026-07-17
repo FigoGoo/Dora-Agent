@@ -149,6 +149,11 @@ export function useAuthSession() {
   return value;
 }
 
+// useOptionalAuthSession 供可独立单测的叶子组件读取现有会话；生产 App 始终提供 Provider。
+export function useOptionalAuthSession() {
+  return useContext(AuthSessionContext);
+}
+
 function initialState(initialSession, autoBootstrap) {
   if (initialSession != null) {
     return normalizeSession(initialSession);

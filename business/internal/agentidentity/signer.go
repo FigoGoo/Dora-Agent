@@ -29,6 +29,18 @@ const (
 	ScopeEventsRead = "agent.session.events.read"
 	// ScopeToolsRead 允许读取单个已绑定 Session 的静态 Tool Definition Catalog。
 	ScopeToolsRead = "agent.session.tools.read"
+	// ScopeCreationSpecPreviewWrite 只允许向指定 Session 持久化提交一条 CreationSpec Preview Intent。
+	ScopeCreationSpecPreviewWrite = "creation_spec.preview.write"
+	// ScopeAnalyzeMaterialsPreviewWrite 只允许向指定 Session 持久化提交一条素材分析 Preview Intent。
+	ScopeAnalyzeMaterialsPreviewWrite = "analyze_materials.preview.write"
+	// ScopePlanStoryboardPreviewWrite 只允许向指定 Session 持久化提交一条 Storyboard Preview Intent。
+	ScopePlanStoryboardPreviewWrite = "plan_storyboard.preview.write"
+	// ScopeWritePromptsPreviewWrite 只允许向指定 Session 持久化提交一条 Prompt Preview Intent。
+	ScopeWritePromptsPreviewWrite = "write_prompts.preview.write"
+	// ScopeGenerateMediaPreviewWrite 只允许向指定 Session 入队一个确定性 PNG 媒体 Job。
+	ScopeGenerateMediaPreviewWrite = "generate_media.preview.write"
+	// ScopeAssembleOutputPreviewWrite 只允许向指定 Session 入队一个固定 MP4 装配 Job。
+	ScopeAssembleOutputPreviewWrite = "assemble_output.preview.write"
 
 	assertionSchema              = "agent_http_identity_assertion.v1"
 	assertionIssuer              = "dora-business-service"
@@ -68,6 +80,8 @@ type Identity struct {
 	RequestID string
 	// CanonicalTarget 是固定 allowlist 路径以及规范化后的可选 Cursor Query。
 	CanonicalTarget string
+	// Method 是签入 Canonical 的大写 HTTP Method；空值只为既有 GET 调用兼容并按 GET 处理。
+	Method string
 	// PrincipalUserID 是 Business Auth Resolver 确认的用户 UUIDv7。
 	PrincipalUserID string
 	// WebSessionID 是当前权威浏览器会话 UUIDv7。
@@ -116,6 +130,10 @@ func NewSigner(clock Clock, random io.Reader, cfg Config) (*Signer, error) {
 // Sign 校验路径与身份绑定，生成 16-byte Nonce，并返回固定三 Header 断言。
 // 任一权威 ID、Scope 或路径不匹配都会在签名之前失败，避免产生可跨资源使用的凭据。
 func (s *Signer) Sign(identity Identity) (Assertion, error) {
+	if identity.Method == "" {
+		// W0.5 已发布的调用构造没有 Method 字段；只把零值兼容为 GET，任何显式未知 Method 仍失败关闭。
+		identity.Method = "GET"
+	}
 	if err := validateIdentity(identity); err != nil {
 		return Assertion{}, err
 	}
@@ -135,7 +153,7 @@ func (s *Signer) Sign(identity Identity) (Assertion, error) {
 		assertionAudience,
 		s.keyVersion,
 		identity.RequestID,
-		"GET",
+		identity.Method,
 		identity.CanonicalTarget,
 		identity.PrincipalUserID,
 		identity.WebSessionID,
@@ -169,18 +187,48 @@ func validateIdentity(identity Identity) error {
 	workspaceTarget := "/api/v1/agent/sessions/" + identity.AgentSessionID + "/workspace"
 	eventsPrefix := "/api/v1/agent/sessions/" + identity.AgentSessionID + "/events?after_seq="
 	toolsTarget := "/api/v1/agent/sessions/" + identity.AgentSessionID + "/tools"
+	creationSpecPreviewTarget := "/internal/v1/workspaces/sessions/" + identity.AgentSessionID + "/creation-spec-previews"
+	analyzeMaterialsPreviewTarget := "/internal/v1/workspaces/sessions/" + identity.AgentSessionID + "/analyze-materials-previews"
+	planStoryboardPreviewTarget := "/internal/v1/workspaces/sessions/" + identity.AgentSessionID + "/plan-storyboard-previews"
+	writePromptsPreviewTarget := "/internal/v1/workspaces/sessions/" + identity.AgentSessionID + "/write-prompts-previews"
+	generateMediaPreviewTarget := "/internal/v1/workspaces/sessions/" + identity.AgentSessionID + "/generate-media-previews"
+	assembleOutputPreviewTarget := "/internal/v1/workspaces/sessions/" + identity.AgentSessionID + "/assemble-output-previews"
 	switch identity.Scope {
 	case ScopeWorkspaceRead:
-		if identity.CanonicalTarget != workspaceTarget {
+		if identity.Method != "GET" || identity.CanonicalTarget != workspaceTarget {
 			return ErrInvalidAssertionInput
 		}
 	case ScopeEventsRead:
 		cursor := strings.TrimPrefix(identity.CanonicalTarget, eventsPrefix)
-		if cursor == identity.CanonicalTarget || !canonicalNonNegativeInt(cursor) {
+		if identity.Method != "GET" || cursor == identity.CanonicalTarget || !canonicalNonNegativeInt(cursor) {
 			return ErrInvalidAssertionInput
 		}
 	case ScopeToolsRead:
-		if identity.CanonicalTarget != toolsTarget {
+		if identity.Method != "GET" || identity.CanonicalTarget != toolsTarget {
+			return ErrInvalidAssertionInput
+		}
+	case ScopeCreationSpecPreviewWrite:
+		if identity.Method != "POST" || identity.CanonicalTarget != creationSpecPreviewTarget {
+			return ErrInvalidAssertionInput
+		}
+	case ScopeAnalyzeMaterialsPreviewWrite:
+		if identity.Method != "POST" || identity.CanonicalTarget != analyzeMaterialsPreviewTarget {
+			return ErrInvalidAssertionInput
+		}
+	case ScopePlanStoryboardPreviewWrite:
+		if identity.Method != "POST" || identity.CanonicalTarget != planStoryboardPreviewTarget {
+			return ErrInvalidAssertionInput
+		}
+	case ScopeWritePromptsPreviewWrite:
+		if identity.Method != "POST" || identity.CanonicalTarget != writePromptsPreviewTarget {
+			return ErrInvalidAssertionInput
+		}
+	case ScopeGenerateMediaPreviewWrite:
+		if identity.Method != "POST" || identity.CanonicalTarget != generateMediaPreviewTarget {
+			return ErrInvalidAssertionInput
+		}
+	case ScopeAssembleOutputPreviewWrite:
+		if identity.Method != "POST" || identity.CanonicalTarget != assembleOutputPreviewTarget {
 			return ErrInvalidAssertionInput
 		}
 	default:

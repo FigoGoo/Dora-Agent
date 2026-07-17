@@ -1,13 +1,19 @@
 # AIGC Tool 编排与动态故事板详细设计
 
-> 状态：Current Implementation + Target Gaps
+> 状态：Historical `main` Migration Snapshot + Target Contract Reference / 非当前实现真源
 > 日期：2026-07-14
 > 适用范围：Dora Agent 的 Agent Tool、UI 定向操作、Graph 内部节点、动态故事板、媒体生成衔接
 > 关联文档：[AIGC ChatModelAgent Demo 详细设计](./aigc-chatmodelagent-demo-design.md)、[AIGC Generation Worker 详细设计](./aigc-worker-design.md)、[AIGC A2UI 全栈详细设计](./aigc-a2ui-design.md)
 
+> 文档定位：本文保留历史 `main` 单体 Tool/Storyboard 实现的迁移快照和仍有效的目标契约。正文中的“当前实现”一律指本文日期对应的历史快照，不是当前三 Module 工作树事实。
+>
+> 权威口径：当前阶段、已通过 Evidence 和下一步只以[功能优先开发与试跑计划](./requirements/full-function-smoke-development-plan.md)为准；各 Tool 获批范围以[Graph Tool 设计索引](./design/agent/graphtool/README.md)及独立设计为准。本文的下一阶段和实施重点仅保留目标依赖，不再维护独立排期。
+>
+> 维护规则：不得在本文增量维护当前 Registry Tool 数量、Runtime Profile 或试跑状态；这些状态变化只更新上述唯一计划、Graph Tool 索引和对应独立设计。本文中的五 Tool、旧 `internal/aigc/**` 路径和历史 Demo 验收描述均不得作为当前工作树证据。
+
 ## 1. 文档目标
 
-本文档同时记录 Dora Agent 当前可运行实现和后续目标。凡标记为“待实现”的能力不得作为当前运行保证；README 只描述已经可运行的行为。当前部署定位是受信本地 Demo，不具备面向公网的真实登录鉴权、租户授权和接口限流。本地验收保留 DeepSeek 与真实 Image2：Image2 结果解码后走本地素材链路；Seedance、Audio 和 Assembly 可使用占位实现，不要求真实视频/音频合成、拼接或转码。
+本文档同时记录历史 `main` 可运行实现快照和后续目标。凡标记为“待实现”的能力不得作为当前工作树运行保证；当前事实必须回到唯一计划、Graph Tool 索引和对应独立设计核验。历史部署定位是受信本地 Demo，不具备面向公网的真实登录鉴权、租户授权和接口限流。本地验收保留 DeepSeek 与真实 Image2：Image2 结果解码后走本地素材链路；Seedance、Audio 和 Assembly 可使用占位实现，不要求真实视频/音频合成、拼接或转码。
 
 文档解决以下问题：
 
@@ -57,7 +63,7 @@
 2. Agent Tool Registry 和 Storyboard 语义以本文档为准。
 3. Agent 运行、会话输入和 UI 投影以 ChatModelAgent 设计为准。
 
-### 2.1 实施状态总览
+### 2.1 历史 `main` 实施状态总览
 
 | 能力 | 状态 | 当前实现边界 |
 | --- | --- | --- |
@@ -77,7 +83,7 @@
 | Durable Turn 因果与 receipt | 已实现 | 已启动输入保持 Session HOL；消息按 RunID 因果分组和冻结边界重建；外层 Agent Model receipt、完整 Turn output receipt、稳定 ToolCall 幂等和 durable terminal error 已接入。 |
 | Artifact 审核 receipt | 已实现但入口有限 | Artifact Review 命令以 first-write-wins receipt 与生命周期同事务提交，防止旧版本重放回滚新 Active；当前 `assemble_output` 主流程仍不自动创建 Export Result Approval。 |
 
-### 2.2 本地 Demo 的 Tool/Worker 边界
+### 2.2 历史 `main` 本地 Demo 的 Tool/Worker 边界
 
 本地 Demo 仍完整执行五个 Agent-facing Tool、Capability Graph、durable Approval、Operation/Batch/Job、Worker、Finalization、Batch Barrier 和 A2UI/SSE。差异只在 Worker-only Provider/Storage Adapter：
 
@@ -1587,7 +1593,7 @@ Candidate 批量 Decision 当前只支持 `approved`，请求必须携带 `expec
 | Capability/Approval Decision UI 发布失败 | 当前仍无对应领域 Outbox 补投；全域 Projector/Inbox 是待实现项。 |
 | Session Turn 无 frozen output 且耗尽重试 | 在 Input/Turn 置 dead 的同一事务追加稳定、脱敏 `a2ui.error` SessionEvent；Tail Relay 按 cursor 重放。 |
 
-## 27. 当前代码状态映射
+## 27. 历史 `main` 代码状态映射
 
 | 领域 | 已实现 | 尚未实现/仍为兼容 |
 | --- | --- | --- |
@@ -1633,7 +1639,7 @@ worker/internal/
   events/            # Worker terminal Outbox
 ```
 
-## 29. 后续实施重点
+## 29. 历史迁移目标依赖（不维护当前排期）
 
 ### 已完成基线
 
@@ -1741,7 +1747,7 @@ worker/internal/
 - EventLog Append 后进程内通知丢失或 SSE 断线时，Relay 都按 seq 补读；`ready` 不推进 Last-Event-ID。
 - 所有目标复用成功时不创建空 Batch，也不进入 `waiting_jobs`。
 
-## 31. 当前验收标准
+## 31. 历史快照与目标契约核验标准
 
 当前实现必须满足：
 

@@ -1,0 +1,54 @@
+{
+  "schema_version": "prompt.preview.save-draft.digest.corpus.v1",
+  "canonical": {
+    "schema_version": "prompt.preview.save-draft.digest.v1",
+    "user_id": "01989f50-0000-7000-8000-000000000001",
+    "project_id": "01989f50-0000-7000-8000-000000000002",
+    "expected_project_version": 7,
+    "storyboard_preview_ref": {
+      "id": "01989f50-0000-7000-8000-000000000003",
+      "version": 1,
+      "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tool_call_id": "01989f50-0000-7000-8000-000000000004",
+    "prompt_version": "graph_tool.write_prompts.preview.v1",
+    "validator_version": "write_prompts.preview.validator.v1",
+    "exact_set_validator_version": "write_prompts.preview.exact-set-validator.v1",
+    "exact_target_set_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "content": {
+      "schema_version": "prompt.preview.draft.v1",
+      "mode": "storyboard_preview",
+      "source_storyboard_preview_ref": {
+        "id": "01989f50-0000-7000-8000-000000000003",
+        "version": 1,
+        "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "prompts": [
+        {
+          "target_local_key": "slot_2",
+          "element_local_key": "element_1",
+          "slot_type": "image",
+          "media_kind": "image",
+          "purpose": "海边环境图",
+          "required": false,
+          "positive_prompt": "明亮夏日海边，品牌色调自然融入",
+          "negative_constraints": [],
+          "output_language": "zh-CN"
+        },
+        {
+          "target_local_key": "slot_1",
+          "element_local_key": "element_2",
+          "slot_type": "video",
+          "media_kind": "video",
+          "purpose": "产品动态特写",
+          "required": true,
+          "positive_prompt": "产品包装动态特写，镜头平稳推进",
+          "negative_constraints": ["无水印"],
+          "output_language": "zh-CN"
+        }
+      ]
+    }
+  },
+  "canonical_json": "{\"schema_version\":\"prompt.preview.save-draft.digest.v1\",\"user_id\":\"01989f50-0000-7000-8000-000000000001\",\"project_id\":\"01989f50-0000-7000-8000-000000000002\",\"expected_project_version\":7,\"storyboard_preview_ref\":{\"id\":\"01989f50-0000-7000-8000-000000000003\",\"version\":1,\"content_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"tool_call_id\":\"01989f50-0000-7000-8000-000000000004\",\"prompt_version\":\"graph_tool.write_prompts.preview.v1\",\"validator_version\":\"write_prompts.preview.validator.v1\",\"exact_set_validator_version\":\"write_prompts.preview.exact-set-validator.v1\",\"exact_target_set_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"content\":{\"schema_version\":\"prompt.preview.draft.v1\",\"mode\":\"storyboard_preview\",\"source_storyboard_preview_ref\":{\"id\":\"01989f50-0000-7000-8000-000000000003\",\"version\":1,\"content_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"prompts\":[{\"target_local_key\":\"slot_2\",\"element_local_key\":\"element_1\",\"slot_type\":\"image\",\"media_kind\":\"image\",\"purpose\":\"海边环境图\",\"required\":false,\"positive_prompt\":\"明亮夏日海边，品牌色调自然融入\",\"negative_constraints\":[],\"output_language\":\"zh-CN\"},{\"target_local_key\":\"slot_1\",\"element_local_key\":\"element_2\",\"slot_type\":\"video\",\"media_kind\":\"video\",\"purpose\":\"产品动态特写\",\"required\":true,\"positive_prompt\":\"产品包装动态特写，镜头平稳推进\",\"negative_constraints\":[\"无水印\"],\"output_language\":\"zh-CN\"}]}}",
+  "expected_sha256": "15e8f16b3cc88588d36b82710d785c8ee733217b2a6e3e477170e695e710de82"
+}

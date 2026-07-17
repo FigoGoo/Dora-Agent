@@ -6,7 +6,7 @@
 >
 > 更新日期：2026-07-14
 >
-> 关联文档：[共通业务规则与验收基线](common-requirements-baseline.md)、[Graph Tool 功能需求总览](graph-tool-requirements-overview.md)、[支付与积分充值需求总览](payment-requirements-overview.md)、[管理端需求总览](admin-requirements-overview.md)、[服务端需求总览](server-requirements-overview.md)、[全功能冒烟开发推进计划](full-function-smoke-development-plan.md)
+> 关联文档：[共通业务规则与验收基线](common-requirements-baseline.md)、[Graph Tool 功能需求总览](graph-tool-requirements-overview.md)、[支付与积分充值需求总览](payment-requirements-overview.md)、[管理端需求总览](admin-requirements-overview.md)、[服务端需求总览](server-requirements-overview.md)、[功能优先开发与试跑计划](full-function-smoke-development-plan.md)
 
 ## 1. 文档目的
 

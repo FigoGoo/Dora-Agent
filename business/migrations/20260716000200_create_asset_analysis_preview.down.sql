@@ -1,0 +1,4 @@
+DROP TRIGGER IF EXISTS trg_asset_analysis_preview_evidence_immutable ON business.asset_analysis_preview_evidence;
+DROP FUNCTION IF EXISTS business.reject_asset_analysis_preview_evidence_mutation();
+DROP TABLE IF EXISTS business.asset_analysis_preview_evidence;
+DROP TABLE IF EXISTS business.asset_analysis_preview_assets;

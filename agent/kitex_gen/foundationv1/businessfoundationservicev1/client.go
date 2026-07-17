@@ -12,6 +12,16 @@ import (
 // Client is designed to provide IDL-compatible methods with call-option parameter for kitex framework.
 type Client interface {
 	Probe(ctx context.Context, request *foundationv1.FoundationProbeRequestV1, callOptions ...callopt.Option) (r *foundationv1.FoundationProbeResponseV1, err error)
+	GetCreationSpecContextPreviewV1(ctx context.Context, request *foundationv1.GetCreationSpecContextPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.GetCreationSpecContextPreviewResponseV1, err error)
+	SaveCreationSpecDraftPreviewV1(ctx context.Context, request *foundationv1.SaveCreationSpecDraftPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.SaveCreationSpecDraftPreviewResponseV1, err error)
+	QueryCreationSpecDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryCreationSpecDraftCommandPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.QueryCreationSpecDraftCommandPreviewResponseV1, err error)
+	BatchGetAssetAnalysisInputsPreviewV1(ctx context.Context, request *foundationv1.BatchGetAssetAnalysisInputsPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.BatchGetAssetAnalysisInputsPreviewResponseV1, err error)
+	GetStoryboardPlanningContextPreviewV1(ctx context.Context, request *foundationv1.GetStoryboardPlanningContextPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.GetStoryboardPlanningContextPreviewResponseV1, err error)
+	SaveStoryboardDraftPreviewV1(ctx context.Context, request *foundationv1.SaveStoryboardDraftPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.SaveStoryboardDraftPreviewResponseV1, err error)
+	QueryStoryboardDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryStoryboardDraftCommandPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.QueryStoryboardDraftCommandPreviewResponseV1, err error)
+	GetPromptGenerationContextPreviewV1(ctx context.Context, request *foundationv1.GetPromptGenerationContextPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.GetPromptGenerationContextPreviewResponseV1, err error)
+	SavePromptDraftPreviewV1(ctx context.Context, request *foundationv1.SavePromptDraftPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.SavePromptDraftPreviewResponseV1, err error)
+	QueryPromptDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryPromptDraftCommandPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.QueryPromptDraftCommandPreviewResponseV1, err error)
 }
 
 // NewClient creates a client for the service defined in IDL.
@@ -46,4 +56,54 @@ type kBusinessFoundationServiceV1Client struct {
 func (p *kBusinessFoundationServiceV1Client) Probe(ctx context.Context, request *foundationv1.FoundationProbeRequestV1, callOptions ...callopt.Option) (r *foundationv1.FoundationProbeResponseV1, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.Probe(ctx, request)
+}
+
+func (p *kBusinessFoundationServiceV1Client) GetCreationSpecContextPreviewV1(ctx context.Context, request *foundationv1.GetCreationSpecContextPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.GetCreationSpecContextPreviewResponseV1, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.GetCreationSpecContextPreviewV1(ctx, request)
+}
+
+func (p *kBusinessFoundationServiceV1Client) SaveCreationSpecDraftPreviewV1(ctx context.Context, request *foundationv1.SaveCreationSpecDraftPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.SaveCreationSpecDraftPreviewResponseV1, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.SaveCreationSpecDraftPreviewV1(ctx, request)
+}
+
+func (p *kBusinessFoundationServiceV1Client) QueryCreationSpecDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryCreationSpecDraftCommandPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.QueryCreationSpecDraftCommandPreviewResponseV1, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.QueryCreationSpecDraftCommandPreviewV1(ctx, request)
+}
+
+func (p *kBusinessFoundationServiceV1Client) BatchGetAssetAnalysisInputsPreviewV1(ctx context.Context, request *foundationv1.BatchGetAssetAnalysisInputsPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.BatchGetAssetAnalysisInputsPreviewResponseV1, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.BatchGetAssetAnalysisInputsPreviewV1(ctx, request)
+}
+
+func (p *kBusinessFoundationServiceV1Client) GetStoryboardPlanningContextPreviewV1(ctx context.Context, request *foundationv1.GetStoryboardPlanningContextPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.GetStoryboardPlanningContextPreviewResponseV1, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.GetStoryboardPlanningContextPreviewV1(ctx, request)
+}
+
+func (p *kBusinessFoundationServiceV1Client) SaveStoryboardDraftPreviewV1(ctx context.Context, request *foundationv1.SaveStoryboardDraftPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.SaveStoryboardDraftPreviewResponseV1, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.SaveStoryboardDraftPreviewV1(ctx, request)
+}
+
+func (p *kBusinessFoundationServiceV1Client) QueryStoryboardDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryStoryboardDraftCommandPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.QueryStoryboardDraftCommandPreviewResponseV1, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.QueryStoryboardDraftCommandPreviewV1(ctx, request)
+}
+
+func (p *kBusinessFoundationServiceV1Client) GetPromptGenerationContextPreviewV1(ctx context.Context, request *foundationv1.GetPromptGenerationContextPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.GetPromptGenerationContextPreviewResponseV1, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.GetPromptGenerationContextPreviewV1(ctx, request)
+}
+
+func (p *kBusinessFoundationServiceV1Client) SavePromptDraftPreviewV1(ctx context.Context, request *foundationv1.SavePromptDraftPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.SavePromptDraftPreviewResponseV1, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.SavePromptDraftPreviewV1(ctx, request)
+}
+
+func (p *kBusinessFoundationServiceV1Client) QueryPromptDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryPromptDraftCommandPreviewRequestV1, callOptions ...callopt.Option) (r *foundationv1.QueryPromptDraftCommandPreviewResponseV1, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.QueryPromptDraftCommandPreviewV1(ctx, request)
 }

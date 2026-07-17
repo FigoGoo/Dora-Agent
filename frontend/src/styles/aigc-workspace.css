@@ -1351,3 +1351,367 @@
     grid-template-columns: 1fr;
   }
 }
+.creation-spec-preview-panel {
+  display: grid;
+  gap: 1rem;
+  margin: 1.5rem 0;
+  padding: 1.25rem;
+  border: 1px solid rgba(112, 86, 191, 0.2);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.creation-spec-preview-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.creation-spec-preview-form header p,
+.creation-spec-card footer,
+.creation-spec-card__phases small {
+  color: var(--text-muted, #6f687d);
+}
+
+.creation-spec-preview-form input,
+.creation-spec-preview-form select,
+.creation-spec-preview-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid rgba(67, 54, 97, 0.24);
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+
+.creation-spec-preview-form__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.creation-spec-preview-form__grid label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.creation-spec-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(247, 244, 255, 0.98), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 12px 30px rgba(49, 34, 87, 0.08);
+}
+
+.creation-spec-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.creation-spec-card__eyebrow,
+.creation-spec-card__version {
+  color: #6846aa;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.creation-spec-card__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.creation-spec-card__summary div {
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(108, 75, 170, 0.07);
+}
+
+.creation-spec-card__summary dt {
+  color: var(--text-muted, #6f687d);
+  font-size: 0.78rem;
+}
+
+.creation-spec-card__summary dd {
+  margin: 0.2rem 0 0;
+  font-weight: 650;
+}
+
+.creation-spec-card__phases {
+  display: grid;
+  gap: 0.65rem;
+  padding-left: 1.4rem;
+}
+
+.creation-spec-card__phases li {
+  padding: 0.75rem;
+  border-left: 3px solid rgba(104, 70, 170, 0.45);
+}
+
+.plan-storyboard-preview-panel,
+.plan-storyboard-preview-form,
+.storyboard-preview-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.plan-storyboard-preview-panel {
+  margin: 1.5rem 0;
+  padding: 1.25rem;
+  border: 1px solid rgba(44, 119, 142, 0.24);
+  border-radius: 18px;
+  background: rgba(244, 252, 253, 0.82);
+}
+
+.plan-storyboard-preview-form textarea,
+.plan-storyboard-preview-form input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid rgba(35, 94, 112, 0.28);
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+
+.storyboard-preview-card {
+  padding: 1.25rem;
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(238, 250, 252, 0.98), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 12px 30px rgba(24, 78, 94, 0.09);
+}
+
+.storyboard-preview-card--failed {
+  border: 1px solid rgba(167, 67, 67, 0.24);
+  background: rgba(255, 247, 247, 0.96);
+}
+
+.storyboard-preview-card dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.storyboard-preview-card dl div,
+.storyboard-preview-card section > ol > li {
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(52, 135, 157, 0.07);
+}
+
+.storyboard-preview-card dd {
+  margin: 0.2rem 0 0;
+  font-weight: 650;
+}
+
+.storyboard-preview-card section > ol {
+  display: grid;
+  gap: 0.75rem;
+  padding-left: 1.4rem;
+}
+
+.write-prompts-preview-panel,
+.write-prompts-preview-form,
+.prompt-preview-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.write-prompts-preview-panel {
+  margin: 1.5rem 0;
+  padding: 1.25rem;
+  border: 1px solid rgba(78, 105, 175, 0.24);
+  border-radius: 18px;
+  background: rgba(245, 248, 255, 0.84);
+}
+
+.write-prompts-preview-form textarea,
+.write-prompts-preview-form select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid rgba(62, 82, 135, 0.28);
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+
+.prompt-preview-card {
+  padding: 1.25rem;
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(241, 245, 255, 0.98), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 12px 30px rgba(42, 63, 119, 0.09);
+}
+
+.prompt-preview-card--failed {
+  border: 1px solid rgba(167, 67, 67, 0.24);
+  background: rgba(255, 247, 247, 0.96);
+}
+
+.prompt-preview-card dl,
+.prompt-preview-card > ol {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.prompt-preview-card dl {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.prompt-preview-card dl div,
+.prompt-preview-card > ol > li {
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(72, 99, 169, 0.07);
+}
+
+.prompt-preview-card dd {
+  margin: 0.2rem 0 0;
+  font-weight: 650;
+}
+
+.text-material-panel,
+.text-material-form,
+.text-material-list,
+.analyze-materials-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.text-material-panel {
+  margin: 1.5rem 0;
+  padding: 1.25rem;
+  border: 1px solid rgba(89, 122, 77, 0.25);
+  border-radius: 18px;
+  background: rgba(248, 252, 245, 0.86);
+}
+
+.text-material-form textarea,
+.analyze-materials-form textarea,
+.analyze-materials-form select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid rgba(72, 101, 62, 0.28);
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+
+.text-material-list ul {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.text-material-list li {
+  padding: 0.7rem;
+  border-radius: 10px;
+  background: rgba(89, 122, 77, 0.07);
+}
+
+.text-material-list label,
+.analyze-materials-form fieldset label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.text-material-list span {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.analyze-materials-form fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  border: 1px solid rgba(72, 101, 62, 0.2);
+  border-radius: 10px;
+}
+
+.media-preview-controls,
+.media-preview-controls form,
+.media-preview-card {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.media-preview-controls {
+  margin: 1.5rem 0;
+  padding: 1.25rem;
+  border: 1px solid rgba(168, 101, 36, 0.24);
+  border-radius: 18px;
+  background: rgba(255, 249, 241, 0.88);
+}
+
+.media-preview-controls form {
+  padding: 1rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.media-preview-controls select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid rgba(134, 78, 29, 0.28);
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+
+.media-preview-card {
+  margin: 1rem 0;
+  padding: 1.25rem;
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(255, 246, 232, 0.98), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 12px 30px rgba(112, 65, 24, 0.09);
+}
+
+.media-preview-card--failed {
+  border: 1px solid rgba(167, 67, 67, 0.24);
+  background: rgba(255, 247, 247, 0.96);
+}
+
+.media-preview-card img,
+.media-preview-card video {
+  display: block;
+  width: min(100%, 640px);
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  background: #111;
+  object-fit: contain;
+}
+
+.media-preview-card dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.media-preview-card dl div {
+  min-width: 0;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(167, 101, 38, 0.07);
+}
+
+.media-preview-card dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+}

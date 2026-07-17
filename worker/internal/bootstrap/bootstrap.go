@@ -7,10 +7,16 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/FigoGoo/Dora-Agent/worker/internal/agentconsumer"
+	"github.com/FigoGoo/Dora-Agent/worker/internal/businessmedia"
+	"github.com/FigoGoo/Dora-Agent/worker/internal/clock"
 	"github.com/FigoGoo/Dora-Agent/worker/internal/config"
 	"github.com/FigoGoo/Dora-Agent/worker/internal/etcdcheck"
 	"github.com/FigoGoo/Dora-Agent/worker/internal/health"
 	"github.com/FigoGoo/Dora-Agent/worker/internal/httpserver"
+	"github.com/FigoGoo/Dora-Agent/worker/internal/idgen"
+	"github.com/FigoGoo/Dora-Agent/worker/internal/mediajob"
+	"github.com/FigoGoo/Dora-Agent/worker/internal/mediapreview"
 	"github.com/FigoGoo/Dora-Agent/worker/internal/postgres"
 	redisadapter "github.com/FigoGoo/Dora-Agent/worker/internal/redis"
 )
@@ -48,6 +54,56 @@ func Run(ctx context.Context, build BuildInfo) error {
 	if err := postgresClient.VerifySchema(ctx, cfg.PostgreSQL.PingTimeout); err != nil {
 		return err
 	}
+	var mediaProcessor *mediajob.Processor
+	if cfg.MediaRuntime.Enabled() {
+		artifactEngine, err := mediapreview.NewEngine(ctx, mediapreview.Config{
+			Profile: mediapreview.RuntimeProfileMediaV3Preview1, ObjectRoot: cfg.MediaRuntime.ObjectRoot,
+			GeneratorVersion: mediapreview.GeneratorVersionPNG640x360V1,
+			FFMPEGPath:       cfg.MediaRuntime.FFMPEGPath, FFprobePath: cfg.MediaRuntime.FFprobePath,
+			StderrLimitBytes: cfg.MediaRuntime.StderrLimitBytes,
+		})
+		if err != nil {
+			return fmt.Errorf("create media preview artifact engine: %w", err)
+		}
+		defer func() {
+			if closeErr := artifactEngine.Close(); closeErr != nil {
+				logger.Error("关闭媒体 Preview 产物引擎失败", "error_code", "INTERNAL")
+			}
+		}()
+		mediaRepository, err := postgres.NewMediaJobRepository(postgresClient)
+		if err != nil {
+			return err
+		}
+		agentClient, err := agentconsumer.Open(ctx, cfg.MediaRuntime)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if closeErr := agentClient.Close(); closeErr != nil {
+				logger.Error("关闭 Agent Media Consumer 失败", "error_code", "INTERNAL")
+			}
+		}()
+		businessClient, err := businessmedia.New(cfg.MediaRuntime)
+		if err != nil {
+			return err
+		}
+		defer businessClient.Close()
+		mediaProcessor, err = mediajob.NewProcessor(mediajob.ProcessorConfig{
+			WorkerID: cfg.Service.InstanceID, PollInterval: cfg.Worker.PollInterval,
+			LeaseTTL: cfg.Worker.LeaseTTL, HeartbeatInterval: cfg.Worker.HeartbeatInterval,
+			AttemptTimeout: cfg.Worker.AttemptTimeout, MaxAttempts: cfg.Worker.MaxAttempts,
+			AgentCallTimeout:    cfg.MediaRuntime.AgentCallTimeout,
+			BusinessCallTimeout: cfg.MediaRuntime.BusinessCallTimeout,
+			MaxPNGBytes:         cfg.MediaRuntime.MaxPNGBytes, MaxMP4Bytes: cfg.MediaRuntime.MaxMP4Bytes,
+			RetryBaseDelay: cfg.MediaRuntime.RetryBaseDelay, RetryMaxDelay: cfg.MediaRuntime.RetryMaxDelay,
+		}, mediaRepository, agentClient, businessClient, artifactEngine, idgen.UUIDv7{}, clock.System{}, nil, logger)
+		if err != nil {
+			return err
+		}
+		if err := mediaProcessor.Readiness(ctx); err != nil {
+			return err
+		}
+	}
 	redisClient, err := redisadapter.Open(ctx, cfg.Redis)
 	if err != nil {
 		return err
@@ -77,6 +133,12 @@ func Run(ctx context.Context, build BuildInfo) error {
 	}
 	serveErrors := make(chan error, 1)
 	go func() { serveErrors <- server.Serve(listener) }()
+	if mediaProcessor != nil {
+		if err := mediaProcessor.Start(); err != nil {
+			_ = listener.Close()
+			return err
+		}
+	}
 	state.SetReady(true)
 	logger.Info("Business Worker 基础 Runtime 已就绪", "http_addr", cfg.HTTP.Address,
 		"concurrency", cfg.Worker.Concurrency, "claim_batch_size", cfg.Worker.ClaimBatchSize)
@@ -90,6 +152,11 @@ func Run(ctx context.Context, build BuildInfo) error {
 	state.SetReady(false)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
+	if mediaProcessor != nil {
+		if err := mediaProcessor.Stop(shutdownCtx); err != nil && runErr == nil {
+			runErr = err
+		}
+	}
 	if err := server.Shutdown(shutdownCtx); err != nil && runErr == nil {
 		runErr = err
 	}

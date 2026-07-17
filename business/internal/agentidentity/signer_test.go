@@ -100,6 +100,171 @@ func TestSignerBindsToolsScopeToCanonicalTarget(t *testing.T) {
 	}
 }
 
+// TestSignerBindsCreationSpecPreviewToPOSTInternalTarget 验证 Preview 写 Scope 不能重放到 GET、公开 BFF 路径或其他 Session。
+func TestSignerBindsCreationSpecPreviewToPOSTInternalTarget(t *testing.T) {
+	identity := Identity{
+		RequestID:       "019f0000-0000-7000-8000-000000000001",
+		Method:          "POST",
+		CanonicalTarget: "/internal/v1/workspaces/sessions/019f0000-0000-7000-8000-000000000005/creation-spec-previews",
+		PrincipalUserID: "019f0000-0000-7000-8000-000000000002",
+		WebSessionID:    "019f0000-0000-7000-8000-000000000003", WebSessionVersion: 7,
+		ProjectID:      "019f0000-0000-7000-8000-000000000004",
+		AgentSessionID: "019f0000-0000-7000-8000-000000000005", Scope: ScopeCreationSpecPreviewWrite,
+	}
+	signer, err := NewSigner(fixedClock{value: time.UnixMilli(1784011500123)}, bytes.NewReader(make([]byte, 16)), Config{
+		KeyVersion: "active", Secret: bytes.Repeat([]byte{1}, 32), TTL: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewSigner() error = %v", err)
+	}
+	assertion, err := signer.Sign(identity)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	canonical, err := base64.RawURLEncoding.DecodeString(assertion.EncodedCanonical)
+	if err != nil {
+		t.Fatalf("decode assertion: %v", err)
+	}
+	lines := strings.Split(string(canonical), "\n")
+	if len(lines) != 16 || lines[5] != "POST" || lines[6] != identity.CanonicalTarget || lines[12] != ScopeCreationSpecPreviewWrite {
+		t.Fatalf("preview canonical mismatch: %q", canonical)
+	}
+	for _, mutate := range []func(*Identity){
+		func(candidate *Identity) { candidate.Method = "GET" },
+		func(candidate *Identity) { candidate.Method = "post" },
+		func(candidate *Identity) {
+			candidate.CanonicalTarget = "/api/v1/agent/sessions/019f0000-0000-7000-8000-000000000005/creation-spec-previews"
+		},
+		func(candidate *Identity) {
+			candidate.CanonicalTarget = "/internal/v1/workspaces/sessions/019f0000-0000-7000-8000-000000000006/creation-spec-previews"
+		},
+		func(candidate *Identity) { candidate.Scope = ScopeWorkspaceRead },
+	} {
+		candidate := identity
+		mutate(&candidate)
+		if err := validateIdentity(candidate); !errors.Is(err, ErrInvalidAssertionInput) {
+			t.Fatalf("mutated preview identity error=%v identity=%+v", err, candidate)
+		}
+	}
+}
+
+// TestSignerBindsAnalyzeMaterialsPreviewToPOSTInternalTarget 验证素材分析写 Scope 只能签入对应内部 Session 路径。
+func TestSignerBindsAnalyzeMaterialsPreviewToPOSTInternalTarget(t *testing.T) {
+	identity := Identity{
+		RequestID:       "019f0000-0000-7000-8000-000000000001",
+		Method:          "POST",
+		CanonicalTarget: "/internal/v1/workspaces/sessions/019f0000-0000-7000-8000-000000000005/analyze-materials-previews",
+		PrincipalUserID: "019f0000-0000-7000-8000-000000000002",
+		WebSessionID:    "019f0000-0000-7000-8000-000000000003", WebSessionVersion: 7,
+		ProjectID:      "019f0000-0000-7000-8000-000000000004",
+		AgentSessionID: "019f0000-0000-7000-8000-000000000005", Scope: ScopeAnalyzeMaterialsPreviewWrite,
+	}
+	if err := validateIdentity(identity); err != nil {
+		t.Fatalf("valid analyze materials identity error=%v", err)
+	}
+	for _, mutate := range []func(*Identity){
+		func(candidate *Identity) { candidate.Method = "GET" },
+		func(candidate *Identity) { candidate.Scope = ScopeCreationSpecPreviewWrite },
+		func(candidate *Identity) {
+			candidate.CanonicalTarget = "/internal/v1/workspaces/sessions/019f0000-0000-7000-8000-000000000005/creation-spec-previews"
+		},
+		func(candidate *Identity) {
+			candidate.CanonicalTarget = "/internal/v1/workspaces/sessions/019f0000-0000-7000-8000-000000000006/analyze-materials-previews"
+		},
+	} {
+		candidate := identity
+		mutate(&candidate)
+		if err := validateIdentity(candidate); !errors.Is(err, ErrInvalidAssertionInput) {
+			t.Fatalf("mutated analyze materials identity error=%v identity=%+v", err, candidate)
+		}
+	}
+}
+
+// TestSignerBindsPlanStoryboardPreviewToPOSTInternalTarget 验证 Storyboard 写 Scope 只能签入对应内部 Session 路径。
+func TestSignerBindsPlanStoryboardPreviewToPOSTInternalTarget(t *testing.T) {
+	identity := Identity{
+		RequestID:       "019f0000-0000-7000-8000-000000000001",
+		Method:          "POST",
+		CanonicalTarget: "/internal/v1/workspaces/sessions/019f0000-0000-7000-8000-000000000005/plan-storyboard-previews",
+		PrincipalUserID: "019f0000-0000-7000-8000-000000000002",
+		WebSessionID:    "019f0000-0000-7000-8000-000000000003", WebSessionVersion: 7,
+		ProjectID:      "019f0000-0000-7000-8000-000000000004",
+		AgentSessionID: "019f0000-0000-7000-8000-000000000005", Scope: ScopePlanStoryboardPreviewWrite,
+	}
+	if err := validateIdentity(identity); err != nil {
+		t.Fatalf("valid plan storyboard identity error=%v", err)
+	}
+	for _, mutate := range []func(*Identity){
+		func(candidate *Identity) { candidate.Method = "GET" },
+		func(candidate *Identity) { candidate.Scope = ScopeCreationSpecPreviewWrite },
+		func(candidate *Identity) {
+			candidate.CanonicalTarget = "/internal/v1/workspaces/sessions/019f0000-0000-7000-8000-000000000005/creation-spec-previews"
+		},
+		func(candidate *Identity) {
+			candidate.CanonicalTarget = "/internal/v1/workspaces/sessions/019f0000-0000-7000-8000-000000000006/plan-storyboard-previews"
+		},
+	} {
+		candidate := identity
+		mutate(&candidate)
+		if err := validateIdentity(candidate); !errors.Is(err, ErrInvalidAssertionInput) {
+			t.Fatalf("mutated plan storyboard identity error=%v identity=%+v", err, candidate)
+		}
+	}
+}
+
+// TestSignerBindsWritePromptsPreviewToPOSTInternalTarget 验证 Prompt 写作 Scope 只能签入对应内部 Session 路径。
+func TestSignerBindsWritePromptsPreviewToPOSTInternalTarget(t *testing.T) {
+	identity := Identity{
+		RequestID:       "019f0000-0000-7000-8000-000000000001",
+		Method:          "POST",
+		CanonicalTarget: "/internal/v1/workspaces/sessions/019f0000-0000-7000-8000-000000000005/write-prompts-previews",
+		PrincipalUserID: "019f0000-0000-7000-8000-000000000002",
+		WebSessionID:    "019f0000-0000-7000-8000-000000000003", WebSessionVersion: 1,
+		ProjectID:      "019f0000-0000-7000-8000-000000000004",
+		AgentSessionID: "019f0000-0000-7000-8000-000000000005", Scope: ScopeWritePromptsPreviewWrite,
+	}
+	if err := validateIdentity(identity); err != nil {
+		t.Fatalf("valid Write Prompts Preview identity rejected: %v", err)
+	}
+	for _, mutate := range []func(*Identity){
+		func(candidate *Identity) { candidate.Method = "GET" },
+		func(candidate *Identity) { candidate.CanonicalTarget += "/extra" },
+		func(candidate *Identity) { candidate.Scope = ScopePlanStoryboardPreviewWrite },
+	} {
+		candidate := identity
+		mutate(&candidate)
+		if err := validateIdentity(candidate); !errors.Is(err, ErrInvalidAssertionInput) {
+			t.Fatalf("invalid Write Prompts Preview identity accepted: %+v err=%v", candidate, err)
+		}
+	}
+}
+
+func TestSignerBindsMediaPreviewScopesToExactInternalTargets(t *testing.T) {
+	base := Identity{
+		RequestID:       "019f0000-0000-7000-8000-000000000001",
+		Method:          "POST",
+		PrincipalUserID: "019f0000-0000-7000-8000-000000000002",
+		WebSessionID:    "019f0000-0000-7000-8000-000000000003", WebSessionVersion: 1,
+		ProjectID:      "019f0000-0000-7000-8000-000000000004",
+		AgentSessionID: "019f0000-0000-7000-8000-000000000005",
+	}
+	for _, test := range []struct{ suffix, scope string }{
+		{"generate-media-previews", ScopeGenerateMediaPreviewWrite},
+		{"assemble-output-previews", ScopeAssembleOutputPreviewWrite},
+	} {
+		identity := base
+		identity.CanonicalTarget = "/internal/v1/workspaces/sessions/" + identity.AgentSessionID + "/" + test.suffix
+		identity.Scope = test.scope
+		if err := validateIdentity(identity); err != nil {
+			t.Fatalf("valid media identity rejected: %+v error=%v", identity, err)
+		}
+		identity.CanonicalTarget += "/extra"
+		if err := validateIdentity(identity); !errors.Is(err, ErrInvalidAssertionInput) {
+			t.Fatalf("media path alias accepted: %+v error=%v", identity, err)
+		}
+	}
+}
+
 func TestSignerRejectsCrossPathAndRandomFailure(t *testing.T) {
 	secret := bytes.Repeat([]byte{1}, 32)
 	identity := Identity{

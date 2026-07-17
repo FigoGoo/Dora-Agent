@@ -7,6 +7,7 @@ on:
       - "agent/**"
       - "worker/**"
       - "frontend/**"
+      - "docs/**"
       - "go.work"
       - "Makefile"
       - "scripts/**"
@@ -18,6 +19,13 @@ permissions:
   contents: read
 
 jobs:
+  document-single-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check development plan and design status single source
+        run: make test-document-single-source
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -33,6 +41,16 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  write-prompts-smoke-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Check Write Prompts canonical smoke contract
+        run: make test-write-prompts-runtime-smoke
 
   module:
     strategy:

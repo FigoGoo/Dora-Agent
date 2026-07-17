@@ -8,16 +8,20 @@
 >
 > 实现门禁：本文和 Corpus 只冻结候选语义。跨角色评审通过前，不得据此创建生产 Repository、Migration、HTTP/IDL 或宣称 `SMK-017/018` 已通过。
 
+> 2026-07-16 子集批准：完整契约仍未 Approved；V1 Preview 只获准实现单一 `plan_creation_spec` 输入所需的 HOL、Lease/Fence、稳定 Run、恢复和 Drain 最小子集。Preview 通过不得关闭 `SMK-017/018` 或升级为六 Tool 通用生产 Runtime。
+>
+> 2026-07-17 子集批准：[`user_message.runtime.v2preview1`](./user-message-runtime-v2-design.md) 只批准方案 A 的首个 QuickCreate `user_message`、最小 Turn Context、统一 HOL Source Dispatcher、无 Tool ChatModelAgent 与 Direct Response/Failure 投影。Executable Tool Registry 固定为空；本例外不批准 `analyze_materials`、通用取消/恢复、Marker、58 字段 Context 或本文完整生产契约。
+
 ## 1. 目的和当前事实
 
 本文把 [`runner-session-lane-review-v1.md`](./runner-session-lane-review-v1.md) 的 W2-R02 候选语义收敛为一个可执行的纯状态模型，先消除 Turn/Run 创建时点、HOL、Lease/Fence、Unknown Outcome、Cancel 和 Drain 的歧义，再进入 PostgreSQL Repository 设计。
 
-截至 2026-07-14，生产事实仍是：
+截至 2026-07-17，当前工作树事实是：
 
 - `session_runtime_lease` 只是 W0 空租约骨架；
-- `session_input` 生产路径只创建 `user_message/pending`，没有 Processor；
-- Turn、Run、Runtime、Recovery Scanner 和 PostgreSQL CheckpointStore 尚未实现；
-- Eino `v0.9.10` 已锁定，但当前只有依赖与兼容测试，没有生产 Runner 装配；
+- Ensure 生产路径创建 `user_message/pending`；V1 Preview 又新增 `creation_spec_preview`、专用 Run/Receipt/Projection、`recovery_pending` 和只处理该 Source 的 Processor，但它不得领取 `user_message`；
+- 通用 Turn/Run、统一 Source Dispatcher、`user_message` Recovery Scanner 和 PostgreSQL CheckpointStore 尚未实现；
+- Eino `v0.9.10` 已锁定，V1 Preview 已有专用 Runner 装配，但没有方案 A 的通用无 Tool ChatModelAgent 路径；
 - Redis input wake、Cancel API 和 Agent drain 协议均未实现。
 
 因此，本批新增的 Go 类型全部位于 `_test.go`，JSON 只存于 `agent/tests/contract/testdata/w2_r02`。

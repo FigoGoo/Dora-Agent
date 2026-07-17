@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -469,6 +468,25 @@ func TestAgentProxyClosesOversizedSSELineWithoutUnboundedRead(t *testing.T) {
 	}
 }
 
+// TestAgentProxyForwardsPromptPreviewSizedSSEFrame 验证 128 KiB Card 加事件信封后仍能通过 BFF 有界帧代理。
+func TestAgentProxyForwardsPromptPreviewSizedSSEFrame(t *testing.T) {
+	frame := "data: {\"payload\":\"" + strings.Repeat("x", 200<<10) + "\"}\n\n"
+	client := agentProxyClientFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(frame)),
+		}, nil
+	})
+	handler, _, _ := newAgentProxyHandlerForTest(t, client)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/agent/sessions/"+agentProxySessionID+"/events?after_seq=0", nil)
+	recorder := &agentProxyFlushRecorder{ResponseRecorder: httptest.NewRecorder()}
+	serveAgentProxyRequestWithWriter(handler, request, recorder)
+	if recorder.Code != http.StatusOK || recorder.Body.String() != frame || recorder.flushCalls != 2 {
+		t.Fatalf("Prompt SSE frame status=%d bytes=%d flushes=%d", recorder.Code, recorder.Body.Len(), recorder.flushCalls)
+	}
+}
+
 func TestAgentProxyEventsPropagatesBrowserCancellation(t *testing.T) {
 	entered := make(chan struct{})
 	canceled := make(chan struct{})
@@ -505,16 +523,6 @@ func TestAgentProxyEventsPropagatesBrowserCancellation(t *testing.T) {
 }
 
 func TestAgentHTTPClientForbidsRedirectReplay(t *testing.T) {
-	var targetCalls atomic.Int32
-	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		targetCalls.Add(1)
-	}))
-	defer target.Close()
-	redirect := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		writer.Header().Set("Location", target.URL)
-		writer.WriteHeader(http.StatusTemporaryRedirect)
-	}))
-	defer redirect.Close()
 	client, err := NewAgentHTTPClient(config.AgentHTTPConfig{RequestTimeout: time.Second})
 	if err != nil {
 		t.Fatalf("NewAgentHTTPClient() error = %v", err)
@@ -523,14 +531,11 @@ func TestAgentHTTPClientForbidsRedirectReplay(t *testing.T) {
 	if !ok || !transport.DisableKeepAlives || transport.ForceAttemptHTTP2 {
 		t.Fatalf("client transport permits assertion replay: %#v", client.Transport)
 	}
-	request, _ := http.NewRequest(http.MethodGet, redirect.URL, nil)
-	request.Header.Set(agentidentity.HeaderAssertion, agentProxyAssertion)
-	response, err := client.Do(request)
-	if response != nil {
-		_ = response.Body.Close()
-	}
-	if err == nil || targetCalls.Load() != 0 {
-		t.Fatalf("redirect was followed: err=%v target_calls=%d", err, targetCalls.Load())
+	original, _ := http.NewRequest(http.MethodGet, "http://agent.internal/original", nil)
+	original.Header.Set(agentidentity.HeaderAssertion, agentProxyAssertion)
+	redirected, _ := http.NewRequest(http.MethodGet, "http://other.internal/redirected", nil)
+	if err := client.CheckRedirect(redirected, []*http.Request{original}); err == nil {
+		t.Fatal("redirect callback allowed one-time assertion replay")
 	}
 }
 

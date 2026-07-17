@@ -52,6 +52,9 @@ type serviceRepository struct {
 	aggregate   QuickCreateAggregate
 	result      QuickCreateResult
 	bootstrap   BootstrapResult
+	listCalls   int
+	listQuery   ProjectListQuery
+	listResult  ProjectListResult
 	err         error
 }
 
@@ -67,6 +70,12 @@ func (repository *serviceRepository) FindOwnedByID(_ context.Context, _ string, 
 
 func (repository *serviceRepository) FindBootstrapOwnedByID(_ context.Context, _, _ string) (BootstrapResult, error) {
 	return repository.bootstrap, repository.err
+}
+
+func (repository *serviceRepository) ListOwned(_ context.Context, query ProjectListQuery) (ProjectListResult, error) {
+	repository.listCalls++
+	repository.listQuery = query
+	return repository.listResult, repository.err
 }
 
 func newProjectServiceForTest(t *testing.T, repository *serviceRepository, protector *serviceProtector) *Service {
@@ -166,5 +175,36 @@ func TestBootstrapCreationStatus(t *testing.T) {
 		if actual := (BootstrapResult{ProvisioningStatus: status}).CreationStatus(); actual != expected {
 			t.Fatalf("status %q: expected %q, got %q", status, expected, actual)
 		}
+	}
+}
+
+func TestServiceListOwnedValidatesBeforeRepositoryAndForwardsTrustedQuery(t *testing.T) {
+	repository := &serviceRepository{listResult: ProjectListResult{Items: []ProjectListItem{}}}
+	service := newProjectServiceForTest(t, repository, &serviceProtector{})
+	ownerID, _ := uuid.NewV7()
+	projectID, _ := uuid.NewV7()
+	after := ProjectListCursor{UpdatedAt: time.Date(2026, 7, 17, 9, 0, 0, 0, time.UTC), ProjectID: projectID.String()}
+
+	result, err := service.ListOwned(context.Background(), ProjectListQuery{OwnerUserID: ownerID.String(), Limit: 20, After: &after})
+	if err != nil {
+		t.Fatalf("list owned projects: %v", err)
+	}
+	if repository.listCalls != 1 || repository.listQuery.OwnerUserID != ownerID.String() || repository.listQuery.Limit != 20 ||
+		repository.listQuery.After == nil || repository.listQuery.After.ProjectID != projectID.String() || len(result.Items) != 0 {
+		t.Fatalf("unexpected project list forwarding: calls=%d query=%+v result=%+v", repository.listCalls, repository.listQuery, result)
+	}
+
+	for _, query := range []ProjectListQuery{
+		{OwnerUserID: "forged", Limit: 20},
+		{OwnerUserID: ownerID.String(), Limit: 0},
+		{OwnerUserID: ownerID.String(), Limit: MaxProjectListLimit + 1},
+		{OwnerUserID: ownerID.String(), Limit: 20, After: &ProjectListCursor{ProjectID: projectID.String()}},
+	} {
+		if _, err := service.ListOwned(context.Background(), query); !errors.Is(err, ErrInvalidProjectListQuery) {
+			t.Fatalf("query %+v: expected invalid list query, got %v", query, err)
+		}
+	}
+	if repository.listCalls != 1 {
+		t.Fatalf("invalid list query reached repository: calls=%d", repository.listCalls)
 	}
 }

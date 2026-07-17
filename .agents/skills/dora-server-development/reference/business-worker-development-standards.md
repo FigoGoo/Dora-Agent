@@ -21,7 +21,7 @@
 5. Runtime 数据访问统一使用 GORM。
 6. PostgreSQL Job/Outbox 是任务权威状态；Redis 只用于低延迟唤醒。
 7. Worker 执行语义是 At-Least-Once + 幂等，禁止宣称 Exactly-Once。
-8. PostgreSQL 使用 16，本地镜像为 `postgres:16-alpine`。
+8. PostgreSQL 使用 16，本地镜像为 `postgres:16.4-alpine`，与 `deploy/local/compose.yaml` 一致。
 9. 本地使用 Docker 中的 PostgreSQL、Redis 和 etcd。
 10. 本地 Go SDK 固定为 `/Users/figo/sdk/go1.26.3`。
 11. 严禁在数据库层面创建物理外键约束；Job、Attempt、Outbox、Entity、GORM Model 和 DTO 应保留业务需要的逻辑外键字段。
@@ -37,7 +37,7 @@
 | --- | --- | --- |
 | Go | Go 1.26.3 | 本地使用指定绝对路径 |
 | 数据访问 | GORM + PostgreSQL Driver | 所有访问经 Repository |
-| 数据库 | PostgreSQL 16 | `postgres:16-alpine` |
+| 数据库 | PostgreSQL 16 | `postgres:16.4-alpine` |
 | 唤醒 | Redis | 不存储任务权威状态 |
 | 服务发现 | etcd | 作为 Business RPC Client 时使用 |
 | RPC | Kitex + Thrift | 跨 Module 使用 DTO 契约 |
@@ -611,7 +611,7 @@ error_code
 测试要求：
 
 - Clock、ID Generator 和随机源可注入，禁止测试依赖真实长时间 Sleep。
-- Repository 集成测试使用真实 `postgres:16-alpine`，禁止使用 SQLite。
+- Repository 集成测试使用真实 `postgres:16.4-alpine`，禁止使用 SQLite。
 - 批量查询测试验证处理 1、10、100 个 Job 时 SQL 次数固定，不随 Job 数量增长。
 - 复杂 JOIN/CTE 查询测试覆盖 DTO 映射、空逻辑关联、一对多去重和分页。
 - Redis、etcd 集成测试使用 Docker 或 Testcontainers。
@@ -699,7 +699,7 @@ PR 必须说明：
 - [ ] Worker 自有 Migration 仅位于 `worker/migrations`，没有复制或修改其他 Module 拥有的 Migration。
 - [ ] Worker 未导入 Business、Agent 或仓库根其他 Module 的 `internal` 包，也未绕过公开契约访问其普通业务表。
 - [ ] 本地使用 `/Users/figo/sdk/go1.26.3/bin/go`。
-- [ ] PostgreSQL 使用 `postgres:16-alpine`。
+- [ ] PostgreSQL 使用 `postgres:16.4-alpine`。
 - [ ] Runtime 数据访问统一使用 GORM，未使用 AutoMigrate。
 - [ ] Migration 和实际 Schema 未创建任何数据库物理外键约束。
 - [ ] Job、Attempt、Outbox 及其他业务需要的逻辑外键字段已正确保留，并具有中文 COMMENT、必要索引和业务完整性校验。

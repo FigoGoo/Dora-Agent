@@ -105,6 +105,16 @@ func (r *SessionRepository) Ensure(ctx context.Context, plan session.EnsurePlan)
 			if err := tx.Create(modelPointer(mapSessionInputModel(*plan.Input))).Error; err != nil {
 				return fmt.Errorf("create initial session input: %w", err)
 			}
+			if plan.UserMessageRuntime != nil {
+				turnModel := mapUserMessageTurnModel(plan.UserMessageRuntime.Turn)
+				if err := tx.Create(&turnModel).Error; err != nil {
+					return fmt.Errorf("create user message runtime turn: %w", err)
+				}
+				contextModel := mapUserMessageContextModel(plan.UserMessageRuntime.Context)
+				if err := tx.Create(&contextModel).Error; err != nil {
+					return fmt.Errorf("create user message runtime context: %w", err)
+				}
+			}
 		}
 
 		// 创建新 Session 时 Event Counter 也首次建立，因此可在内存连续分配并一次批量 INSERT；
@@ -227,6 +237,64 @@ func (r *SessionRepository) LoadSkillSnapshot(
 	return mapStoredSkillSnapshot(header, items), nil
 }
 
+// LoadSkillSnapshots 使用至多两条 SQL 批量读取一组 Header 与 Items，供 Legacy Helper 完整
+// preflight 使用。Items 总读取量按“每个 Session 上限 + 1”封顶，数据库损坏只能失败关闭。
+func (r *SessionRepository) LoadSkillSnapshots(
+	ctx context.Context,
+	sessionIDs []string,
+	maxItems int,
+) ([]session.StoredSkillSnapshot, error) {
+	if len(sessionIDs) == 0 || len(sessionIDs) > 10_000 || maxItems <= 0 || maxItems > 32 {
+		return nil, session.ErrInvalidCommand
+	}
+	seen := make(map[string]struct{}, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		if sessionID == "" {
+			return nil, session.ErrInvalidCommand
+		}
+		if _, duplicate := seen[sessionID]; duplicate {
+			return nil, session.ErrInvalidCommand
+		}
+		seen[sessionID] = struct{}{}
+	}
+	var headers []sessionSkillSnapshotModel
+	if err := r.db.WithContext(ctx).
+		Where("session_id IN ?", sessionIDs).
+		Order("session_id ASC").
+		Find(&headers).Error; err != nil {
+		return nil, mapSessionRepositoryError(err)
+	}
+	if len(headers) != len(sessionIDs) {
+		return nil, session.ErrSnapshotNotFound
+	}
+	for _, header := range headers {
+		if header.SkillCount < 0 || header.SkillCount > maxItems {
+			return nil, session.ErrSnapshotLimitExceeded
+		}
+	}
+	var items []sessionSkillSnapshotItemModel
+	if err := r.db.WithContext(ctx).
+		Where("session_id IN ?", sessionIDs).
+		Order("session_id ASC, load_order ASC").
+		Limit((maxItems + 1) * len(headers)).
+		Find(&items).Error; err != nil {
+		return nil, mapSessionRepositoryError(err)
+	}
+	itemsBySession := make(map[string][]sessionSkillSnapshotItemModel, len(headers))
+	for _, item := range items {
+		group := append(itemsBySession[item.SessionID], item)
+		if len(group) > maxItems {
+			return nil, session.ErrSnapshotLimitExceeded
+		}
+		itemsBySession[item.SessionID] = group
+	}
+	result := make([]session.StoredSkillSnapshot, len(headers))
+	for index, header := range headers {
+		result[index] = mapStoredSkillSnapshot(header, itemsBySession[header.SessionID])
+	}
+	return result, nil
+}
+
 // sameRepositoryDigest 比较已完成 Receipt 与调用方预期摘要；两个值都由领域/Schema 约束为固定长度小写十六进制。
 func sameRepositoryDigest(left, right string) bool {
 	return left == right
@@ -269,6 +337,9 @@ func validateEnsurePlan(plan session.EnsurePlan) error {
 	}
 	if (plan.Message == nil) != (plan.Input == nil) {
 		return fmt.Errorf("%w: message and input must both exist or both be absent", session.ErrInvalidCommand)
+	}
+	if !session.ValidUserMessageRuntimePlanForRepository(plan) {
+		return fmt.Errorf("%w: user message runtime plan is inconsistent", session.ErrInvalidCommand)
 	}
 	expectedEventCount := 1
 	if plan.Message != nil {

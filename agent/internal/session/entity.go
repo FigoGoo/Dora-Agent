@@ -2,6 +2,8 @@
 package session
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/FigoGoo/Dora-Agent/agent/internal/event"
@@ -41,7 +43,59 @@ type InputSourceType string
 const (
 	// InputSourceTypeUserMessage 表示输入由用户消息产生。
 	InputSourceTypeUserMessage InputSourceType = "user_message"
+	// InputSourceTypeCreationSpecPreview 表示输入由已认证 Preview POST 的严格结构化 Intent 产生。
+	InputSourceTypeCreationSpecPreview InputSourceType = "creation_spec_preview"
+	// InputSourceTypeAnalyzeMaterialsPreview 表示输入由已认证素材分析 Preview POST 的严格 Intent 产生。
+	InputSourceTypeAnalyzeMaterialsPreview InputSourceType = "analyze_materials_preview"
+	// InputSourceTypePlanStoryboardPreview 表示输入由已认证 Storyboard Preview POST 的严格 Intent 产生。
+	InputSourceTypePlanStoryboardPreview InputSourceType = "plan_storyboard_preview"
+	// InputSourceTypeWritePromptsPreview 表示输入由已认证 Prompt Preview POST 的严格 Intent 产生。
+	InputSourceTypeWritePromptsPreview InputSourceType = "write_prompts_preview"
+	// InputSourceTypeGenerateMediaPreviewRequest 表示 generate_media typed ingress。
+	InputSourceTypeGenerateMediaPreviewRequest InputSourceType = "generate_media_preview_request"
+	// InputSourceTypeAssembleOutputPreviewRequest 表示 assemble_output typed ingress。
+	InputSourceTypeAssembleOutputPreviewRequest InputSourceType = "assemble_output_preview_request"
+	// InputSourceTypeMediaJobPreviewTerminal 表示 Worker 终态经 AppendOnce Bridge 返回 Session Lane。
+	InputSourceTypeMediaJobPreviewTerminal InputSourceType = "media_job_preview_terminal"
 )
+
+// Valid 只接受当前持久化 Schema 已批准的 Input Source exact-set。
+func (source InputSourceType) Valid() bool {
+	switch source {
+	case InputSourceTypeUserMessage, InputSourceTypeCreationSpecPreview, InputSourceTypeAnalyzeMaterialsPreview,
+		InputSourceTypePlanStoryboardPreview, InputSourceTypeWritePromptsPreview,
+		InputSourceTypeGenerateMediaPreviewRequest, InputSourceTypeAssembleOutputPreviewRequest,
+		InputSourceTypeMediaJobPreviewTerminal:
+		return true
+	default:
+		return false
+	}
+}
+
+// MarshalJSON 拒绝把未知 Input Source 写入事件、快照或持久化 JSON。
+func (source InputSourceType) MarshalJSON() ([]byte, error) {
+	if !source.Valid() {
+		return nil, fmt.Errorf("marshal session input source type: invalid value")
+	}
+	return json.Marshal(string(source))
+}
+
+// UnmarshalJSON 把 JSON 字符串严格映射到已批准的 Input Source exact-set。
+func (source *InputSourceType) UnmarshalJSON(encoded []byte) error {
+	if source == nil {
+		return fmt.Errorf("unmarshal session input source type: nil destination")
+	}
+	var value string
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		return fmt.Errorf("unmarshal session input source type: %w", err)
+	}
+	parsed := InputSourceType(value)
+	if !parsed.Valid() {
+		return fmt.Errorf("unmarshal session input source type: invalid value")
+	}
+	*source = parsed
+	return nil
+}
 
 // InputStatus 表示 Session Input 的持久化处理状态。
 type InputStatus string
@@ -55,6 +109,8 @@ const (
 	InputStatusRunning InputStatus = "running"
 	// InputStatusRetryWait 表示可重试失败后的有界等待状态。
 	InputStatusRetryWait InputStatus = "retry_wait"
+	// InputStatusRecoveryPending 表示外部命令结果未知或终态投影尚待恢复，仍阻塞 Session HOL。
+	InputStatusRecoveryPending InputStatus = "recovery_pending"
 	// InputStatusResolved 表示输入已经产生并提交冻结终态。
 	InputStatusResolved InputStatus = "resolved"
 	// InputStatusDead 表示输入达到重试上限或遇到不可恢复失败。
@@ -311,6 +367,8 @@ type EnsurePlan struct {
 	Input *Input
 	// Receipt 是与所有领域事实同事务提交的命令回执。
 	Receipt CommandReceipt
+	// UserMessageRuntime 是显式本地 Profile 开启时与首 Input 同事务冻结的最小 Turn/Context；空 Prompt 或关闭时为空。
+	UserMessageRuntime *UserMessageRuntimePlan
 	// Events 是严格有类型、无敏感正文的 EventLog 投影。
 	Events []event.Record
 }

@@ -32,6 +32,63 @@ func requiredAgentTables() []string {
 	}
 }
 
+func requiredCreationSpecPreviewTables() []string {
+	return []string{
+		"creation_spec_preview_model_receipt",
+		"creation_spec_preview_projection",
+		"creation_spec_preview_run",
+		"creation_spec_preview_tool_receipt",
+	}
+}
+
+func requiredUserMessageRuntimeTables() []string {
+	return []string{
+		"session_user_message_turn_context",
+		"session_user_message_model_receipt",
+		"session_user_message_output_projection",
+		"session_user_message_output_receipt",
+		"session_user_message_run",
+		"session_user_message_turn",
+		"session_user_message_upgrade_ledger",
+	}
+}
+
+// requiredAnalyzeMaterialsRuntimeTables 返回素材分析开发预览启用时必须完整存在的隔离表。
+func requiredAnalyzeMaterialsRuntimeTables() []string {
+	return []string{
+		"analyze_materials_preview_model_receipt",
+		"analyze_materials_preview_projection",
+		"analyze_materials_preview_run",
+		"analyze_materials_preview_tool_receipt",
+		"analyze_materials_preview_turn_context",
+	}
+}
+
+// requiredPlanStoryboardRuntimeTables 返回故事板规划开发预览启用时必须完整存在的隔离表。
+func requiredPlanStoryboardRuntimeTables() []string {
+	return []string{
+		"plan_storyboard_preview_model_receipt",
+		"plan_storyboard_preview_run",
+		"plan_storyboard_preview_tool_receipt",
+		"plan_storyboard_preview_turn_context",
+	}
+}
+
+// requiredWritePromptsRuntimeTables 返回 Prompt 写作开发预览启用时必须完整存在的隔离表。
+func requiredWritePromptsRuntimeTables() []string {
+	return []string{
+		"write_prompts_preview_model_receipt",
+		"write_prompts_preview_run",
+		"write_prompts_preview_tool_receipt",
+		"write_prompts_preview_turn_context",
+	}
+}
+
+func requiredMediaRuntimeTables() []string {
+	return []string{"media_preview_request", "media_preview_operation", "media_preview_batch",
+		"media_preview_job", "media_preview_dispatch_outbox", "media_preview_terminal_outbox"}
+}
+
 // tableNameRecord 承接一次固定 Schema 查询返回的表名，不向 Repository 或领域层暴露。
 type tableNameRecord struct {
 	// TableName 是 Agent Schema 中已经存在的普通表或分区表名称。
@@ -87,6 +144,282 @@ func (c *Client) VerifySchema(ctx context.Context, timeout time.Duration) error 
 	}
 	if err := c.verifySchemaContract(checkCtx); err != nil {
 		return err
+	}
+	return nil
+}
+
+// VerifyCreationSpecPreviewSchema 在 local Preview flag 开启时额外要求全部版本化运行时表存在。
+func (c *Client) VerifyCreationSpecPreviewSchema(ctx context.Context, timeout time.Duration) error {
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var records []tableNameRecord
+	if err := c.db.WithContext(checkCtx).Raw(`
+		SELECT relation.relname AS table_name
+		FROM pg_class AS relation
+		JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = ? AND relation.relkind IN ('r', 'p')`, schemaName).Scan(&records).Error; err != nil {
+		return fmt.Errorf("query creation spec preview tables: %w", err)
+	}
+	existing := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		existing[record.TableName] = struct{}{}
+	}
+	var missing []string
+	for _, table := range requiredCreationSpecPreviewTables() {
+		if _, ok := existing[table]; !ok {
+			missing = append(missing, table)
+		}
+	}
+	if len(missing) != 0 {
+		return fmt.Errorf("agent schema missing Preview tables: %s; run agent migrations", strings.Join(missing, ","))
+	}
+	return nil
+}
+
+// VerifyUserMessageRuntimeSchema 在本地方案 A 开启时要求全部隔离表存在。
+func (c *Client) VerifyUserMessageRuntimeSchema(ctx context.Context, timeout time.Duration) error {
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var records []tableNameRecord
+	if err := c.db.WithContext(checkCtx).Raw(`
+		SELECT relation.relname AS table_name
+		FROM pg_class AS relation
+		JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = ? AND relation.relkind IN ('r', 'p')`, schemaName).Scan(&records).Error; err != nil {
+		return fmt.Errorf("query user message runtime tables: %w", err)
+	}
+	existing := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		existing[record.TableName] = struct{}{}
+	}
+	var missing []string
+	for _, table := range requiredUserMessageRuntimeTables() {
+		if _, ok := existing[table]; !ok {
+			missing = append(missing, table)
+		}
+	}
+	if len(missing) != 0 {
+		return fmt.Errorf("agent schema missing user message runtime tables: %s; run agent migrations", strings.Join(missing, ","))
+	}
+	var legacyUpgradeReady bool
+	if err := c.db.WithContext(checkCtx).Raw(`
+		SELECT
+			EXISTS (
+				SELECT 1 FROM schema_migrations
+				WHERE version >= 20260717000900 AND dirty = false
+			)
+			AND EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_schema = 'agent'
+				  AND table_name = 'session_user_message_upgrade_ledger'
+				  AND column_name = 'upgrade_generation'
+			)
+			AND EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_schema = 'agent'
+				  AND table_name = 'session_user_message_upgrade_ledger'
+				  AND column_name = 'version'
+			)
+			AND EXISTS (
+				SELECT 1
+				FROM pg_trigger AS trigger_record
+				JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+				JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+				WHERE namespace.nspname = 'agent'
+				  AND relation.relname = 'session_user_message_upgrade_ledger'
+				  AND trigger_record.tgname = 'trg_session_user_message_upgrade_ledger__guard'
+				  AND NOT trigger_record.tgisinternal
+			)
+			AND EXISTS (
+				SELECT 1
+				FROM pg_trigger AS trigger_record
+				JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+				JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+				WHERE namespace.nspname = 'agent'
+				  AND relation.relname = 'session_command_receipt'
+				  AND trigger_record.tgname = 'trg_session_command_receipt__immutable'
+				  AND NOT trigger_record.tgisinternal
+			)
+			AND EXISTS (
+				SELECT 1
+				FROM pg_trigger AS trigger_record
+				JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+				JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+				WHERE namespace.nspname = 'agent'
+				  AND relation.relname = 'session_message'
+				  AND trigger_record.tgname = 'trg_session_message__immutable'
+				  AND NOT trigger_record.tgisinternal
+			)`).
+		Scan(&legacyUpgradeReady).Error; err != nil {
+		return fmt.Errorf("query user message legacy upgrade generation: %w", err)
+	}
+	if !legacyUpgradeReady {
+		return fmt.Errorf("agent user message legacy upgrade generation is not ready; run agent migrations")
+	}
+	return nil
+}
+
+// VerifyAnalyzeMaterialsRuntimeSchema 在本地素材分析 Profile 开启时要求全部隔离表和数据库 Guard 存在。
+func (c *Client) VerifyAnalyzeMaterialsRuntimeSchema(ctx context.Context, timeout time.Duration) error {
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var records []tableNameRecord
+	if err := c.db.WithContext(checkCtx).Raw(`
+		SELECT relation.relname AS table_name
+		FROM pg_class AS relation
+		JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = ? AND relation.relkind IN ('r', 'p')`, schemaName).Scan(&records).Error; err != nil {
+		return fmt.Errorf("query analyze materials runtime tables: %w", err)
+	}
+	existing := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		existing[record.TableName] = struct{}{}
+	}
+	var missing []string
+	for _, table := range requiredAnalyzeMaterialsRuntimeTables() {
+		if _, ok := existing[table]; !ok {
+			missing = append(missing, table)
+		}
+	}
+	if len(missing) != 0 {
+		return fmt.Errorf("agent schema missing analyze materials runtime tables: %s; run agent migrations", strings.Join(missing, ","))
+	}
+	var guardCount int64
+	if err := c.db.WithContext(checkCtx).Raw(`
+		SELECT COUNT(*)
+		FROM pg_trigger AS trigger_record
+		JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+		JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = 'agent'
+		  AND NOT trigger_record.tgisinternal
+		  AND trigger_record.tgname IN (
+		      'trg_analyze_materials_preview_turn_context__immutable',
+		      'trg_analyze_materials_preview_model_receipt__guard',
+		      'trg_analyze_materials_preview_tool_receipt__guard',
+		      'trg_analyze_materials_preview_projection__immutable'
+		  )`).Scan(&guardCount).Error; err != nil {
+		return fmt.Errorf("query analyze materials runtime guards: %w", err)
+	}
+	if guardCount != 4 {
+		return fmt.Errorf("agent analyze materials runtime guards are incomplete; run agent migrations")
+	}
+	return nil
+}
+
+// VerifyPlanStoryboardRuntimeSchema 在本地故事板规划 Profile 开启时要求全部隔离表和数据库 Guard 存在。
+func (c *Client) VerifyPlanStoryboardRuntimeSchema(ctx context.Context, timeout time.Duration) error {
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var records []tableNameRecord
+	if err := c.db.WithContext(checkCtx).Raw(`
+		SELECT relation.relname AS table_name
+		FROM pg_class AS relation
+		JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = ? AND relation.relkind IN ('r', 'p')`, schemaName).Scan(&records).Error; err != nil {
+		return fmt.Errorf("query plan storyboard runtime tables: %w", err)
+	}
+	existing := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		existing[record.TableName] = struct{}{}
+	}
+	var missing []string
+	for _, table := range requiredPlanStoryboardRuntimeTables() {
+		if _, ok := existing[table]; !ok {
+			missing = append(missing, table)
+		}
+	}
+	if len(missing) != 0 {
+		return fmt.Errorf("agent schema missing plan storyboard runtime tables: %s; run agent migrations", strings.Join(missing, ","))
+	}
+	var guardCount int64
+	if err := c.db.WithContext(checkCtx).Raw(`
+		SELECT COUNT(*)
+		FROM pg_trigger AS trigger_record
+		JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+		JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = 'agent'
+		  AND NOT trigger_record.tgisinternal
+		  AND trigger_record.tgname IN (
+		      'trg_plan_storyboard_preview_turn_context__immutable',
+		      'trg_plan_storyboard_preview_model_receipt__guard',
+		      'trg_plan_storyboard_preview_tool_receipt__guard'
+		  )`).Scan(&guardCount).Error; err != nil {
+		return fmt.Errorf("query plan storyboard runtime guards: %w", err)
+	}
+	if guardCount != 3 {
+		return fmt.Errorf("agent plan storyboard runtime guards are incomplete; run agent migrations")
+	}
+	return nil
+}
+
+// VerifyWritePromptsRuntimeSchema 在本地 Prompt 写作 Profile 开启时要求全部隔离表和数据库 Guard 存在。
+func (c *Client) VerifyWritePromptsRuntimeSchema(ctx context.Context, timeout time.Duration) error {
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var records []tableNameRecord
+	if err := c.db.WithContext(checkCtx).Raw(`
+		SELECT relation.relname AS table_name
+		FROM pg_class AS relation
+		JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = ? AND relation.relkind IN ('r', 'p')`, schemaName).Scan(&records).Error; err != nil {
+		return fmt.Errorf("query write prompts runtime tables: %w", err)
+	}
+	existing := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		existing[record.TableName] = struct{}{}
+	}
+	var missing []string
+	for _, table := range requiredWritePromptsRuntimeTables() {
+		if _, ok := existing[table]; !ok {
+			missing = append(missing, table)
+		}
+	}
+	if len(missing) != 0 {
+		return fmt.Errorf("agent schema missing write prompts runtime tables: %s; run agent migrations", strings.Join(missing, ","))
+	}
+	var guardCount int64
+	if err := c.db.WithContext(checkCtx).Raw(`
+		SELECT COUNT(*)
+		FROM pg_trigger AS trigger_record
+		JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+		JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = 'agent'
+		  AND NOT trigger_record.tgisinternal
+		  AND trigger_record.tgname IN (
+		      'trg_write_prompts_preview_turn_context__immutable',
+		      'trg_write_prompts_preview_model_receipt__guard',
+		      'trg_write_prompts_preview_tool_receipt__guard'
+		  )`).Scan(&guardCount).Error; err != nil {
+		return fmt.Errorf("query write prompts runtime guards: %w", err)
+	}
+	if guardCount != 3 {
+		return fmt.Errorf("agent write prompts runtime guards are incomplete; run agent migrations")
+	}
+	return nil
+}
+
+// VerifyMediaRuntimeSchema 要求 media.runtime.v3preview1 的六张 Agent-owned 表全部存在。
+func (c *Client) VerifyMediaRuntimeSchema(ctx context.Context, timeout time.Duration) error {
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var records []tableNameRecord
+	if err := c.db.WithContext(checkCtx).Raw(`SELECT relation.relname AS table_name
+		FROM pg_class AS relation JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = ? AND relation.relkind IN ('r','p')`, schemaName).Scan(&records).Error; err != nil {
+		return fmt.Errorf("query media runtime tables: %w", err)
+	}
+	existing := make(map[string]bool, len(records))
+	for _, record := range records {
+		existing[record.TableName] = true
+	}
+	var missing []string
+	for _, name := range requiredMediaRuntimeTables() {
+		if !existing[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("agent schema missing media runtime tables: %s; run agent migrations", strings.Join(missing, ","))
 	}
 	return nil
 }

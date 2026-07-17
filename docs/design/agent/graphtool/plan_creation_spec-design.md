@@ -1,16 +1,172 @@
 # `plan_creation_spec` Graph Tool 设计
 
-> 状态：Draft / 待产品、Business、Agent、财务与安全评审
+> 状态：V1 开发预览范围已批准 / 完整生产范围仍为 Draft
 >
 > Graph Key：`plan_creation_spec_graph_v1`
 >
-> Tool Definition Version：`plan_creation_spec.v1alpha1`
+> Tool Definition Version：开发预览 `plan_creation_spec.v1preview1`；生产目标 `plan_creation_spec.v1alpha1`
 >
 > Migration Owner：Business（CreationSpec），Agent（Run/Receipt/Approval）
 >
-> 实现门禁：评审结论为“通过”前禁止创建生产代码。
+> 实现门禁：允许实现本文第 0 节冻结的 V1 开发预览；计费、Approval、生产 availability 和第 1～12 节完整目标仍须另行评审。
 
 关联需求：`graph-tool-requirements-overview.md` 的 `plan_creation_spec`、Creation Spec、计费、审批、幂等、A2UI 与全功能冒烟条目。共同契约见 [`../../cross-module/aigc-contract-catalog.md`](../../cross-module/aigc-contract-catalog.md)。
+
+## 0. V1 开发预览设计冻结（2026-07-16）
+
+本节落实[功能优先开发与试跑计划](../../../requirements/full-function-smoke-development-plan.md)的 V1 首条纵切，是当前可实施范围。若本节与第 1～12 节完整生产目标冲突，**仅对 `plan_creation_spec.v1preview1` 以本节为准**；生产版本仍以完整目标为准，不得用预览结论替代计费、Approval、安全或发布评审。
+
+### 0.1 目标、边界与 availability
+
+V1 只证明以下用户价值：用户在真实 Project Workspace 提交创作目标后，系统经持久化 Session Lane、Eino Runner 和可执行 Graph Tool 生成一份严格结构化的 CreationSpec Draft，并通过 Event/SSE/Card 展示和恢复。
+
+V1 保留的架构不变量：
+
+- Business PostgreSQL 是 CreationSpec Draft 唯一真源；Agent 不保存或直写 Business 领域表；
+- HTTP 只鉴权、校验、持久化输入和唤醒，Processor 必须经 Session HOL、Lease/Fence 和 Eino Runner 执行；
+- 项目只有一个 `ChatModelAgent`，`plan_creation_spec` 是启动时预编译并注册的高层 Graph Tool；
+- 模型只生成 Proposal，独立确定性 Validator 通过后才能调用 Business Command；
+- Tool/Input/Business Command 使用稳定幂等键；同键同义重放、同键异义冲突；Unknown Outcome 先查询原键，权威 `not_found` 只有在完整规范命令已加密持久化且有重发预算时才允许有界重发同一键，禁止换键；
+- Agent Tool Result 先冻结，再投影 Event/Card；投影失败不得重调模型或重写 Business Draft；
+- 跨 Module 只使用版本化 Kitex/Thrift DTO，不引用其他 Module 的 `internal` 包。
+
+V1 明确不实现：扣费、收益、模型执行 Approval、激活 Approval、Correction、媒体任务、公开发布和生产 DeepSeek 默认启用。Draft 状态固定为 `draft`，不得冒充 `active`。生产 Catalog 继续 `unavailable`；仅在 Business 与 Agent 都显式配置 `DORA_AGENT_PLAN_SPEC_PREVIEW_ENABLED=true` 时向已鉴权 Workspace 暴露 `preview` 入口，缺少配置必须让 BFF、Agent Processor 与 Business Preview RPC 全部失败关闭，且生产环境禁止启用。
+
+浏览器同源入口固定为 `POST /api/v1/agent/sessions/:session_id/creation-spec-previews`；Business 重新编码严格 DTO 后调用 Agent 内部唯一目标 `POST /internal/v1/workspaces/sessions/:session_id/creation-spec-previews`，内部 Scope 固定为 `creation_spec.preview.write`。两个路径不得混用或接受 Query。
+
+V1 Preview Processor 只消费新 `source_type=creation_spec_preview` 输入，不得 Claim、跳过、改型或终结既有 `user_message`。因此本地 Preview 开关开启时，首页 QuickCreate 把 `initial_prompt` 显式延后为 `null`，原目标只在前端进程内按 `project_id` 一次性交给 Workspace 表单，用户确认后才持久化 Preview Intent；不得写入 URL、History state、`localStorage` 或 `sessionStorage`。对已经存在非终态非 Preview Input 的 Session，Agent 必须在任何计数器、Message、Input、Run、Receipt 或 Event 写入前返回 `409 SESSION_LANE_BLOCKED`（不可重试），不能返回一个永远排队的伪 202。完整 `user_message` Runtime 或显式 supersession 契约进入后续阶段，不得用原地修改旧 Input provenance 的方式偷渡。
+
+### 0.2 最小严格 DTO
+
+`PlanCreationSpecPreviewIntentV1` 只允许以下字段，所有 object 使用 strict decoder，拒绝未知字段、重复键、显式 `null`、尾随 token、非法 UTF-8 和非 NFC 字符串：
+
+| 字段 | 类型 | 规则 |
+|---|---|---|
+| `schema_version` | string | 必填且固定 `plan_creation_spec.preview.intent.v1` |
+| `goal` | string | 必填，NFC 后 1～2000 字符 |
+| `deliverable_type` | enum | 必填，仅 `video/image_set/audio/mixed` |
+| `audience` | string | 可省略，NFC 后最多 500 字符；省略与空字符串不同 |
+| `locale` | enum | 必填，仅 `zh-CN/en-US` |
+| `constraints` | string[] | 必填，可为空，最多 8 项；每项 1～200 字符，规范化后精确去重 |
+
+`user_id/project_id/session_id/input_id/turn_id/run_id/tool_call_id/idempotency_key/fence_token` 均由服务端可信上下文注入，不得进入模型可控 Schema。
+
+模型输出 `CreationSpecPreviewProposalV1`，只包含：
+
+| 字段 | 类型 | 规则 |
+|---|---|---|
+| `schema_version` | string | 固定 `creation_spec.preview.proposal.v1` |
+| `title` | string | 1～80 字符 |
+| `goal` | string | 1～2000 字符，必须保留用户目标语义 |
+| `deliverable_type` | enum | 必须等于 Intent |
+| `audience` | string | 最多 500 字符 |
+| `phases` | object[] | 1～6 项；每项固定 `key/title/objective/output`，key 唯一且匹配 `phase_[1-6]` |
+| `constraints` | string[] | 最多 8 项，必须包含 Intent 的全部硬约束 |
+| `acceptance_criteria` | string[] | 1～8 项；每项 1～240 字符且可验证 |
+
+Proposal 禁止出现资源 ID、用户 ID、价格、余额、状态、Approval、Provider、Prompt、Receipt 或任意服务端摘要。Validator 注入 `schema_version=creation_spec.draft.v1`、`status=draft` 和规范化摘要后才形成 `CreationSpecDraftV1`。
+
+`PlanCreationSpecPreviewResultV1` 只允许：
+
+- 成功：`status=completed`、`result_code=CREATION_SPEC_DRAFT_CREATED`、`resource_ref{id,version,digest,status=draft}`、`receipt_ref`；
+- 确定失败：`status=failed`、稳定 `result_code`、安全中文 `summary`、`retryable`、`receipt_ref`；
+- Unknown Outcome：不冻结 Result，Run 保持 `recovery_pending`，由同一 Business command key 查询后再收口。
+
+### 0.3 Business RPC 冻结
+
+Business Owner 的 Foundation IDL 在 V1 增加三组 Preview v1 方法；Preview 后缀明确其兼容和发布级别，后续生产方法使用新方法名/字段号：
+
+| RPC | 作用 | 幂等/一致性 |
+|---|---|---|
+| `GetCreationSpecContextPreviewV1` | 校验 `user_id/project_id` Owner，并返回 Project ID/version 与最小安全标题 | 只读；不存在和跨 Owner 统一 `NOT_FOUND` |
+| `SaveCreationSpecDraftPreviewV1` | 保存 Validator 产出的规范化 Draft JSON | `command_id` first-write-wins；同 digest 重放，异 digest `IDEMPOTENCY_CONFLICT` |
+| `QueryCreationSpecDraftCommandPreviewV1` | 消除保存 RPC 的 Unknown Outcome | 只按原 `command_id + request_digest` 查询；`not_found` 不授权换键，但在 Agent 已持久化完整原命令且有重发预算时可有界重发同一键 |
+
+这三组 RPC 是本地 Development Preview 临时子集，受 Business 开关再次保护；关闭时稳定返回不可重试 `FEATURE_DISABLED`。当前没有独立 Agent→Business caller authentication，不得用于共享或生产环境。正式服务身份认证、TLS、网络最小权限和生产 RPC Owner 在 P1 完成，详见 [`foundation-rpc-v1`](../../cross-module/foundation-rpc-v1.md)。
+
+Business 表至少保存 `id/project_id/user_id/status/version/schema_version/content_json/content_digest/source_tool_call_id/created_at/updated_at`；状态只允许 `draft`，应用生成 UUIDv7，所有字段有中文 COMMENT，无物理外键。`content_json` 是严格 DTO，不保存 Prompt、模型 reasoning 或 Provider 原文。
+
+### 0.4 Runner 与 Graph 拓扑
+
+```mermaid
+flowchart TD
+    S([START]) --> VI[validate_intent]
+    VI --> LC[load_context]
+    LC --> RP[render_prompt]
+    RP --> CM[call_model]
+    CM --> VP[validate_proposal]
+    VP --> SD[save_draft]
+    SD -->|saved/replayed| BR[build_result]
+    SD -->|unknown| QR[query_save_receipt]
+    QR -->|saved/replayed| BR
+    QR -->|unresolved| DR[defer_recovery]
+    BR --> X([END])
+    DR --> X
+```
+
+该 Graph 是无环 DAG，启动时使用 `compose.AllPredecessor` 编译并复用，不需要 fan-in、循环、ToolsNode、Interrupt 或 Checkpoint。Prompt、模型、Validator、Business Command 必须是独立 Node；`graph.go` 只组装拓扑。
+
+| Node Key | 分类 / Eino 实现 | 单一职责 | 副作用与失败 |
+|---|---|---|---|
+| `validate_intent` | guard / `AddLambdaNode` | strict decode、规范化和 Intent digest | 无副作用；非法输入确定失败 |
+| `load_context` | query / `AddLambdaNode` | 调 Business 校验 Owner/Project version | 只读 RPC；NOT_FOUND/版本错误确定失败 |
+| `render_prompt` | prompt / `AddChatTemplateNode` | 用版本化模板生成 classic Messages | 无副作用；模板错误确定失败 |
+| `call_model` | inference / `AddChatModelNode` | 生成一个 Proposal Message | V1 默认 FakeModel；ModelReceipt first-write-wins |
+| `validate_proposal` | validator / `AddLambdaNode` | strict parse、枚举/长度/阶段/约束闭合校验 | 无副作用；失败不得进入 Command |
+| `save_draft` | command / `AddLambdaNode` | 以稳定 command ID 调 Business 保存 Draft | Business 写；unknown 只能查询 |
+| `query_save_receipt` | query / `AddLambdaNode` | 查询原保存命令权威结果 | 只读；未确定进入 recovery_pending |
+| `build_result` | transform / `AddLambdaNode` | 构造严格成功 Result | 无外部副作用 |
+| `defer_recovery` | command / `AddLambdaNode` | 保留 open Run/Receipt 和恢复阶段 | 仅 Agent DB 状态写，不发布伪终态 |
+
+开发 FakeModel 仍实现 Eino `model.BaseChatModel`，返回与输入目标相关的确定性 Proposal；它不是绕过 Graph 的硬编码业务 Command。后续 DeepSeek Adapter 必须注入同一 Node 接口，不能改变 Validator 或 Business Command 语义。
+
+### 0.5 Typed State 与状态机
+
+`PlanCreationSpecPreviewStateV1` 固定字段：`trusted_context`、`intent`、`intent_digest`、`domain_context`、`prompt_messages`、`model_message`、`proposal`、`validation_report`、`draft`、`business_command_receipt`、`result`、`error`。State 仅存在于单次 Graph 调用；持久化只保存 ID/version/digest/ref，不保存完整 Prompt、reasoning 或数据库连接。
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: HTTP 持久化输入
+    pending --> running: Session Lane claim + fence
+    running --> recovery_pending: Business outcome unknown / 投影待恢复
+    recovery_pending --> running: 原 ID 与更高 fence 恢复
+    running --> resolved: Tool Result 冻结且投影提交
+    running --> dead: 确定不可恢复错误
+    resolved --> [*]
+    dead --> [*]
+```
+
+Business CreationSpec 的 V1 状态机只有 `不存在 → draft`；重复命令重放原 Draft，不创建第二个版本。Agent Input/Run/ToolReceipt 与 Business Draft 是不同状态空间，不得互相推断或压平。
+
+### 0.6 持久化、幂等和恢复
+
+- HTTP 使用客户端幂等键建立 first-write-wins 入队回执；首次写入冻结稳定 `input_id/tool_call_id/business_command_id`，同义重放先只读返回原 Input，不能依赖新的内容加密、随机 ID 或时钟；最终并发竞态仍由入队事务收敛；
+- Session Lane 只领取每个 Session 最小未决 `enqueue_seq`，并同时校验 Session lease 和 Input fence；
+- 入队事务锁定 Session sequence 后检查非 Preview 未决前驱；命中时以 `SESSION_LANE_BLOCKED` 零增量失败，禁止跳过 HOL 或改写旧 `user_message` 的 `source_type/source_id/message_id/input_id`；
+- ModelReceipt 在调用前冻结 request digest，已有完整响应时重放，避免 Agent 投影失败后再次调用模型；
+- Business Command digest 固定为 `SHA-256(JSON)`，Schema 为 `creation_spec.preview.save-draft.digest.v1`；JSON 字段顺序严格是 `schema_version,user_id,project_id,expected_project_version,tool_call_id,prompt_version,validator_version,content`，其中 Content 顺序严格是 `title,goal,deliverable_type,audience,locale,phases,constraints,acceptance_criteria`，Phase 顺序严格是 `key,title,objective,output`；禁止使用 Map、易变时间、command_id 或 Run attempt 参与摘要；Agent/Business 必须共同通过 [`creation_spec_preview_save_digest_v1.json`](../../cross-module/testdata/creation_spec_preview_save_digest_v1.json) 固定向量；
+- Business 保存成功后 Agent 冻结 Tool Result/Resource Ref，再在同一 Agent 事务写 Projection/Event 并 resolve Input；
+- 崩溃恢复优先读 Agent Receipt 和 Business Query，不重新渲染 Prompt、调用模型或创建 Draft；
+- Event 只携带安全 Card DTO 和 Resource Ref；完整 Draft 由版本化 Resource Read 或 Snapshot Projection 恢复。
+
+当前实现已增加 `creation_spec.preview.durable-draft-command.v1` 恢复账本：`PrepareCommand` 加密持久化完整严格 Draft Command、payload digest 与 key version，并按 Receipt 冻结重发上限。恢复先以原 `command_id + request_digest` Query；只有 Business 权威 `not_found` 才由当前 Fence 在行锁/CAS 下领取一次预算并重发解密后的同一命令，可信 Owner/Fence 从当前执行上下文重建而不进入持久化命令。技术 Query 失败保持 query-only；最终权威 `not_found` 才冻结 `business_resend_exhausted`，Input 继续保持 `recovery_pending` 以维持 HOL。Graph/Repository 测试已覆盖同键重发、技术失败不误耗尽、重启解密、预算 CAS 和 exhausted Claim/HOL；canonical Smoke 还会在停止正式 Agent 后，以真实 PostgreSQL、全新 AEAD/Repository 实例、正式 `CompiledGraph.Recover` 和测试侧脚本化 Business adapter 验证 technical→`not_found`→同键重发→exhausted/HOL，并只把布尔/计数写入 0600 Evidence。该探针的静态契约和无 DSN 编译/skip 已通过，真实执行 Evidence 仍是 V1 退出门槛。
+
+V1 的确定性 FakeModel 没有外部财务或 Provider 副作用，但当前遗留 `pending` Model Receipt 在新 Fence 下仍可能重新执行模型。接入真实 DeepSeek 前，必须引入稳定 Provider 请求键与可查询的 `model_unknown` 恢复阶段；未证明首次调用未发生时不得直接重调。该项是 V2 真实模型接入门禁，不影响本地 FakeModel 预览的边界说明。
+
+### 0.7 安全、测试与评审结论
+
+V1 浏览器入口继续使用 Business 同源 Session、CSRF、Project Owner 校验和 Business→Agent 短期签名身份断言；Agent 不信任前端传入的 User/Project/Session 绑定。当前断言只绑定身份、方法、路径与 Scope，尚未把规范 `Idempotency-Key` 和正文 SHA-256 纳入签名，因此即使双端开关打开也只允许 local-only Preview；共享或生产环境必须先版本化升级 assertion，并在完整静态绑定校验后消费 Nonce。Agent→Business Preview RPC 同样是明确标记的本地开发限制，不得描述成已完成服务认证。普通日志只记录 ID/version/digest、Node Key、状态和耗时。
+
+V1 必测：strict DTO 边界、FakeModel 正常/非法输出、Validator、Graph Compile/Node exact-set、同键重放/异义冲突、重放不调用内容保护器/随机源、Business 保存响应丢失、投影失败重放、Session HOL/Fence、非空 QuickCreate predecessor 的 `SESSION_LANE_BLOCKED` 零增量、空 QuickCreate 正向链、跨 Owner、CSRF、SSE 重连、硬刷新和 Agent 重启。完整计费、Approval、Correction、真实模型失败矩阵进入 P1。
+
+- [x] 产品范围：用户已确认“主要功能优先、生产细节后置”，V1 固定只产出 Draft；
+- [x] Business：Owner、Migration、RPC、幂等与 Draft 状态已冻结；
+- [x] Agent：Runner、Graph、Validator、Receipt、Event 与恢复边界已冻结；
+- [x] 前端/测试：Preview 入口、Card 和 V1 验收路径已冻结；
+- [x] 财务：V1 无计费、无收益、无退款，不适用；
+- [x] 安全：同源入口与当前 Business→Agent 身份断言已冻结为 local-only Preview；正文/幂等键签名绑定与 Agent→Business 服务认证均未完成，生产安全不被视为已通过。
+
+**V1 评审结论：Approved for Development Preview。** 该结论只授权 `plan_creation_spec.v1preview1`，不授权生产 availability 或第 1～12 节完整生产流程。
 
 ## 1. 场景、目标与边界
 
@@ -520,4 +676,4 @@ ModelReceipt 使用稳定内部键绑定 `tool_key + graph_run_id + node_key + p
 - [ ] 安全确认素材最小化、Prompt 与日志策略；
 - [ ] 测试确认契约、故障注入和 SMK-P0 映射。
 
-当前结论：**待评审，不通过实现门禁。**
+完整生产结论：**待评审，不通过生产 availability 门禁。** 第 0 节 `plan_creation_spec.v1preview1` 已批准进入 V1 开发预览，二者不得混用。

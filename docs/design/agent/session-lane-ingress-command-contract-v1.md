@@ -7,6 +7,10 @@
 > 适用范围：Agent Session Input 入队、全局 CommandID、Source first-write-wins、稳定 Turn 创建与命令查询
 >
 > 实现门禁：本文只冻结测试专用逻辑模型。跨角色评审通过前，不得据此修改生产 Migration、Repository、HTTP/IDL 或宣称 `SMK-017/020` 已通过。
+>
+> 2026-07-16 Preview 例外：上述门禁继续约束通用 `enqueue_input_v1` 和完整生产 Lane；[`plan_creation_spec.v1preview1`](./graphtool/plan_creation_spec-design.md#0-v1-开发预览设计冻结2026-07-16) 已按独立最小 Input/Run/Receipt 子集批准实现，不表示本文通用 Command Receipt 或 `SMK-017/020` 已 Approved。开发顺序只以[功能优先开发与试跑计划](../../requirements/full-function-smoke-development-plan.md)为准。
+>
+> 2026-07-17 Preview 例外：[`user_message.runtime.v2preview1`](./user-message-runtime-v2-design.md) 方案 A 只复用现有 Ensure V1/V2 创建的首个 `user_message` 与稳定 Receipt/Message/Input 身份，不采用本文 test-only `enqueue_input_v1`，也不批准 approval、batch、resume 或新 Source DTO。
 
 ## 1. 目的和当前事实
 
@@ -16,8 +20,8 @@
 
 - `agent.session_command_receipt.command_id` 已是 Agent Session Command 域全局主键，现有 `ensure_project_session_v1/v2` 通过同一表执行 first-write-wins；UUIDv7 由应用校验，数据库主键本身不验证版本位；
 - `SessionRepository.Ensure` 已按 CommandID 事务级 advisory lock 串行化，Agent 会独立重算 Ensure 请求摘要；
-- `session_input` 已有 `(session_id, source_type, source_id)` 和 `(session_id, enqueue_seq)` 唯一约束，但生产 `source_type` 只允许 `user_message`，没有 `source_digest/version`；现有 Receipt/Content 摘要持久字段使用裸 64 位 lowercase hex；
-- W0 创建首个 `pending` Input 时尚不创建 Turn；Approval/Batch Continuation、通用 Enqueue API、Redis Wake、Scanner 与 Processor 均未实现；
+- `session_input` 已有 `(session_id, source_type, source_id)` 和 `(session_id, enqueue_seq)` 唯一约束；Migration 006 已允许 `user_message/creation_spec_preview`，没有本文候选的通用 `source_digest/version`；现有 Receipt/Content 摘要持久字段使用裸 64 位 lowercase hex；
+- Ensure 创建首个 `user_message/pending` 时尚不创建 Turn；V1 Preview 另有专用 Writer/Processor，Approval/Batch Continuation 与通用 Enqueue API 仍未实现；
 - 现有 Command Receipt 的字段组和 CHECK 仍是 Ensure 专用，不能直接声称可承载 Runtime 命令。
 
 因此，本批只新增 `_test.go` 和测试 Corpus，不修改生产 Go、SQL 或对外协议。

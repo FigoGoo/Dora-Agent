@@ -7,6 +7,12 @@
 > 适用范围：Agent Session Lane 的 Turn 身份、不可变执行上下文、Message Set、Snapshot 引用、legacy Input 升级和 Runner 恢复读取
 >
 > 实现门禁：本文是评审候选，不是已批准 Schema。第 12 节 P0 与第 13 节跨角色审核全部关闭前，禁止创建生产 Migration、GORM Model、Repository、Helper、HTTP/IDL 或 Runtime Writer；禁止把本文字段直接复制为生产实现，也不得据此宣称 `SMK-017/018/020` 已通过。
+>
+> 2026-07-16 Preview 例外：上述门禁继续约束完整 Immutable Turn Context 与生产 Schema；[`plan_creation_spec.v1preview1`](./graphtool/plan_creation_spec-design.md#0-v1-开发预览设计冻结2026-07-16) 已批准专用最小稳定 Turn/Run/Tool 身份，但不复制本文 58 字段候选、不升级 legacy cohort，也不关闭 `SMK-017/018/020`。
+>
+> 2026-07-17 Preview 例外：[`user_message.runtime.v2preview1`](./user-message-runtime-v2-design.md) 方案 A 只批准 schema `user_message.turn_context.v2preview1` 与独立 `session_user_message_turn_context` 的最小字段 exact-set。它不是 `dora.session_turn_context.v1`，不承载 Tool/Assistant History、Approval、Batch、Continuation 或多轮 Chat，不能关闭或替代本文 58 字段候选与 TC-P01～TC-P10。
+>
+> 2026-07-17 M2 Preview 例外：[`plan_storyboard.runtime.v2preview1`](./plan-storyboard-runtime-v2-design.md) 只批准 local-only、单 Tool、独立表与逐文件清单约束的 typed Input、最小 Storyboard Turn Context、Session HOL/Fence、两层 Model/Tool Receipt 和 ChatModelAgent 纵切。它不实现本文 58 字段候选，不承载 History、Approval、Batch、Continuation 或多轮 Chat，不解锁通用 Runtime/Registry，也不改变 `awaiting_owner_approval`、`implementation_unlocked=false` 或 TC-P01～TC-P10 生产门禁。
 
 ## 1. 目的、范围和当前事实
 
@@ -490,7 +496,7 @@ Message 不可变 Trigger 只有在 Context 为零、没有依赖其 append-only
 9. **Turn/Run 与 Activation**：批准 Turn/Run 状态、Context 损坏映射、quarantine/HOL、legacy Ledger/Helper、Capability generation、旧 Writer drain 和零早启协议。
 10. **物理与证据审核**：批准字段长度/NULL/CHECK/索引/触发器、固定查询上限、Up/Down、真实 PostgreSQL crash/race/CLI migration 矩阵和脱敏 Evidence Bundle。
 
-这 10 项任何一项未关闭，都不得创建生产 Turn/Context Migration 或 Repository。当前允许的下一步仅是设计评审和 test-only canonical Corpus；Corpus 也必须在独立变更中创建，不能与生产实现混合。
+这 10 项任何一项未关闭，都不得创建完整生产 Turn/Context Migration 或 Repository。除已单独批准的 V1 Preview 专用最小身份子集外，当前允许的下一步仅是设计评审和 test-only canonical Corpus；Corpus 也必须在独立变更中创建，不能与生产实现混合。
 
 ## 13. 审核角色与批准条件
 
@@ -572,7 +578,7 @@ Message 不可变 Trigger 只有在 Context 为零、没有依赖其 append-only
 
 Message Set full-array 与 Turn Context 58 字段 test-only Corpus 已形成可执行的模型契约证据，但只冻结推荐候选的 canonical、条件组、引用绑定、摘要和失败关闭边界；真实 DDL/Store/Runner 与 Owner Approval 仍不存在，`SMK-009/017/018/020` 均不能因此关闭。
 
-推荐下一步顺序：
+以下顺序只表示本文完整生产 Profile 内部的依赖闭合关系，不是仓库当前开发排期；仓库阶段和“当前下一步”唯一以[功能优先开发与试跑计划](../../requirements/full-function-smoke-development-plan.md)为准：
 
 1. Agent Runtime、PostgreSQL 和安全先联合关闭冻结时点、模型可见历史与 Message Set/prefix-chain；
 2. 各 Snapshot Owner 提供不可变 ref/digest/读取/保留契约；

@@ -5,6 +5,8 @@
 > 适用范围：用户端创作页聊天框中的服务端驱动交互卡片
 > 关联文档：[AIGC ChatModelAgent 详细设计](./aigc-chatmodelagent-demo-design.md)、[AIGC Tool 与 Storyboard 详细设计](./aigc-tool-storyboard-design.md)、[AIGC Generation Worker 详细设计](./aigc-worker-design.md)
 
+> 排期口径：本文保留完整目标组件/Action 设计；唯一排期以[功能优先开发与试跑计划](./requirements/full-function-smoke-development-plan.md)为准。V1 只实现 CreationSpec Preview Card、完成/失败 Event 与 Snapshot/SSE 恢复，不能据此宣称完整 A2UI 已完成。
+
 ## 1. 目标与边界
 
 A2UI 是 Agent 将对话、表单、审核、Tool 进度和生成状态投影到用户端创作页聊天框的协议。它解决“服务端决定展示什么交互、前端用受控组件渲染”的问题，但不承载业务真值。

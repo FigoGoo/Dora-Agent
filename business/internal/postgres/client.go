@@ -14,7 +14,7 @@ import (
 
 const schemaName = "business"
 
-// requiredBusinessTables 是 Business Runtime 进入 Ready 前必须存在的 W0 与 W1 Foundation 权威表固定集合。
+// requiredBusinessTables 是 Business Runtime 进入 Ready 前必须存在的 Foundation 权威表固定集合。
 var requiredBusinessTables = [...]string{
 	"user_account",
 	"user_login_identity",
@@ -31,6 +31,18 @@ var requiredBusinessTables = [...]string{
 	"skill_published_snapshot",
 	"skill_command_receipt",
 	"skill_governance_audit",
+	"creation_spec",
+	"creation_spec_command_receipt",
+	"asset_analysis_preview_assets",
+	"asset_analysis_preview_evidence",
+	"storyboard_preview_draft",
+	"storyboard_preview_command_receipt",
+}
+
+var requiredMediaPreviewTables = [...]string{
+	"media_preview_asset",
+	"media_preview_preparation_receipt",
+	"media_preview_finalization_receipt",
 }
 
 // Client 封装 Business PostgreSQL 连接和底层连接池生命周期。
@@ -94,6 +106,23 @@ func (c *Client) VerifySchema(ctx context.Context, timeout time.Duration) error 
 	}
 	if err := c.verifySchemaContract(checkCtx); err != nil {
 		return err
+	}
+	return nil
+}
+
+// VerifyMediaPreviewSchema 只在媒体 Profile 开启时确认三张 local-only 权威表已迁移。
+func (c *Client) VerifyMediaPreviewSchema(ctx context.Context, timeout time.Duration) error {
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var count int64
+	if err := c.db.WithContext(checkCtx).Raw(`
+		SELECT COUNT(*)
+		FROM pg_catalog.pg_tables
+		WHERE schemaname = ? AND tablename IN ?`, schemaName, requiredMediaPreviewTables[:]).Scan(&count).Error; err != nil {
+		return fmt.Errorf("query business media preview schema: %w", err)
+	}
+	if count != int64(len(requiredMediaPreviewTables)) {
+		return fmt.Errorf("business media preview schema is missing required tables: found %d of %d; run business migrations", count, len(requiredMediaPreviewTables))
 	}
 	return nil
 }

@@ -25,11 +25,13 @@ type registrationRecordV1 struct {
 
 // EtcdResolver 从 Dora 稳定服务 Prefix 解析可访问的 Business RPC 实例。
 type EtcdResolver struct {
-	client *clientv3.Client
+	client        *clientv3.Client
+	allowLoopback bool
 }
 
 // NewEtcdResolver 创建具有独立生命周期的 Resolver，并确认至少一个 etcd Endpoint 可用。
-func NewEtcdResolver(ctx context.Context, cfg config.EtcdConfig) (*EtcdResolver, error) {
+// allowLoopback 只供已经通过 Config local + exact Profile 门禁的单机 Preview 使用。
+func NewEtcdResolver(ctx context.Context, cfg config.EtcdConfig, allowLoopback bool) (*EtcdResolver, error) {
 	client, err := clientv3.New(clientv3.Config{Endpoints: cfg.Endpoints, DialTimeout: cfg.DialTimeout})
 	if err != nil {
 		return nil, fmt.Errorf("open Business RPC etcd resolver: %w", err)
@@ -40,7 +42,7 @@ func NewEtcdResolver(ctx context.Context, cfg config.EtcdConfig) (*EtcdResolver,
 		_, lastStatusErr = client.Status(statusCtx, endpoint)
 		cancel()
 		if lastStatusErr == nil {
-			return &EtcdResolver{client: client}, nil
+			return &EtcdResolver{client: client, allowLoopback: allowLoopback}, nil
 		}
 	}
 	_ = client.Close()
@@ -65,7 +67,7 @@ func (r *EtcdResolver) Resolve(ctx context.Context, serviceName string) (discove
 	}
 	instances := make([]discovery.Instance, 0, len(response.Kvs))
 	for _, item := range response.Kvs {
-		if instance, ok := parseRegistrationInstance(serviceName, item.Value); ok {
+		if instance, ok := parseRegistrationInstance(serviceName, item.Value, r.allowLoopback); ok {
 			instances = append(instances, instance)
 		}
 	}
@@ -77,7 +79,7 @@ func (r *EtcdResolver) Resolve(ctx context.Context, serviceName string) (discove
 }
 
 // parseRegistrationInstance 把不可信 etcd Value 收敛为 Kitex Instance；任何不完整或不可访问记录都被隔离。
-func parseRegistrationInstance(serviceName string, value []byte) (discovery.Instance, bool) {
+func parseRegistrationInstance(serviceName string, value []byte, allowLoopback bool) (discovery.Instance, bool) {
 	var record registrationRecordV1
 	if err := json.Unmarshal(value, &record); err != nil || record.Service != serviceName ||
 		strings.TrimSpace(record.InstanceID) == "" || strings.TrimSpace(record.Version) == "" {
@@ -92,11 +94,13 @@ func parseRegistrationInstance(serviceName string, value []byte) (discovery.Inst
 		return nil, false
 	}
 	plainHost := strings.Trim(strings.ToLower(host), "[]")
-	if plainHost == "localhost" {
+	if plainHost == "localhost" && !allowLoopback {
 		return nil, false
 	}
-	if ip := net.ParseIP(plainHost); ip != nil && (ip.IsLoopback() || ip.IsUnspecified()) {
-		return nil, false
+	if ip := net.ParseIP(plainHost); ip != nil {
+		if ip.IsUnspecified() || (ip.IsLoopback() && !allowLoopback) {
+			return nil, false
+		}
 	}
 	return discovery.NewInstance("tcp", record.Address, discovery.DefaultWeight, map[string]string{
 		"instance_id": record.InstanceID,

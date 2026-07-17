@@ -423,6 +423,11 @@ func (w *sseWriter) start() error {
 	w.response.Header().Set("X-Accel-Buffering", "no")
 	return w.withFrameDeadline(func() error {
 		w.response.WriteHeader(http.StatusOK)
+		// Gin 的 WriteHeader 只缓存状态码；底层 ResponseController Flush 会绕过包装层提交 Header。
+		// 先同步包装层的 committed 状态，避免后续帧再次向 net/http 写同一个 Header。
+		if committer, ok := w.response.(interface{ WriteHeaderNow() }); ok {
+			committer.WriteHeaderNow()
+		}
 		return w.control.Flush()
 	})
 }

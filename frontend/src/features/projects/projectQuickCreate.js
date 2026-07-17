@@ -6,7 +6,14 @@ export const PROJECT_QUICK_CREATE_MAX_SKILL_COUNT = 16;
 const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 // quickCreateProject 提交一次稳定创建意图；调用方拥有并复用 Idempotency-Key。
-export function quickCreateProject({ prompt, enabledSkillIDs = [], idempotencyKey, csrfToken, signal } = {}) {
+export function quickCreateProject({
+  prompt,
+  enabledSkillIDs = [],
+  deferInitialPrompt = false,
+  idempotencyKey,
+  csrfToken,
+  signal
+} = {}) {
   if (!idempotencyKey) {
     throw new TypeError('quickCreateProject 需要稳定的 Idempotency-Key');
   }
@@ -14,13 +21,14 @@ export function quickCreateProject({ prompt, enabledSkillIDs = [], idempotencyKe
     throw new TypeError('quickCreateProject 需要内存中的 CSRF Token');
   }
   const normalizedSkillIDs = normalizeSkillIDs(enabledSkillIDs);
+  const initialPrompt = deferInitialPrompt === true ? null : prompt == null ? null : String(prompt);
   const body = normalizedSkillIDs.length > 0
     ? {
         schema_version: PROJECT_QUICK_CREATE_SCHEMA_V2,
-        initial_prompt: prompt == null ? null : String(prompt),
+        initial_prompt: initialPrompt,
         enabled_skill_ids: normalizedSkillIDs
       }
-    : { initial_prompt: prompt == null ? null : String(prompt) };
+    : { initial_prompt: initialPrompt };
   const headers = { 'Idempotency-Key': idempotencyKey };
   headers['X-CSRF-Token'] = csrfToken;
   return requestJSON(PROJECT_QUICK_CREATE_PATH, {

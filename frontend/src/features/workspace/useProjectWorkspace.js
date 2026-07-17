@@ -3,7 +3,12 @@ import { bootstrapProjectWorkspace } from '../projects/projectQuickCreate.js';
 import { loadAgentWorkspaceSnapshot } from './workspaceApi.js';
 import { parseProjectBootstrap, parseWorkspaceSnapshot } from './workspaceContract.js';
 import { openWorkspaceEventStream } from './workspaceEventStream.js';
-import { classifyWorkspaceEvent, createWorkspaceState, workspaceReducer } from './workspaceReducer.js';
+import {
+  classifyWorkspaceEvent,
+  classifyWorkspaceSnapshot,
+  createWorkspaceState,
+  workspaceReducer
+} from './workspaceReducer.js';
 
 export const DEFAULT_PROJECT_RETRY_DELAYS = Object.freeze([0, 250, 500, 1000, 2000, 3000]);
 export const DEFAULT_STREAM_RETRY_DELAYS = Object.freeze([250, 500, 1000, 2000, 3000]);
@@ -226,6 +231,12 @@ export function useProjectWorkspace({
           expectedProjectID: project.projectID,
           expectedSessionID: project.sessionID
         });
+        if (classifyWorkspaceSnapshot(stateRef.current, project, snapshot) === 'invalid') {
+          fail(Object.assign(new Error('权威 Creation Spec 投影发生倒退或异义'), {
+            code: 'WORKSPACE_PROJECTION_INVALID'
+          }));
+          return;
+        }
         reconnectAttemptRef.current = 0;
         commit({ type: 'snapshot_ready', project, snapshot });
         connect(project, snapshot, snapshot.eventHighWatermark);

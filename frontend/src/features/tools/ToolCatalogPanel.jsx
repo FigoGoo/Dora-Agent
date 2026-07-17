@@ -45,7 +45,13 @@ export function ToolCatalogPanel({ sessionID, loadCatalog = loadToolCatalog }) {
   }, [load]);
 
   return (
-    <section className="tool-catalog-panel" aria-labelledby="tool-catalog-title" data-tool-catalog-state={state.kind}>
+    <section
+      id="workspace-toolbox"
+      className="tool-catalog-panel"
+      aria-labelledby="tool-catalog-title"
+      data-tool-catalog-state={state.kind}
+      tabIndex={-1}
+    >
       <header>
         <div>
           <h2 id="tool-catalog-title">工具目录</h2>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/FigoGoo/Dora-Agent/business/internal/config"
@@ -27,6 +28,11 @@ type ClientConfig struct {
 	RequestTimeout time.Duration
 	// AuthSecret 是逐请求 HMAC 服务间身份证明使用的 32 字节共享密钥。
 	AuthSecret []byte
+	// Environment 与互斥的本地 Preview 开关共同决定是否允许单机 loopback 注册地址。
+	Environment                  string
+	PlanStoryboardRuntimeEnabled bool
+	// WritePromptsRuntimeEnabled 表示当前进程只在本地运行 write_prompts Development Preview，可接受精确回环注册地址。
+	WritePromptsRuntimeEnabled bool
 }
 
 // protocolClient 是消费方定义的最小生成 Client 接口，便于隔离映射和错误测试。
@@ -55,7 +61,8 @@ func NewClient(ctx context.Context, clientConfig ClientConfig, etcdConfig config
 	if err != nil {
 		return nil, err
 	}
-	resolver, err := NewEtcdResolver(ctx, etcdConfig)
+	allowLoopback := allowLoopbackRegistration(clientConfig)
+	resolver, err := NewEtcdResolver(ctx, etcdConfig, allowLoopback)
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +84,11 @@ func NewClient(ctx context.Context, clientConfig ClientConfig, etcdConfig config
 		protocol: protocol, resolver: resolver, config: clientConfig,
 		idgen: idgen.UUIDv7{}, auth: authenticator,
 	}, nil
+}
+
+// allowLoopbackRegistration 只在冻结的 local Preview Profile 下放宽同机发现；其他环境保持失败关闭。
+func allowLoopbackRegistration(clientConfig ClientConfig) bool {
+	return (clientConfig.PlanStoryboardRuntimeEnabled || clientConfig.WritePromptsRuntimeEnabled) && strings.EqualFold(clientConfig.Environment, "local")
 }
 
 // Ensure 调用无框架重试的写方法，并严格校验响应版本、关联 ID、Disposition 与 Receipt。

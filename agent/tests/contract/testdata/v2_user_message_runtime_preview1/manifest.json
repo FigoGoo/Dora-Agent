@@ -1,0 +1,53 @@
+{
+  "schema_version": "user_message_runtime_v2preview1_corpus_manifest.v1",
+  "profile": "user_message.runtime.v2preview1",
+  "selected_scheme": "A",
+  "files": [
+    {
+      "file": "user_message_runtime_v2preview1.json",
+      "sha256": "sha256:11d0e7278deabd7718ee9204523c71518c0a2446d84f18b6393bf73b6b8449c5",
+      "vector_count": 27
+    }
+  ],
+  "fixture_ids": [
+    "user_message.scheme_a.base"
+  ],
+  "vector_ids": [
+    "UM-P01-direct-response",
+    "UM-P02-skill-does-not-expand-tools",
+    "UM-P03-empty-prompt-zero-facts",
+    "UM-P04-command-replay-single-facts",
+    "UM-P05-session-hol",
+    "UM-P06-cross-session-parallel",
+    "UM-P07-frozen-output-replay",
+    "UM-P08-fence-takeover",
+    "UM-P09-lost-wake-scanner",
+    "UM-P10-terminal-response-loss",
+    "UM-P11-preview-drain-handoff",
+    "UM-P12-local-activation",
+    "UM-N01-source-retype",
+    "UM-N02-preview-fact-fabrication",
+    "UM-N03-later-source-skip",
+    "UM-N04-dual-processor",
+    "UM-N05-tool-call",
+    "UM-N06-analyze-materials",
+    "UM-N07-plan-creation-spec",
+    "UM-N08-assistant-history",
+    "UM-N09-model-unknown-resend",
+    "UM-N10-stale-fence",
+    "UM-N11-unverifiable-accepted-event",
+    "UM-N12-shared-production-enable",
+    "UM-N13-side-effects",
+    "UM-N14-production-schema-alias",
+    "UM-N15-production-corpus-reuse"
+  ],
+  "total_vector_count": 27,
+  "target_tests": [
+    "TestUserMessageRuntimeV2Preview1CorpusManifest",
+    "TestUserMessageRuntimeV2Preview1Corpus",
+    "TestUserMessageRuntimeV2Preview1ExactSets",
+    "TestUserMessageRuntimeV2Preview1ContextContractDigest",
+    "TestUserMessageRuntimeV2Preview1NegativeCapabilities",
+    "TestUserMessageRuntimeV2Preview1StrictJSON"
+  ]
+}

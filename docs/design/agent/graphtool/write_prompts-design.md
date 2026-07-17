@@ -10,6 +10,8 @@
 >
 > 实现门禁：评审结论为“通过”前禁止创建生产代码。
 
+> Development Preview 例外：[`write_prompts.runtime.v2preview1`](../write-prompts-runtime-v2-design.md) 已于 2026-07-17 按其 exact-set 批准，只允许实现默认不注册的 `storyboard_preview` Tool Core 和后续隔离 Preview 纵切；不批准本文的生产 PromptArtifact/PromptRevision、standalone、计费、Approval、Active Storyboard 或生产 Catalog。
+
 共同契约见 [`../../cross-module/aigc-contract-catalog.md`](../../cross-module/aigc-contract-catalog.md)。本 Tool 是最终媒体 Prompt 的唯一生成入口；`plan_storyboard` 不再隐式生成 Prompt。
 
 ## 1. 场景、目标与边界
@@ -247,3 +249,5 @@ stateDiagram-v2
 - [ ] 测试确认跨 Tool 契约与 SMK-P0。
 
 当前结论：**待评审，不通过实现门禁。**
+
+该结论继续约束完整生产 `write_prompts.v1alpha1`；不覆盖已独立批准且严格隔离的 [`write_prompts.runtime.v2preview1`](../write-prompts-runtime-v2-design.md)。

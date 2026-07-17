@@ -30,8 +30,10 @@ const (
 	// 16 KiB 是冻结六项 Tool Definition Catalog 的双端传输上限，禁止借目录接口透传执行定义或大对象。
 	maximumToolCatalogResponseBytes = 16 << 10
 	maximumUpstreamErrorBytes       = 64 << 10
-	maximumSSEFrameBytes            = 128 << 10
-	maximumJavaScriptSafeInteger    = uint64(1<<53 - 1)
+	// 512 KiB 覆盖 Agent 256 KiB 合法事件上限及 SSE framing，仍保持逐帧读取有界。
+	maximumSSEFrameBytes           = 512 << 10
+	maximumJavaScriptSafeInteger   = uint64(1<<53 - 1)
+	defaultPreviewRequestBodyBytes = 16 << 10
 )
 
 // AgentSessionAccessService 定义 BFF 签发断言前所需的最小资源级授权边界。
@@ -52,15 +54,19 @@ type AgentHTTPClient interface {
 	Do(request *http.Request) (*http.Response, error)
 }
 
-// AgentProxyHandler 负责固定 Agent GET 路由的同源认证、Cursor 规范化与安全代理。
+// AgentProxyHandler 负责固定 Agent 读路由与 CreationSpec Preview 写路由的同源认证和安全代理。
 type AgentProxyHandler struct {
-	access            AgentSessionAccessService
-	signer            AgentIdentitySigner
-	requestIDs        auth.IDGenerator
-	client            AgentHTTPClient
-	baseURL           *url.URL
-	requestTimeout    time.Duration
-	frameWriteTimeout time.Duration
+	access                  AgentSessionAccessService
+	signer                  AgentIdentitySigner
+	requestIDs              auth.IDGenerator
+	client                  AgentHTTPClient
+	baseURL                 *url.URL
+	requestTimeout          time.Duration
+	frameWriteTimeout       time.Duration
+	previewEnabled          bool
+	analyzeMaterialsEnabled bool
+	mediaRuntimeEnabled     bool
+	previewBodyBytes        int64
 }
 
 // NewAgentHTTPClient 创建禁用代理、压缩与 Redirect 的内部 Client。
@@ -99,18 +105,34 @@ func NewAgentProxyHandler(access AgentSessionAccessService, signer AgentIdentity
 		return nil, fmt.Errorf("create Agent proxy HTTP handler: invalid base URL")
 	}
 	baseURL.Path = ""
+	previewBodyBytes := cfg.PreviewMaxRequestBodyBytes
+	if previewBodyBytes == 0 {
+		// 保持已发布 GET-only 构造兼容；完整 Runtime 配置始终显式注入同一默认值。
+		previewBodyBytes = defaultPreviewRequestBodyBytes
+	}
+	if previewBodyBytes < 1024 || previewBodyBytes > 65536 {
+		return nil, fmt.Errorf("create Agent proxy HTTP handler: invalid preview request body limit")
+	}
 	frameWriteTimeout := min(cfg.RequestTimeout, 5*time.Second)
 	return &AgentProxyHandler{
 		access: access, signer: signer, requestIDs: requestIDs, client: client, baseURL: baseURL,
 		requestTimeout: cfg.RequestTimeout, frameWriteTimeout: frameWriteTimeout,
+		previewEnabled: cfg.PlanSpecPreviewEnabled, analyzeMaterialsEnabled: cfg.AnalyzeMaterialsRuntimeEnabled,
+		mediaRuntimeEnabled: cfg.MediaRuntimeEnabled, previewBodyBytes: previewBodyBytes,
 	}, nil
 }
 
-// Register 仅注册 Workspace Snapshot、EventLog SSE 与 Tool Definition Catalog 三条固定 GET 路由，并复用 Business Cookie Resolver。
-func (handler *AgentProxyHandler) Register(router gin.IRoutes, requireSession gin.HandlerFunc) {
+// Register 注册三个固定 GET 与一个 Preview POST；写入口复用 Business Session + CSRF 中间件并在功能关闭时返回 404。
+func (handler *AgentProxyHandler) Register(router gin.IRoutes, requireSession gin.HandlerFunc, requireWrite ...gin.HandlerFunc) {
 	router.GET("/api/v1/agent/sessions/:session_id/workspace", requireSession, handler.workspace)
 	router.GET("/api/v1/agent/sessions/:session_id/events", requireSession, handler.events)
 	router.GET("/api/v1/agent/sessions/:session_id/tools", requireSession, handler.tools)
+	if len(requireWrite) == 1 && requireWrite[0] != nil {
+		router.POST("/api/v1/agent/sessions/:session_id/creation-spec-previews", requireWrite[0], handler.creationSpecPreview)
+		router.POST("/api/v1/agent/sessions/:session_id/analyze-materials-previews", requireWrite[0], handler.analyzeMaterialsPreview)
+		router.POST("/api/v1/agent/sessions/:session_id/generate-media-previews", requireWrite[0], handler.generateMediaPreview)
+		router.POST("/api/v1/agent/sessions/:session_id/assemble-output-previews", requireWrite[0], handler.assembleOutputPreview)
+	}
 }
 
 // workspace 严格拒绝 Query，重新构造内部 Snapshot 请求，并对 JSON 响应执行有界复制。
@@ -264,6 +286,11 @@ func (handler *AgentProxyHandler) events(c *gin.Context) {
 
 // prepareUpstreamRequest 读取私有 ResolvedSession、完成一次 owner JOIN、签发断言，并创建无浏览器 Header 的新请求。
 func (handler *AgentProxyHandler) prepareUpstreamRequest(c *gin.Context, requestID string, sessionID string, target string, scope string, accept string) (*http.Request, bool) {
+	return handler.prepareBoundUpstreamRequest(c, requestID, sessionID, http.MethodGet, target, scope, accept, "", nil)
+}
+
+// prepareBoundUpstreamRequest 读取私有会话与 Owner Binding，签发绑定 Method/Target/Scope 的断言并新建内部请求。
+func (handler *AgentProxyHandler) prepareBoundUpstreamRequest(c *gin.Context, requestID string, sessionID string, method string, target string, scope string, accept string, contentType string, body io.Reader) (*http.Request, bool) {
 	resolved, ok := auth.ResolvedSessionFromContext(c.Request.Context())
 	if !ok || resolved.Principal.ID == "" || resolved.WebSessionID == "" || resolved.WebSessionVersion < 1 {
 		handler.writeAgentError(c, http.StatusUnauthorized, "UNAUTHENTICATED", "未认证或会话已失效", requestID, false)
@@ -279,7 +306,7 @@ func (handler *AgentProxyHandler) prepareUpstreamRequest(c *gin.Context, request
 		return nil, false
 	}
 	assertion, err := handler.signer.Sign(agentidentity.Identity{
-		RequestID: requestID, CanonicalTarget: target,
+		RequestID: requestID, CanonicalTarget: target, Method: method,
 		PrincipalUserID: resolved.Principal.ID, WebSessionID: resolved.WebSessionID,
 		WebSessionVersion: resolved.WebSessionVersion, ProjectID: access.ProjectID,
 		AgentSessionID: access.AgentSessionID, Scope: scope,
@@ -289,13 +316,16 @@ func (handler *AgentProxyHandler) prepareUpstreamRequest(c *gin.Context, request
 		return nil, false
 	}
 	upstreamURL := handler.baseURL.String() + target
-	request, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, upstreamURL, nil)
+	request, err := http.NewRequestWithContext(c.Request.Context(), method, upstreamURL, body)
 	if err != nil {
 		handler.writeAgentError(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "工作台依赖暂时不可用", requestID, true)
 		return nil, false
 	}
 	// 新请求只包含固定 Accept 和三身份 Header；Cookie、Authorization、CSRF、原始 Query 与浏览器伪造断言均不会被复制。
 	request.Header.Set("Accept", accept)
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
+	}
 	request.Header.Set(agentidentity.HeaderAssertion, assertion.EncodedCanonical)
 	request.Header.Set(agentidentity.HeaderKeyVersion, assertion.KeyVersion)
 	request.Header.Set(agentidentity.HeaderSignature, assertion.Signature)
@@ -320,11 +350,17 @@ func (handler *AgentProxyHandler) proxyUpstreamError(c *gin.Context, response *h
 	}
 	switch {
 	case response.StatusCode == http.StatusBadRequest && envelope.Error.Code == "INVALID_ARGUMENT":
-		handler.writeAgentError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "Session 标识无效", requestID, false)
+		handler.writeAgentError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数无效", requestID, false)
 	case response.StatusCode == http.StatusBadRequest && envelope.Error.Code == "INVALID_CURSOR":
 		handler.writeAgentError(c, http.StatusBadRequest, "INVALID_CURSOR", "事件游标无效", requestID, false)
 	case response.StatusCode == http.StatusNotFound && envelope.Error.Code == "SESSION_NOT_FOUND":
 		handler.writeAgentError(c, http.StatusNotFound, "SESSION_NOT_FOUND", "Session 不存在或不可访问", requestID, false)
+	case response.StatusCode == http.StatusNotFound && envelope.Error.Code == "PREVIEW_DISABLED":
+		handler.writeAgentError(c, http.StatusNotFound, "PREVIEW_DISABLED", "CreationSpec 开发预览未启用", requestID, false)
+	case response.StatusCode == http.StatusConflict && envelope.Error.Code == "IDEMPOTENCY_CONFLICT":
+		handler.writeAgentError(c, http.StatusConflict, "IDEMPOTENCY_CONFLICT", "幂等键已用于不同的预览请求", requestID, false)
+	case response.StatusCode == http.StatusConflict && envelope.Error.Code == "SESSION_LANE_BLOCKED":
+		handler.writeAgentError(c, http.StatusConflict, "SESSION_LANE_BLOCKED", "Session 存在未完成的普通输入；当前预览不会接管，请使用空白工作台", requestID, false)
 	case response.StatusCode == http.StatusTooManyRequests && envelope.Error.Code == "STREAM_RATE_LIMITED":
 		handler.writeAgentError(c, http.StatusTooManyRequests, "STREAM_RATE_LIMITED", "事件流连接过多，请稍后重试", requestID, true)
 	case response.StatusCode == http.StatusServiceUnavailable && envelope.Error.Code == "PERSISTENCE_UNAVAILABLE":

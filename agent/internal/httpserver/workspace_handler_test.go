@@ -1,9 +1,11 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,7 +79,10 @@ func TestWorkspaceSSECommitsHeadersBeforeFrames(t *testing.T) {
 	}
 	router := gin.New()
 	handler.Register(router)
-	server := httptest.NewServer(router)
+	var serverLogs bytes.Buffer
+	server := httptest.NewUnstartedServer(router)
+	server.Config.ErrorLog = log.New(&serverLogs, "", 0)
+	server.Start()
 	defer server.Close()
 
 	response, err := server.Client().Get(server.URL + "/api/v1/agent/sessions/" + handlerSessionID + "/events?after_seq=2")
@@ -95,6 +100,9 @@ func TestWorkspaceSSECommitsHeadersBeforeFrames(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "event: stream.ready\n") || strings.Contains(string(body), "id: 2\nevent: stream.ready") {
 		t.Fatalf("Ready 控制帧错误: %q", body)
+	}
+	if strings.Contains(serverLogs.String(), "superfluous response.WriteHeader") {
+		t.Fatalf("SSE 经 Gin 包装后重复提交 Header: %s", serverLogs.String())
 	}
 }
 

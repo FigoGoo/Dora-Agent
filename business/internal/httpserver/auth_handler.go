@@ -151,6 +151,9 @@ func (h *AuthHandler) requireSession(requireCSRF bool) gin.HandlerFunc {
 		}
 		resolved, err := h.service.Resolve(c.Request.Context(), cookieToken)
 		if err != nil {
+			if abortCanceledAuthRequest(c) {
+				return
+			}
 			h.audit(c, "auth.require_session", "denied", "", requestID, authErrorCode(err))
 			h.writeMappedAuthError(c, err, requestID)
 			c.Abort()
@@ -182,6 +185,9 @@ func (h *AuthHandler) getSession(c *gin.Context) {
 	}
 	resolved, err := h.service.Resolve(c.Request.Context(), cookieToken)
 	if err != nil {
+		if abortCanceledAuthRequest(c) {
+			return
+		}
 		h.writeMappedAuthError(c, err, requestID)
 		return
 	}
@@ -216,6 +222,9 @@ func (h *AuthHandler) login(c *gin.Context) {
 	}
 	result, err := h.service.Login(c.Request.Context(), request.Email, request.Password)
 	if err != nil {
+		if abortCanceledAuthRequest(c) {
+			return
+		}
 		h.audit(c, "auth.login", "denied", "", requestID, authErrorCode(err))
 		h.writeMappedAuthError(c, err, requestID)
 		return
@@ -239,6 +248,9 @@ func (h *AuthHandler) logout(c *gin.Context) {
 		return
 	}
 	if err := h.service.Logout(c.Request.Context(), cookieToken, c.GetHeader("X-CSRF-Token")); err != nil {
+		if abortCanceledAuthRequest(c) {
+			return
+		}
 		h.audit(c, "auth.logout", "denied", "", requestID, authErrorCode(err))
 		h.writeMappedAuthError(c, err, requestID)
 		return
@@ -284,6 +296,16 @@ func (h *AuthHandler) writeSession(c *gin.Context, principal auth.Principal, csr
 		},
 		CSRFToken: csrfToken, SessionExpiresAt: expiresAt.UTC().Format(time.RFC3339),
 	})
+}
+
+// abortCanceledAuthRequest 只识别 HTTP Request Context 已被客户端取消的情形，并停止 Gin Handler 链。
+// 客户端已离开时不存在可交付的认证结果，也不应伪造 503 或“鉴权拒绝”审计；内部依赖错误但请求仍存活时必须继续正常错误映射。
+func abortCanceledAuthRequest(c *gin.Context) bool {
+	if !errors.Is(c.Request.Context().Err(), context.Canceled) {
+		return false
+	}
+	c.Abort()
+	return true
 }
 
 // writeMappedAuthError 将稳定认证错误映射到 Frozen v1 HTTP 代码，未知原错一律收敛为可重试 503。

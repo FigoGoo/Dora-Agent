@@ -616,6 +616,13 @@ func assertContractV2UpBackfillsW0Data(t *testing.T, client *Client) {
 	if tx.Error != nil {
 		t.Fatalf("开始 V2 Up 回填验证事务失败: %v", tx.Error)
 	}
+	// latest Schema 的 009 已将 Receipt 冻结；本用例验证的是历史 005 自身的 W0→V2
+	// 回填语义，因此只在这个最终会回滚的事务内暂停 009 Guard。
+	if err := tx.Exec(`ALTER TABLE agent.session_command_receipt
+		DISABLE TRIGGER trg_session_command_receipt__immutable`).Error; err != nil {
+		_ = tx.Rollback().Error
+		t.Fatalf("暂停 latest Receipt Guard 失败: %v", err)
+	}
 	if err := tx.Exec(string(downSQL)).Error; err != nil {
 		_ = tx.Rollback().Error
 		t.Fatalf("准备 W0 Schema 失败: %v", err)
@@ -754,6 +761,10 @@ func assertContractV2DownRefusesDataLoss(t *testing.T, client *Client, sessionID
 				_ = tx.Rollback().Error
 				t.Fatalf("临时关闭 Item 不可变触发器失败: %v", err)
 			}
+			if err := tx.Exec("ALTER TABLE agent.session_command_receipt DISABLE TRIGGER trg_session_command_receipt__immutable").Error; err != nil {
+				_ = tx.Rollback().Error
+				t.Fatalf("临时关闭 Receipt 不可变触发器失败: %v", err)
+			}
 			if err := testCase.prepare(tx); err != nil {
 				_ = tx.Rollback().Error
 				t.Fatalf("准备独立拒绝条件失败: %v", err)
@@ -765,6 +776,10 @@ func assertContractV2DownRefusesDataLoss(t *testing.T, client *Client, sessionID
 			if err := tx.Exec("ALTER TABLE agent.session_skill_snapshot_item ENABLE TRIGGER trg_session_skill_snapshot_item__immutable").Error; err != nil {
 				_ = tx.Rollback().Error
 				t.Fatalf("重新开启 Item 不可变触发器失败: %v", err)
+			}
+			if err := tx.Exec("ALTER TABLE agent.session_command_receipt ENABLE TRIGGER trg_session_command_receipt__immutable").Error; err != nil {
+				_ = tx.Rollback().Error
+				t.Fatalf("重新开启 Receipt 不可变触发器失败: %v", err)
 			}
 			downErr := tx.Exec(string(downSQL)).Error
 			_ = tx.Rollback().Error

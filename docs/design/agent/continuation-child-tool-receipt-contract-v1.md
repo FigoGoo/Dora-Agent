@@ -16,7 +16,7 @@
 - [AIGC 跨 Module 契约目录](../cross-module/aigc-contract-catalog.md)
 - [CreationSpec Candidate Decision 公共契约候选 v1](../cross-module/creation-spec-candidate-decision-contract-v1.md)
 - [`plan_creation_spec` Graph Tool 设计](./graphtool/plan_creation_spec-design.md)
-- [全功能冒烟推进计划](../../requirements/full-function-smoke-development-plan.md)
+- [功能优先开发与试跑计划](../../requirements/full-function-smoke-development-plan.md)
 
 ## 1. 目的与边界
 

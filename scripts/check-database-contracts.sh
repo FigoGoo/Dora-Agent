@@ -206,17 +206,45 @@ for module in "${modules[@]}"; do
         GOWORK=off "$go_bin" -C "$repo_root/business" test -json \
           -run '^(TestProjectRepositoryPostgreSQLW0Semantics|TestRepositoryAuthPostgreSQLW0Semantics|TestAuthorizationRepositoryPostgreSQLLifecycle|TestSkillRepositoryPostgreSQLW1Semantics|TestProjectRepositoryPostgreSQLQuickCreateV2BatchSQL|TestProjectRepositoryPostgreSQLQuickCreateV2|TestSkillApprovalCannotCommitAfterConcurrentReviewerRevocation|TestSkillMarketMigrationPostgreSQLIndexContract|TestSkillMarketRepositoryPostgreSQLVisibilityAndPublisherPolicy|TestSkillMarketRepositoryPostgreSQLValidatesTwentyFirstCandidate)$' \
           -count=1 ./internal/postgres
+	  run_required_go_tests business 'TestStoryboardPreviewRepositoryPostgreSQLSemantics' -- \
+		env DORA_BUSINESS_TEST_POSTGRES_DSN="$database_url" \
+		DORA_BUSINESS_TEST_ALLOW_DESTRUCTIVE=1 \
+		GOWORK=off "$go_bin" -C "$repo_root/business" test -json \
+		  -run '^TestStoryboardPreviewRepositoryPostgreSQLSemantics$' \
+		  -count=1 ./internal/postgres
       ;;
     agent)
       run_required_go_tests agent 'TestMigratedSchemaContract' -- \
         env DORA_POSTGRES_CONTRACT_DSN="$database_url" GOWORK=off \
         "$go_bin" -C "$repo_root/agent" test -json \
           -run '^TestMigratedSchemaContract$' -count=1 ./internal/postgres
+      # Legacy Helper 必须在 fresh latest Schema 上验证；后续 Session Repository 契约会有意留下
+      # 其他 Keyring 的 pristine legacy fixture，不能把它们混入本用例的专用 cohort。
+      run_required_go_tests agent 'TestUserMessageLegacyUpgradeGuardsPostgreSQL,TestUserMessageLegacyUpgradePostgreSQLRecoveryAndConcurrency' -- \
+        env DORA_USER_MESSAGE_RUNTIME_POSTGRES_DSN="$database_url" GOWORK=off \
+        "$go_bin" -C "$repo_root/agent" test -json \
+          -run '^(TestUserMessageLegacyUpgradeGuardsPostgreSQL|TestUserMessageLegacyUpgradePostgreSQLRecoveryAndConcurrency)$' \
+          -count=1 ./internal/postgres
       run_required_go_tests agent 'TestSessionRepositoryConcurrentEnsureContract' -- \
         env DORA_POSTGRES_CONTRACT_DSN="$database_url" GOWORK=off \
         "$go_bin" -C "$repo_root/agent" test -json \
           -run '^TestSessionRepositoryConcurrentEnsureContract$' \
           -count=1 ./internal/postgres
+      run_required_go_tests agent 'TestUserMessageRuntimePostgreSQLLifecycle' -- \
+        env DORA_USER_MESSAGE_RUNTIME_POSTGRES_DSN="$database_url" GOWORK=off \
+        "$go_bin" -C "$repo_root/agent" test -json \
+          -run '^TestUserMessageRuntimePostgreSQLLifecycle$' \
+          -count=1 ./internal/postgres
+      run_required_go_tests agent 'TestAnalyzeMaterialsRuntimePostgreSQLLifecycle' -- \
+        env DORA_ANALYZE_MATERIALS_RUNTIME_POSTGRES_DSN="$database_url" GOWORK=off \
+        "$go_bin" -C "$repo_root/agent" test -json \
+          -run '^TestAnalyzeMaterialsRuntimePostgreSQLLifecycle$' \
+          -count=1 ./internal/postgres
+	  run_required_go_tests agent 'TestPlanStoryboardRuntimePostgreSQLLifecycle' -- \
+		env DORA_AGENT_TEST_POSTGRES_DSN="$database_url" GOWORK=off \
+		"$go_bin" -C "$repo_root/agent" test -json \
+		  -run '^TestPlanStoryboardRuntimePostgreSQLLifecycle$' \
+		  -count=1 ./internal/postgres
       # Baseline 使用独立 reset 后的精确 Migration 005，不能受 latest forward Schema 或上一个
       # Repository Contract 留下的 V2 事实污染。它结束后保留 005 fixture 仅供人工诊断；下次运行先 reset。
       reset_module_contract_schema agent "$database_url"

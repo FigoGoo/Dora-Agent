@@ -2,13 +2,15 @@
 
 > 状态：Draft / 待产品、Business、Agent、Worker、财务、安全与运维评审
 >
+> Development Preview 例外：[`media.runtime.v3preview1`](../media-runtime-v3-preview-design.md) 已获 **Approved for Development Preview**，只允许一个 Prompt Preview 图片目标经共享 Operation/Batch/Job/Terminal Outbox，由 Worker 使用 Go `image/png` 生成确定性 `640x360` 真 PNG，并经 Business 本地 Preview Asset Prepare/Finalize/Range 闭环。它不向 Agent、Worker、Job、Outbox 或日志复制 Prompt 明文，不调用模型/Provider，不计费、不审批、不使用 TOS，也不使生产 Catalog 可用；本文第 1～12 节完整生产范围继续 Draft。
+>
 > Graph Key：`generate_media_graph_v1`
 >
 > Tool Definition Version：`generate_media.v1alpha1`
 >
 > Migration Owner：Business（Charge/Asset/Binding），Agent（Operation/Batch/Job/Outbox/Approval），Worker（Attempt/Provider/Upload Receipt）
 >
-> 实现门禁：评审结论为“通过”前禁止创建生产代码、Migration 或 Worker Consumer。
+> 实现门禁：评审结论为“通过”前禁止创建生产代码、Migration 或 Worker Consumer；上面的 local-only Preview exact-set 可按独立设计创建隔离的 Preview 代码、向前 Migration 与版本化 Consumer，不得复用其结论宣称生产能力。
 
 共同契约见 [`../../cross-module/aigc-contract-catalog.md`](../../cross-module/aigc-contract-catalog.md)。本 Tool 不使用 ChatModel Node；它以确定性 Graph 完成目标冻结、报价、正式审批、扣费准备和原子派发，媒体内容由 Worker 调 Provider 生成。
 

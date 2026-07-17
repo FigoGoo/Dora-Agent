@@ -5,6 +5,8 @@
 > 设计日期：2026-07-15
 >
 > 实现边界：本文、Go `_test.go` 与 JSON Corpus 只冻结候选语义，不提供生产 Migration、Repository、升级 Helper、Turn/Run、Processor、Scanner 或 Readiness 接线。
+>
+> 2026-07-17 Preview 例外：[`user_message.runtime.v2preview1`](./user-message-runtime-v2-design.md) 方案 A 可实现独立 `session_user_message_upgrade_ledger`，且只处理设计逐值证明 eligible 的 pristine 首 Input。它不创建 `legacy_authority_attestation`、Marker 或本文通用升级 Ledger；blocker 必须原样失败关闭，不能 reset、skip、改型或伪造终态。
 
 ## 1. 目的与当前事实
 
@@ -14,7 +16,7 @@
 2. 升级必须从 Session 聚合根做 anti-join，并返回稳定、有序、完整的 blocker exact-set；
 3. Foundation Ready、Lane Capability Ready、Processor Ready 和 Claim Allowed 必须分层。
 
-截至 2026-07-15，生产事实仍只有 Migration 001～005 的 Foundation 表与 Ensure V1/V2 路径：
+截至 2026-07-17，Foundation 之外已有 Migration 006/007 的 `creation_spec_preview` 专用 Runtime；它不改变本文通用 legacy authority/upgrade 仍未实现的结论：
 
 - `session/session_message/session_input/session_command_receipt/session_event_log` 等现有表已落地；
 - 005 只给 Skill Snapshot Header/Item 增加不可变触发器，Receipt、Message、Input、Event 仍不是数据库级不可变事实；

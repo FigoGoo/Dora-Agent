@@ -23,6 +23,22 @@ var _ project.Repository = (*ProjectRepository)(nil)
 var _ project.DispatchRepository = (*ProjectRepository)(nil)
 var _ project.AgentSessionAccessRepository = (*ProjectRepository)(nil)
 
+// projectListReadDTO 承载项目列表单次显式 SELECT 的安全列，不参与 GORM 持久化。
+type projectListReadDTO struct {
+	// ProjectID 是当前 owner 可见的 Project UUIDv7。
+	ProjectID string `gorm:"column:project_id"`
+	// Title 是项目安全展示标题。
+	Title string `gorm:"column:title"`
+	// LifecycleStatus 是 active 或 archived 生命周期代码。
+	LifecycleStatus string `gorm:"column:lifecycle_status"`
+	// RecentRunStatus 是最近运行摘要稳定代码。
+	RecentRunStatus string `gorm:"column:recent_run_status"`
+	// InitialPromptStatus 是首提示词初始化摘要稳定代码。
+	InitialPromptStatus string `gorm:"column:initial_prompt_status"`
+	// UpdatedAt 是项目最近更新的 UTC 时间。
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+}
+
 // NewProjectRepository 从 Business PostgreSQL Client 创建 Repository；Client 未初始化时返回错误并阻止隐式降级。
 func NewProjectRepository(client *Client) (*ProjectRepository, error) {
 	if client == nil || client.db == nil {
@@ -108,6 +124,65 @@ func (r *ProjectRepository) FindOwnedByID(ctx context.Context, projectID string,
 		return project.Project{}, mapProjectRepositoryError(err)
 	}
 	return entity, nil
+}
+
+// ListOwned 使用 (updated_at DESC, id DESC) Keyset 单次读取 owner 的 active/archived 项目。
+// 查询额外读取一条仅用于判定下一页，SQL 次数不随返回项目数增长。
+func (r *ProjectRepository) ListOwned(ctx context.Context, query project.ProjectListQuery) (project.ProjectListResult, error) {
+	if err := query.Validate(); err != nil {
+		return project.ProjectListResult{}, err
+	}
+
+	database := r.db.WithContext(ctx).
+		Table("business.project AS project").
+		Select(`project.id AS project_id,
+			project.title AS title,
+			project.lifecycle_status AS lifecycle_status,
+			project.recent_run_status AS recent_run_status,
+			project.initial_prompt_status AS initial_prompt_status,
+			project.updated_at AS updated_at`).
+		Where("project.owner_user_id = ?", query.OwnerUserID).
+		Where("project.lifecycle_status IN ?", []string{
+			string(project.LifecycleStatusActive), string(project.LifecycleStatusArchived),
+		})
+	if query.After != nil {
+		// 降序 Keyset 必须同时比较时间和唯一 ID，避免同一 updated_at 下重复或漏项。
+		database = database.Where(
+			"(project.updated_at < ? OR (project.updated_at = ? AND project.id < ?))",
+			query.After.UpdatedAt, query.After.UpdatedAt, query.After.ProjectID,
+		)
+	}
+
+	var records []projectListReadDTO
+	if err := database.Order("project.updated_at DESC").Order("project.id DESC").Limit(query.Limit + 1).Find(&records).Error; err != nil {
+		return project.ProjectListResult{}, mapProjectRepositoryError(err)
+	}
+
+	hasNextPage := len(records) > query.Limit
+	if hasNextPage {
+		records = records[:query.Limit]
+	}
+	items := make([]project.ProjectListItem, 0, len(records))
+	for _, record := range records {
+		item := project.ProjectListItem{
+			ProjectID: record.ProjectID, Title: record.Title,
+			LifecycleStatus:     project.LifecycleStatus(record.LifecycleStatus),
+			RecentRunStatus:     project.RecentRunStatus(record.RecentRunStatus),
+			InitialPromptStatus: project.InitialPromptStatus(record.InitialPromptStatus),
+			UpdatedAt:           record.UpdatedAt,
+		}
+		if err := item.Validate(); err != nil {
+			return project.ProjectListResult{}, mapProjectRepositoryError(fmt.Errorf("map project list item: %w", err))
+		}
+		items = append(items, item)
+	}
+
+	result := project.ProjectListResult{Items: items}
+	if hasNextPage {
+		last := items[len(items)-1]
+		result.NextAfter = &project.ProjectListCursor{UpdatedAt: last.UpdatedAt, ProjectID: last.ProjectID}
+	}
+	return result, nil
 }
 
 // FindBootstrapOwnedByID 通过一次显式 JOIN 读取 Project 与默认 Session 绑定，避免页面 Bootstrap 产生 N+1。

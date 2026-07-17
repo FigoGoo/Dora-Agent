@@ -20,6 +20,76 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"GetCreationSpecContextPreviewV1": kitex.NewMethodInfo(
+		getCreationSpecContextPreviewV1Handler,
+		newBusinessFoundationServiceV1GetCreationSpecContextPreviewV1Args,
+		newBusinessFoundationServiceV1GetCreationSpecContextPreviewV1Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"SaveCreationSpecDraftPreviewV1": kitex.NewMethodInfo(
+		saveCreationSpecDraftPreviewV1Handler,
+		newBusinessFoundationServiceV1SaveCreationSpecDraftPreviewV1Args,
+		newBusinessFoundationServiceV1SaveCreationSpecDraftPreviewV1Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"QueryCreationSpecDraftCommandPreviewV1": kitex.NewMethodInfo(
+		queryCreationSpecDraftCommandPreviewV1Handler,
+		newBusinessFoundationServiceV1QueryCreationSpecDraftCommandPreviewV1Args,
+		newBusinessFoundationServiceV1QueryCreationSpecDraftCommandPreviewV1Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"BatchGetAssetAnalysisInputsPreviewV1": kitex.NewMethodInfo(
+		batchGetAssetAnalysisInputsPreviewV1Handler,
+		newBusinessFoundationServiceV1BatchGetAssetAnalysisInputsPreviewV1Args,
+		newBusinessFoundationServiceV1BatchGetAssetAnalysisInputsPreviewV1Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"GetStoryboardPlanningContextPreviewV1": kitex.NewMethodInfo(
+		getStoryboardPlanningContextPreviewV1Handler,
+		newBusinessFoundationServiceV1GetStoryboardPlanningContextPreviewV1Args,
+		newBusinessFoundationServiceV1GetStoryboardPlanningContextPreviewV1Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"SaveStoryboardDraftPreviewV1": kitex.NewMethodInfo(
+		saveStoryboardDraftPreviewV1Handler,
+		newBusinessFoundationServiceV1SaveStoryboardDraftPreviewV1Args,
+		newBusinessFoundationServiceV1SaveStoryboardDraftPreviewV1Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"QueryStoryboardDraftCommandPreviewV1": kitex.NewMethodInfo(
+		queryStoryboardDraftCommandPreviewV1Handler,
+		newBusinessFoundationServiceV1QueryStoryboardDraftCommandPreviewV1Args,
+		newBusinessFoundationServiceV1QueryStoryboardDraftCommandPreviewV1Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"GetPromptGenerationContextPreviewV1": kitex.NewMethodInfo(
+		getPromptGenerationContextPreviewV1Handler,
+		newBusinessFoundationServiceV1GetPromptGenerationContextPreviewV1Args,
+		newBusinessFoundationServiceV1GetPromptGenerationContextPreviewV1Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"SavePromptDraftPreviewV1": kitex.NewMethodInfo(
+		savePromptDraftPreviewV1Handler,
+		newBusinessFoundationServiceV1SavePromptDraftPreviewV1Args,
+		newBusinessFoundationServiceV1SavePromptDraftPreviewV1Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"QueryPromptDraftCommandPreviewV1": kitex.NewMethodInfo(
+		queryPromptDraftCommandPreviewV1Handler,
+		newBusinessFoundationServiceV1QueryPromptDraftCommandPreviewV1Args,
+		newBusinessFoundationServiceV1QueryPromptDraftCommandPreviewV1Result,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 }
 
 var (
@@ -110,6 +180,246 @@ func newBusinessFoundationServiceV1ProbeResult() interface{} {
 	return foundationv1.NewBusinessFoundationServiceV1ProbeResult()
 }
 
+func getCreationSpecContextPreviewV1Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*foundationv1.BusinessFoundationServiceV1GetCreationSpecContextPreviewV1Args)
+	realResult := result.(*foundationv1.BusinessFoundationServiceV1GetCreationSpecContextPreviewV1Result)
+	success, err := handler.(foundationv1.BusinessFoundationServiceV1).GetCreationSpecContextPreviewV1(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *foundationv1.FoundationServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newBusinessFoundationServiceV1GetCreationSpecContextPreviewV1Args() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1GetCreationSpecContextPreviewV1Args()
+}
+
+func newBusinessFoundationServiceV1GetCreationSpecContextPreviewV1Result() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1GetCreationSpecContextPreviewV1Result()
+}
+
+func saveCreationSpecDraftPreviewV1Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*foundationv1.BusinessFoundationServiceV1SaveCreationSpecDraftPreviewV1Args)
+	realResult := result.(*foundationv1.BusinessFoundationServiceV1SaveCreationSpecDraftPreviewV1Result)
+	success, err := handler.(foundationv1.BusinessFoundationServiceV1).SaveCreationSpecDraftPreviewV1(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *foundationv1.FoundationServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newBusinessFoundationServiceV1SaveCreationSpecDraftPreviewV1Args() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1SaveCreationSpecDraftPreviewV1Args()
+}
+
+func newBusinessFoundationServiceV1SaveCreationSpecDraftPreviewV1Result() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1SaveCreationSpecDraftPreviewV1Result()
+}
+
+func queryCreationSpecDraftCommandPreviewV1Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*foundationv1.BusinessFoundationServiceV1QueryCreationSpecDraftCommandPreviewV1Args)
+	realResult := result.(*foundationv1.BusinessFoundationServiceV1QueryCreationSpecDraftCommandPreviewV1Result)
+	success, err := handler.(foundationv1.BusinessFoundationServiceV1).QueryCreationSpecDraftCommandPreviewV1(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *foundationv1.FoundationServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newBusinessFoundationServiceV1QueryCreationSpecDraftCommandPreviewV1Args() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1QueryCreationSpecDraftCommandPreviewV1Args()
+}
+
+func newBusinessFoundationServiceV1QueryCreationSpecDraftCommandPreviewV1Result() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1QueryCreationSpecDraftCommandPreviewV1Result()
+}
+
+func batchGetAssetAnalysisInputsPreviewV1Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*foundationv1.BusinessFoundationServiceV1BatchGetAssetAnalysisInputsPreviewV1Args)
+	realResult := result.(*foundationv1.BusinessFoundationServiceV1BatchGetAssetAnalysisInputsPreviewV1Result)
+	success, err := handler.(foundationv1.BusinessFoundationServiceV1).BatchGetAssetAnalysisInputsPreviewV1(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *foundationv1.FoundationServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newBusinessFoundationServiceV1BatchGetAssetAnalysisInputsPreviewV1Args() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1BatchGetAssetAnalysisInputsPreviewV1Args()
+}
+
+func newBusinessFoundationServiceV1BatchGetAssetAnalysisInputsPreviewV1Result() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1BatchGetAssetAnalysisInputsPreviewV1Result()
+}
+
+func getStoryboardPlanningContextPreviewV1Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*foundationv1.BusinessFoundationServiceV1GetStoryboardPlanningContextPreviewV1Args)
+	realResult := result.(*foundationv1.BusinessFoundationServiceV1GetStoryboardPlanningContextPreviewV1Result)
+	success, err := handler.(foundationv1.BusinessFoundationServiceV1).GetStoryboardPlanningContextPreviewV1(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *foundationv1.FoundationServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newBusinessFoundationServiceV1GetStoryboardPlanningContextPreviewV1Args() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1GetStoryboardPlanningContextPreviewV1Args()
+}
+
+func newBusinessFoundationServiceV1GetStoryboardPlanningContextPreviewV1Result() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1GetStoryboardPlanningContextPreviewV1Result()
+}
+
+func saveStoryboardDraftPreviewV1Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*foundationv1.BusinessFoundationServiceV1SaveStoryboardDraftPreviewV1Args)
+	realResult := result.(*foundationv1.BusinessFoundationServiceV1SaveStoryboardDraftPreviewV1Result)
+	success, err := handler.(foundationv1.BusinessFoundationServiceV1).SaveStoryboardDraftPreviewV1(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *foundationv1.FoundationServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newBusinessFoundationServiceV1SaveStoryboardDraftPreviewV1Args() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1SaveStoryboardDraftPreviewV1Args()
+}
+
+func newBusinessFoundationServiceV1SaveStoryboardDraftPreviewV1Result() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1SaveStoryboardDraftPreviewV1Result()
+}
+
+func queryStoryboardDraftCommandPreviewV1Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*foundationv1.BusinessFoundationServiceV1QueryStoryboardDraftCommandPreviewV1Args)
+	realResult := result.(*foundationv1.BusinessFoundationServiceV1QueryStoryboardDraftCommandPreviewV1Result)
+	success, err := handler.(foundationv1.BusinessFoundationServiceV1).QueryStoryboardDraftCommandPreviewV1(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *foundationv1.FoundationServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newBusinessFoundationServiceV1QueryStoryboardDraftCommandPreviewV1Args() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1QueryStoryboardDraftCommandPreviewV1Args()
+}
+
+func newBusinessFoundationServiceV1QueryStoryboardDraftCommandPreviewV1Result() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1QueryStoryboardDraftCommandPreviewV1Result()
+}
+
+func getPromptGenerationContextPreviewV1Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*foundationv1.BusinessFoundationServiceV1GetPromptGenerationContextPreviewV1Args)
+	realResult := result.(*foundationv1.BusinessFoundationServiceV1GetPromptGenerationContextPreviewV1Result)
+	success, err := handler.(foundationv1.BusinessFoundationServiceV1).GetPromptGenerationContextPreviewV1(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *foundationv1.FoundationServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newBusinessFoundationServiceV1GetPromptGenerationContextPreviewV1Args() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1GetPromptGenerationContextPreviewV1Args()
+}
+
+func newBusinessFoundationServiceV1GetPromptGenerationContextPreviewV1Result() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1GetPromptGenerationContextPreviewV1Result()
+}
+
+func savePromptDraftPreviewV1Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*foundationv1.BusinessFoundationServiceV1SavePromptDraftPreviewV1Args)
+	realResult := result.(*foundationv1.BusinessFoundationServiceV1SavePromptDraftPreviewV1Result)
+	success, err := handler.(foundationv1.BusinessFoundationServiceV1).SavePromptDraftPreviewV1(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *foundationv1.FoundationServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newBusinessFoundationServiceV1SavePromptDraftPreviewV1Args() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1SavePromptDraftPreviewV1Args()
+}
+
+func newBusinessFoundationServiceV1SavePromptDraftPreviewV1Result() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1SavePromptDraftPreviewV1Result()
+}
+
+func queryPromptDraftCommandPreviewV1Handler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*foundationv1.BusinessFoundationServiceV1QueryPromptDraftCommandPreviewV1Args)
+	realResult := result.(*foundationv1.BusinessFoundationServiceV1QueryPromptDraftCommandPreviewV1Result)
+	success, err := handler.(foundationv1.BusinessFoundationServiceV1).QueryPromptDraftCommandPreviewV1(ctx, realArg.Request)
+	if err != nil {
+		switch v := err.(type) {
+		case *foundationv1.FoundationServiceExceptionV1:
+			realResult.ServiceError = v
+		default:
+			return err
+		}
+	} else {
+		realResult.Success = success
+	}
+	return nil
+}
+func newBusinessFoundationServiceV1QueryPromptDraftCommandPreviewV1Args() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1QueryPromptDraftCommandPreviewV1Args()
+}
+
+func newBusinessFoundationServiceV1QueryPromptDraftCommandPreviewV1Result() interface{} {
+	return foundationv1.NewBusinessFoundationServiceV1QueryPromptDraftCommandPreviewV1Result()
+}
+
 type kClient struct {
 	c client.Client
 }
@@ -125,6 +435,146 @@ func (p *kClient) Probe(ctx context.Context, request *foundationv1.FoundationPro
 	_args.Request = request
 	var _result foundationv1.BusinessFoundationServiceV1ProbeResult
 	if err = p.c.Call(ctx, "Probe", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) GetCreationSpecContextPreviewV1(ctx context.Context, request *foundationv1.GetCreationSpecContextPreviewRequestV1) (r *foundationv1.GetCreationSpecContextPreviewResponseV1, err error) {
+	var _args foundationv1.BusinessFoundationServiceV1GetCreationSpecContextPreviewV1Args
+	_args.Request = request
+	var _result foundationv1.BusinessFoundationServiceV1GetCreationSpecContextPreviewV1Result
+	if err = p.c.Call(ctx, "GetCreationSpecContextPreviewV1", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) SaveCreationSpecDraftPreviewV1(ctx context.Context, request *foundationv1.SaveCreationSpecDraftPreviewRequestV1) (r *foundationv1.SaveCreationSpecDraftPreviewResponseV1, err error) {
+	var _args foundationv1.BusinessFoundationServiceV1SaveCreationSpecDraftPreviewV1Args
+	_args.Request = request
+	var _result foundationv1.BusinessFoundationServiceV1SaveCreationSpecDraftPreviewV1Result
+	if err = p.c.Call(ctx, "SaveCreationSpecDraftPreviewV1", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) QueryCreationSpecDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryCreationSpecDraftCommandPreviewRequestV1) (r *foundationv1.QueryCreationSpecDraftCommandPreviewResponseV1, err error) {
+	var _args foundationv1.BusinessFoundationServiceV1QueryCreationSpecDraftCommandPreviewV1Args
+	_args.Request = request
+	var _result foundationv1.BusinessFoundationServiceV1QueryCreationSpecDraftCommandPreviewV1Result
+	if err = p.c.Call(ctx, "QueryCreationSpecDraftCommandPreviewV1", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) BatchGetAssetAnalysisInputsPreviewV1(ctx context.Context, request *foundationv1.BatchGetAssetAnalysisInputsPreviewRequestV1) (r *foundationv1.BatchGetAssetAnalysisInputsPreviewResponseV1, err error) {
+	var _args foundationv1.BusinessFoundationServiceV1BatchGetAssetAnalysisInputsPreviewV1Args
+	_args.Request = request
+	var _result foundationv1.BusinessFoundationServiceV1BatchGetAssetAnalysisInputsPreviewV1Result
+	if err = p.c.Call(ctx, "BatchGetAssetAnalysisInputsPreviewV1", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) GetStoryboardPlanningContextPreviewV1(ctx context.Context, request *foundationv1.GetStoryboardPlanningContextPreviewRequestV1) (r *foundationv1.GetStoryboardPlanningContextPreviewResponseV1, err error) {
+	var _args foundationv1.BusinessFoundationServiceV1GetStoryboardPlanningContextPreviewV1Args
+	_args.Request = request
+	var _result foundationv1.BusinessFoundationServiceV1GetStoryboardPlanningContextPreviewV1Result
+	if err = p.c.Call(ctx, "GetStoryboardPlanningContextPreviewV1", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) SaveStoryboardDraftPreviewV1(ctx context.Context, request *foundationv1.SaveStoryboardDraftPreviewRequestV1) (r *foundationv1.SaveStoryboardDraftPreviewResponseV1, err error) {
+	var _args foundationv1.BusinessFoundationServiceV1SaveStoryboardDraftPreviewV1Args
+	_args.Request = request
+	var _result foundationv1.BusinessFoundationServiceV1SaveStoryboardDraftPreviewV1Result
+	if err = p.c.Call(ctx, "SaveStoryboardDraftPreviewV1", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) QueryStoryboardDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryStoryboardDraftCommandPreviewRequestV1) (r *foundationv1.QueryStoryboardDraftCommandPreviewResponseV1, err error) {
+	var _args foundationv1.BusinessFoundationServiceV1QueryStoryboardDraftCommandPreviewV1Args
+	_args.Request = request
+	var _result foundationv1.BusinessFoundationServiceV1QueryStoryboardDraftCommandPreviewV1Result
+	if err = p.c.Call(ctx, "QueryStoryboardDraftCommandPreviewV1", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) GetPromptGenerationContextPreviewV1(ctx context.Context, request *foundationv1.GetPromptGenerationContextPreviewRequestV1) (r *foundationv1.GetPromptGenerationContextPreviewResponseV1, err error) {
+	var _args foundationv1.BusinessFoundationServiceV1GetPromptGenerationContextPreviewV1Args
+	_args.Request = request
+	var _result foundationv1.BusinessFoundationServiceV1GetPromptGenerationContextPreviewV1Result
+	if err = p.c.Call(ctx, "GetPromptGenerationContextPreviewV1", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) SavePromptDraftPreviewV1(ctx context.Context, request *foundationv1.SavePromptDraftPreviewRequestV1) (r *foundationv1.SavePromptDraftPreviewResponseV1, err error) {
+	var _args foundationv1.BusinessFoundationServiceV1SavePromptDraftPreviewV1Args
+	_args.Request = request
+	var _result foundationv1.BusinessFoundationServiceV1SavePromptDraftPreviewV1Result
+	if err = p.c.Call(ctx, "SavePromptDraftPreviewV1", &_args, &_result); err != nil {
+		return
+	}
+	switch {
+	case _result.ServiceError != nil:
+		return r, _result.ServiceError
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) QueryPromptDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryPromptDraftCommandPreviewRequestV1) (r *foundationv1.QueryPromptDraftCommandPreviewResponseV1, err error) {
+	var _args foundationv1.BusinessFoundationServiceV1QueryPromptDraftCommandPreviewV1Args
+	_args.Request = request
+	var _result foundationv1.BusinessFoundationServiceV1QueryPromptDraftCommandPreviewV1Result
+	if err = p.c.Call(ctx, "QueryPromptDraftCommandPreviewV1", &_args, &_result); err != nil {
 		return
 	}
 	switch {

@@ -90,6 +90,88 @@ func TestProbeOnceRejectsInvalidResponse(t *testing.T) {
 	}
 }
 
+// TestProbeOnceRequiresExactPlanStoryboardRuntimeProfile 验证任一端单独开启或 Profile 漂移都阻断 Agent Ready。
+func TestProbeOnceRequiresExactPlanStoryboardRuntimeProfile(t *testing.T) {
+	request := &foundationv1.FoundationProbeRequestV1{
+		SchemaVersion: foundationv1.FOUNDATION_SCHEMA_VERSION,
+		RequestId:     "018f0000-0000-7000-8000-000000000001",
+		CallerService: "dora-agent-service", CallerVersion: "test", SentAtUnixMs: 1,
+	}
+	response := &foundationv1.FoundationProbeResponseV1{
+		SchemaVersion: foundationv1.FOUNDATION_SCHEMA_VERSION, RequestId: request.RequestId,
+		ServiceName: "dora-business-service", ServiceVersion: "test", Environment: "local",
+		InstanceId: "business-test-1", ReceivedAtUnixMs: 1,
+	}
+	enabled := true
+	profile := foundationv1.PLAN_STORYBOARD_RUNTIME_PROFILE
+	response.PlanStoryboardRuntimeEnabled = &enabled
+	response.PlanStoryboardRuntimeProfile = &profile
+	protocol := foundationProtocolClientFunc(func(_ context.Context, _ *foundationv1.FoundationProbeRequestV1, _ ...callopt.Option) (*foundationv1.FoundationProbeResponseV1, error) {
+		return response, nil
+	})
+	client := &Client{protocol: protocol, config: config.BusinessRPCConfig{RequestTimeout: time.Second}}
+	if _, err := client.probeOnce(context.Background(), request); err == nil {
+		t.Fatal("Business 单独开启 Storyboard Runtime 未阻断 Agent Ready")
+	}
+	client.storyboardExpected = true
+	if _, err := client.probeOnce(context.Background(), request); err != nil {
+		t.Fatalf("双端 exact-match 未通过: %v", err)
+	}
+	wrongProfile := "plan_storyboard.runtime.v3"
+	response.PlanStoryboardRuntimeProfile = &wrongProfile
+	if _, err := client.probeOnce(context.Background(), request); err == nil {
+		t.Fatal("Storyboard Runtime Profile 漂移未阻断 Agent Ready")
+	}
+	disabled := false
+	emptyProfile := ""
+	response.PlanStoryboardRuntimeEnabled = &disabled
+	response.PlanStoryboardRuntimeProfile = &emptyProfile
+	if _, err := client.probeOnce(context.Background(), request); err == nil {
+		t.Fatal("Agent 单独开启 Storyboard Runtime 未阻断 Agent Ready")
+	}
+}
+
+// TestProbeOnceRequiresExactWritePromptsRuntimeProfile 验证 Prompt Preview 双端开关与 Profile 必须同时 exact-match。
+func TestProbeOnceRequiresExactWritePromptsRuntimeProfile(t *testing.T) {
+	request := &foundationv1.FoundationProbeRequestV1{
+		SchemaVersion: foundationv1.FOUNDATION_SCHEMA_VERSION,
+		RequestId:     "018f0000-0000-7000-8000-000000000001",
+		CallerService: "dora-agent-service", CallerVersion: "test", SentAtUnixMs: 1,
+	}
+	response := &foundationv1.FoundationProbeResponseV1{
+		SchemaVersion: foundationv1.FOUNDATION_SCHEMA_VERSION, RequestId: request.RequestId,
+		ServiceName: "dora-business-service", ServiceVersion: "test", Environment: "local",
+		InstanceId: "business-test-1", ReceivedAtUnixMs: 1,
+	}
+	enabled := true
+	profile := foundationv1.WRITE_PROMPTS_RUNTIME_PROFILE
+	response.WritePromptsRuntimeEnabled = &enabled
+	response.WritePromptsRuntimeProfile = &profile
+	protocol := foundationProtocolClientFunc(func(_ context.Context, _ *foundationv1.FoundationProbeRequestV1, _ ...callopt.Option) (*foundationv1.FoundationProbeResponseV1, error) {
+		return response, nil
+	})
+	client := &Client{protocol: protocol, config: config.BusinessRPCConfig{RequestTimeout: time.Second}}
+	if _, err := client.probeOnce(context.Background(), request); err == nil {
+		t.Fatal("Business 单独开启 Write Prompts Runtime 未阻断 Agent Ready")
+	}
+	client.promptExpected = true
+	if _, err := client.probeOnce(context.Background(), request); err != nil {
+		t.Fatalf("双端 Write Prompts exact-match 未通过: %v", err)
+	}
+	wrongProfile := "write_prompts.runtime.v3"
+	response.WritePromptsRuntimeProfile = &wrongProfile
+	if _, err := client.probeOnce(context.Background(), request); err == nil {
+		t.Fatal("Write Prompts Runtime Profile 漂移未阻断 Agent Ready")
+	}
+	disabled := false
+	emptyProfile := ""
+	response.WritePromptsRuntimeEnabled = &disabled
+	response.WritePromptsRuntimeProfile = &emptyProfile
+	if _, err := client.probeOnce(context.Background(), request); err == nil {
+		t.Fatal("Agent 单独开启 Write Prompts Runtime 未阻断 Agent Ready")
+	}
+}
+
 type foundationProtocolClientFunc func(context.Context, *foundationv1.FoundationProbeRequestV1, ...callopt.Option) (*foundationv1.FoundationProbeResponseV1, error)
 
 func (f foundationProtocolClientFunc) Probe(ctx context.Context, request *foundationv1.FoundationProbeRequestV1, options ...callopt.Option) (*foundationv1.FoundationProbeResponseV1, error) {

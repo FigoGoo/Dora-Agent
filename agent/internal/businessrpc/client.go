@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/FigoGoo/Dora-Agent/agent/internal/clock"
@@ -34,6 +35,27 @@ type foundationProtocolClient interface {
 	Probe(ctx context.Context, request *foundationv1.FoundationProbeRequestV1, callOptions ...callopt.Option) (*foundationv1.FoundationProbeResponseV1, error)
 }
 
+// creationSpecPreviewProtocolClient 是 V1 Preview 开关启用时才会调用的生成 Client 最小接口。
+type creationSpecPreviewProtocolClient interface {
+	GetCreationSpecContextPreviewV1(ctx context.Context, request *foundationv1.GetCreationSpecContextPreviewRequestV1, callOptions ...callopt.Option) (*foundationv1.GetCreationSpecContextPreviewResponseV1, error)
+	SaveCreationSpecDraftPreviewV1(ctx context.Context, request *foundationv1.SaveCreationSpecDraftPreviewRequestV1, callOptions ...callopt.Option) (*foundationv1.SaveCreationSpecDraftPreviewResponseV1, error)
+	QueryCreationSpecDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryCreationSpecDraftCommandPreviewRequestV1, callOptions ...callopt.Option) (*foundationv1.QueryCreationSpecDraftCommandPreviewResponseV1, error)
+}
+
+// storyboardPreviewProtocolClient 是 Plan Storyboard M1 启用时使用的生成 Client 最小接口。
+type storyboardPreviewProtocolClient interface {
+	GetStoryboardPlanningContextPreviewV1(ctx context.Context, request *foundationv1.GetStoryboardPlanningContextPreviewRequestV1, callOptions ...callopt.Option) (*foundationv1.GetStoryboardPlanningContextPreviewResponseV1, error)
+	SaveStoryboardDraftPreviewV1(ctx context.Context, request *foundationv1.SaveStoryboardDraftPreviewRequestV1, callOptions ...callopt.Option) (*foundationv1.SaveStoryboardDraftPreviewResponseV1, error)
+	QueryStoryboardDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryStoryboardDraftCommandPreviewRequestV1, callOptions ...callopt.Option) (*foundationv1.QueryStoryboardDraftCommandPreviewResponseV1, error)
+}
+
+// promptPreviewProtocolClient 是 Write Prompts M2 Adapter 使用的生成 Client 最小接口。
+type promptPreviewProtocolClient interface {
+	GetPromptGenerationContextPreviewV1(ctx context.Context, request *foundationv1.GetPromptGenerationContextPreviewRequestV1, callOptions ...callopt.Option) (*foundationv1.GetPromptGenerationContextPreviewResponseV1, error)
+	SavePromptDraftPreviewV1(ctx context.Context, request *foundationv1.SavePromptDraftPreviewRequestV1, callOptions ...callopt.Option) (*foundationv1.SavePromptDraftPreviewResponseV1, error)
+	QueryPromptDraftCommandPreviewV1(ctx context.Context, request *foundationv1.QueryPromptDraftCommandPreviewRequestV1, callOptions ...callopt.Option) (*foundationv1.QueryPromptDraftCommandPreviewResponseV1, error)
+}
+
 // ProbeReceipt 是 Agent 启动成功后保留的最小跨服务探针回执，不扩散生成类型。
 type ProbeReceipt struct {
 	// RequestID 是本次启动探针的 UUIDv7，用于日志和冒烟证据关联。
@@ -46,21 +68,44 @@ type ProbeReceipt struct {
 	BusinessInstanceID string
 	// ReceivedAt 是 Business 接收请求的 UTC 时间。
 	ReceivedAt time.Time
+	// PlanStoryboardRuntimeEnabled 是 Business 启动时冻结的 Storyboard Preview 门禁。
+	PlanStoryboardRuntimeEnabled bool
+	// PlanStoryboardRuntimeProfile 是门禁开启时双方必须 exact-match 的 Profile。
+	PlanStoryboardRuntimeProfile string
+	// WritePromptsRuntimeEnabled 是 Business 启动时冻结的 Prompt Preview 门禁。
+	WritePromptsRuntimeEnabled bool
+	// WritePromptsRuntimeProfile 是门禁开启时双方必须 exact-match 的 Profile。
+	WritePromptsRuntimeProfile string
 }
 
 // Client 管理生成的 Foundation Client、etcd Resolver 和启动重试预算。
 type Client struct {
-	protocol foundationProtocolClient
-	resolver *EtcdResolver
-	config   config.BusinessRPCConfig
-	caller   config.ServiceConfig
-	clock    Clock
-	idgen    IDGenerator
+	protocol                foundationProtocolClient
+	preview                 creationSpecPreviewProtocolClient
+	materialAnalysisPreview materialAnalysisPreviewProtocolClient
+	storyboardPreview       storyboardPreviewProtocolClient
+	promptPreview           promptPreviewProtocolClient
+	storyboardExpected      bool
+	promptExpected          bool
+	resolver                *EtcdResolver
+	config                  config.BusinessRPCConfig
+	caller                  config.ServiceConfig
+	clock                   Clock
+	idgen                   IDGenerator
 }
 
 // NewClient 创建禁用写重试、具有显式连接和请求超时的 Foundation Client。
-func NewClient(ctx context.Context, rpcCfg config.BusinessRPCConfig, etcdCfg config.EtcdConfig, caller config.ServiceConfig) (*Client, error) {
-	resolver, err := NewEtcdResolver(ctx, etcdCfg)
+func NewClient(
+	ctx context.Context,
+	rpcCfg config.BusinessRPCConfig,
+	etcdCfg config.EtcdConfig,
+	caller config.ServiceConfig,
+	previewEnabled bool,
+	storyboardPreviewEnabled bool,
+	promptPreviewEnabled bool,
+) (*Client, error) {
+	allowLoopback := (storyboardPreviewEnabled || promptPreviewEnabled) && strings.EqualFold(caller.Environment, "local")
+	resolver, err := NewEtcdResolver(ctx, etcdCfg, allowLoopback)
 	if err != nil {
 		return nil, err
 	}
@@ -74,8 +119,25 @@ func NewClient(ctx context.Context, rpcCfg config.BusinessRPCConfig, etcdCfg con
 		_ = resolver.Close()
 		return nil, fmt.Errorf("create Business Foundation RPC client: %w", err)
 	}
+	var preview creationSpecPreviewProtocolClient
+	if previewEnabled {
+		preview = protocol
+	}
+	var storyboardPreview storyboardPreviewProtocolClient
+	if storyboardPreviewEnabled {
+		storyboardPreview = protocol
+	}
+	var promptPreview promptPreviewProtocolClient
+	if promptPreviewEnabled {
+		promptPreview = protocol
+	}
 	return &Client{
-		protocol: protocol, resolver: resolver, config: rpcCfg, caller: caller,
+		protocol: protocol, preview: preview, materialAnalysisPreview: protocol,
+		storyboardPreview:  storyboardPreview,
+		promptPreview:      promptPreview,
+		storyboardExpected: storyboardPreviewEnabled,
+		promptExpected:     promptPreviewEnabled,
+		resolver:           resolver, config: rpcCfg, caller: caller,
 		clock: clock.System{}, idgen: idgen.UUIDv7{},
 	}, nil
 }
@@ -131,10 +193,32 @@ func (c *Client) probeOnce(ctx context.Context, request *foundationv1.Foundation
 		response.ServiceVersion == "" || response.InstanceId == "" || response.ReceivedAtUnixMs <= 0 {
 		return ProbeReceipt{}, errInvalidProbeResponse
 	}
+	storyboardCapabilityPresent := response.IsSetPlanStoryboardRuntimeEnabled() && response.IsSetPlanStoryboardRuntimeProfile()
+	storyboardEnabled := response.GetPlanStoryboardRuntimeEnabled()
+	storyboardProfile := response.GetPlanStoryboardRuntimeProfile()
+	promptCapabilityPresent := response.IsSetWritePromptsRuntimeEnabled() && response.IsSetWritePromptsRuntimeProfile()
+	promptEnabled := response.GetWritePromptsRuntimeEnabled()
+	promptProfile := response.GetWritePromptsRuntimeProfile()
+	if (c.storyboardExpected && (!storyboardCapabilityPresent || response.Environment != "local")) ||
+		storyboardEnabled != c.storyboardExpected ||
+		(storyboardEnabled && storyboardProfile != foundationv1.PLAN_STORYBOARD_RUNTIME_PROFILE) ||
+		(!storyboardEnabled && storyboardProfile != "") ||
+		(response.IsSetPlanStoryboardRuntimeEnabled() != response.IsSetPlanStoryboardRuntimeProfile()) ||
+		(c.promptExpected && (!promptCapabilityPresent || response.Environment != "local")) ||
+		promptEnabled != c.promptExpected ||
+		(promptEnabled && promptProfile != foundationv1.WRITE_PROMPTS_RUNTIME_PROFILE) ||
+		(!promptEnabled && promptProfile != "") ||
+		(response.IsSetWritePromptsRuntimeEnabled() != response.IsSetWritePromptsRuntimeProfile()) {
+		return ProbeReceipt{}, errInvalidProbeResponse
+	}
 	return ProbeReceipt{
 		RequestID: request.RequestId, BusinessService: response.ServiceName,
 		BusinessVersion: response.ServiceVersion, BusinessInstanceID: response.InstanceId,
-		ReceivedAt: time.UnixMilli(response.ReceivedAtUnixMs).UTC(),
+		ReceivedAt:                   time.UnixMilli(response.ReceivedAtUnixMs).UTC(),
+		PlanStoryboardRuntimeEnabled: storyboardEnabled,
+		PlanStoryboardRuntimeProfile: storyboardProfile,
+		WritePromptsRuntimeEnabled:   promptEnabled,
+		WritePromptsRuntimeProfile:   promptProfile,
 	}, nil
 }
 

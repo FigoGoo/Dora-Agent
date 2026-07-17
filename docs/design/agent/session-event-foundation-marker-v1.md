@@ -9,6 +9,10 @@
 > 适用范围：`session.created`、`session.input.accepted` 的永久证明、EventLog 在线保留、legacy Session Lane 升级前置条件
 >
 > 实现门禁：本文只收敛候选设计，不创建 Migration、GORM Model、Repository、Helper、Retention Job 或 Runtime 接线。跨 Agent、数据、安全、运维与测试评审 Approved 前，不得据此启用 Retention、legacy Helper、Processor、Scanner、Claim、Redis Wake 或 Run。
+>
+> 2026-07-16 Preview 例外：上述门禁继续约束独立 Marker、Retention、legacy Helper 和完整生产 Runtime；[`plan_creation_spec.v1preview1`](./graphtool/plan_creation_spec-design.md#0-v1-开发预览设计冻结2026-07-16) 只获准为新 `source_type=creation_spec_preview` 输入复用 `session.input.accepted`，追加 `creation_spec.preview.completed/failed` 终态 Event，并启动只 Claim 该 Source 的专用 Processor。该 Processor 不得 Claim、跳过、终结或改型 `user_message`/legacy Input；存在非终态非 Preview 前驱时入队必须以 `409 SESSION_LANE_BLOCKED` 零增量失败。Preview 不创建或替代 Marker，Retention、legacy Helper 和通用 Scanner 继续关闭。
+>
+> 2026-07-17 Preview 例外：[`user_message.runtime.v2preview1`](./user-message-runtime-v2-design.md) 方案 A 仍不创建或替代 Marker，只允许对 `session.input.accepted` 仍位于可验证在线窗口、且全部 provenance/digest 一致的 eligible Input 执行；缺失、已裁剪或不一致必须成为稳定 blocker。它只追加方案 A 的 Turn 终态 Event，不批准 Retention、Marker 回填或本文通用 legacy Helper。
 
 ## 1. 结论
 
@@ -261,6 +265,8 @@ Append 与 Retention 通过同一 Counter 行串行；Workspace 的 `REPEATABLE 
 
 ## 9. Rollout 与 Readiness
 
+下列阶段只描述完整生产 Marker/Lane 的 Rollout，不是当前开发排期；V1 Preview 只执行文档顶部冻结的专用 Source 例外。
+
 ### 9.1 阶段
 
 | 阶段 | 动作 | 必须保持关闭 |
@@ -281,7 +287,7 @@ Marker rollout 不改变现有 Foundation Ready 含义：
 - legacy Marker blocker、Helper 未完成或 Retention disabled 不得使现有 Ensure/Workspace `/readyz` 失败；
 - `MarkerCapabilityReady=true` 至少要求 Schema exact、兼容 Writer 全量、旧 Writer 已排空、分类完成、blocker=0、未标记 eligible=0、active Helper claim=0、真实 PG Evidence Approved、capability state=`ready` 且 generation>0；
 - Retention 每次事务必须读取并匹配当前 Marker generation；stale generation 禁止删除；
-- Marker Capability Ready 不等于 Lane Capability Ready。Receipt 不可变、Authority、Turn Context、Ledger、Turn/Run 和其他 PG 门禁未 Approved 时，Processor/Scanner/Claim/Wake/Run 继续为零。
+- Marker Capability Ready 不等于 Lane Capability Ready。Receipt 不可变、Authority、Turn Context、Ledger、Turn/Run 和其他 PG 门禁未 Approved 时，完整生产 Processor/Scanner/Claim/Wake/Run 继续为零；不扩权到文档顶部单独批准的 Preview 专用 Processor。
 
 ## 10. Down Guard
 

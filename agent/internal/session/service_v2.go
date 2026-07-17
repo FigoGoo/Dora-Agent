@@ -142,10 +142,20 @@ func (s *Service) EnsureProjectSessionV2(ctx context.Context, command EnsureComm
 			return EnsureResult{}, err
 		}
 	}
+	if err := s.attachUserMessageRuntimePlan(&plan, now); err != nil {
+		return EnsureResult{}, err
+	}
 	if err := s.addEnsureEventsToPlan(&plan, canonical.commandID, now); err != nil {
 		return EnsureResult{}, err
 	}
-	return s.repository.Ensure(ctx, plan)
+	result, err := s.repository.Ensure(ctx, plan)
+	if err != nil {
+		return EnsureResult{}, err
+	}
+	if plan.UserMessageRuntime != nil && s.runtimeWake != nil {
+		s.runtimeWake()
+	}
+	return result, nil
 }
 
 // canonicalizeEnsureCommandV2 严格校验 V2 传输字段，并独立重算 Prompt、Runtime、set 与 request digest。
@@ -314,6 +324,64 @@ func (s *Service) LoadSessionSkillSnapshotV1(ctx context.Context, sessionID stri
 	if err != nil {
 		return LoadedSkillSnapshotV1{}, err
 	}
+	return s.openStoredSkillSnapshotV1(ctx, stored)
+}
+
+type skillSnapshotBatchRepository interface {
+	LoadSkillSnapshots(context.Context, []string, int) ([]StoredSkillSnapshot, error)
+}
+
+// LoadSessionSkillSnapshotsV1 用固定两条批量 SQL 读取一批 legacy Session 的冻结 Snapshot，
+// 避免 Legacy Helper preflight 在候选循环中形成同构 SQL/N+1。
+func (s *Service) LoadSessionSkillSnapshotsV1(ctx context.Context, sessionIDs []string) (map[string]LoadedSkillSnapshotV1, error) {
+	if len(sessionIDs) == 0 {
+		return map[string]LoadedSkillSnapshotV1{}, nil
+	}
+	unique := make([]string, 0, len(sessionIDs))
+	seen := make(map[string]struct{}, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		normalized, err := normalizeUUIDv7(sessionID)
+		if err != nil || normalized != sessionID {
+			return nil, ErrInvalidCommand
+		}
+		if _, exists := seen[sessionID]; exists {
+			continue
+		}
+		seen[sessionID] = struct{}{}
+		unique = append(unique, sessionID)
+	}
+	batchRepository, ok := s.repository.(skillSnapshotBatchRepository)
+	if !ok {
+		return nil, ErrSnapshotIntegrity
+	}
+	storedSnapshots, err := batchRepository.LoadSkillSnapshots(ctx, unique, s.skillSnapshotLimits.MaxItems)
+	if err != nil {
+		return nil, err
+	}
+	if len(storedSnapshots) != len(unique) {
+		return nil, ErrSnapshotIntegrity
+	}
+	loaded := make(map[string]LoadedSkillSnapshotV1, len(storedSnapshots))
+	for _, stored := range storedSnapshots {
+		value, openErr := s.openStoredSkillSnapshotV1(ctx, stored)
+		if openErr != nil {
+			return nil, openErr
+		}
+		if _, duplicate := loaded[value.SessionID]; duplicate {
+			return nil, ErrSnapshotIntegrity
+		}
+		loaded[value.SessionID] = value
+	}
+	for _, sessionID := range unique {
+		if _, exists := loaded[sessionID]; !exists {
+			return nil, ErrSnapshotIntegrity
+		}
+	}
+	return loaded, nil
+}
+
+func (s *Service) openStoredSkillSnapshotV1(ctx context.Context, stored StoredSkillSnapshot) (LoadedSkillSnapshotV1, error) {
+	sessionID := stored.Header.SessionID
 	if stored.Header.SessionID != sessionID || stored.Header.SchemaVersion != SkillSnapshotSchemaVersionV1 ||
 		stored.Header.SkillCount != len(stored.Items) {
 		return LoadedSkillSnapshotV1{}, ErrSnapshotIntegrity

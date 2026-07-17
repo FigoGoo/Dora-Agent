@@ -10,6 +10,8 @@
 >
 > 实现门禁：本文和跨 Module 契约目录尚未 Approved。本批只提供测试专用 DTO、严格校验器与固定语料，不提供生产 DTO、Runner、Graph、Repository、Migration、IDL 或前端协议。
 
+> 2026-07-16 子集批准：完整 `GraphToolResultV1` 六状态契约仍受上述门禁；V1 Preview 只实现 `completed/failed` 与 unknown 时不冻结结果的 `PlanCreationSpecPreviewResultV1`、最小 Model/Tool Receipt。它不能冒充本文件通用契约已实现。
+
 ## 1. 目标与边界
 
 本文把 [`runner-session-lane-review-v1.md`](./runner-session-lane-review-v1.md) 第 4 节中的候选语义收紧为可执行契约，关闭以下歧义：

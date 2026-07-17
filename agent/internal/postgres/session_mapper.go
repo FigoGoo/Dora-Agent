@@ -115,6 +115,32 @@ func mapSessionRuntimeLeaseModel(entity session.RuntimeLease) sessionRuntimeLeas
 	}
 }
 
+func mapUserMessageTurnModel(entity session.UserMessageTurn) userMessageTurnModel {
+	return userMessageTurnModel{
+		TurnID: entity.TurnID, InputID: entity.InputID, SessionID: entity.SessionID,
+		MessageID: entity.MessageID, UserID: entity.UserID, ProjectID: entity.ProjectID,
+		OutputID: entity.OutputID, ModelCallID: entity.ModelCallID,
+		RecoveryEventID: entity.RecoveryEventID, TerminalEventID: entity.TerminalEventID,
+		Status: entity.Status, Version: entity.Version, CreatedAt: entity.CreatedAt, UpdatedAt: entity.UpdatedAt,
+	}
+}
+
+func mapUserMessageContextModel(entity session.UserMessageContext) userMessageContextModel {
+	return userMessageContextModel{
+		TurnID: entity.TurnID, SchemaVersion: entity.SchemaVersion, SessionID: entity.SessionID,
+		InputID: entity.InputID, MessageID: entity.MessageID, UserID: entity.UserID, ProjectID: entity.ProjectID,
+		MessageCutoffSeq: entity.MessageCutoffSeq, MessageContentDigest: entity.MessageContentDigest,
+		SkillSnapshotRef: entity.SkillSnapshotRef, SkillSnapshotDigest: entity.SkillSnapshotDigest,
+		PromptRef: entity.PromptRef, PromptDigest: entity.PromptDigest,
+		ToolRegistryRef: entity.ToolRegistryRef, ToolRegistryDigest: entity.ToolRegistryDigest,
+		RuntimePolicyRef: entity.RuntimePolicyRef, RuntimePolicyDigest: entity.RuntimePolicyDigest,
+		ModelRouteRef: entity.ModelRouteRef, ModelRouteDigest: entity.ModelRouteDigest,
+		BudgetRef: entity.BudgetRef, BudgetDigest: entity.BudgetDigest,
+		AccessScopeRef: entity.AccessScopeRef, AccessScopeDigest: entity.AccessScopeDigest,
+		ContextDigest: entity.ContextDigest, CreatedAt: entity.CreatedAt,
+	}
+}
+
 // mapSessionCommandReceiptModel 显式映射不包含 Prompt 正文的冻结命令回执。
 func mapSessionCommandReceiptModel(entity session.CommandReceipt) sessionCommandReceiptModel {
 	return sessionCommandReceiptModel{

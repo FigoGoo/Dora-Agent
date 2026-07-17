@@ -35,8 +35,16 @@ type RouteHandlers struct {
 	Auth *AuthHandler
 	// Project 注册 Quick Create 与资源级 Bootstrap 路由。
 	Project *ProjectHandler
+	// TextMaterial 注册 Project 内文本素材创建与列表路由；nil 仅用于不装配业务纵切的旧测试。
+	TextMaterial *TextMaterialHandler
 	// Agent 注册同源 Workspace Snapshot、EventLog SSE 与 Tool Definition Catalog 固定代理路由。
 	Agent *AgentProxyHandler
+	// PlanStoryboard 注册 local-only Storyboard Development Preview 独立写入口；nil 表示该纵切未装配。
+	PlanStoryboard *PlanStoryboardPreviewProxy
+	// WritePrompts 注册 local-only Prompt Development Preview 独立写入口；nil 表示该纵切未装配。
+	WritePrompts *WritePromptsPreviewProxy
+	// MediaPreview 注册 profile-gated 内部回执与 Owner 鉴权内容路由；nil 时完全不注册。
+	MediaPreview *MediaPreviewHandler
 	// Skill 注册 W1 Skill Owner 草稿、列表、详情、替换和审核提交路由。
 	Skill *SkillHandler
 	// SkillReview 注册 W1-C2 Reviewer 待审队列、冻结详情和批准决定路由。
@@ -66,7 +74,24 @@ func New(httpCfg config.HTTPConfig, serviceCfg config.ServiceConfig, state *heal
 		}
 		handlers.Auth.Register(router)
 		handlers.Project.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
-		handlers.Agent.Register(router, handlers.Auth.RequireSession())
+		if handlers.TextMaterial != nil {
+			handlers.TextMaterial.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
+		}
+		handlers.Agent.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
+		if handlers.PlanStoryboard != nil {
+			if err := handlers.PlanStoryboard.Register(router, handlers.Auth.RequireSessionAndCSRF()); err != nil {
+				return nil, err
+			}
+		}
+		if handlers.WritePrompts != nil {
+			if err := handlers.WritePrompts.Register(router, handlers.Auth.RequireSessionAndCSRF()); err != nil {
+				return nil, err
+			}
+		}
+		if handlers.MediaPreview != nil {
+			handlers.MediaPreview.RegisterInternal(router)
+			handlers.MediaPreview.RegisterContent(router, handlers.Auth.RequireSession())
+		}
 		handlers.Skill.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
 		handlers.SkillReview.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
 		handlers.SkillGovernance.Register(router, handlers.Auth.RequireSession(), handlers.Auth.RequireSessionAndCSRF())
