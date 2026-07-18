@@ -1,326 +1,161 @@
-# `assemble_output` Graph Tool 设计
+# `assemble_output` Graph Tool 当前实现设计
 
-> 状态：Draft / 待产品、Business、Agent、Worker、财务、安全与运维评审
+> 状态：Current Implementation / local Development Preview 范围；完整生产范围仍为 Draft。当前验收结论只见[交付状态](../../../requirements/delivery-status.md)。
 >
-> Development Preview 例外：[`media.runtime.v3preview1`](../media-runtime-v3-preview-design.md) 已获 **Approved for Development Preview**，只允许复用同项目 ready Preview PNG，经共享 Operation/Batch/Job/Terminal Outbox 和固定白名单 `ffmpeg` argv 生成 `2s` H.264/`yuv420p`/`faststart` 真 MP4，再由 Business 同源 Range 下载/播放。它不允许任意 Timeline/ffmpeg 参数、模型规划、计费、Approval、TOS、真实 Provider、复杂 Batch 或生产导出；本文第 1～12 节完整生产范围继续 Draft。
+> Development Preview 例外：`media.runtime.v3preview1` 只允许一个同项目 ready PNG 经固定白名单 ffmpeg 参数生成 `2s` H.264/`yuv420p`/`faststart` MP4；不授权任意 Timeline、任意 ffmpeg 参数、计费、Approval 或生产导出。
 >
-> Graph Key：`assemble_output_graph_v1`
+> 当前 Pin：`assemble_output.v3preview1` / `assemble_output_graph_v3preview1` / `assemble_output.intent.v3preview1` / `mp4_h264_640x360_2s.v1`。
 >
-> Tool Definition Version：`assemble_output.v1alpha1`
->
-> Migration Owner：Business（AssemblyPlan/Output Asset/Binding/Charge），Agent（Run/Receipt/Approval/Operation/Job），Worker（Render Attempt/Receipt）
->
-> 实现门禁：评审结论为“通过”前禁止创建生产代码、Migration 或渲染 Worker；上面的 local-only Preview exact-set 可按独立设计创建隔离的 Preview 代码、向前 Migration 与版本化 Consumer，不得复用其结论宣称生产能力。
+> 当前代码：`agent/internal/mediapreview`、`worker/internal/mediajob`、`worker/internal/mediapreview`、`business/internal/mediapreview`；当前迁移：`agent/migrations/20260717001300_add_media_runtime_v3preview1.up.sql`、`business/migrations/20260717000500_create_media_preview_asset.up.sql`、`worker/migrations/20260717000100_create_media_preview_runtime_receipts.up.sql`。
 
-共同契约见 [`../../cross-module/aigc-contract-catalog.md`](../../cross-module/aigc-contract-catalog.md)。本设计禁止“只生成 manifest 就冒充导出成功”：`preview/export` 必须创建真实渲染 Job，由 Worker 生成可播放/可下载的 Output Asset。
+## 1. 功能边界
 
-## 1. 场景、模式、目标与边界
+当前实现读取一个 Business-owned、同项目、精确 version/digest 匹配的 ready PNG Asset，冻结固定 MP4 输出 Profile，创建或恢复一 Operation/Batch/Job，调用 Business Prepare 预留输出 Asset，原子派发 Job；Worker 用固定参数构造器调用 ffmpeg 生成真实 MP4，完成 Business Finalize 和 Agent Terminal 提交，最终通过受保护同源接口播放/下载。
 
-支持四种互斥模式：
+原 Graph 在派发确认后返回 `accepted`，不等待渲染。当前没有 validate/plan/preview/export 四模式、AssemblyPlan、Timeline、ChatModel、任意转场/字幕/音轨、计费、Approval、复杂 Batch 或生产 Catalog；Preview MP4 不能冒充 final export。
 
-- `validate`：确定性检查资源、依赖、时长、格式、版权/安全标记和导出就绪度，不扣模型/渲染费用；
-- `plan`：基于激活 Storyboard、ready Assets 和用户意图生成可编辑 AssemblyPlan 候选；
-- `preview`：对已激活 AssemblyPlan 做低规格真实渲染；
-- `export`：对已激活 AssemblyPlan 做最终规格真实渲染。
+## 2. 输入与输出
 
-目标：
+### 2.1 输入
 
-- 将 Timeline、轨道、片段、转场、字幕、音频、裁切和输出规格持久化为版本化 AssemblyPlan；
-- readiness 报告明确缺失、冲突、过期绑定和可降级项；
-- plan 模式先授权/扣费再调用模型，候选经确定性 Timeline Validator 后进入正式审核；
-- preview/export 冻结 Plan/Asset/Output Spec/Quote，正式审批、扣费、预留 Output Asset 后原子派发；
-- Worker 使用冻结 Render Manifest 执行真实渲染并走统一 Finalize/终态事件。
+`AssembleOutputIntent` exact-set：
 
-非目标：
-
-- 不生成素材、Prompt 或 Storyboard；
-- 不允许模型直接执行 ffmpeg、访问对象存储 Secret 或决定价格；
-- 不在 Graph 中等待渲染完成；
-- 不把前端本地预览、manifest 文件或 Job accepted 当成最终导出成功。
-
-### 1.1 需求追踪
-
-| 类型 | ID |
+| 字段 | 当前约束 |
 |---|---|
-| Tool 主验收 | `GTL-EDIT-001`、`GTL-EDIT-002` |
-| 异步与共通 | `GTL-ASYNC-001`、`GTL-CANCEL-001`、`GTL-USE-002`、`GTL-VER-001`、`GTL-IDEM-001`、`GTL-BILL-001`、`GTL-EARN-001`、`GTL-SEC-001` |
-| 全功能冒烟 | `SMK-015`、`SMK-016`、`SMK-018`、`SMK-019`、`SMK-020`、`SMK-021`、`SMK-022`、`SMK-023`、`SMK-033`、`SMK-034` |
+| `schema_version` | 固定 `assemble_output.intent.v3preview1` |
+| `source_asset_id` | Business Media Preview Asset UUIDv7 |
+| `expected_source_version` | 当前精确版本 |
+| `expected_source_content_digest` | ready PNG 小写 SHA-256 |
+| `output_profile` | 固定 `mp4_h264_640x360_2s.v1` |
 
-## 2. Intent、输入与结果
+User/Project/Session/Input/Turn/Run/ToolCall/Idempotency/Fence/Deadline 只来自 `TrustedContext`。输入不接受 Timeline、路径、URL、shell、codec、滤镜或自定义 ffmpeg 参数。
 
-### 2.1 `AssembleOutputIntentV1`
+### 2.2 输出
 
-| 字段 | 类型 | 规则 |
-|---|---|---|
-| `mode` | `validate/plan/preview/export` | 必填 |
-| `storyboard_revision_id` | UUID? | validate/plan 可指定；必须 active |
-| `assembly_plan_id` | UUID? | 修订、preview、export 必填；preview/export 必须 active |
-| `expected_plan_version` | int64? | 修订/渲染时必填 |
-| `instruction` | string? | plan 新建/修订时必填；不承载权限 |
-| `selected_asset_ids` | UUID[]? | plan 可选；服务端仍按 Binding/权限/版本验证 |
-| `output_spec` | object? | preview/export 必填；格式、尺寸、码率等服务端 Schema |
-| `preserve_track_ids` | UUID[]? | plan 修订提示；锁定仍由服务端决定 |
+- Graph 受理：`accepted/MEDIA_PREVIEW_ACCEPTED`，返回 `operation_id/batch_id/asset_id/receipt_id`。
+- 确定失败：`failed`，只返回白名单 `result_code/error_code`。
+- Prepare/Dispatch 未确定：内部 `GraphOutcome.Recovery`，Operation 保持 `recovery_pending`，不冻结伪失败。
+- Worker 成功后：Business Asset 变 `ready`，Terminal Outbox 驱动 Workspace completed Card；内容端点支持 `HEAD/GET/Range`。
 
-用户、项目、Run、Approval 和 Budget Authorization 来自可信上下文。preview/export 的 Approval Continuation 必须绑定 Plan version/digest、Asset set digest、Render Manifest digest、Quote 和输出规格。
-
-### 2.2 Readiness 与 Render Manifest
-
-`compute_readiness` 只根据 Business 权威资源生成：
-
-- ready/missing/failed/stale/superseded Asset Binding；
-- Storyboard/Prompt/AssemblyPlan 版本关系；
-- Timeline 引用、时长、格式、轨道冲突和必需音视频输入；
-- 可降级项与禁止继续项。
-
-Render Manifest 由 Agent 确定性节点从已激活 AssemblyPlan 及权威资源生成，包含稳定资源引用/digest、轨道参数、输出规格和 Worker Policy Ref。模型不能直接输出可执行命令行。
-
-### 2.3 输出
-
-- validate：`completed` 或 `partial` + Readiness Resource/Card；
-- plan 缺预算授权：`waiting_user` + billable execution Approval；
-- plan 候选保存：`waiting_user` + AssemblyPlan activation Approval；
-- preview/export 缺 Render Approval：`waiting_user` + Quote/Readiness/Approval；
-- preview/export 派发成功：`accepted` + Operation/Batch/Output Asset 占位；
-- 硬依赖缺失、版本冲突、余额不足、模型/准备/派发失败：`failed`。
-
-真实 Output Asset 只有 Worker Finalize 成功后才进入 ready/bound；终态通过新 Continuation Turn/A2UI 返回。
-
-## 3. Typed Graph State
-
-Graph State 类型为 `AssembleOutputStateV1`。
-
-| State 字段 | Owner/来源 | 读节点 | 写节点 | 持久化/Checkpoint | 敏感性与不变量 |
-|---|---|---|---|---|---|
-| `trusted_context` | Agent | 全部 | 初始化器 | Run | 不可覆盖 |
-| `intent` | Tool Schema | 校验、分支、上下文 | `validate_intent` | input digest | 模式互斥 |
-| `assembly_context` | Business | readiness、Prompt、Manifest | `load_assembly_context` | Resource refs/digests | 同一项目授权快照 |
-| `readiness_report` | Agent | 所有模式/Result | `compute_readiness` | Tool/Plan/Operation Receipt | 硬阻塞和可降级项确定性 |
-| `selected_mode` | Agent | 模式分支 | `select_mode` | ToolReceipt | 只能等于已校验 Intent mode |
-| `plan_scope_digest` | Agent | plan 授权/扣费/保存 | `freeze_plan_scope` | Receipt | 包含基线、锁、Asset 版本 |
-| `execution_quote`、`execution_authorization` | Agent/Business | plan 扣费 | plan 估价/授权节点 | Approval/Receipt | 绑定 plan scope |
-| `execution_approval` | Agent | plan 待授权结果 | `create_plan_execution_approval` | Agent 权威 | 仅覆盖 plan 模型执行 |
-| `charge_receipt` | Business | plan Model/恢复 | 扣费节点 | Business + Ref | 成功前禁止模型调用 |
-| `prompt_input`、`plan_candidate` | Agent/ChatModel | Model/Validator | Prompt/Model Nodes | ModelReceipt/短期 Checkpoint | Candidate 非业务事实 |
-| `validation_report` | Agent | 分支/保存 | Timeline Validators | ToolReceipt | 禁止执行型命令和无效资源引用 |
-| `plan_diff` | Agent | 保存/审批/Result | `compute_plan_diff` | Business Candidate/Agent Receipt | 绑定基线版本；锁定 Track 变化必须为空 |
-| `saved_plan`、`plan_approval` | Business/Agent | Result | 保存/审批节点 | 各自权威 DB | version/digest/Diff 绑定 |
-| `render_scope_digest`、`render_manifest` | Agent | Quote/Approval/Prepare/Job | 冻结/Manifest 节点 | Operation/Dispatch Receipt | 渲染后不可变；不含 Secret |
-| `operation`、`render_quote` | Agent/Business | Approval/Prepare | Operation/Quote 节点 | 权威 DB | mode+scope 唯一 |
-| `render_approval` | Agent | 渲染待审批结果 | `create_render_approval` | Agent 权威 | 绑定 Plan/Manifest/Quote/金额/规格 |
-| `approval_consumption` | Agent | Prepare | `resolve_and_consume_render_approval` | Agent Approval | 正式一次性 CAS |
-| `preparation_receipt`、`dispatch_receipt` | Business/Agent | Job/Result/恢复 | Prepare/Dispatch 节点 | 权威 DB | Charge/Output Asset/Job 完整 |
-| `render_job_spec` | Agent | Dispatch | `build_render_job` | Dispatch Receipt | Job ID、Manifest、Asset 和幂等键必须稳定 |
-| `result`、`error` | Agent | END | Result/Error Nodes | ToolReceipt | 唯一终态 |
-
-## 4. Graph 流程
+## 3. 当前 Graph 流程
 
 ```mermaid
 flowchart TD
-    S([START]) --> V[validate_intent]
-    V -->|invalid| F[emit_failed]
-    V --> L[load_assembly_context]
-    L --> R[compute_readiness]
-    R --> M{select_mode}
-
-    M -->|validate| VR[emit_readiness_result]
-
-    M -->|plan| PG[guard_plan_dependencies]
-    PG -->|blocked| F
-    PG --> PS[freeze_plan_scope]
-    PS --> PE[estimate_plan_execution]
-    PE --> PA[resolve_plan_execution_authorization]
-    PA -->|approval required| PAA[create_plan_execution_approval]
-    PAA --> W1[emit_waiting_user]
-    PA -->|authorized| PC[prepare_billable_execution]
-    PC -->|unknown| PCQ[get_billable_execution_receipt]
-    PCQ -->|charged| PP1[build_plan_primary_prompt]
-    PCQ -->|unresolved| F
-    PC -->|charged| PP1
-    PP1 --> PM1[call_plan_model_primary]
-    PM1 --> PV1[validate_plan_primary]
-    PV1 -->|valid| PD[compute_plan_diff]
-    PV1 -->|repairable| PP2[build_plan_correction_prompt]
-    PV1 -->|non-repairable| F
-    PP2 --> PM2[call_plan_model_correction]
-    PM2 --> PV2[validate_plan_correction]
-    PV2 -->|valid| PD
-    PV2 -->|invalid| F
-    PD --> SP[save_assembly_plan_candidate]
-    SP --> APA[create_plan_activation_approval]
-    APA --> W2[emit_waiting_user]
-
-    M -->|preview / export| RG[guard_render_dependencies]
-    RG -->|blocked| F
-    RG --> RM[build_render_manifest]
-    RM --> RS[freeze_render_scope]
-    RS --> RO[ensure_render_operation]
-    RO --> RQ[quote_render]
-    RQ --> RA[resolve_and_consume_render_approval]
-    RA -->|approval absent / changed| RAA[create_render_approval]
-    RAA --> W3[emit_waiting_user]
-    RA -->|consumed| RP[prepare_render]
-    RP -->|unknown| RPQ[get_render_preparation]
-    RPQ -->|charged| RJ[build_render_job]
-    RPQ -->|unresolved| F
-    RP -->|charged| RJ
-    RJ --> RD[dispatch_render_operation]
-    RD -->|committed| OK[emit_accepted]
-    RD -->|unknown| RDQ[get_dispatch_receipt]
-    RDQ -->|committed| OK
-    RDQ -->|unresolved| F
-
-    VR --> X([END])
-    W1 --> X
-    W2 --> X
-    W3 --> X
-    OK --> X
-    F --> X
+    S([START]) --> VI[validate_intent]
+    VI -->|valid| FS[freeze_scope]
+    VI -->|invalid| EF[emit_failed]
+    FS --> EO[ensure_operation]
+    EO --> PA[prepare_asset]
+    PA -->|reserved| BJ[build_job]
+    PA -->|unknown| QP[query_preparation]
+    PA -->|failed| EF
+    QP -->|completed| BJ
+    QP -->|unresolved| DR[defer_recovery]
+    QP -->|failed| EF
+    BJ --> DJ[dispatch_job]
+    DJ -->|committed| EA[emit_accepted]
+    DJ -->|unknown| QD[query_dispatch]
+    DJ -->|failed| EF
+    QD -->|committed| EA
+    QD -->|unresolved| DR
+    QD -->|failed| EF
+    EA --> X([END])
+    EF --> X
+    DR --> X
 ```
 
-Graph 为 `AllPredecessor` 无环 DAG。只有 `plan` 分支使用 ChatModel；validate/preview/export 全部确定性执行。渲染终态不恢复原 Graph。
+Graph 与 `generate_media` 复用相同 `AllPredecessor` 泛型无环拓扑，只替换 Source、Definition、Job Type 和 Profile。Graph 无 ChatModel、Prompt Node、ToolsNode、循环或跨分钟栈。
 
-## 5. 稳定 Node 清单
+## 4. 稳定 Node / Branch exact-set
 
-| Node Key | 中文名称 | 业务分类 | Eino 实现 | 单一职责 | 输入/输出 | State 读写 | 副作用/风险 | Invoke/Stream | 预算/回执 | 错误码/失败目标 | Checkpoint |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| `validate_intent` | 校验装配意图 | Guard | Lambda | 模式、Schema、版本、规格和互斥字段 | Intent→规范化 Intent | R/W intent | 无 | Invoke | input digest | `INVALID_ARGUMENT` | 否 |
-| `load_assembly_context` | 加载装配上下文 | Query | Lambda/RPC | 读取 Storyboard、Plan、Asset、Binding、锁和版本 | Refs→Context | W assembly_context | Business 敏感读取 | Invoke | RPC Receipt | `PERMISSION_DENIED/VERSION_CONFLICT` | 可，仅引用 |
-| `compute_readiness` | 计算装配就绪度 | Validate | Lambda | 确定性输出硬阻塞/可降级/缺失/过期项 | Context→Readiness | W readiness_report | 不调用模型 | Invoke | Readiness Validator Version | `DEPENDENCY_NOT_READY` | 否 |
-| `select_mode` | 选择装配模式 | Branch | Branch | 按已校验 Intent 进入 validate/plan/preview/export | Intent→mode | W selected_mode | 模型不能决定 | Invoke | Branch Receipt | `INVALID_ARGUMENT` | 否 |
-| `emit_readiness_result` | 输出就绪报告 | Result | Lambda | 写 completed/partial ToolResult/A2UI | Report→Result | W result | EventLog | Invoke | ToolReceipt/Event ID | `INTERNAL` | 否 |
-| `guard_plan_dependencies` | 校验计划依赖 | Guard | Lambda | 确认可用于规划的最小资源与锁 | Readiness→Guard | W error | 无 | Invoke | Guard Version | `DEPENDENCY_NOT_READY/LOCK_CONFLICT` | 否 |
-| `freeze_plan_scope` | 冻结计划范围 | Compute | Lambda | 摘要 Storyboard、Asset、基线 Plan、锁和 instruction | Context→Scope | W plan_scope_digest | 扣费后不可变 | Invoke | Scope Receipt | `INTERNAL` | 否 |
-| `estimate_plan_execution` | 估算计划模型执行 | Compute | Lambda | 按时间线规模和配置生成 Quote | Scope→Quote | W execution_quote | 不扣费 | Invoke | Policy Ref | `BUDGET_POLICY_MISSING` | 否 |
-| `resolve_plan_execution_authorization` | 校验计划预算授权 | Guard | Branch | 验证 plan scope 的正式授权 | Quote→Auth | W execution_authorization | 不信任模型授权 | Invoke | Approval Receipt | `APPROVAL_REQUIRED` | 否 |
-| `create_plan_execution_approval` | 创建计划执行审批 | Command | Lambda/Repository | 保存 billable execution Approval | Quote→Approval | W execution_approval | Agent DB/EventLog | Invoke | Approval Receipt | `INTERNAL` | 否 |
-| `prepare_billable_execution` | 扣除计划模型费用 | Command | Lambda/RPC | 调 `BIZ-AIGC-003` | Auth→Charge | W charge_receipt | 扣费 | Invoke | Charge Receipt | `INSUFFICIENT_POINTS/UNKNOWN_OUTCOME` | 是，仅 Receipt |
-| `get_billable_execution_receipt` | 查询模型扣费 | Query | Lambda/RPC | 调 `BIZ-AIGC-004` | Key→Charge | W charge_receipt | 无新扣费 | Invoke | Charge Receipt | `UNKNOWN_OUTCOME` | 否 |
-| `build_plan_primary_prompt` | 构造装配计划 Prompt | Prompt | ChatTemplate | 传入抽象时间线数据和约束，不生成命令行 | Context→Messages | W prompt_input | Prompt 注入 | Invoke | prompt key/version/digest | `PROMPT_RENDER_FAILED` | 否 |
-| `call_plan_model_primary` | 主装配规划 | Inference | ChatModel | 生成结构化 Timeline 候选 | Messages→Candidate | W plan_candidate | 已计费模型调用 | Invoke | ModelReceipt/配置预算 | `MODEL_*` | 是，Receipt |
-| `validate_plan_primary` | 首次 Timeline 校验 | Validate | Lambda | Schema、引用、时长、轨道、规格、锁和安全校验 | Candidate→Report | W validation_report | 无 | Invoke | Validator Version | invalid→repair/failed | 否 |
-| `build_plan_correction_prompt` | 构造计划纠错 Prompt | Prompt | ChatTemplate | 只带稳定错误码和候选摘要 | Report→Messages | W prompt_input | 不泄漏内部实现 | Invoke | prompt key/version/digest | `PROMPT_RENDER_FAILED` | 否 |
-| `call_plan_model_correction` | 单次计划纠错 | Inference | ChatModel | 原预算内纠错一次 | Messages→Candidate | W plan_candidate | 禁止无限重试 | Invoke | ModelReceipt 子 Attempt | `MODEL_*` | 是，Receipt |
-| `validate_plan_correction` | 纠错 Timeline 校验 | Validate | Lambda | 复用确定性 Validator | Candidate→Report | W validation_report | 无 | Invoke | Validator Version | invalid→failed | 否 |
-| `compute_plan_diff` | 计算计划差异 | Compute | Lambda | 对基线 Plan 生成 Diff 并保护锁定 Track | Candidate→Diff | W plan_diff | 无外部写入 | Invoke | Diff digest | `LOCK_CONFLICT` | 否 |
-| `save_assembly_plan_candidate` | 保存装配计划候选 | Command | Lambda/RPC | 调 `BIZ-AIGC-013` 保存 Plan/Track/Clip/Diff | Candidate→ResourceRef | W saved_plan | Business 多表事务 | Invoke | Write Receipt | `VERSION_CONFLICT/UNKNOWN_OUTCOME` | 是，仅 Receipt |
-| `create_plan_activation_approval` | 创建计划激活审批 | Command | Lambda/Repository | 绑定 Plan version/digest/Diff | ResourceRef→Approval | W plan_approval | Agent DB/EventLog | Invoke | Approval Receipt | `INTERNAL` | 否 |
-| `guard_render_dependencies` | 校验渲染依赖 | Guard | Lambda | 要求 active Plan、所有硬依赖 ready、版本一致 | Readiness→Guard | W error | 无 | Invoke | Guard Version | `DEPENDENCY_NOT_READY/VERSION_CONFLICT` | 否 |
-| `build_render_manifest` | 构造渲染清单 | Compute | Lambda | 将 Plan 转为版本化、无 Secret 的 Worker 输入 | Context→Manifest | W render_manifest | 不生成 shell 命令 | Invoke | Manifest key/version/digest | `MANIFEST_INVALID` | 是，digest |
-| `freeze_render_scope` | 冻结渲染范围 | Compute | Lambda | 摘要 Plan、Assets、Manifest、mode 和 output spec | Manifest→Scope | W render_scope_digest | 扣费后不可变 | Invoke | Scope Receipt | `INTERNAL` | 否 |
-| `ensure_render_operation` | 创建或恢复渲染 Operation | Command | Lambda/Repository | 按 scope 创建 `awaiting_approval` Operation | Scope→Operation | W operation | Agent DB 写入 | Invoke | Operation Receipt | `VERSION_CONFLICT` | 是，仅 Receipt |
-| `quote_render` | 获取真实渲染报价 | Query | Lambda/RPC | 调 `BIZ-AIGC-015` 获取 preview/export Quote | Scope→Quote | W render_quote | 价格敏感 | Invoke | Quote Receipt | `UNSUPPORTED_OUTPUT_SPEC` | 否 |
-| `resolve_and_consume_render_approval` | 校验并消费渲染审批 | Guard/Command | Branch/Repository | 绑定 Plan/Manifest/Quote/金额执行一次性 CAS | Approval→Consumption | W approval_consumption | 最终导出高风险 | Invoke | Approval Consumption Receipt | `APPROVAL_REQUIRED/INVALID` | 否 |
-| `create_render_approval` | 创建渲染审批 | Command | Lambda/Repository | 保存 Quote、readiness、output spec 和不可退款提示 | State→Approval | W render_approval | Agent DB/EventLog | Invoke | Approval/Event Receipt | `INTERNAL` | 否 |
-| `prepare_render` | 扣费并预留输出资产 | Command | Lambda/RPC | 以 render job type 调 `BIZ-AIGC-016` | Scope/Auth→Preparation | W preparation_receipt | 扣费/Output Asset/Token | Invoke | Preparation Receipt | `INSUFFICIENT_POINTS/UNKNOWN_OUTCOME` | 是，仅 Receipt |
-| `get_render_preparation` | 查询渲染准备 | Query | Lambda/RPC | 调 `BIZ-AIGC-017` | Operation→Preparation | W preparation_receipt | 无新扣费 | Invoke | Preparation Receipt | `UNKNOWN_OUTCOME` | 否 |
-| `build_render_job` | 构建真实渲染 Job | Compute | Lambda | 生成稳定 Job ID、Manifest Ref 和幂等键 | Preparation→JobSpec | W render_job_spec | Binding Token 受限 | Invoke | Job Spec digest | `PREPARATION_MISMATCH` | 是，映射 Receipt |
-| `dispatch_render_operation` | 原子派发渲染 | Command | Lambda/Repository | 写 Operation/Batch/Job/Dispatch Outbox | Job→Dispatch | W dispatch_receipt | Agent 多表事务 | Invoke | Dispatch Receipt | `VERSION_CONFLICT/UNKNOWN_OUTCOME` | 是，仅 Receipt |
-| `get_dispatch_receipt` | 查询渲染派发 | Query | Lambda/Repository | 查询相同 Operation 是否提交 | Operation→Dispatch | W dispatch_receipt | 无新 Job | Invoke | Dispatch Receipt | `UNKNOWN_OUTCOME` | 否 |
-| `emit_waiting_user` | 输出待审批 | Result | Lambda | 按分支返回模型/计划/渲染 Approval Card | State→Result | R execution_approval/plan_approval/render_approval; W result | EventLog | Invoke | ToolReceipt/Event ID | `INTERNAL` | 否 |
-| `emit_accepted` | 输出渲染受理 | Result | Lambda | 返回 Operation/Output Asset 占位 | Dispatch→Result | W result | EventLog | Invoke | ToolReceipt/Event ID | `INTERNAL` | 否 |
-| `emit_failed` | 输出失败/未知结果 | Error | Lambda | 归一化错误并登记 Recovery 条件 | Error→Result | W result/error | 不自动退款/重派 | Invoke | Failure/Recovery Receipt | 稳定错误码 | 否 |
+Node exact-set（11）：
 
-## 6. 业务与执行状态机
+`validate_intent`, `freeze_scope`, `ensure_operation`, `prepare_asset`, `query_preparation`, `build_job`, `dispatch_job`, `query_dispatch`, `defer_recovery`, `emit_accepted`, `emit_failed`。
 
-### 6.1 AssemblyPlan
+| Branch Key / 源 Node | 输出 exact-set |
+|---|---|
+| `route_intent_validation` / `validate_intent` | `freeze_scope`, `emit_failed` |
+| `route_prepare_outcome` / `prepare_asset` | `build_job`, `query_preparation`, `emit_failed` |
+| `route_preparation_query` / `query_preparation` | `build_job`, `defer_recovery`, `emit_failed` |
+| `route_dispatch_outcome` / `dispatch_job` | `emit_accepted`, `query_dispatch`, `emit_failed` |
+| `route_dispatch_query` / `query_dispatch` | `emit_accepted`, `defer_recovery`, `emit_failed` |
+
+未知值返回错误并失败关闭。
+
+## 5. 强类型 Graph State 摘要
+
+`AssembleOutputPreviewStateV1` 是 `mediaPreviewState[AssembleOutputIntent]` 的强类型别名：
+
+| 字段组 | 内容与不变量 |
+|---|---|
+| 身份/Intent | `TrustedContext`, `Intent`；可信字段不可覆盖 |
+| 范围 | `ScopeDigest`；覆盖 Tool/Definition、Owner 范围、ready PNG exact ref 与固定 Profile |
+| Agent 聚合 | `Operation`；first-write-wins 预分配 Operation/Batch/Job/Outbox ID |
+| Business 边界 | `PreparationRequest`, `Preparation`；源 Asset 与输出 Asset 必须再次校验 |
+| 派发 | `JobSpec`, `DispatchReceipt`；Job Type 固定 `assemble_mp4` |
+| 结束 | `Result`, `ErrorCode`；Recovery 使用独立联合 |
+
+State/Job 不保存任意命令行、绝对路径、Secret、永久 URL 或媒体二进制。
+
+## 6. 业务状态机与迁移表
+
+### 6.1 Business Output Asset 与 Agent Operation
 
 ```mermaid
 stateDiagram-v2
-    [*] --> reviewing: SaveAssemblyPlanCandidate
-    reviewing --> active: approved + version/digest/diff match
-    reviewing --> rejected: rejected
-    active --> stale: source Storyboard/Asset Binding changes
-    active --> superseded: newer plan activates
-    reviewing --> superseded: newer candidate replaces it
-    rejected --> [*]
-    stale --> [*]
-    superseded --> [*]
+    state "Business Output Asset" as BA {
+        [*] --> reserved: Prepare
+        reserved --> ready: MP4 Finalize success
+        reserved --> failed: render/finalize failure
+    }
+    state "Agent Render Operation" as AO {
+        [*] --> preparing: ensure operation
+        preparing --> recovery_pending: prepare/dispatch unknown
+        recovery_pending --> preparing: original-key reconciliation
+        preparing --> accepted: dispatch committed
+        accepted --> running: Worker claims Job
+        running --> completed: Job succeeded
+        running --> failed: Job dead
+    }
 ```
 
-### 6.2 Output Asset / Render Operation
+### 6.2 当前迁移表
 
-```mermaid
-stateDiagram-v2
-    [*] --> awaiting_approval
-    awaiting_approval --> preparing: render approval consumed
-    preparing --> accepted: render job dispatched
-    accepted --> running: worker claimed
-    running --> completed: output asset bound
-    running --> failed: terminal failure
-    running --> cancelled: cancellation converged
-    completed --> superseded: newer export replaces it
-```
+| 聚合 / Owner | 当前迁移 | Guard / 幂等 | 失败处理 |
+|---|---|---|---|
+| Output Asset / Business | 不存在 → `reserved → ready/failed` | Prepare command、Operation、Asset 唯一；Source 必须 ready image；Finalize 绑定 job/fence/output digest | unknown 只查原命令 |
+| Operation / Agent | 不存在 → `preparing → accepted → running → completed/failed` | `tool_call_id` 唯一；scope/profile/version CAS | unknown → `recovery_pending` |
+| Batch / Agent | 不存在 → `accepted → running → completed/failed` | 一 Operation 一 Batch | 由唯一 Job barrier 收口 |
+| Job / Agent | 不存在 → `pending → running/retry_wait/reconciling → succeeded/dead` | Job Type/Profile 固定；lease + 单调 Fence | stale Fence 不得绑定输出 Asset |
+| Attempt / Worker | `claim_pending/claim_unknown → running → artifact_ready → completed/failed`，可经未知/对账/重试状态 | attempt/job/fence/artifact digest 与 Finalize command 唯一 | 先查临时产物、Business Finalize 和 Agent terminal receipt |
 
-| Aggregate/Owner | 权威来源 | 原状态 | 触发事件 | 执行方 | Guard/动作 | 目标状态 | 终态/可重试 | 事务/幂等键 | Fence/版本/Outbox | 失败处理 |
-|---|---|---|---|---|---|---|---|---|---|---|
-| AssemblyPlan/Business | Business DB | 不存在 | 保存候选 | Business | Timeline、资源、基线、锁、Diff 合法 | `reviewing` | 非终态 | `tool_call_id + plan_digest` | plan version + Outbox | 多表事务回滚 |
-| AssemblyPlan/Business | Business DB | `reviewing` | Approval 决策 | Agent Continuation→Business | Approval 绑定 version/digest/Diff | `active/rejected` | active 可渲染；rejected 终态 | `approval_id + decision_version` | CAS + Outbox | 冲突拒绝并刷新 |
-| AssemblyPlan/Business | Business DB | `active` | 上游资源变化 | Business | source digest 不再匹配 | `stale` | 不可新渲染 | event_id | CAS + Outbox | 保留历史 |
-| RenderOperation/Agent | Agent DB | 不存在 | 冻结 render scope | Agent Graph | mode/Plan/Manifest/Quote 唯一 | `awaiting_approval` | 非终态 | `turn_id + tool_call_id` | operation version | 重放复用 |
-| OutputAssetBinding/Business | Business DB | 不存在 | Prepare render | Business | Approval Consumption、Quote、余额、scope 合法 | `reserved` | 可恢复 | `operation_id + render_scope_digest` | Asset version/Token | unknown 查询 |
-| RenderOperation/Job/Agent | Agent DB | `preparing` | Dispatch render | Agent Graph | Preparation Receipt 与 Manifest 匹配 | `accepted/pending` | Worker 可 Claim | operation + preparation receipt | 同事务 Dispatch Outbox | Recovery 补派发 |
-| RenderAttempt/Worker | Worker DB | 不存在/可重试 | Claim/start/render/upload | Worker | 当前 Fence、取消检查、Manifest Schema 支持 | `claimed/rendering/uploading/finalizing` | 按策略重试 | job + attempt + fence | Worker Receipts | Provider/ffmpeg unknown 先查 Receipt |
-| OutputAssetBinding/Business | Business DB | `reserved` | Finalize render | Worker | Token/Fence/output digest/格式校验 | `bound/failed/cancelled/superseded` | 终态 | job + fence + output digest | Finalization Receipt + Outbox | stale 隔离；unknown 查询 |
-| RenderOperation/Agent | Agent DB | `running` | Job terminal/barrier | Worker via `AGT-JOB-V1` | 当前 Fence 和 Finalization Receipt | `completed/failed/cancelled` | 终态 | job + fence + terminal status | 同事务 Terminal Outbox | 重放返回原结果 |
+当前没有 AssemblyPlan 领域表或状态机；Source PNG 与 Output MP4 都使用 `business.media_preview_asset` 的 Preview 状态集。
 
-preview 和 export 产生不同 Output Asset 类型和 Binding，不允许用 preview 文件冒充 final export。
+## 7. Owner、幂等与 Unknown Outcome
 
-## 7. ChatModel、Prompt、Schema 与预算
+- Business 拥有 Source/Output Asset、Prepare/Finalize Receipt 和受保护对象元数据。
+- Agent 拥有 Operation/Batch/Job、Dispatch/Terminal Outbox 与 Workspace Event。
+- Worker 拥有 Attempt、Artifact Receipt 和 Finalization Observation；不直写其他 Module 普通表。
+- `EnsureOperation` 固定一 Operation/Batch/Job/Outbox 身份；重复请求不能重新分配输出 Asset 或 Job。
+- Prepare unknown 只查原 `command_id/request_digest`；Dispatch unknown 只查原 `operation_id/scope_digest`。
+- Worker 在执行前保存 Attempt/Artifact 请求身份；ffmpeg/Finalize/terminal 结果不确定时先按原回执核对，禁止盲目生成第二份 MP4。
+- Fence 过期的 Worker 结果不能 Finalize Asset 或覆盖 Agent Job 终态。
 
-- 仅 plan 分支使用 Prompt：`graph_tool.assemble_output.plan.primary`、`graph_tool.assemble_output.plan.correction`。
-- ChatModel 通过 Eino DeepSeek 兼容组件注入；模型参数来自 Runtime 配置。
-- 模型只输出抽象 Timeline：Track、Clip、资源 local ref、in/out、转场、字幕/音量/裁切意图和验收提示；不输出 shell、ffmpeg 参数串、URL、Secret、价格、Job ID。
-- Validator 校验所有资源引用、时间区间、轨道冲突、总时长、锁、输出能力和 Schema；服务端再生成 Render Manifest。
-- 只允许一次显式纠错；Track/Clip 数、Token、上下文和耗时由 Tool Budget 控制。
-- validate 分支不扣费；plan 模型费用和 preview/export 渲染费用是不同 Charge/Approval Scope。
+## 8. 安全
 
-## 8. 分支、并行与异步边界
+- Business Prepare 重新校验 User/Project、Source Asset `ready`、media kind、MIME、version/digest 与固定 Profile。
+- Worker 不执行用户提供的 shell。ffmpeg 使用固定可执行文件与白名单 argv，不经过 shell，不接收任意滤镜、路径或 codec。
+- Source/Object key 必须是 Business 生成的相对路径；禁止绝对路径、反斜杠、`..` 和双斜杠。
+- Job/Receipt/日志不保存对象根、绝对路径、用户 Prompt、Secret 或二进制。
+- 内容读取通过 Business 同源授权端点，Owner/Project 校验后支持标准 Range；不暴露本地对象路径。
+- 当前 local-only；生产渲染沙箱、资源配额、恶意媒体扫描、对象存储身份和供应链治理未完成。
 
-- 四种模式在 readiness 后分支；只有 plan 进入 ChatModel，只有 preview/export 进入 Worker。
-- plan 首次/纠错结果汇入一次保存；无模型循环。
-- preview/export 共用 Render Manifest、Approval、Preparation、Job Contract，但 Quote、输出规格和 Asset 类型不同。
-- Worker 可以并行处理不同 Operation；单个 Render Job 内部并行策略由 Worker 配置，不能改变 Job/Plan digest。
-- Render Job 终态通过 Agent Barrier/Terminal Outbox，不恢复旧 Graph。
+## 9. 测试与验收入口
 
-## 9. 幂等、事务、Fence 与恢复
+当前测试覆盖共享 Graph exact-set、Intent strict decode、scope digest、Source ready/version/digest、Prepare/Dispatch Unknown Query、Operation/Job first-write-wins、Claim/Lease/Fence、固定 ffmpeg argv、真实 MP4 产物、Finalize/Terminal 重放、迁移约束和安全路径校验。
 
-- Plan Scope、Render Scope、Manifest、Charge、Operation、Job 和 Output Digest 各自版本化并可审计。
-- Plan 保存为 Business 多表事务；保存成功后 Agent Approval 失败由 Recovery Scanner 补建。
-- Prepare render 成功但 Dispatch 失败时，使用原 Operation/Preparation/Job ID 补派发，不重新扣费。
-- Render Worker 调外部程序/服务前落 Request Receipt；进程结果未知时先检查输出临时对象和 Attempt 状态，不能盲目生成第二份 final asset。
-- Fence 过期结果进入 superseded/orphaned，不能绑定 Output Asset。
-- Agent Job 终态与 Terminal Outbox 同事务，SSE/EventLog 按 Event ID 幂等。
+`make trial-basic` 的固定验收范围包括：Worker 从 ready PNG 生成真实 `2s`、`640x360`、H.264、`yuv420p`、`faststart` MP4；浏览器 `<video>` 可读取；同源内容接口返回 `200`、合法 Range `206`、非法 Range `416`；Workspace V5 和硬刷新恢复。
 
-## 10. 风险、HITL、权限与隐私
+## 10. 生产差距
 
-- Plan 模型执行、Plan 激活、preview 渲染、final export 分别使用独立正式 Approval；任何摘要变化使 Approval 失效。
-- final export Card 必须展示 Plan 版本、输出规格、资产就绪度、Quote、余额影响、风险和不可退款规则。
-- Render Manifest 不含永久 URL/Secret；Worker 在执行时按 Resource Ref 获取短期授权。
-- 模型不能输出可执行命令；Worker 使用受控参数构造器并限制路径、格式、资源和进程权限。
-- 日志只记录 Plan/Asset/Manifest/Output digest、进度和错误码；用户内容与签名 URL 脱敏。
-
-## 11. 测试与验收
-
-必须覆盖：
-
-- 四种模式 Schema、readiness completed/partial/blocked、stale Plan、缺 Asset、版本冲突；
-- plan 模型授权/扣费、单次纠错、Timeline 冲突、锁保护、多表保存和激活；
-- Manifest 确定性、禁止命令注入、同输入同 digest；
-- preview/export Quote 变化、Approval 过期/重放、余额不足；
-- Prepare unknown outcome、已扣费未派发恢复、Worker Fence/取消/渲染/上传/Finalize；
-- preview 与 final Asset 区分、真实文件可解码/播放/下载，不接受纯 manifest；
-- Terminal Outbox/Inbox/Continuation/A2UI/SSE 幂等；
-- Graph 所有模式唯一 END，无长期等待。
-
-全功能冒烟至少覆盖资源就绪检查→生成并批准 AssemblyPlan→真实 preview→final export→下载/播放，以及缺失资源、部分失败、取消和幂等恢复。
-
-## 12. 评审结论
-
-- [ ] 产品确认四种模式、Timeline、readiness、preview/final 交互；
-- [ ] Business 确认 Plan/Output Asset/Binding/计费状态机；
-- [ ] Agent 确认 Graph、Approval、Operation/Job、A2UI；
-- [ ] Worker 确认 Render Manifest、沙箱、Receipt、Fence、上传与 Finalize；
-- [ ] 财务、安全、运维确认费用、不可退款、命令隔离、资源上限、扫描恢复与告警；
-- [ ] 测试确认真实产物和 SMK-P0。
-
-当前结论：**待评审，不通过实现门禁。**
+生产 `assemble_output.v1alpha1` 仍为 Draft，至少缺少：validate/plan/preview/export 四模式，正式 AssemblyPlan/Timeline/Track/Clip/Diff/锁，任意受控字幕/音轨/转场，计划模型与 Validator，preview/final Asset 区分，Quote/计费/收入/冲正，多 Scope Approval/Continuation，取消、复杂 Batch/部分失败，生产渲染沙箱与对象存储，资源限额/告警，生产 Registry/Catalog，以及完整故障注入和服务/数据库重启恢复证据。

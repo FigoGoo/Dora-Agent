@@ -13,7 +13,7 @@ description: Apply Dora project backend development standards when creating, mod
 - `worker/**`：读取 [Business Worker 开发规范](reference/business-worker-development-standards.md)。
 - `agent/**`：读取 [Agent Service 开发规范](reference/agent-development-standards.md)，并按改动类型使用对应 Eino Skill：Agent/Runner/Middleware/HITL 使用 `$eino-agent`，Graph/Graph Tool/State/Checkpoint/Interrupt 使用 `$eino-compose`，ChatModel/Prompt/Tool Component 使用 `$eino-component`；不确定时先使用 `$eino-guide`。Eino Skill 或示例与 Dora Agent 规范冲突时，以 Dora Agent 规范为准。
 - Agent-facing Graph Tool：实现前读取 `../../../docs/design/agent/graphtool/<tool_key>-design.md`；文档缺失，或缺少流程图、稳定 Node 清单/类型、Graph State、分离的业务状态机和审核结论时停止实现并先补齐设计评审。
-- 现有 AIGC 行为：按范围读取 `../../../docs/aigc-chatmodelagent-demo-design.md`、`../../../docs/aigc-tool-storyboard-design.md`、`../../../docs/aigc-worker-design.md`，核对当前实现、目标形态和旧目录路径，不得仅凭文档声明认定能力已实现。
+- 现有 AIGC 行为：先从 `../../../docs/README.md` 选择对应功能设计，并核对 `../../../docs/requirements/delivery-status.md` 的当前实现边界；冻结审批证据只用于审计，Git 历史和已删除的里程碑文档不得作为当前能力真源。
 - 跨任意 Module 的 DTO、RPC、Event、Job、数据库或持久化消费契约：完整读取所有受影响 Module 的规范。
 - 根 `go.work`、Docker Compose、CI、构建脚本、共享 IDL 或 Event Schema：先识别受影响 Module，再读取所有对应规范。
 

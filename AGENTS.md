@@ -24,7 +24,7 @@
 4. `agent/**` 改动完整读取 [Agent Service 开发规范](.agents/skills/dora-server-development/reference/agent-development-standards.md)。
 5. Agent、Runner、Middleware 或 HITL 改动同时使用项目级 `$eino-agent` Skill；Graph Tool、Graph、Branch、State、Checkpoint 或 Interrupt 改动同时使用 `$eino-compose` Skill；ChatModel、Prompt、Tool Component 改动同时使用 `$eino-component` Skill。不确定 Eino 能力归属时先使用 `$eino-guide`。Eino Skill 和示例与 Dora Agent 规范冲突时，以 Dora Agent 规范为准。
 6. 新增或修改 Agent-facing Graph Tool 时，在实现前完整读取其 `docs/design/agent/graphtool/<tool_key>-design.md`；缺少独立中文设计文档、流程图、稳定 Node 清单/类型、Graph State、分离的业务状态机或审核结论时不得开始实现或合并。
-7. 修改现有 AIGC 行为时按范围读取 `docs/aigc-chatmodelagent-demo-design.md`、`docs/aigc-tool-storyboard-design.md`、`docs/aigc-worker-design.md`，并核对“当前实现/目标形态”和旧目录路径，禁止把目标能力或历史路径直接当作当前事实。
+7. 修改现有 AIGC 行为时先从 `docs/README.md` 选择对应功能设计，并核对 `docs/requirements/delivery-status.md` 的当前实现边界；涉及 Graph Tool 时同时读取固定路径的独立设计。禁止从冻结审批证据、Git 历史或已删除的里程碑文档推断当前能力。
 8. 跨任意 Module 的 DTO、RPC、Event、Job、数据库或持久化消费契约改动，必须完整读取所有受影响 Module 的规范；不得引用其他 Module 的 `internal` 包。
 9. 修改根 `go.work`、Docker Compose、CI、构建脚本、共享 IDL 或跨 Module Event Schema 时，先识别受影响的 Module，再读取所有对应规范。
 10. 修改规范文档、Skill 路由、Module 布局或规范状态时，必须同步检查本文件与 Skill 中的链接和说明。
