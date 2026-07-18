@@ -36,6 +36,14 @@ description: Apply Dora project backend development standards when creating, mod
 
 Migration Owner 是定义表生命周期、写入事务和数据不变量的 Module，不是碰巧读取、Claim、发布或消费该表的 Runtime。Migration 只能位于 Owner Module 的 `migrations/`；Outbox Owner 是将 Outbox 与领域 Aggregate 原子写入的生产者 Module。跨 Module Schema 变更由 Owner 提交 Migration，所有消费者执行契约测试。
 
+### 2.1 保持最小充分设计
+
+- 以用户当前目标、当前功能设计、已发布契约和现有代码边界为准，选择能完整通过门禁的最小改动；设计缺失或互相冲突时先补齐或澄清，不得从未来规划、冻结证据或 Git 历史推导当前需求。
+- 优先复用现有包、契约和简单直接的实现；只有当前需求具有明确必要性时，才新增抽象层、共享 Module、通用框架、可插拔机制或配置开关。
+- 不为“以后可能需要”预留未使用的表、字段、状态、接口、事件、配置、兼容分支、软删除或扩展点；只有现有数据、已发布契约或滚动发布确实需要时才引入兼容逻辑。
+- 不顺带重构无关代码；必要的邻接调整只做到支撑当前变更，并在交付说明中解释原因。
+- 最小实现不能省略安全、权限、幂等、事务、Migration、可观测性和测试门禁。
+
 ## 3. 不可省略的代码门禁
 
 - Runtime 数据访问使用 GORM，Repository 之外不得调用 GORM。
@@ -47,6 +55,9 @@ Migration Owner 是定义表生命周期、写入事务和数据不变量的 Mod
 - 类和方法的中文注释不能替代流程注释；业务判断、状态流转、幂等、事务、重试、补偿和兼容逻辑还必须在对应代码处用中文说明原因及一致性影响。
 - 单次请求、UseCase、事务或 Attempt 内严禁在循环中执行同一或仅参数不同的同构 SQL。复杂读取优先使用一次 JOIN/CTE/子查询并映射为专用查询 DTO；JOIN 不适合时使用固定数量的批量查询或重新设计逻辑，禁止逐条查询和 N+1。
 - 前端、RPC、Event、Job Payload 和跨领域参数必须使用 DTO；禁止暴露 Entity 或 GORM Model。
+- `context.Context` 必须作为调用链首参并贯穿 HTTP、RPC、GORM、Redis 和对象存储，外部 I/O 显式设置超时；请求链禁止使用 `context.Background()` 脱离生命周期或 fire-and-forget，异步业务必须落持久化 Job/Outbox，goroutine 必须有 Owner、取消和回收路径。
+- 事务只包含必要的数据库读写，禁止在事务内等待 HTTP、RPC、Redis、对象存储、模型或 Provider；强一致领域状态与本 Module Outbox 同事务提交，条件更新必须检查 `RowsAffected`。
+- 同一外部副作用只能有一个重试 Owner；Unknown Outcome 先使用原幂等键查询权威状态，禁止换键或跨层叠加重试。
 - 应用生成 UUIDv7；当前没有 Tenant，不得预留无业务含义的 `tenant_id`。
 - 积分使用 `bigint`；金额按字段明确使用分为单位的 `bigint` 或 `numeric(p,2)`，禁止浮点数。
 - etcd 只用于服务注册发现。
@@ -56,8 +67,10 @@ Migration Owner 是定义表生命周期、写入事务和数据不变量的 Mod
 ## 4. Worker 额外门禁
 
 - 明确 At-Least-Once 语义和稳定幂等键。
-- Claim 使用短事务、Lease 和 Fencing Token。
-- Heartbeat、终态和重试更新必须校验 Lease Owner、Lease Version 和旧状态。
+- Claim 使用短事务、Lease 和 Fencing Token；在同一事务中设置 Lease Owner、递增 Lease Version 并创建 Attempt，提交后才执行外部调用。
+- Heartbeat、终态和重试更新必须校验 Lease Owner、Lease Version 和旧状态；`RowsAffected == 0` 视为 Lease Lost，立即取消 Attempt Context 且禁止提交结果。
+- 持久化 Job Payload 必须携带 `schema_version`；存量任务存在时不得原地改变字段语义，破坏性变化使用新版本，滚动发布期间新旧 Worker 必须兼容存量 Payload。
+- Worker 跨 Module 访问只能通过公开 RPC/Event 或 Owner 发布的版本化 Job、Outbox、Inbox、Read Model 消费契约；禁止直连或 JOIN 普通业务操作表，批量 RPC/查询次数不得随 Job 数量增长。
 - Retry 必须分类、有限、带退避和随机抖动；Unknown Outcome 先核对再决定。
 - Worker Pool、Channel、Claim Batch 和下游并发必须有界。
 - Redis 丢失唤醒时，PostgreSQL 轮询必须能够恢复。
@@ -76,7 +89,9 @@ Migration Owner 是定义表生命周期、写入事务和数据不变量的 Mod
 - Skill 草稿/发布、Storyboard、Binding、Asset 和积分归 Business；Agent Graph 通过 RPC 访问，Worker 只负责生成/TOS 并调用 Business Finalize，terminal event 经 Agent Inbox 进入 Session Lane。
 - A2UI 使用独立后端/前端包，所有组件组合具备安全 Markdown 的 Card 公共结构；Worker 不生成 A2UI。
 - PostgreSQL 是 Session、Run、Checkpoint、Receipt、Approval、Operation、Batch、Job、Outbox 和 Event 权威来源；Redis 只缓存和唤醒。
-- 生产调用统一经过 Runner 和持久化 Session Lane；模型/Tool 输出先冻结再投影，恢复不得重复外部副作用。
+- 所有 Session Input 先持久化 PostgreSQL 再唤醒 Processor；生产调用统一经过 Runner 和持久化 Session Lane，同一 Session 以 Lease/Fencing 串行且保持 Head-of-Line，技术重试复用原 InputID/TurnID。
+- 模型可填写的 Tool Intent 与服务端可信 Turn/Command Context 必须分离；身份、权限、预算、资源版本和幂等基键不得进入模型可控 Schema，未知字段、版本或枚举失败关闭。
+- 模型/Tool 输出先完整冻结再投影；Receipt 或冻结输出存在时只重放，恢复不得重新调用模型、Tool 或重复外部副作用。
 - 高风险 Tool 在副作用前使用正式 Approval；通用 HTTP、宿主文件、Shell、任意 SQL 和动态 Tool Search 默认禁用。
 - 每个 Agent Profile 必须配置迭代、模型、Tool、Token、时间、并发和费用硬预算，具体数值不得写死在代码、Prompt 或 Skill 中。
 - 普通日志和 Trace 禁止保存完整 Prompt、会话、Tool Payload、Checkpoint 和 Reasoning。
